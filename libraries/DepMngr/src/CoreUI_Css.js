@@ -876,6 +876,25 @@ function _CoreUI_Css_getStylesheet() {
     '  vertical-align: middle;',
     '  white-space: nowrap;',
     '}',
+         // Phase 3a — Multi-date phased deployment rendering (defensive selectors)
+    '#golives-tbody td > div,',
+    '#deployments-tbody td > div {',
+    '  padding: var(--space-1) 0;',
+    '  line-height: 1.5;',
+    '}',
+    '#golives-tbody td > div + div,',
+    '#deployments-tbody td > div + div {',
+    '  border-top: 1px dashed var(--color-border-subtle);',
+    '  margin-top: var(--space-2);',
+    '  padding-top: var(--space-2);',
+    '}',
+    '#golives-tbody td strong,',
+    '#deployments-tbody td strong {',
+    '  font-weight: 600;',
+    '  color: var(--color-text);',
+    '  margin-right: var(--space-1);',
+    '}',
+    
     // Phased KPI tile accent (purple top border)
     '.ph-kpi.phased::before { background: #6d28d9; }',
 

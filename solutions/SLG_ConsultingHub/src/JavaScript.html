@@ -1,0 +1,2310 @@
+<script>
+/* ================================================================
+   State
+   ================================================================ */
+
+// Normalize isAdmin to a real boolean (handles boolean or "true"/"false" string)
+const BOOT_IS_ADMIN =
+  !!(
+    window.__BOOT__ &&
+    (window.__BOOT__.isAdmin === true || window.__BOOT__.isAdmin === 'true')
+  );
+
+// Normalize email from the bootstrap object (strip wrapping quotes)
+const BOOT_EMAIL = (window.__BOOT__ && window.__BOOT__.email)
+  ? String(window.__BOOT__.email).replace(/^['"]+|['"]+$/g, '').trim()
+  : '';
+
+const state = {
+  area: 'ALL',
+  q: '',
+  priority: '',
+  targetMonth: '',
+  showArchived: false,
+  topics: [],
+  sort: { key: 'Votes', dir: 'desc' },
+  expanded: new Set(),
+  user: {
+    email: BOOT_EMAIL,
+    isAdmin: BOOT_IS_ADMIN,
+    displayName: window.__BOOT__.displayName || ''
+  },
+  manage: {
+    id: null,
+    links: [],          // array of { url, title, addedBy, addedAt }
+    presenters: []      // array of presenter names
+  },
+  comments: {
+    topicId: null,
+    editingCommentId: null
+  },
+  // simple form edit mode: ID of topic being edited (or null)
+  simpleEditId: null
+};
+
+/* ================================================================
+   Small helpers
+   ================================================================ */
+
+let _searchDebounceTimer = null;
+
+function debounceSearch(fn, delay) {
+  return function (...args) {
+    if (_searchDebounceTimer) clearTimeout(_searchDebounceTimer);
+    _searchDebounceTimer = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+function formatDateMDY(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) {
+    // Fallback: if it's already a short string like '5/07/26', leave it.
+    return String(s);
+  }
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  const yy = String(d.getFullYear() % 100).padStart(2, '0');
+  return m + '/' + String(day).padStart(2, '0') + '/' + yy;
+}
+
+// Optional alias if you still want shortDate
+function shortDate(s) {
+  return formatDateMDY(s);
+}
+
+function cleanDisplayName(name) {
+  return String(name || '')
+    .replace(/^['"]+|['"]+$/g, '') // strip leading/trailing quotes
+    .trim();
+}
+
+/* ================================================================
+   DOM ready
+   ================================================================ */
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Area tabs
+  document
+    .querySelectorAll('.tab')
+    .forEach(b =>
+      b.addEventListener('click', () => {
+        document
+          .querySelectorAll('.tab')
+          .forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        state.area = b.dataset.area;
+        state.expanded.clear();
+        refresh();
+      })
+    );
+
+  // Search + filters
+  document
+    .getElementById('search')
+    .addEventListener(
+      'input',
+      debounceSearch(e => {
+        state.q = e.target.value;
+        refresh();
+      }, 250)
+    );
+
+  document
+    .getElementById('priorityFilter')
+    .addEventListener('change', e => {
+      state.priority = e.target.value;
+      refresh();
+    });
+
+  document
+    .getElementById('targetMonthFilter')
+    .addEventListener('change', e => {
+      state.targetMonth = e.target.value;
+      refresh();
+    });
+
+  const showArchived = document.getElementById('showArchived');
+  if (showArchived)
+    showArchived.addEventListener('change', e => {
+      state.showArchived = e.target.checked;
+      refresh();
+    });
+
+  // New topic
+  const newTopicBtn = document.getElementById('newTopicBtn');
+  if (newTopicBtn) {
+    newTopicBtn.addEventListener('click', () => {
+      if (state.user.isAdmin) {
+        // Admin: full manage modal in "create" mode
+        openManageModalForCreate();
+      } else {
+        // Consultant: simple modal in "create" mode
+        openTopicModal();
+      }
+    });
+  }
+
+  document.getElementById('saveTopic').addEventListener('click', saveTopic);
+
+  // Admin FAB cluster
+  const adminAgendaBtn = document.getElementById('adminAgendaBtn');
+  if (adminAgendaBtn)
+    adminAgendaBtn.addEventListener('click', openAgendaModal);
+
+  const meetingsBtn = document.getElementById('meetingsBtn');
+  if (meetingsBtn) meetingsBtn.addEventListener('click', openMeetings);
+
+  const rollupBtn = document.getElementById('rollupBtn');
+  if (rollupBtn) rollupBtn.addEventListener('click', openRollup);
+
+  const adminToolsBtn = document.getElementById('adminToolsBtn');
+  if (adminToolsBtn)
+    adminToolsBtn.addEventListener('click', openAdminTools);
+
+  // Admin Tools: Send test email
+  const sendTestEmailBtn = document.getElementById('sendTestEmailBtn');
+  if (sendTestEmailBtn)
+    sendTestEmailBtn.addEventListener('click', sendTestEmail);
+
+  // Agenda
+  const aArea = document.getElementById('a_area');
+  if (aArea) aArea.addEventListener('change', reloadAgendaPicker);
+
+  document.getElementById('buildAgenda').addEventListener('click', buildAgenda);
+  document.getElementById('copyAgenda').addEventListener('click', copyAgenda);
+  document
+    .getElementById('previewAgenda')
+    .addEventListener('click', previewAgenda);
+
+  // Meetings
+  const mArea = document.getElementById('m_area');
+  if (mArea) mArea.addEventListener('change', reloadMeetings);
+
+  // Rollup
+  const rMonths = document.getElementById('r_months');
+  if (rMonths) rMonths.addEventListener('change', reloadRollup);
+
+  // Manage modal wiring
+  const m_addLink = document.getElementById('m_addLink');
+  if (m_addLink) m_addLink.addEventListener('click', () => addLinkRow());
+
+  const m_save = document.getElementById('m_save');
+  if (m_save) m_save.addEventListener('click', saveManageModal);
+
+  const m_archive = document.getElementById('m_archive');
+  if (m_archive)
+    m_archive.addEventListener('click', archiveCurrentTopic);
+
+  const m_restore = document.getElementById('m_restore');
+  if (m_restore)
+    m_restore.addEventListener('click', restoreCurrentTopic);
+
+  const m_notes = document.getElementById('m_notes');
+  if (m_notes) m_notes.addEventListener('input', updateNotesCount);
+
+  // Comments panel wiring
+  const closeCommentsBtn = document.getElementById('closeCommentsBtn');
+  if (closeCommentsBtn)
+    closeCommentsBtn.addEventListener('click', closeCommentsPanel);
+
+  const saveCommentBtn = document.getElementById('saveCommentBtn');
+  if (saveCommentBtn)
+    saveCommentBtn.addEventListener('click', saveComment);
+
+  const cancelEditCommentBtn = document.getElementById(
+    'cancelEditCommentBtn'
+  );
+  if (cancelEditCommentBtn)
+    cancelEditCommentBtn.addEventListener('click', cancelEditComment);
+
+  const commentInput = document.getElementById('commentInput');
+  if (commentInput)
+    commentInput.addEventListener('input', updateCommentCharCount);
+  if (commentInput)
+    commentInput.addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        saveComment();
+      }
+    });
+
+  // Generic close + Esc
+  document.addEventListener('click', e => {
+    const close = e.target.closest('[data-close]');
+    if (close) hide(close.dataset.close);
+
+    if (
+      e.target.classList &&
+      e.target.classList.contains('modal')
+    ) {
+      e.target.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      document
+        .querySelectorAll('.modal:not(.hidden)')
+        .forEach(m => m.classList.add('hidden'));
+
+      const panel = document.getElementById('commentsPanel');
+      const backdrop = document.getElementById('commentsBackdrop');
+      if (panel && !panel.classList.contains('hidden'))
+        closeCommentsPanel();
+      if (backdrop) backdrop.classList.add('hidden');
+    }
+  });
+
+  // Presenter input multi-select handlers
+  const presenterInput = document.getElementById('m_presenterInput');
+  if (presenterInput) {
+    presenterInput.addEventListener('keydown', e => {
+      if (
+        e.key === 'Enter' ||
+        e.key === 'Tab' ||
+        e.key === ',' ||
+        e.key === ';'
+      ) {
+        e.preventDefault();
+        addPresenterFromInput();
+      }
+    });
+    presenterInput.addEventListener('blur', () => {
+      addPresenterFromInput();
+    });
+  }
+
+  refresh();
+  initPresenterOptions();
+});
+
+/* ================================================================
+   UI helpers
+   ================================================================ */
+
+function show(id) {
+  document.getElementById(id).classList.remove('hidden');
+}
+
+function hide(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+function toast(msg, ms) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('hidden'), ms || 2200);
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[c]));
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s);
+}
+
+function truncate(s, n) {
+  s = String(s || '');
+  return s.length > n ? s.slice(0, n - 1) + '...' : s;
+}
+
+function formatTargetMonth(ym) {
+  const m = String(ym || '').match(/^(\d{4})-(\d{2})$/);
+  return m ? m[2] + '/' + m[1].slice(2) : '';
+}
+
+/* ================================================================
+   Presenter autocomplete + multi-select
+   ================================================================ */
+
+function initPresenterOptions() {
+  const dl = document.getElementById('presenterOptions');
+  if (!dl) {
+    console.log('initPresenterOptions: no #presenterOptions element found.');
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(users => {
+      if (!Array.isArray(users) || !users.length) {
+        console.log('initPresenterOptions: Users list is empty.');
+        dl.innerHTML = '';
+        return;
+      }
+      dl.innerHTML = users
+        .map(u => {
+          const label = u.name || u.email;
+          return `<option value="${escapeAttr(label)}"></option>`;
+        })
+        .join('');
+    })
+    .withFailureHandler(err => {
+      const msg =
+        (err && err.message) || 'unknown error';
+      console.log(
+        'initPresenterOptions: listUsers failed:',
+        msg
+      );
+    })
+    .listUsers();
+}
+
+function syncPresenterHidden() {
+  const hidden = document.getElementById('m_presenter');
+  if (!hidden) return;
+  hidden.value = (state.manage.presenters || []).join('; ');
+}
+
+function renderPresenterChips() {
+  const root = document.getElementById('m_presenterChips');
+  if (!root) return;
+  const names = state.manage.presenters || [];
+  if (!names.length) {
+    root.innerHTML = '';
+    syncPresenterHidden();
+    return;
+  }
+  root.innerHTML = names
+    .map(
+      (name, i) => `
+      <span class="presenter-chip" data-idx="${i}">
+        <span>${escapeHtml(name)}</span>
+        <button type="button" title="Remove presenter">&times;</button>
+      </span>
+    `
+    )
+    .join('');
+
+  root
+    .querySelectorAll('.presenter-chip button')
+    .forEach(btn => {
+      btn.addEventListener('click', () => {
+        const chip = btn.closest('.presenter-chip');
+        if (!chip) return;
+        const idx = parseInt(chip.dataset.idx, 10);
+        if (isNaN(idx)) return;
+        state.manage.presenters.splice(idx, 1);
+        renderPresenterChips();
+      });
+    });
+
+  syncPresenterHidden();
+}
+
+function addPresenterFromInput() {
+  const input = document.getElementById('m_presenterInput');
+  if (!input) return;
+  const raw = input.value.trim();
+  if (!raw) return;
+
+  const parts = raw
+    .split(/[;,]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (!parts.length) {
+    input.value = '';
+    return;
+  }
+
+  if (!Array.isArray(state.manage.presenters)) {
+    state.manage.presenters = [];
+  }
+  parts.forEach(name => {
+    const exists = state.manage.presenters.some(
+      n => n.toLowerCase() === name.toLowerCase()
+    );
+    if (!exists) state.manage.presenters.push(name);
+  });
+  input.value = '';
+  renderPresenterChips();
+}
+
+/* ================================================================
+   Topics: load + render table
+   ================================================================ */
+
+function refresh() {
+  const filter = { q: state.q };
+  if (state.area !== 'ALL') filter.area = state.area;
+  if (state.priority) filter.priority = state.priority;
+  if (state.targetMonth) filter.targetMonth = state.targetMonth;
+  if (state.showArchived) filter.includeArchived = true;
+
+  google.script.run
+    .withSuccessHandler(renderTopics)
+    .withFailureHandler(err => {
+      toast(
+        (err && err.message) ||
+          'Failed to load topics.'
+      );
+      renderTopics([]);
+    })
+    .listTopics(filter);
+}
+
+function sortTopics(topics) {
+  const { key, dir } = state.sort;
+  const mult = dir === 'asc' ? 1 : -1;
+  const numeric = key === 'Votes' || key === 'CommentsCount';
+
+  return topics.slice().sort((a, b) => {
+    let av = a[key],
+      bv = b[key];
+    if (numeric)
+      return ((Number(av) || 0) - (Number(bv) || 0)) * mult;
+    av = String(av || '').toLowerCase();
+    bv = String(bv || '').toLowerCase();
+    if (av < bv) return -1 * mult;
+    if (av > bv) return 1 * mult;
+    return 0;
+  });
+}
+
+function renderTopics(topics) {
+  if (!Array.isArray(topics)) {
+    toast('No topics returned.');
+    topics = [];
+  }
+  state.topics = topics;
+
+  const sorted = sortTopics(topics);
+  const root = document.getElementById('topicList');
+
+  const filterBits = [];
+  if (state.area !== 'ALL')
+    filterBits.push(escapeHtml(state.area));
+  if (state.priority)
+    filterBits.push(
+      'Priority: ' + escapeHtml(state.priority)
+    );
+  if (state.targetMonth)
+    filterBits.push(
+      'Target: ' +
+        escapeHtml(formatTargetMonth(state.targetMonth))
+    );
+  if (state.q)
+    filterBits.push(
+      'matching “' + escapeHtml(state.q) + '”'
+    );
+  if (state.showArchived)
+    filterBits.push('incl. archived');
+
+  const metaHtml = `
+    <div class="results-meta">
+      <div>${sorted.length} topic${
+    sorted.length === 1 ? '' : 's'
+  }${
+    filterBits.length
+      ? ' · ' + filterBits.join(' · ')
+      : ''
+  }</div>
+      <div>Sorted by <strong>${escapeHtml(
+        labelFor(state.sort.key)
+      )}</strong> (${state.sort.dir})</div>
+    </div>
+  `;
+
+  if (!sorted.length) {
+    root.innerHTML =
+      metaHtml +
+      '<div class="table-wrap"><div class="empty-state">No topics yet — be the first to add one.</div></div>';
+    return;
+  }
+
+  const headerRow = `
+    <tr>
+      <th class="col-expand" aria-label="Expand"></th>
+      ${thSortable('Area', 'col-area')}
+      ${thSortable('Title', 'col-title')}
+      ${thSortable('Votes', 'col-votes')}
+      ${thSortable(
+        'CommentsCount',
+        'col-comments',
+        'Comments'
+      )}
+      ${thSortable('Status', 'col-status')}
+      ${thSortable(
+        'SubmitterName',
+        'col-submitter',
+        'Submitter'
+      )}
+      ${thSortable(
+        'CreatedAt',
+        'col-created',
+        'Created'
+      )}
+      <th class="col-actions">Actions</th>
+    </tr>
+  `;
+
+  const bodyRows = sorted.map(t => rowHtml(t)).join('');
+
+  root.innerHTML = `
+    ${metaHtml}
+    <div class="table-wrap">
+      <table class="topics-table" role="grid">
+        <thead>${headerRow}</thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
+
+  // Header sorts
+  root
+    .querySelectorAll('th.sortable')
+    .forEach(th => {
+      th.addEventListener('click', () => {
+        const k = th.dataset.key;
+        if (state.sort.key === k) {
+          state.sort.dir =
+            state.sort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.sort.key = k;
+          state.sort.dir =
+            k === 'Votes' ||
+            k === 'CreatedAt' ||
+            k === 'CommentsCount'
+              ? 'desc'
+              : 'asc';
+        }
+        renderTopics(state.topics);
+      });
+    });
+
+  // Row expansion
+  root
+    .querySelectorAll('tr[data-row]')
+    .forEach(tr => {
+      tr.addEventListener('click', e => {
+        if (
+          e.target.closest('button') ||
+          e.target.closest('a')
+        )
+          return;
+        const id = tr.dataset.row;
+        if (state.expanded.has(id))
+          state.expanded.delete(id);
+        else state.expanded.add(id);
+        renderTopics(state.topics);
+      });
+    });
+
+  // Vote buttons (optimistic)
+  root
+    .querySelectorAll('[data-vote]')
+    .forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const countEl =
+          btn.parentElement.querySelector('.vote-count');
+        const wasVoted = btn.classList.toggle('voted');
+        if (countEl)
+          countEl.textContent =
+            (parseInt(countEl.textContent, 10) || 0) +
+            (wasVoted ? 1 : -1);
+
+        google.script.run
+          .withSuccessHandler(() => {})
+          .withFailureHandler(err => {
+            toast(err.message);
+            refresh();
+          })
+          .toggleVote(btn.dataset.vote);
+      });
+    });
+
+  // History
+  root
+    .querySelectorAll('[data-history]')
+    .forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openHistory(btn.dataset.history);
+      });
+    });
+
+  // Manage (admin only)
+  root
+    .querySelectorAll('[data-manage]')
+    .forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openManageModal(btn.dataset.manage);
+      });
+    });
+
+  // Comments
+  root
+    .querySelectorAll('[data-comments]')
+    .forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openCommentsPanel(btn.dataset.comments);
+      });
+    });
+
+  // Owner edit via simple modal (non-admin only)
+  root
+    .querySelectorAll('[data-edit]')
+    .forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const id = btn.dataset.edit;
+        const topic = state.topics.find(t => t.ID === id);
+        if (topic) openTopicModal(topic);
+      });
+    });
+}
+
+function labelFor(key) {
+  return (
+    {
+      Area: 'Area',
+      Title: 'Title',
+      Votes: 'Votes',
+      Status: 'Status',
+      SubmitterName: 'Submitter',
+      CreatedAt: 'Created',
+      CommentsCount: 'Comments'
+    }[key] || key
+  );
+}
+
+function thSortable(key, cls, label) {
+  const active = state.sort.key === key;
+  const ind = active
+    ? state.sort.dir === 'asc'
+      ? '▴'
+      : '▾'
+    : '';
+  return `
+    <th class="sortable ${cls}" data-key="${key}">
+      ${escapeHtml(
+        label || labelFor(key)
+      )}<span class="sort-ind">${ind}</span>
+    </th>
+  `;
+}
+
+function statusChip(status) {
+  const s = String(status || 'Proposed');
+  const cls =
+    s === 'Discussed'
+      ? 'discussed'
+      : s === 'Scheduled'
+      ? 'scheduled'
+      : s === 'Archived'
+      ? 'archived'
+      : 'proposed';
+  return `<span class="chip ${cls}">${escapeHtml(
+    s
+  )}</span>`;
+}
+
+function rowHtml(t) {
+  const isOpen = state.expanded.has(t.ID);
+  const areas =
+    Array.isArray(t.Areas) && t.Areas.length
+      ? t.Areas
+      : String(t.Area || '')
+          .split(/[;,]/)
+          .map(s => s.trim())
+          .filter(Boolean);
+  const isCross = areas.length > 1;
+  const areasLabel = areas.join(', ');
+  const areaCell = isCross
+    ? `<span class="chip cross">Cross-functional</span> <div class="areas-list">${escapeHtml(
+        areasLabel
+      )}</div>`
+    : `<span class="chip">${escapeHtml(
+        areas[0] || ''
+      )}</span>`;
+
+  const snippet = truncate(t.Description, 90);
+  const isArchived = t.Status === 'Archived';
+  const commentCount = Number(t.CommentsCount) || 0;
+
+  const isOwner =
+    String(t.SubmitterEmail || '').toLowerCase() ===
+    String(state.user.email || '').toLowerCase();
+
+  const main = `
+    <tr data-row="${escapeHtml(t.ID)}"
+        class="${isOpen ? 'expanded' : ''} ${
+    isArchived ? 'archived-row' : ''
+  }">
+      <td class="col-expand" aria-hidden="true">${
+        isOpen ? '▾' : '▸'
+      }</td>
+      <td class="col-area">${areaCell}</td>
+      <td class="col-title title-cell">
+        ${escapeHtml(t.Title)}
+        <span class="snippet">${escapeHtml(
+          snippet
+        )}</span>
+      </td>
+      <td class="col-votes">
+        <span class="vote-inline">
+          <button data-vote="${escapeHtml(
+            t.ID
+          )}" aria-label="Vote for ${escapeHtml(
+    t.Title
+  )}">▲</button>
+          <span class="vote-count">${
+            Number(t.Votes) || 0
+          }</span>
+        </span>
+      </td>
+      <td class="col-comments">
+        <button class="comments-chip"
+                data-comments="${escapeHtml(
+                  t.ID
+                )}" aria-label="Open comments for ${escapeHtml(
+    t.Title
+  )}">
+          <span class="comments-count">${commentCount}</span>
+        </button>
+      </td>
+      <td class="col-status">${statusChip(t.Status)}</td>
+      <td class="col-submitter">${escapeHtml(
+        t.SubmitterName || t.SubmitterEmail || ''
+      )}</td>
+      <td class="col-created">${escapeHtml(
+        formatDateMDY(t.CreatedAt)
+      )}</td>
+      <td class="col-actions">
+        <div class="actions">
+          <div class="actions-secondary">
+            <!-- Comments -->
+            <button class="icon-button"
+                    data-comments="${escapeHtml(
+                      t.ID
+                    )}" title="Comments">💬</button>
+            <!-- History -->
+            <button class="icon-button"
+                    data-history="${escapeHtml(
+                      t.ID
+                    )}" title="History">🕑</button>
+            <!-- Owner edit via simple form (non-admin only) -->
+            ${
+              !state.user.isAdmin && isOwner
+                ? `
+            <button class="icon-button"
+                    data-edit="${escapeHtml(
+                      t.ID
+                    )}" title="Edit your topic">✏️</button>
+            `
+                : ''
+            }
+            <!-- Manage (admin only) -->
+            ${
+              state.user.isAdmin
+                ? `
+            <button class="icon-button"
+                    data-manage="${escapeHtml(
+                      t.ID
+                    )}" title="Manage">⚙️</button>
+            `
+                : ''
+            }
+          </div>
+        </div>
+      </td>
+    </tr>
+  `;
+
+  if (!isOpen) return main;
+
+  const planningBits = [];
+  if (t.Presenter)
+    planningBits.push(
+      'Presenter: ' + escapeHtml(t.Presenter)
+    );
+  if (t.Priority)
+    planningBits.push(
+      'Priority: ' + escapeHtml(t.Priority)
+    );
+  if (t.TargetMonth)
+    planningBits.push(
+      'Target: ' +
+        escapeHtml(formatTargetMonth(t.TargetMonth))
+    );
+  const planningLine = planningBits.length
+    ? `<div class="detail-meta">${planningBits.join(
+        ' · '
+      )}</div>`
+    : '';
+  const discussedLine = t.DiscussedOn
+    ? `<div class="detail-meta">Discussed on: ${escapeHtml(
+        formatDateMDY(t.DiscussedOn)
+      )}</div>`
+    : '';
+  const tagsLine = t.Tags
+    ? `<div class="detail-meta">Tags: ${escapeHtml(
+        t.Tags
+      )}</div>`
+    : '';
+
+  let linksLine = '';
+  if (Array.isArray(t.DriveLinks) && t.DriveLinks.length) {
+    const items = t.DriveLinks
+      .map(
+        L =>
+          `<li><a href="${escapeAttr(
+            L.url
+          )}" target="_blank" rel="noopener">${escapeHtml(
+            L.title || L.url
+          )}</a></li>`
+      )
+      .join('');
+    linksLine = `
+      <div class="detail-meta">
+        Reference materials:
+        <ul class="detail-links">${items}</ul>
+      </div>
+    `;
+  }
+
+  const detail = `
+    <tr class="detail" data-detail="${escapeHtml(t.ID)}">
+      <td colspan="9">
+        <div class="desc">${escapeHtml(t.Description)}</div>
+        <div class="detail-meta">
+          Submitted ${escapeHtml(formatDateMDY(t.CreatedAt))} by ${escapeHtml(
+    t.SubmitterName || t.SubmitterEmail || ''
+  )}
+        </div>
+        ${planningLine}
+        ${discussedLine}
+        ${tagsLine}
+        ${linksLine}
+      </td>
+    </tr>
+  `;
+
+  return main + detail;
+}
+
+/* ================================================================
+   New topic modal (non-admin) – create + edit
+   ================================================================ */
+
+function openTopicModal(topic) {
+  const targetArea = state.area === 'ALL' ? null : state.area;
+
+  if (topic) {
+    // EDIT mode
+    state.simpleEditId = topic.ID;
+
+    const topicAreas =
+      Array.isArray(topic.Areas) && topic.Areas.length
+        ? topic.Areas
+        : String(topic.Area || '')
+            .split(/[;,]/)
+            .map(s => s.trim())
+            .filter(Boolean);
+
+    document
+      .querySelectorAll('#f_areas input[type="checkbox"]')
+      .forEach(cb => {
+        cb.checked = topicAreas.indexOf(cb.value) !== -1;
+      });
+
+    document.getElementById('f_title').value =
+      topic.Title || '';
+    document.getElementById('f_description').value =
+      topic.Description || '';
+    document.getElementById('f_submitter').value =
+      topic.SubmitterName ||
+      cleanDisplayName(state.user.displayName || '');
+
+    document.getElementById('topicModalTitle').textContent =
+      'Edit Topic';
+  } else {
+    // CREATE mode
+    state.simpleEditId = null;
+
+    document
+      .querySelectorAll('#f_areas input[type="checkbox"]')
+      .forEach(cb => {
+        cb.checked =
+          !targetArea || cb.value === targetArea;
+      });
+
+    document.getElementById('f_title').value = '';
+    document.getElementById('f_description').value = '';
+    document.getElementById('f_submitter').value =
+      cleanDisplayName(state.user.displayName || '');
+
+    document.getElementById('topicModalTitle').textContent =
+      'New Topic';
+  }
+
+  show('topicModal');
+  setTimeout(
+    () => document.getElementById('f_title').focus(),
+    50
+  );
+}
+
+function saveTopic() {
+  const areas = Array.from(
+    document.querySelectorAll(
+      '#f_areas input[type="checkbox"]:checked'
+    )
+  ).map(cb => cb.value);
+
+  if (!areas.length) {
+    toast('Select at least one functional area.');
+    return;
+  }
+
+  const title =
+    document.getElementById('f_title').value.trim();
+  const description =
+    document.getElementById('f_description').value.trim();
+  const submitterName =
+    document.getElementById('f_submitter').value.trim();
+
+  if (!title || !description) {
+    toast('Title and description are required.');
+    return;
+  }
+
+  const isEdit = !!state.simpleEditId;
+
+  if (!isEdit) {
+    // CREATE path
+    const payload = {
+      area: areas.join(', '),
+      areas: areas,
+      title: title,
+      description: description,
+      submitterName: submitterName
+    };
+
+    google.script.run
+      .withSuccessHandler(() => {
+        hide('topicModal');
+        toast('Topic added.');
+        refresh();
+      })
+      .withFailureHandler(err =>
+        toast(
+          err && err.message
+            ? err.message
+            : 'Failed to create topic.'
+        )
+      )
+      .createTopic(payload);
+  } else {
+    // EDIT path: limited to owner-safe fields
+    const patch = {
+      Areas: areas,
+      Title: title,
+      Description: description,
+      SubmitterName: submitterName
+    };
+
+    const id = state.simpleEditId;
+
+    google.script.run
+      .withSuccessHandler(() => {
+        state.simpleEditId = null;
+        hide('topicModal');
+        toast('Topic updated.');
+        refresh();
+      })
+      .withFailureHandler(err =>
+        toast(
+          err && err.message
+            ? err.message
+            : 'Failed to update topic.'
+        )
+      )
+      .updateTopic(id, patch);
+  }
+}
+
+/* ================================================================
+   Manage Topic modal (admin only)
+   ================================================================ */
+
+// Admin-only: open Manage modal in "create new topic" mode
+function openManageModalForCreate() {
+  if (!state.user.isAdmin) return;
+
+  state.manage.id = null;
+  state.manage.links = [];
+  state.manage.presenters = [];
+
+  document.getElementById('manageModalTitle').textContent =
+    'New Topic';
+
+  const rawEmail = String(state.user.email || '');
+  const cleanEmail = rawEmail.replace(/^['"]+|['"]+$/g, '');
+  const defaultSubmitter = cleanDisplayName(
+    state.user.displayName || cleanEmail
+  );
+
+  document.getElementById('m_audit').textContent = '';
+  document.getElementById('m_title').value = '';
+  document.getElementById('m_description').value = '';
+  document.getElementById('m_submitter').value =
+    defaultSubmitter;
+  document.getElementById('m_status').value = 'Proposed';
+  document.getElementById('m_tags').value = '';
+  document.getElementById('m_targetMonth').value = '';
+  document.getElementById('m_priority').value = '';
+  document.getElementById('m_notes').value = '';
+  updateNotesCount();
+
+  document
+    .querySelectorAll('#m_areas input[type="checkbox"]')
+    .forEach(cb => (cb.checked = false));
+
+  renderLinkRows();
+
+  // Presenters UI
+  state.manage.presenters = [];
+  const presenterInput = document.getElementById(
+    'm_presenterInput'
+  );
+  if (presenterInput) presenterInput.value = '';
+  renderPresenterChips();
+
+  document
+    .getElementById('m_archive')
+    .classList.add('hidden');
+  document
+    .getElementById('m_restore')
+    .classList.add('hidden');
+
+  show('manageModal');
+  setTimeout(
+    () => document.getElementById('m_title').focus(),
+    50
+  );
+}
+
+function openManageModal(id) {
+  if (!state.user.isAdmin) return;
+
+  state.manage.id = id;
+  state.manage.links = [];
+  state.manage.presenters = [];
+
+  document.getElementById('manageModalTitle').textContent =
+    'Manage Topic — loading...';
+  document.getElementById('m_audit').textContent = '';
+
+  document.getElementById('m_title').value = '';
+  document.getElementById('m_description').value = '';
+  document.getElementById('m_submitter').value = '';
+  document.getElementById('m_status').value = 'Proposed';
+  document.getElementById('m_tags').value = '';
+  document.getElementById('m_targetMonth').value = '';
+  document.getElementById('m_priority').value = '';
+  document.getElementById('m_notes').value = '';
+  updateNotesCount();
+
+  document
+    .querySelectorAll('#m_areas input[type="checkbox"]')
+    .forEach(cb => (cb.checked = false));
+
+  renderLinkRows();
+  renderPresenterChips();
+
+  show('manageModal');
+
+  google.script.run
+    .withSuccessHandler(populateManageModal)
+    .withFailureHandler(err => {
+      toast(
+        err && err.message
+          ? err.message
+          : 'Failed to load topic.'
+      );
+      hide('manageModal');
+    })
+    .getTopic(id);
+}
+
+function populateManageModal(t) {
+  if (!t) {
+    toast('Topic not found.');
+    hide('manageModal');
+    return;
+  }
+
+  document.getElementById('manageModalTitle').textContent =
+    'Manage Topic — ' + (t.ID || '');
+
+  const audit = document.getElementById('m_audit');
+  if (t.LastEditedBy || t.LastEditedAt) {
+    audit.textContent =
+      'Last edited by ' +
+      (t.LastEditedBy || 'unknown') +
+      (t.LastEditedAt
+        ? ' on ' + formatDateMDY(t.LastEditedAt)
+        : '');
+  } else {
+    audit.textContent = '';
+  }
+
+  const areas =
+    Array.isArray(t.Areas) && t.Areas.length
+      ? t.Areas
+      : String(t.Area || '')
+          .split(/[;,]/)
+          .map(s => s.trim())
+          .filter(Boolean);
+  document
+    .querySelectorAll('#m_areas input[type="checkbox"]')
+    .forEach(cb => {
+      cb.checked = areas.indexOf(cb.value) !== -1;
+    });
+
+  document.getElementById('m_title').value = t.Title || '';
+  document.getElementById('m_description').value =
+    t.Description || '';
+  document.getElementById('m_submitter').value =
+    t.SubmitterName || '';
+  document.getElementById('m_status').value =
+    t.Status || 'Proposed';
+  document.getElementById('m_tags').value = t.Tags || '';
+  document.getElementById('m_targetMonth').value =
+    t.TargetMonth || '';
+  document.getElementById('m_priority').value =
+    t.Priority || '';
+  document.getElementById('m_notes').value = t.Notes || '';
+  updateNotesCount();
+
+  // Presenters: split existing Presenter string into names
+  const rawPresenter = t.Presenter || '';
+  const parts = rawPresenter
+    ? rawPresenter
+        .split(/[;,]/)
+        .map(s => s.trim())
+        .filter(Boolean)
+    : [];
+  state.manage.presenters = parts;
+  const presenterInput = document.getElementById(
+    'm_presenterInput'
+  );
+  if (presenterInput) presenterInput.value = '';
+  renderPresenterChips();
+
+  // Links
+  state.manage.links = Array.isArray(t.DriveLinks)
+    ? t.DriveLinks.map(L => ({
+        url: String(L.url || ''),
+        title: String(L.title || ''),
+        addedBy: String(L.addedBy || ''),
+        addedAt: String(L.addedAt || '')
+      }))
+    : [];
+  renderLinkRows();
+
+  const isArchived = t.Status === 'Archived';
+  document
+    .getElementById('m_archive')
+    .classList.toggle('hidden', isArchived);
+  document
+    .getElementById('m_restore')
+    .classList.toggle('hidden', !isArchived);
+
+  setTimeout(
+    () => document.getElementById('m_title').focus(),
+    50
+  );
+}
+
+function updateNotesCount() {
+  const ta = document.getElementById('m_notes');
+  const out = document.getElementById('m_notes_count');
+  if (!ta || !out) return;
+  const n = ta.value.length;
+  out.textContent = n;
+  out.classList.toggle('over', n > 4500);
+}
+
+/* ----- Drive link repeater ----- */
+
+function renderLinkRows() {
+  const root = document.getElementById('m_links');
+  if (!root) return;
+  if (!state.manage.links.length) {
+    root.innerHTML =
+      '<div class="links-empty">No links yet. Click <em>Add link</em> to attach a Drive document.</div>';
+    return;
+  }
+  root.innerHTML = state.manage.links
+    .map(
+      (L, i) => `
+      <div class="link-row" data-index="${i}">
+        <div class="link-grid">
+          <label class="sr-label" for="link_title_${i}">Title</label>
+          <input id="link_title_${i}" class="link-title" type="text" placeholder="Title" value="${escapeAttr(
+            L.title
+          )}" />
+          <label class="sr-label" for="link_url_${i}">URL</label>
+          <input id="link_url_${i}" class="link-url" type="url" placeholder="https://drive.google.com/..." value="${escapeAttr(
+            L.url
+          )}" />
+          <button type="button" class="link-fetch" title="Auto-fill title from Drive">Fetch title</button>
+          <button type="button" class="link-remove" title="Remove link">×</button>
+        </div>
+      </div>
+    `
+    )
+    .join('');
+
+  root
+    .querySelectorAll('.link-row')
+    .forEach(row => {
+      const i = parseInt(row.dataset.index, 10);
+      row
+        .querySelector('.link-title')
+        .addEventListener('input', e => {
+          state.manage.links[i].title = e.target.value;
+        });
+      row
+        .querySelector('.link-url')
+        .addEventListener('input', e => {
+          state.manage.links[i].url = e.target.value;
+        });
+      row
+        .querySelector('.link-remove')
+        .addEventListener('click', () => {
+          state.manage.links.splice(i, 1);
+          renderLinkRows();
+        });
+      row
+        .querySelector('.link-fetch')
+        .addEventListener('click', () => {
+          const url = state.manage.links[i].url;
+          if (!url) {
+            toast('Enter a URL first.');
+            return;
+          }
+          google.script.run
+            .withSuccessHandler(meta => {
+              if (meta && meta.title) {
+                state.manage.links[i].title = meta.title;
+                renderLinkRows();
+                toast('Title fetched from Drive.');
+              } else {
+                toast(
+                  'Could not fetch title (file may be restricted).'
+                );
+              }
+            })
+            .withFailureHandler(err =>
+              toast(
+                (err && err.message) || 'Lookup failed.'
+              )
+            )
+            .lookupDriveMeta(url);
+        });
+    });
+}
+
+function addLinkRow() {
+  state.manage.links.push({
+    url: '',
+    title: '',
+    addedBy: '',
+    addedAt: ''
+  });
+  renderLinkRows();
+  setTimeout(() => {
+    const inputs = document.querySelectorAll(
+      '#m_links .link-url'
+    );
+    if (inputs.length)
+      inputs[inputs.length - 1].focus();
+  }, 30);
+}
+
+function saveManageModal() {
+  const isUpdate = !!state.manage.id;
+
+  const areas = Array.from(
+    document.querySelectorAll(
+      '#m_areas input[type="checkbox"]:checked'
+    )
+  ).map(cb => cb.value);
+
+  if (!areas.length) {
+    toast('Select at least one functional area.');
+    return;
+  }
+
+  for (const L of state.manage.links) {
+    const url = String(L.url || '').trim();
+    if (!url) {
+      toast('Drive link rows must have a URL.');
+      return;
+    }
+    if (!/^https:\/\//i.test(url)) {
+      toast('Drive links must start with https://');
+      return;
+    }
+  }
+
+  // Make sure hidden presenter value is in sync
+  syncPresenterHidden();
+
+  const patch = {
+    Areas: areas,
+    Title: document.getElementById('m_title').value.trim(),
+    Description: document
+      .getElementById('m_description')
+      .value.trim(),
+    SubmitterName: document
+      .getElementById('m_submitter')
+      .value.trim(),
+    Status: document.getElementById('m_status').value,
+    Tags: document.getElementById('m_tags').value.trim(),
+    Presenter: document
+      .getElementById('m_presenter')
+      .value.trim(),
+    TargetMonth: document.getElementById('m_targetMonth').value,
+    Priority: document.getElementById('m_priority').value,
+    Notes: document.getElementById('m_notes').value,
+    DriveLinks: state.manage.links.map(L => ({
+      url: String(L.url || '').trim(),
+      title: String(L.title || '').trim(),
+      addedBy: L.addedBy || '',
+      addedAt: L.addedAt || ''
+    }))
+  };
+
+  if (!patch.Title || !patch.Description) {
+    toast('Title and description are required.');
+    return;
+  }
+
+  const saveBtn = document.getElementById('m_save');
+  saveBtn.disabled = true;
+  saveBtn.textContent = isUpdate ? 'Saving...' : 'Creating...';
+
+  const successMsg = isUpdate
+    ? 'Topic updated.'
+    : 'Topic created.';
+  const methodName = isUpdate
+    ? 'updateTopic'
+    : 'createTopicFromAdmin';
+  const args = isUpdate ? [state.manage.id, patch] : [patch];
+
+  const runner = google.script.run
+    .withSuccessHandler(() => {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+      hide('manageModal');
+      toast(successMsg);
+      refresh();
+    })
+    .withFailureHandler(err => {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+      toast(
+        (err && err.message) ||
+          (isUpdate ? 'Save failed.' : 'Create failed.')
+      );
+    });
+
+  runner[methodName].apply(runner, args);
+}
+
+function archiveCurrentTopic() {
+  if (!state.manage.id) return;
+  if (
+    !confirm(
+      'Archive this topic? It will be hidden from the default view but can be restored.'
+    )
+  )
+    return;
+
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Topic archived.');
+      hide('manageModal');
+      refresh();
+    })
+    .withFailureHandler(err =>
+      toast(
+        (err && err.message) || 'Archive failed.'
+      )
+    )
+    .archiveTopic(state.manage.id);
+}
+
+function restoreCurrentTopic() {
+  if (!state.manage.id) return;
+
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Topic restored.');
+      hide('manageModal');
+      refresh();
+    })
+    .withFailureHandler(err =>
+      toast(
+        (err && err.message) || 'Restore failed.'
+      )
+    )
+    .restoreTopic(state.manage.id);
+}
+
+/* ================================================================
+   Admin Tools modal (admin only)
+   ================================================================ */
+
+function openAdminTools() {
+  if (!state.user.isAdmin) return;
+  const status = document.getElementById('testEmailStatus');
+  if (status) {
+    status.textContent = '';
+    status.classList.remove('ok', 'err');
+  }
+  show('adminToolsModal');
+}
+
+function sendTestEmail() {
+  if (!state.user.isAdmin) return;
+  const btn = document.getElementById('sendTestEmailBtn');
+  const status = document.getElementById('testEmailStatus');
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  if (status) {
+    status.textContent = '';
+    status.classList.remove('ok', 'err');
+  }
+
+  google.script.run
+    .withSuccessHandler(res => {
+      btn.disabled = false;
+      btn.textContent = 'Send test email';
+
+      if (status) {
+        if (res && res.ok) {
+          status.textContent =
+            '✓ Sent to ' +
+            state.user.email +
+            ' at ' +
+            new Date().toLocaleTimeString();
+          status.classList.add('ok');
+        } else {
+          const msg =
+            (res && res.error) || 'Unknown failure.';
+          status.textContent = '✕ Failed: ' + msg;
+          status.classList.add('err');
+        }
+      }
+
+      toast(
+        res && res.ok
+          ? 'Test email sent.'
+          : 'Test email failed — see Tools panel.'
+      );
+    })
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.textContent = 'Send test email';
+      const msg =
+        (err && err.message) || 'Test email failed.';
+      if (status) {
+        status.textContent = '✕ Failed: ' + msg;
+        status.classList.add('err');
+      }
+      toast(msg);
+    })
+    .sendTestNotification();
+}
+
+/* ================================================================
+   Comments side panel
+   ================================================================ */
+
+function openCommentsPanel(topicId) {
+  if (!topicId) return;
+  state.comments.topicId = topicId;
+  state.comments.editingCommentId = null;
+
+  const panel = document.getElementById('commentsPanel');
+  const backdrop = document.getElementById('commentsBackdrop');
+  const list = document.getElementById('commentsList');
+  const meta = document.getElementById('commentsTopicMeta');
+  const idEl = document.getElementById('commentsTopicId');
+  const input = document.getElementById('commentInput');
+  const count = document.getElementById('commentInputCount');
+  const cancelEditBtn = document.getElementById(
+    'cancelEditCommentBtn'
+  );
+
+  if (list)
+    list.innerHTML =
+      '<p class="comments-loading">Loading comments...</p>';
+  if (meta) meta.textContent = '';
+  if (idEl) idEl.textContent = ''; // hide Topic ID from UI
+  if (input) input.value = '';
+  if (count) count.textContent = '0 / 2000';
+  if (cancelEditBtn) cancelEditBtn.classList.add('hidden');
+
+  const topic = state.topics.find(t => t.ID === topicId);
+  if (topic && meta) {
+    meta.textContent = `${
+      topic.Area || ''
+    } · ${topic.Title || ''}`;
+  }
+
+  if (panel) {
+    panel.classList.remove('hidden');
+    panel.setAttribute('aria-hidden', 'false');
+  }
+  if (backdrop) backdrop.classList.remove('hidden');
+
+  google.script.run
+    .withSuccessHandler(renderComments)
+    .withFailureHandler(err => {
+      if (list)
+        list.innerHTML =
+          '<p class="comments-error">Failed to load comments.</p>';
+      toast(
+        (err && err.message) ||
+          'Failed to load comments.'
+      );
+    })
+    .listComments(topicId);
+}
+
+function closeCommentsPanel() {
+  const panel = document.getElementById('commentsPanel');
+  const backdrop = document.getElementById('commentsBackdrop');
+  if (panel) {
+    panel.classList.add('hidden');
+    panel.setAttribute('aria-hidden', 'true');
+  }
+  if (backdrop) backdrop.classList.add('hidden');
+  state.comments.topicId = null;
+  state.comments.editingCommentId = null;
+}
+
+function renderComments(comments) {
+  const list = document.getElementById('commentsList');
+  if (!list) return;
+
+  if (!Array.isArray(comments) || !comments.length) {
+    list.innerHTML =
+      '<p class="comments-empty"><em>No comments yet. Be the first to add one.</em></p>';
+    return;
+  }
+
+  const html = comments
+    .map(c => {
+      const isDeleted = c.Deleted;
+      const body = isDeleted ? '[Comment removed]' : c.Body;
+      const author = c.AuthorName || c.AuthorEmail || '';
+      const whenRaw = c.UpdatedAt || c.CreatedAt || '';
+      const when = formatDateMDY(whenRaw);
+
+      const isMine =
+        String(c.AuthorEmail || '').toLowerCase() ===
+        String(state.user.email || '').toLowerCase();
+      const canEdit = !isDeleted && isMine;
+      const canDelete = !isDeleted && state.user.isAdmin;
+
+      const metaParts = [];
+      if (author) metaParts.push(escapeHtml(author));
+      if (when) metaParts.push(escapeHtml(when));
+
+      return `
+        <article class="comment" data-comment-id="${escapeAttr(
+          c.CommentID
+        )}">
+          <header class="comment-header">
+            <div class="comment-meta">${metaParts.join(
+              ' · '
+            )}</div>
+            <div class="comment-actions">
+              ${
+                canEdit
+                  ? `<button type="button" class="link comment-edit">Edit</button>`
+                  : ''
+              }
+              ${
+                canDelete
+                  ? `<button type="button" class="link comment-delete">Delete</button>`
+                  : ''
+              }
+            </div>
+          </header>
+          <div class="comment-body ${
+            isDeleted ? 'comment-body-deleted' : ''
+          }">
+            ${escapeHtml(body)}
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+
+  list.innerHTML = html;
+
+  list
+    .querySelectorAll('.comment-edit')
+    .forEach(btn => {
+      btn.addEventListener('click', () => {
+        const article = btn.closest('.comment');
+        if (!article) return;
+        const commentId = article.dataset.commentId;
+        const bodyEl = article.querySelector('.comment-body');
+        startEditComment(
+          commentId,
+          bodyEl ? bodyEl.textContent : ''
+        );
+      });
+    });
+
+  list
+    .querySelectorAll('.comment-delete')
+    .forEach(btn => {
+      btn.addEventListener('click', () => {
+        const article = btn.closest('.comment');
+        if (!article) return;
+        const commentId = article.dataset.commentId;
+        deleteCommentById(commentId);
+      });
+    });
+}
+
+function updateCommentCharCount() {
+  const input = document.getElementById('commentInput');
+  const out = document.getElementById('commentInputCount');
+  if (!input || !out) return;
+  const n = input.value.length;
+  out.textContent = `${n} / 2000`;
+  out.classList.toggle('over', n > 1800);
+}
+
+function adjustCommentsCountForTopic(topicId, delta) {
+  if (!topicId || !delta) return;
+  const t = state.topics.find(x => x.ID === topicId);
+  if (!t) return;
+  const prev = Number(t.CommentsCount) || 0;
+  t.CommentsCount = prev + delta;
+
+  const root = document.getElementById('topicList');
+  if (!root) return;
+  const row = root.querySelector(
+    `tr[data-row="${CSS.escape(topicId)}"]`
+  );
+  if (!row) return;
+  const badge = row.querySelector(
+    '.col-comments .comments-chip .comments-count'
+  );
+  if (badge) badge.textContent = String(t.CommentsCount);
+}
+
+function saveComment() {
+  const topicId = state.comments.topicId;
+  if (!topicId) return;
+
+  const input = document.getElementById('commentInput');
+  if (!input) return;
+  const text = input.value.trim();
+
+  if (!text) {
+    toast('Comment cannot be empty.');
+    return;
+  }
+  if (text.length > 2000) {
+    toast('Comment must be 2000 characters or fewer.');
+    return;
+  }
+
+  const isEditing = !!state.comments.editingCommentId;
+  const btn = document.getElementById('saveCommentBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = isEditing
+      ? 'Saving...'
+      : 'Posting...';
+  }
+
+  if (isEditing) {
+    const id = state.comments.editingCommentId;
+    google.script.run
+      .withSuccessHandler(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Post comment';
+        }
+        state.comments.editingCommentId = null;
+        const cancelBtn = document.getElementById(
+          'cancelEditCommentBtn'
+        );
+        if (cancelBtn) cancelBtn.classList.add('hidden');
+        input.value = '';
+        updateCommentCharCount();
+        toast('Comment updated.');
+        reloadComments(topicId);
+      })
+      .withFailureHandler(err => {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Post comment';
+        }
+        toast(
+          (err && err.message) ||
+            'Failed to update comment.'
+        );
+      })
+      .updateComment(id, text);
+  } else {
+    google.script.run
+      .withSuccessHandler(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Post comment';
+        }
+        input.value = '';
+        updateCommentCharCount();
+        toast('Comment added.');
+        reloadComments(topicId);
+        adjustCommentsCountForTopic(topicId, +1);
+      })
+      .withFailureHandler(err => {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Post comment';
+        }
+        toast(
+          (err && err.message) ||
+            'Failed to add comment.'
+        );
+      })
+      .addComment(topicId, text);
+  }
+}
+
+function reloadComments(topicId) {
+  google.script.run
+    .withSuccessHandler(renderComments)
+    .withFailureHandler(err => {
+      const list = document.getElementById('commentsList');
+      if (list)
+        list.innerHTML =
+          '<p class="comments-error">Failed to refresh comments.</p>';
+      toast(
+        (err && err.message) ||
+          'Failed to refresh comments.'
+      );
+    })
+    .listComments(topicId);
+}
+
+function startEditComment(commentId, currentBody) {
+  state.comments.editingCommentId = commentId;
+
+  const input = document.getElementById('commentInput');
+  const cancelBtn = document.getElementById(
+    'cancelEditCommentBtn'
+  );
+
+  if (input) {
+    input.value = currentBody || '';
+    input.focus();
+    input.setSelectionRange(
+      input.value.length,
+      input.value.length
+    );
+    updateCommentCharCount();
+  }
+  if (cancelBtn) cancelBtn.classList.remove('hidden');
+}
+
+function cancelEditComment() {
+  state.comments.editingCommentId = null;
+  const input = document.getElementById('commentInput');
+  const cancelBtn = document.getElementById(
+    'cancelEditCommentBtn'
+  );
+  if (input) {
+    input.value = '';
+    updateCommentCharCount();
+  }
+  if (cancelBtn) cancelBtn.classList.add('hidden');
+}
+
+function deleteCommentById(commentId) {
+  if (!commentId) return;
+  if (
+    !confirm(
+      'Delete this comment? This cannot be undone, but a placeholder will remain in the thread.'
+    )
+  )
+    return;
+
+  const topicId = state.comments.topicId;
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Comment deleted.');
+      reloadComments(topicId);
+      adjustCommentsCountForTopic(topicId, -1);
+    })
+    .withFailureHandler(err =>
+      toast(
+        (err && err.message) ||
+          'Failed to delete comment.'
+      )
+    )
+    .deleteComment(commentId);
+}
+
+/* ================================================================
+   Agenda builder (admin)
+   ================================================================ */
+
+function openAgendaModal() {
+  const dateInput = document.getElementById('a_date');
+  if (!dateInput.value)
+    dateInput.valueAsDate = new Date();
+  document
+    .getElementById('agendaOutput')
+    .classList.add('hidden');
+  show('agendaModal');
+  reloadAgendaPicker();
+}
+
+function reloadAgendaPicker() {
+  const area = document.getElementById('a_area').value;
+  google.script.run
+    .withSuccessHandler(topics => {
+      const root = document.getElementById('a_topics');
+      const eligible = topics.filter(t => {
+        const areas =
+          Array.isArray(t.Areas) && t.Areas.length
+            ? t.Areas
+            : String(t.Area || '')
+                .split(/[;,]/)
+                .map(s => s.trim())
+                .filter(Boolean);
+        return (
+          areas.indexOf(area) !== -1 &&
+          t.Status !== 'Discussed' &&
+          t.Status !== 'Archived'
+        );
+      });
+
+      if (!eligible.length) {
+        root.innerHTML = '<em>No eligible topics.</em>';
+        return;
+      }
+
+      root.innerHTML = eligible
+        .map(t => {
+          const areas =
+            Array.isArray(t.Areas) && t.Areas.length
+              ? t.Areas
+              : String(t.Area || '')
+                  .split(/[;,]/)
+                  .map(s => s.trim())
+                  .filter(Boolean);
+          const isCross = areas.length > 1;
+          const cross = isCross
+            ? ` · Cross-functional (${escapeHtml(
+                areas.join(', ')
+              )})`
+            : '';
+          const presenter = t.Presenter
+            ? ` · Presenter: ${escapeHtml(t.Presenter)}`
+            : '';
+          const priority = t.Priority
+            ? ` · ${escapeHtml(t.Priority)} priority`
+            : '';
+
+          return `
+            <label class="pick">
+              <input type="checkbox" value="${escapeHtml(
+                t.ID
+              )}">
+              <div>
+                <strong>${escapeHtml(
+                  t.Title
+                )}</strong>
+                <div class="meta">
+                  ${
+                    Number(t.Votes) || 0
+                  } vote(s) · ${escapeHtml(
+            t.SubmitterName || ''
+          )}${cross}${presenter}${priority}
+                </div>
+              </div>
+            </label>
+          `;
+        })
+        .join('');
+    })
+    .withFailureHandler(err => toast(err.message))
+    .listTopics({});
+}
+
+function buildAgenda() {
+  const area = document.getElementById('a_area').value;
+  const date = document.getElementById('a_date').value;
+  const ids = Array.from(
+    document.querySelectorAll(
+      '#a_topics input:checked'
+    )
+  ).map(i => i.value);
+
+  if (!date || !ids.length) {
+    toast('Pick a date and at least one topic.');
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(res => {
+      document.getElementById('agendaHtml').value = res.html;
+      document
+        .getElementById('agendaOutput')
+        .classList.remove('hidden');
+      toast('Agenda generated.');
+      refresh();
+    })
+    .withFailureHandler(err => toast(err.message))
+    .buildAgenda(area, date, ids);
+}
+
+function copyAgenda() {
+  const ta = document.getElementById('agendaHtml');
+  ta.select();
+  try {
+    document.execCommand('copy');
+    toast('Agenda HTML copied.');
+  } catch (e) {
+    toast(
+      'Copy failed — select and copy manually.'
+    );
+  }
+}
+
+function previewAgenda() {
+  const iframe = document.getElementById('agendaPreview');
+  iframe.classList.remove('hidden');
+  iframe.srcdoc =
+    document.getElementById('agendaHtml').value;
+}
+
+/* ================================================================
+   Topic history
+   ================================================================ */
+
+function openHistory(topicId) {
+  if (!topicId) {
+    toast('Missing topic ID.');
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (!res || !res.topic) {
+        toast(
+          'No history returned for ' + topicId + '.'
+        );
+        return;
+      }
+
+      const t = res.topic;
+      const hist = Array.isArray(res.history)
+        ? res.history
+        : [];
+      const body = document.getElementById('h_body');
+
+      const planningBits = [];
+      if (t.Presenter)
+        planningBits.push(
+          'Presenter: ' + escapeHtml(t.Presenter)
+        );
+      if (t.Priority)
+        planningBits.push(
+          'Priority: ' + escapeHtml(t.Priority)
+        );
+      if (t.TargetMonth)
+        planningBits.push(
+          'Target: ' + escapeHtml(t.TargetMonth)
+        );
+      const planningLine = planningBits.length
+        ? `<div class="meta">${planningBits.join(
+            ' · '
+          )}</div>`
+        : '';
+
+      const header = `
+        <div class="meta">
+          ${escapeHtml(t.Area)} · ${Number(t.Votes) || 0} vote(s) · Submitted by ${escapeHtml(
+        t.Submitter || ''
+      )}
+        </div>
+        <h4 style="margin:6px 0">${escapeHtml(
+          t.Title
+        )}</h4>
+        <div class="meta">
+          Status: ${escapeHtml(
+            t.Status || 'Proposed'
+          )}
+          ${
+            t.DiscussedOn
+              ? ' · Discussed on: ' +
+                escapeHtml(t.DiscussedOn)
+              : ''
+          }
+        </div>
+        ${planningLine}
+      `;
+
+      const items = hist.length
+        ? hist
+            .map(
+              h => `
+          <div class="history-item">
+            <div><strong>${escapeHtml(
+              formatDateMDY(h.MeetingDate)
+            )}</strong> · ${escapeHtml(
+                h.Area
+              )} · ${escapeHtml(h.MeetingID)}</div>
+            <div class="meta">
+              Status: ${escapeHtml(h.Status)}
+              ${
+                h.DiscussedAt
+                  ? ' · Marked discussed ' +
+                    escapeHtml(
+                      formatDateMDY(h.DiscussedAt)
+                    )
+                  : ''
+              }
+            </div>
+          </div>
+        `
+            )
+            .join('')
+        : '<p><em>No meeting history yet.</em></p>';
+
+      body.innerHTML =
+        header +
+        '<hr style="margin:12px 0;border:none;border-top:1px solid var(--border)">' +
+        items;
+
+      show('historyModal');
+    })
+    .withFailureHandler(err =>
+      toast(
+        (err && err.message) || 'History failed.'
+      )
+    )
+    .getTopicHistory(topicId);
+}
+
+/* ================================================================
+   Meetings / Mark Discussed (admin)
+   ================================================================ */
+
+function openMeetings() {
+  show('meetingsModal');
+  reloadMeetings();
+}
+
+function reloadMeetings() {
+  const area = document.getElementById('m_area').value;
+  google.script.run
+    .withSuccessHandler(renderMeetings)
+    .withFailureHandler(err => toast(err.message))
+    .listMeetings(area);
+}
+
+function renderMeetings(meetings) {
+  const root = document.getElementById('m_list');
+  if (!meetings.length) {
+    root.innerHTML = '<p><em>No meetings yet.</em></p>';
+    return;
+  }
+  root.innerHTML = meetings
+    .map(
+      m => `
+      <div class="meeting-row">
+        <div class="grow">
+          <div><strong>${escapeHtml(
+            formatDateMDY(m.MeetingDate)
+          )}</strong> · ${escapeHtml(
+        m.Area
+      )} · ${escapeHtml(m.MeetingID)}</div>
+          <div class="meta">Topics: ${escapeHtml(
+            m.TopicIDs
+          )}</div>
+        </div>
+        <span class="status-pill ${
+          m.Status === 'Discussed'
+            ? 'discussed'
+            : 'planned'
+        }">${escapeHtml(m.Status)}</span>
+        <button class="link" data-preview="${escapeHtml(
+          m.MeetingID
+        )}">Preview</button>
+        ${
+          m.Status !== 'Discussed'
+            ? `<button class="primary" data-mark="${escapeHtml(
+                m.MeetingID
+              )}">Mark Discussed</button>`
+            : ''
+        }
+      </div>
+    `
+    )
+    .join('');
+
+  root
+    .querySelectorAll('[data-mark]')
+    .forEach(b =>
+      b.addEventListener('click', () =>
+        markDiscussed(b.dataset.mark)
+      )
+    );
+  root
+    .querySelectorAll('[data-preview]')
+    .forEach(b =>
+      b.addEventListener('click', () =>
+        previewMeeting(b.dataset.preview)
+      )
+    );
+}
+
+function markDiscussed(meetingId) {
+  if (
+    !confirm(
+      'Mark all topics on this meeting as Discussed?'
+    )
+  )
+    return;
+
+  google.script.run
+    .withSuccessHandler(r => {
+      toast(
+        'Marked ' + r.count + ' topic(s) discussed.'
+      );
+      reloadMeetings();
+      refresh();
+    })
+    .withFailureHandler(err => toast(err.message))
+    .markMeetingDiscussed(meetingId);
+}
+
+function previewMeeting(meetingId) {
+  google.script.run
+    .withSuccessHandler(html => {
+      const w = window.open('', '_blank');
+      if (!w) {
+        toast(
+          'Pop-up blocked. Allow pop-ups to preview.'
+        );
+        return;
+      }
+      w.document.write(html);
+      w.document.close();
+    })
+    .withFailureHandler(err => toast(err.message))
+    .getAgendaHtml(meetingId);
+}
+
+/* ================================================================
+   Monthly rollup (admin)
+   ================================================================ */
+
+function openRollup() {
+  show('rollupModal');
+  reloadRollup();
+}
+
+function reloadRollup() {
+  const months = parseInt(
+    document.getElementById('r_months').value,
+    10
+  );
+  google.script.run
+    .withSuccessHandler(renderRollup)
+    .withFailureHandler(err => toast(err.message))
+    .getMonthlyRollup(months);
+}
+
+function renderRollup(res) {
+  const body = document.getElementById('r_body');
+  let max = 1;
+
+  res.areas.forEach(a =>
+    res.months.forEach(m => {
+      const d = res.data[a][m];
+      max = Math.max(
+        max,
+        d.submitted,
+        d.scheduled,
+        d.discussed
+      );
+    })
+  );
+
+  const headerCells = res.months
+    .map(m => `<th>${escapeHtml(m)}</th>`)
+    .join('');
+
+  const sections = res.areas
+    .map(a => {
+      const rows = ['submitted', 'scheduled', 'discussed']
+        .map(metric => {
+          const cls =
+            metric === 'scheduled'
+              ? 's'
+              : metric === 'discussed'
+              ? 'd'
+              : '';
+          const cells = res.months
+            .map(m => {
+              const v = res.data[a][m][metric];
+              const w = Math.round((v / max) * 80);
+              return `<td>${v}<span class="bar ${cls}" style="width:${w}px"></span></td>`;
+            })
+            .join('');
+          return `<tr><td>${
+            metric[0].toUpperCase() + metric.slice(1)
+          }</td>${cells}</tr>`;
+        })
+        .join('');
+
+      return `
+        <h4 style="margin:14px 0 4px">${escapeHtml(
+          a
+        )}</h4>
+        <table class="rollup-table">
+          <thead><tr><th>Metric</th>${headerCells}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    })
+    .join('');
+
+  body.innerHTML = sections || '<p><em>No data.</em></p>';
+}
+</script>

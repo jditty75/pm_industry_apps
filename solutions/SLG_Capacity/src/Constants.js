@@ -1,0 +1,191 @@
+// ============================================================
+// Constants.gs — shared names, headers, defaults, Workday palette
+// ============================================================
+
+// --- Sheet tab names ---
+const STAFF_SHEET       = 'PSA';
+const OPPS_SHEET        = 'Pipeline';
+const DEPLOYMENTS_SHEET = 'Deployments';
+const ALLOC_NORM        = 'Allocations_Normalized';
+const OPPS_NORM         = 'Opportunities_Normalized';
+const ASSIGNMENTS       = 'Opportunity_Assignments';
+const SCENARIOS         = 'Scenarios';
+
+const CFG_ICP           = 'Config_ICP';
+const CFG_ROLES         = 'Config_Roles';
+const CFG_CAL           = 'Config_Calendar';
+const CFG_ALIAS         = 'Config_ColumnAliases';
+const CFG_TEAMS         = 'Config_Teams';
+const CFG_INGEST        = 'Config_Ingest_Filters';     // ingest filters config
+const CFG_SLG_MGRS = 'Config_SLG_Managers';     // SLG manager list (+ hierarchy)
+const CFG_SETTINGS = 'Config_Settings';         // key/value settings
+const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
+const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership
+const CFG_WORKER_ROLE_OVERRIDES = 'Config_Worker_Role_Overrides'; // per-worker ICP role override (applied at ingest time)
+
+const REFRESH_LOG       = 'Normalization_Log';
+
+// --- Table headers ---
+
+const ALLOC_HEADERS = [
+  'resource_name',
+  'team',
+  'practice',               // SLG worker's practice as reported by PSA (External rows are unreliable; see Config_Practice_Managers)
+  'manager_org',
+  'job_profile',
+  'role_category',
+  'resource_type',
+  'worker_class',           // SLG_Real / SLG_Generic / External_NonSLG / External_Contractor
+  'ICP_role',
+  'account_name',
+  'project_name',
+  'allocation_type',
+  'engagement_manager',
+  'manager',
+  'period_start',
+  'hours',
+  'source_row'
+];
+
+const OPP_HEADERS = [
+  'opportunity_id','opportunity_name','account','stage','stage_num',
+  'probability','acv','expected_start','expected_end','ee_count',
+  'services','segment','deal_type','deployment_approach'
+];
+
+// Opportunity_Assignments schema.
+//
+// Priority 4 additions:
+//   resource_type — the user's literal selection from the Role dropdown,
+//                   sourced from Config_Resource_Type.resource_type.
+//                   This is the canonical role field going forward.
+//   team_label    — derived server-side from resource_type via
+//                   Config_Resource_Type.team_label. Leadership-facing
+//                   team rollup (Delivery / Functional Consulting /
+//                   Technical Consulting / Unclassified).
+//
+// Existing columns kept for backwards compatibility:
+//   role  — now stores the resolved ICP role (CS_FUNC, CS_TECH, EM, etc.)
+//           when derivable from team_label via Config_Roles inverse.
+//           Blank when the team_label maps to multiple ICP roles
+//           (e.g., Delivery → EM/PD/DA — ambiguous).
+//   team  — duplicates team_label on new writes. Deferred for consolidation
+//           with team_label in a post-demo cleanup pass.
+const ASSIGN_HEADERS = [
+  'assignment_id','opportunity_id','role','resource_name','team',
+  'start_date','end_date','estimated_hours','distribution',
+  'custom_monthly_json','status','scenario_id','notes',
+  'created_by','created_at','modified_by','modified_at',
+  'resource_type','team_label'
+];
+
+const SCENARIO_HEADERS = [
+  'scenario_id','name','description','status',
+  'created_by','created_at','modified_by','modified_at'
+];
+
+const ICP_HEADERS    = ['role','target_utilization','red_threshold'];
+const ROLE_HEADERS   = ['role','monthly_capacity_hours'];
+const CAL_HEADERS    = ['period_start','year','month','quarter','workdays'];
+const ALIAS_HEADERS  = ['logical','actual','notes'];
+const REFRESH_HEADERS = [
+  'timestamp','source','rows_in','rows_out','months_detected','user'
+];
+
+const TEAM_HEADERS = [
+  'project_role_pattern',
+  'job_profile_pattern',
+  'team_type',     // Functional / Technical / Delivery
+  'subteam',       // FIN / HCM / PATT / INT / RPT / DC / EM / PD
+  'priority'       // numeric, higher wins
+];
+
+// Ingest filters config headers
+const INGEST_FILTER_HEADERS = [
+  'logical_field',  // logical column name (e.g. region_worker, resource_type, practice)
+  'group',          // OR-group identifier; rules in same group are ORed, groups are ANDed
+  'operator',       // equals, not_equals, in, not_in, contains, ...
+  'mode',           // include | exclude
+  'value',          // single value or comma-separated list
+  'notes'           // free-text notes
+];
+
+// NEW: Practice managers headers (one row per practice/manager owner)
+// practice_name  — must match a value used in Config_Resource_Type.practice
+// manager_name   — must match a manager_name in Config_SLG_Managers
+// active         — Yes/No (tolerant truthy match in the reader)
+// notes          — free-text
+const PRACTICE_MGRS_HEADERS = [
+  'practice_name',
+  'manager_name',
+  'active',
+  'notes'
+];
+
+// --- Seed data ---
+
+const DEFAULT_ICP = [
+  ['EM', 0.72, 0.90],
+  ['PD', 0.65, 0.85]
+];
+
+const DEFAULT_ROLES = [
+  ['EM', 160],
+  ['PD', 160],
+  ['Functional', 160],
+  ['Integrations', 160],
+  ['Education', 160],
+  ['Reporting & Analytics PS', 160],
+  ['Advanced Services', 160],
+  ['Services Operations', 160],
+  ['Other', 160]
+];
+
+// Default column aliases
+const DEFAULT_ALIASES = [
+  ['resource_name','Worker',''],
+  ['team','Specialty Practice','primary grouping'],
+  ['practice','Customer Segment Practice',''],
+  ['job_profile','Job Profile',''],
+  ['role_category','Project Role Category','primary ICP role signal'],
+  ['resource_type','Resource Type','fallback role bucket'],
+  ['project_role','Project Role','worker job title'],
+  ['project_name','Project',''],
+  ['engagement_manager','Engagement Manager',''],
+  ['manager',"Worker's Manager",'supervisory org for Team group-by'],
+  ['flag_customer','Customer Projects',''],
+  ['flag_internal','Internal Projects (Excludes Education)',''],
+  ['flag_education','Education Projects','']
+];
+
+const ALLOC_TYPES   = ['Billable','Internal','Education','PTO_Holiday','Unassigned'];
+const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded','Custom'];
+const ASSIGN_STATUSES = ['Modeled','Committed','Archived'];
+
+// Group-by modes for the dashboard heatmap
+const GROUP_BY_MODES = ['Function','Role','Team','Individual'];
+
+// --- Workday brand palette (exposed to client via api_getReference) ---
+const WORKDAY_PALETTE = {
+  // Core
+  afterHours:   '#0B1E3F',
+  ink:          '#0A3D7C',
+  ballpoint:    '#0875C1',
+  waterCooler:  '#2FA4E7',
+  blueSky:      '#AED9F4',
+  paper:        '#FDFCF7',
+  keyboard:     '#F4EFDF',
+  highlighter:  '#F7E26B',
+  pencil:       '#F5B700',
+  lunchBreak:   '#E8A317',
+  // Secondary
+  tack:         '#5BB5C4',
+  eraser:       '#F2C5E0',
+  smoothie:     '#A659C4',
+  happyHour:    '#E76F1C',
+  thumbtack:    '#D6371E',
+  laptop:       '#4A5463',
+  staple:       '#8A94A1',
+  desk:         '#BFC6CF',
+  businessCard: '#ECEEF1'
+};

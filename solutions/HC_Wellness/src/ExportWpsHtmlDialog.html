@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body style="margin:12px;font-family:Segoe UI,Arial,sans-serif;font-size:12px;">
+    <h2 style="margin:0 0 8px;">WPS Deployment Health – Preview &amp; HTML</h2>
+
+    <div style="margin-bottom:10px;">
+      <strong>1) Preview (as it will appear in Outlook)</strong>
+    </div>
+
+    <iframe id="previewFrame"
+            style="width:100%;height:260px;border:1px solid #cccccc;"></iframe>
+
+    <div style="margin-top:12px;margin-bottom:6px;">
+      <strong>2) HTML to copy into Outlook</strong>
+      <div style="color:#555;margin-top:2px;">
+        Copy everything in the box below, then paste into an Outlook message (HTML format).
+      </div>
+    </div>
+
+    <textarea id="htmlBox"
+              style="width:100%;height:220px;font-family:monospace;font-size:11px;white-space:pre;">
+<?= escapedHtml ?>
+    </textarea>
+
+    <script>
+      (function() {
+        // rawHtml is injected by the Apps Script template
+        var rawHtml = <?= JSON.stringify(rawHtml) ?>;
+        var iframe = document.getElementById('previewFrame');
+        if (iframe && iframe.contentWindow && iframe.contentWindow.document) {
+          var doc = iframe.contentWindow.document;
+          doc.open();
+          doc.write(rawHtml);  // this renders the HTML table, not plain text
+          doc.close();
+        }
+      })();
+    </script>
+  </body>
+</html>

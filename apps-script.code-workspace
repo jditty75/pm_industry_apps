@@ -1,0 +1,24 @@
+﻿{
+  "folders": [
+    { "path": "libraries/DepMngr" },
+    { "path": "libraries/GoLives" },
+    { "path": "solutions/HC_DM" },
+    { "path": "solutions/SLG_DM" },
+    { "path": "solutions/HENP_DM" },
+    { "path": "solutions/SLG_GoLives" },
+    { "path": "solutions/HC_GoLives" },
+    { "path": "solutions/HENP_GoLives" },
+    { "path": "solutions/SLG_ConsultingHub" },
+    { "path": "solutions/SLG_Capacity" },
+    { "path": "solutions/HC_Wellness" },
+    { "path": ".", "name": "ROOT" }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "files.exclude": {
+      "**/.clasp.json": false,
+      "**/.claspignore": false,
+      "**/.cursorrules": false
+    }
+  }
+}

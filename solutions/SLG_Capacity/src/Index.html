@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <!-- Index.html — SLG Delivery Capacity Planner -->
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+<div id="app" class="app-shell">
+
+  <!-- ============ Sidebar ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <img class="brand-logo" src="https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg?c=1bxid64Mup7aczewSAYMX&t=1761286530298" alt="SLG Logo">
+      <div class="brand-text">
+        <div class="brand-title">SLG Capacity Planner</div>
+        <div class="brand-sub">v1.8</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" data-view="dashboard">
+        <span class="nav-icon">◦</span><span>Dashboard</span>
+      </button>
+      <button class="nav-item" data-view="explorer">
+        <span class="nav-icon">▿</span><span>Capacity Explorer</span>
+      </button>
+      <button class="nav-item" data-view="pipeline">
+        <span class="nav-icon">◉</span><span>Pipeline</span>
+      </button>
+      <button class="nav-item" data-view="deployments">
+        <span class="nav-icon">◆</span><span>Deployments</span>
+      </button>
+      <button class="nav-item" data-view="scenarios">
+        <span class="nav-icon">↷</span><span>Scenarios</span>
+      </button>
+      <button class="nav-item" data-view="reporting">
+        <span class="nav-icon">✚</span><span>Reporting &amp; Metrics</span>
+      </button>
+      <button class="nav-item" data-view="admin">
+        <span class="nav-icon">⚙</span><span>Admin</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-chip" id="userChip">…</div>
+    </div>
+  </aside>
+
+  <!-- ============ Main ============ -->
+  <main class="main">
+
+    <!-- ============ Top Bar ============ -->
+    <header class="topbar">
+      <div class="topbar-row">
+        <button class="icon-btn hamburger" id="hamburger" aria-label="Menu">☰</button>
+
+                <!-- Pinned filters -->
+        <div class="topbar-pinned">
+          <label class="filter">
+            <span class="filter-label">Quarter</span>
+            <select id="quarterFilter" class="select"></select>
+          </label>
+          <label class="filter">
+            <span class="filter-label">Team</span>
+            <select id="teamLabelFilter" class="select"></select>
+          </label>
+          <label class="filter">
+            <span class="filter-label">Managers</span>
+            <select id="teamsSelect" class="select"></select>
+          </label>
+        </div>
+
+        <!-- Actions -->
+        <div class="topbar-actions">
+          <button type="button" class="btn-filters" id="openFiltersBtn" aria-label="Open filters">
+            <span class="btn-filters-icon">⚙</span>
+            <span>Filters</span>
+            <span class="filter-count" id="filterCount" hidden>0</span>
+          </button>
+          <button class="btn-ghost" id="refreshBtn" title="Recompute">↻ Refresh</button>
+        </div>
+      </div>
+
+              <!-- Chip strip -->
+        <div class="chip-strip" id="chipStrip" hidden>
+          <span class="chip-strip-label">Active filters:</span>
+          <span id="chipStripItems"></span>
+          <button type="button" class="chip-clear-all" id="chipClearAll" hidden>Clear all</button>
+        </div>
+
+        <!-- Auto-manager banner (sticky; shown when logged-in email is not recognized) -->
+        <div class="report-banners" id="autoManagerBannerWrap" hidden>
+          <div class="report-banner info" id="autoManagerBanner">
+            <span class="report-banner-icon">ℹ</span>
+            <span><strong>Email not recognized as SLG manager;</strong> showing all data.</span>
+          </div>
+        </div>
+      </header>
+
+    <!-- ============ View: Dashboard ============ -->
+    <section class="view view-dashboard" data-view="dashboard">
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Avg Utilization</div>
+          <div class="kpi-value" id="kpiUtil">—</div>
+          <div class="kpi-sub" id="kpiUtilSub">vs ICP</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Total Committed Hours</div>
+          <div class="kpi-value" id="kpiCommitted">—</div>
+          <div class="kpi-sub" id="kpiCommittedSub">Includes PTO/Holiday</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Scenario Demand (Hours)</div>
+          <div class="kpi-value" id="kpiScenario">—</div>
+          <div class="kpi-sub">All scenarios in scope</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Over / Under Utilized Staff</div>
+          <div class="kpi-value" id="kpiOverUnder">—</div>
+          <div class="kpi-sub" id="kpiOverUnderSub">Hover for details</div>
+        </div>
+      </div>
+      <!-- SLG Headcount Gap by Role (FTE) -->
+      <div class="card" id="kpiHeadcountCard">
+        <div class="card-header">
+          <div class="card-title">SLG Headcount Gap by Role (FTE)</div>
+          <span class="muted" id="kpiHeadcountSub">SLG only · current filters</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="kpiHeadcountTable">
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th class="num">Capacity FTE</th>
+                <th class="num">Peak Demand FTE</th>
+                <th class="num">Peak Util</th>
+                <th class="num">Peak Gap</th>
+                <th class="num">Suggested Heads</th>
+                <th>Peak Month</th>
+                <th class="num">Avg Demand FTE</th>
+                <th class="num">Avg Util</th>
+                <th class="num">Avg Gap</th>
+              </tr>
+            </thead>
+            <tbody id="kpiHeadcountBody">
+              <tr>
+                <td colspan="10" class="muted" style="padding:12px">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card card-heatmap">
+        <div class="card-header">
+          <div class="card-title">Utilization Heatmap</div>
+          <div class="seg seg-sm" id="groupBySeg">
+            <button data-val="Function">Function</button>
+            <button data-val="Role">Role</button>
+            <button data-val="Team">Team</button>
+            <button data-val="Individual" class="on">Individual</button>
+          </div>
+        </div>
+        <div class="heatmap-scroll">
+          <div id="heatmap" class="heatmap"></div>
+        </div>
+        <div class="legend">
+          <span class="legend-swatch" style="background:var(--water-cooler)"></span><span>Healthy</span>
+          <span class="legend-swatch" style="background:var(--pencil)"></span><span>At ICP</span>
+          <span class="legend-swatch" style="background:var(--happy-hour)"></span><span>Over ICP</span>
+          <span class="legend-swatch" style="background:var(--thumbtack)"></span><span>Red threshold</span>
+        </div>
+      </div>
+
+      <div class="card card-trend">
+        <div class="card-header">
+          <div class="card-title">Utilization Trend (6 months)</div>
+        </div>
+        <div style="position:relative;height:280px;width:100%">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ View: Capacity Explorer ============ -->
+    <section class="view" data-view="explorer" hidden>
+      <div class="grid-explorer">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Resources</div>
+            <input type="text" class="input search" id="resourceSearch" placeholder="Search by name…">
+          </div>
+          <div class="resource-list" id="resourceList"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" id="resourceTitle">Select a resource</div>
+            <div class="muted" id="resourceSub"></div>
+          </div>
+          <div style="position:relative;height:320px;width:100%">
+            <canvas id="resourceChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ View: Pipeline ============ -->
+    <section class="view" data-view="pipeline" hidden>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Pipeline</div>
+          <div class="card-tools">
+            <select id="segmentFilter" class="select">
+              <option value="">All segments</option>
+            </select>
+            <select id="stageFilter" class="select">
+              <option value="">All stages</option>
+              <option value="3">3- Engage or later</option>
+              <option value="5">5- Selected or later</option>
+              <option value="9">9- Closed/Won only</option>
+            </select>
+            <input type="text" class="input" id="oppSearch" placeholder="Search opportunity or account…">
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="oppTable">
+            <thead>
+              <tr>
+                <th>Opportunity</th>
+                <th>Account</th>
+                <th>Segment</th>
+                <th>Stage</th>
+                <th class="num">Probability</th>
+                <th class="num">ACV</th>
+                <th>Start</th>
+                <th>Go-Live</th>
+                <th class="num">EE</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="oppBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ View: Deployments ============ -->
+    <section class="view" data-view="deployments" hidden>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Deployments</div>
+          <div class="card-tools">
+            <input type="text" class="input" id="deploySearch" placeholder="Search deployment or account...">
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="deployTable">
+            <thead>
+              <tr>
+                <th>Deployment</th>
+                <th>Account</th>
+                <th>Stage</th>
+                <th>Health</th>
+                <th>MTP Date</th>
+                <th>EM</th>
+                <th>DAM</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="deployBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ View: Scenarios ============ -->
+    <section class="view" data-view="scenarios" hidden>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Scenarios</div>
+            <button class="btn-primary" id="newScenarioBtn">+ New Scenario</button>
+          </div>
+          <div class="scenario-list" id="scenarioList"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title" id="scenarioTitle">Select a scenario</div>
+            <div class="card-tools">
+              <button class="btn-ghost" id="commitScenarioBtn" disabled>Commit All</button>
+              <button class="btn-ghost danger" id="archiveScenarioBtn" disabled>Archive</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="scenarioAssignments">
+              <thead>
+                <tr>
+                  <th>Opportunity</th>
+                  <th>Role</th>
+                  <th>Resource</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th class="num">Hours</th>
+                  <th>Distribution</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="scenarioAssignmentsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ View: Reporting & Metrics ============ -->
+    <section class="view view-reporting" data-view="reporting" hidden>
+
+      <!-- Filter exception banners -->
+      <div class="report-banners" id="reportBanners" hidden></div>
+
+      <!-- Band 1: Headline KPIs -->
+      <div class="kpi-row kpi-row-6">
+        <div class="kpi-card">
+          <div class="kpi-label">Total Hours</div>
+          <div class="kpi-value" id="rpKpiTotal">—</div>
+          <div class="kpi-sub" id="rpKpiTotalSub">—</div>
+        </div>
+        <div class="kpi-card kpi-class-slg">
+          <div class="kpi-label">SLG Hours</div>
+          <div class="kpi-value" id="rpKpiSlg">—</div>
+          <div class="kpi-sub" id="rpKpiSlgPct">—</div>
+        </div>
+        <div class="kpi-card kpi-class-nonslg">
+          <div class="kpi-label">Workday Non-SLG Hours</div>
+          <div class="kpi-value" id="rpKpiNonSlg">—</div>
+          <div class="kpi-sub" id="rpKpiNonSlgPct">—</div>
+        </div>
+        <div class="kpi-card kpi-class-partner">
+          <div class="kpi-label">Partner Hours</div>
+          <div class="kpi-value" id="rpKpiPartner">—</div>
+          <div class="kpi-sub" id="rpKpiPartnerPct">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Avg Utilization</div>
+          <div class="kpi-value" id="rpKpiUtil">—</div>
+          <div class="kpi-sub" id="rpKpiUtilSub">vs ICP</div>
+        </div>
+        <div class="kpi-card kpi-card-reconcile">
+          <div class="kpi-label">Reconciliation</div>
+          <div class="kpi-value" id="rpKpiReconcile">—</div>
+          <div class="kpi-sub" id="rpKpiReconcileSub">Hover for detail</div>
+        </div>
+      </div>
+
+      <!-- Band 2: Composition -->
+      <div class="grid-composition">
+
+        <!-- Hours by Worker Class -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Hours by Worker Class</div>
+            <span class="muted">In current scope</span>
+          </div>
+          <div class="composition-body">
+            <div class="composition-chart">
+              <canvas id="rpDonutChart"></canvas>
+            </div>
+            <table class="data-table compact-mini">
+              <thead>
+                <tr>
+                  <th>Class</th>
+                  <th class="num">Hours</th>
+                  <th class="num">% of Total</th>
+                </tr>
+              </thead>
+              <tbody id="rpDonutLegendBody">
+                <tr>
+                  <td colspan="3" class="muted" style="padding:12px">Loading…</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- SLG vs Everyone Else -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">SLG vs Everyone Else</div>
+            <span class="muted">Headline ratio</span>
+          </div>
+          <div class="composition-body composition-body-bar">
+            <div class="composition-bar-wrap">
+              <canvas id="rpHorizontalBarChart"></canvas>
+            </div>
+            <div class="composition-bar-legend" id="rpHorizontalBarLegend">
+              <div class="muted" style="padding:12px">Loading…</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Band 3: Where the work is -->
+
+      <!-- Hours by SLG Team -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Hours by SLG Team</div>
+          <span class="muted">Click any row to expand</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="rpTeamTable">
+            <thead>
+              <tr>
+                <th>SLG Team</th>
+                <th class="num">Hours</th>
+                <th class="num">% of Total</th>
+                <th>Worker Class Mix</th>
+              </tr>
+            </thead>
+            <tbody id="rpTeamBody">
+              <tr>
+                <td colspan="4" class="muted" style="padding:12px">Loading…</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr id="rpTeamFooter" hidden>
+                <td><strong>Total</strong></td>
+                <td class="num"><strong id="rpTeamTotalHours">—</strong></td>
+                <td class="num"><strong>100%</strong></td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Hours by Account -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Hours by Account
+            <span class="muted" style="font-size:12px;font-weight:normal;">— Top 10</span>
+          </div>
+          <button type="button" class="btn-ghost" id="rpAccountViewAllBtn" hidden>View all accounts</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="rpAccountTable">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th class="num">Hours</th>
+                <th class="num">% of Total</th>
+                <th>Worker Class Mix</th>
+              </tr>
+            </thead>
+            <tbody id="rpAccountBody">
+              <tr>
+                <td colspan="4" class="muted" style="padding:12px">Loading…</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr id="rpAccountFooter" hidden>
+                <td><strong id="rpAccountFooterLabel">Top 10 of —</strong></td>
+                <td class="num"><strong id="rpAccountFooterHours">—</strong></td>
+                <td class="num"><strong id="rpAccountFooterPct">—</strong></td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Hours by Role Category -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Hours by Role Category</div>
+          <span class="muted">PSA role_category</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="rpRoleCategoryTable">
+            <thead>
+              <tr>
+                <th>Role Category</th>
+                <th class="num">Hours</th>
+                <th class="num">% of Total</th>
+              </tr>
+            </thead>
+            <tbody id="rpRoleCategoryBody">
+              <tr>
+                <td colspan="3" class="muted" style="padding:12px">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Hours by Job Profile -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Hours by Job Profile</div>
+          <span class="muted">PSA job_profile</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="rpJobProfileTable">
+            <thead>
+              <tr>
+                <th>Job Profile</th>
+                <th class="num">Hours</th>
+                <th class="num">% of Total</th>
+              </tr>
+            </thead>
+            <tbody id="rpJobProfileBody">
+              <tr>
+                <td colspan="3" class="muted" style="padding:12px">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Top 5 Quick Scan -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Top 5 Quick Scan</div>
+          <span class="muted">Under current scope</span>
+        </div>
+        <div class="grid-top5">
+          <div class="top5-pane">
+            <div class="top5-head">
+              <span class="top5-title">Top 5 Accounts</span>
+            </div>
+            <table class="data-table compact-mini">
+              <tbody id="rpTop5AccountsBody">
+                <tr>
+                  <td colspan="3" class="muted" style="padding:8px 10px">Loading…</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="top5-pane">
+            <div class="top5-head">
+              <span class="top5-title">Top 5 Roles</span>
+            </div>
+            <table class="data-table compact-mini">
+              <tbody id="rpTop5RolesBody">
+                <tr>
+                  <td colspan="3" class="muted" style="padding:8px 10px">Loading…</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Band 5: Diagnostics -->
+      <div class="card card-diagnostics" id="rpDiagnosticsCard">
+        <div class="card-header card-header-collapsible" id="rpDiagnosticsHeader" role="button" tabindex="0">
+          <div class="card-title">
+            <span class="collapse-chev" id="rpDiagnosticsChev">▶</span>
+            Diagnostics
+            <span class="muted" style="font-size:12px;font-weight:normal;margin-left:6px;">
+              <span id="rpDiagnosticsSummary">—</span>
+            </span>
+          </div>
+        </div>
+        <div class="card-body" id="rpDiagnosticsBody" hidden>
+
+          <!-- Unmapped Categories -->
+          <div class="diagnostic-section">
+            <div class="diagnostic-section-header">
+              <span class="diagnostic-section-title">Unmapped Categories</span>
+              <span class="muted" style="font-size:12px;">
+                Add these to <code>Config_Resource_Type</code> to assign them to a team
+              </span>
+              <span id="rpUnmappedBadge" class="badge ghost">—</span>
+            </div>
+            <div class="table-wrap" style="max-height:240px;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>role_category | resource_type</th>
+                    <th class="num">Hours</th>
+                    <th class="num">% of Total</th>
+                  </tr>
+                </thead>
+                <tbody id="rpUnmappedBody">
+                  <tr>
+                    <td colspan="3" class="muted" style="padding:12px">No unmapped categories — all rows classified.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Blank-class Workers -->
+          <div class="diagnostic-section">
+            <div class="diagnostic-section-header">
+              <span class="diagnostic-section-title">Workers with Blank Class</span>
+              <span class="muted" style="font-size:12px;">
+                These workers' hours are not in scope under any worker-scope value. Resolve in Admin → Worker Exclusions or fix in PSA.
+              </span>
+              <span id="rpBlankClassBadge" class="badge ghost">—</span>
+            </div>
+            <div class="table-wrap" style="max-height:240px;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Worker</th>
+                    <th class="num">Hours (out of scope)</th>
+                  </tr>
+                </thead>
+                <tbody id="rpBlankClassBody">
+                  <tr>
+                    <td colspan="2" class="muted" style="padding:12px">No blank-class workers detected.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ============ View: Admin ============ -->
+    <section class="view" data-view="admin" hidden>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Upload PSA</div>
+          </div>
+          <div class="upload-zone" id="uploadZone">
+            <input type="file" id="staffFile" accept=".xlsx" hidden>
+            <div class="upload-hint">
+              <div class="upload-title">Drop .xlsx here or click to browse</div>
+              <div class="muted">Replaces <code>PSA</code> and re-normalizes allocations.</div>
+            </div>
+            <button class="btn-primary" id="browseBtn">Choose file</button>
+          </div>
+          <div id="uploadStatus" class="status" hidden></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">ICP Targets</div>
+            <button class="btn-ghost" id="saveIcpBtn">Save</button>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr><th>Role</th><th class="num">Target</th><th class="num">Red threshold</th></tr>
+            </thead>
+            <tbody id="icpBody"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Role Monthly Capacity</div>
+            <button class="btn-ghost" id="saveRolesBtn">Save</button>
+          </div>
+          <table class="data-table">
+            <thead><tr><th>Role</th><th class="num">Hours / month</th></tr></thead>
+            <tbody id="rolesBody"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Normalization Log</div>
+            <div class="card-tools">
+              <button class="btn-ghost" id="flushCachesBtn" title="Reload all cached config and data sheets">↻ Flush caches</button>
+              <button class="btn-ghost" id="refreshOppsBtn">Normalize Opportunities</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>When</th><th>Source</th><th class="num">In</th><th class="num">Out</th><th class="num">Months</th><th>User</th></tr>
+              </thead>
+              <tbody id="refreshLogBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Pipeline Auto-Refresh (Salesforce)</div>
+            <span class="muted">Last 10 refreshes · every ~8 hours</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Refresh Time</th>
+                  <th>Sheet</th>
+                  <th>Operation</th>
+                  <th>Status</th>
+                  <th>User</th>
+                </tr>
+              </thead>
+              <tbody id="pipelineLogBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Generic Resources</div>
+            <button class="btn-ghost" id="saveGenericBtn">Save</button>
+          </div>
+          <div class="table-wrap" style="max-height:360px">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Resource Type</th>
+                  <th>Project Role</th>
+                  <th>Manager</th>
+                  <th>Team</th>
+                  <th>Practice</th>
+                  <th class="num">Capacity (hrs/mo)</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="genericBody">
+                <tr>
+                  <td colspan="8" class="muted" style="padding:12px">No generic resources configured yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Worker Exclusions</div>
+            <button class="btn-ghost" id="saveExclusionsBtn">Save</button>
+          </div>
+          <div class="table-wrap" style="max-height:360px">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Exclude</th>
+                  <th>Worker</th>
+                  <th>Manager</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody id="exclusionsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ Filters Drawer ============ -->
+  <aside class="drawer filters-drawer" id="filtersDrawer" hidden>
+    <div class="drawer-backdrop" data-close></div>
+    <div class="drawer-panel">
+      <header class="drawer-header">
+        <div>
+          <div class="drawer-title">Filters</div>
+          <div class="muted" id="filtersDrawerSub" style="margin-top:4px;">Adjust filters then click Apply</div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+
+      <div class="filters-body">
+
+        <!-- Manager scope -->
+        <div class="filters-section">
+          <h3 class="filters-section-title">Manager scope</h3>
+          <label class="check-row">
+            <input type="checkbox" id="drawerIncludeMyManagers">
+            Include managers in their organization
+          </label>
+          <div class="muted" style="margin-top:6px;">
+            When enabled, the selected manager's reports are included in totals.
+            The Managers dropdown above stays as the primary picker.
+          </div>
+        </div>
+
+        <!-- Worker scope -->
+        <div class="filters-section">
+          <h3 class="filters-section-title">Worker scope</h3>
+          <label class="field">
+            <span>Show hours for</span>
+            <div class="seg seg-sm seg-5" id="drawerWorkerScopeSeg">
+              <button type="button" data-val="SLG">SLG</button>
+              <button type="button" data-val="NonSLG">NonSLG</button>
+              <button type="button" data-val="Partners">Partners</button>
+              <button type="button" data-val="WorkdayOnly">Workday Only</button>
+              <button type="button" data-val="All" class="on">All</button>
+            </div>
+          </label>
+          <div class="muted" style="margin-top:6px;">
+            SLG = Workday SLG employees · NonSLG = Workday non-SLG on Government ·
+            Partners = contractors · Workday Only = SLG + NonSLG · All = everyone.
+          </div>
+        </div>
+
+        <!-- View mode -->
+        <div class="filters-section">
+          <h3 class="filters-section-title">View mode</h3>
+          <label class="field">
+            <span>Capacity view</span>
+            <div class="seg seg-sm" id="drawerViewModeSeg">
+              <button type="button" data-val="Actual">Actual</button>
+              <button type="button" data-val="Committed" class="on">Committed</button>
+              <button type="button" data-val="Scenario">Scenario</button>
+            </div>
+          </label>
+          <label class="field" id="drawerScenarioField" hidden>
+            <span>Scenario</span>
+            <select id="drawerScenarioSelect" class="select"></select>
+          </label>
+        </div>
+
+        <!-- Display options -->
+        <div class="filters-section">
+          <h3 class="filters-section-title">Display options</h3>
+          <label class="check-row">
+            <input type="checkbox" id="drawerIncludeTimeOffToggle" checked>
+            Include PTO/Holiday in totals
+          </label>
+          <label class="field" style="margin-top:10px;">
+            <span>Heatmap group by (Dashboard only)</span>
+            <div class="seg seg-sm" id="drawerGroupBySeg">
+              <button type="button" data-val="Function">Function</button>
+              <button type="button" data-val="Role">Role</button>
+              <button type="button" data-val="Team">Team</button>
+              <button type="button" data-val="Individual" class="on">Individual</button>
+            </div>
+          </label>
+        </div>
+
+      </div>
+
+      <footer class="filters-footer">
+        <div class="footer-left">
+          <button type="button" class="btn-ghost" id="filtersResetBtn">Reset to defaults</button>
+        </div>
+        <div class="footer-right">
+          <button type="button" class="btn-ghost" data-close>Cancel</button>
+          <button type="button" class="btn-primary" id="filtersApplyBtn">Apply</button>
+        </div>
+      </footer>
+    </div>
+  </aside>
+
+  <!-- ============ Assign Drawer ============ -->
+  <aside class="drawer" id="assignDrawer" hidden>
+    <div class="drawer-backdrop" data-close></div>
+    <div class="drawer-panel">
+      <header class="drawer-header">
+        <div>
+          <div class="muted" id="drawerAccount">—</div>
+          <div class="drawer-title" id="drawerOppName">Assign to Opportunity</div>
+          <div class="drawer-meta">
+            <span class="badge" id="drawerStage">—</span>
+            <span class="badge blue" id="drawerProb">—</span>
+            <span class="badge ghost" id="drawerSegment">—</span>
+          </div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <form class="drawer-form" id="assignForm">
+          <input type="hidden" id="f_assignment_id">
+          <input type="hidden" id="f_opportunity_id">
+
+          <label class="field">
+            <span>Role <span class="muted">(from Config_Resource_Type)</span></span>
+            <select id="f_role" class="select" required></select>
+          </label>
+
+          <label class="field">
+            <span>Resource <span class="muted">(SLG workers only — required)</span></span>
+            <select id="f_resource" class="select" required></select>
+            <div id="psaMatchIndicator" class="muted" style="margin-top:4px;font-size:12px;"></div>
+          </label>
+        <div class="field-row">
+          <label class="field">
+            <span>Start date</span>
+            <input type="date" id="f_start" class="input" required>
+          </label>
+          <label class="field">
+            <span>End date</span>
+            <input type="date" id="f_end" class="input" required>
+          </label>
+        </div>
+        <label class="field">
+          <span>Estimated hours</span>
+          <input type="number" min="0" step="1" id="f_hours" class="input" required>
+        </label>
+                  <label class="field">
+            <span>Distribution</span>
+            <div class="seg" id="f_distribution">
+              <button type="button" data-val="Even" class="on">Even</button>
+              <button type="button" data-val="Front-loaded">Front-loaded</button>
+              <button type="button" data-val="Back-loaded">Back-loaded</button>
+              <button type="button" data-val="Custom">Custom</button>
+            </div>
+          </label>
+
+          <!-- Custom Distribution per-month inputs.
+               Hidden by default; revealed when Distribution = Custom.
+               Rows are regenerated whenever Start/End date change.
+               Pre-filled with Even distribution on first reveal. -->
+          <div class="field" id="customMonthsField" hidden>
+            <div class="custom-months-header">
+              <span class="custom-months-title">Custom hours by month</span>
+              <button type="button" class="btn-ghost btn-ghost-sm" id="customMonthsResetBtn">Reset to Even</button>
+            </div>
+            <div class="muted" style="margin-top:4px;margin-bottom:8px;font-size:11px;">
+              Enter hours for each month. The total below will reconcile against your Estimated hours.
+            </div>
+            <div class="custom-months-list" id="customMonthsList">
+              <!-- per-month rows injected by renderCustomMonths_() -->
+            </div>
+            <div class="custom-months-footer" id="customMonthsFooter">
+              <span class="muted">Total:</span>
+              <strong id="customMonthsTotal">0</strong>
+              <span class="muted">of</span>
+              <strong id="customMonthsTarget">0</strong>
+              <span id="customMonthsDelta" class="custom-months-delta"></span>
+            </div>
+          </div>
+          <label class="field">
+            <span>Scenario <span class="muted">(optional)</span></span>
+          <div class="field-row compact">
+            <select id="f_scenario" class="select">
+              <option value="">— No scenario —</option>
+            </select>
+            <button type="button" class="btn-ghost" id="f_newScenarioBtn">+ New</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>Notes</span>
+          <textarea id="f_notes" class="input" rows="2"></textarea>
+        </label>
+        <div class="card inner">
+          <div class="card-header">
+            <div class="card-title sm">Monthly Load Preview</div>
+          </div>
+          <div style="position:relative;height:160px;width:100%">
+            <canvas id="previewChart"></canvas>
+          </div>
+        </div>
+        <div class="drawer-actions">
+          <button type="button" class="btn-ghost" data-close>Cancel</button>
+          <button type="submit" class="btn-primary" id="saveModeledBtn">Save as Modeled</button>
+          <button type="button" class="btn-solid-accent" id="commitNowBtn">Commit Now</button>
+        </div>
+      </form>
+    </div>
+  </aside>
+
+  <!-- ============ Scenario Modal ============ -->
+  <div class="modal" id="scenarioModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel">
+      <header class="modal-header">
+        <div class="drawer-title">New Scenario</div>
+        <button class="icon-btn" data-close>✕</button>
+      </header>
+      <form id="scenarioForm" class="drawer-form">
+        <input type="hidden" id="s_id">
+        <label class="field">
+          <span>Name</span>
+          <input type="text" id="s_name" class="input" required>
+        </label>
+        <label class="field">
+          <span>Description</span>
+          <textarea id="s_desc" class="input" rows="3"></textarea>
+        </label>
+        <div class="drawer-actions">
+          <button type="button" class="btn-ghost" data-close>Cancel</button>
+          <button type="submit" class="btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ Reporting: Accounts "View all" Modal ============ -->
+  <div class="modal" id="rpAccountsModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" style="width:720px;max-width:92vw;">
+      <header class="modal-header">
+        <div>
+          <div class="drawer-title">Hours by Account</div>
+          <div class="muted" id="rpAccountsModalSub" style="margin-top:4px;">All accounts</div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <div style="padding:12px 20px;">
+        <input
+          type="text"
+          id="rpAccountsModalSearch"
+          class="input"
+          placeholder="Search account…"
+          style="width:100%;">
+      </div>
+      <div class="table-wrap" style="max-height:60vh;border-radius:0;border-left:0;border-right:0;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:48px" class="num">#</th>
+              <th>Account</th>
+              <th class="num">Hours</th>
+              <th class="num">% of Total</th>
+            </tr>
+          </thead>
+          <tbody id="rpAccountsModalBody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2"><strong>Total</strong></td>
+              <td class="num"><strong id="rpAccountsModalTotalHours">—</strong></td>
+              <td class="num"><strong id="rpAccountsModalTotalPct">100%</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Reporting: Team Drill "Show all" Modal ============ -->
+  <div class="modal" id="rpTeamDrillModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" style="width:720px;max-width:92vw;">
+      <header class="modal-header">
+        <div>
+          <div class="drawer-title" id="rpTeamDrillTitle">Team Drill</div>
+          <div class="muted" id="rpTeamDrillSub" style="margin-top:4px;">—</div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <div style="padding:12px 20px;">
+        <input
+          type="text"
+          id="rpTeamDrillSearch"
+          class="input"
+          placeholder="Search…"
+          style="width:100%;">
+      </div>
+      <div class="table-wrap" style="max-height:60vh;border-radius:0;border-left:0;border-right:0;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:48px" class="num">#</th>
+              <th id="rpTeamDrillLabelHeader">Label</th>
+              <th class="num">Hours</th>
+              <th class="num">% of Team</th>
+            </tr>
+          </thead>
+          <tbody id="rpTeamDrillBody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2"><strong>Total</strong></td>
+              <td class="num"><strong id="rpTeamDrillTotalHours">—</strong></td>
+              <td class="num"><strong id="rpTeamDrillTotalPct">100%</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Reporting: Account Drill "Show all" Modal ============ -->
+  <div class="modal" id="rpAccountDrillModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" style="width:720px;max-width:92vw;">
+      <header class="modal-header">
+        <div>
+          <div class="drawer-title" id="rpAccountDrillTitle">Account Drill</div>
+          <div class="muted" id="rpAccountDrillSub" style="margin-top:4px;">—</div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <div style="padding:12px 20px;">
+        <input
+          type="text"
+          id="rpAccountDrillSearch"
+          class="input"
+          placeholder="Search…"
+          style="width:100%;">
+      </div>
+      <div class="table-wrap" style="max-height:60vh;border-radius:0;border-left:0;border-right:0;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:48px" class="num">#</th>
+              <th id="rpAccountDrillLabelHeader">Label</th>
+              <th class="num">Hours</th>
+              <th class="num">% of Account</th>
+            </tr>
+          </thead>
+          <tbody id="rpAccountDrillBody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2"><strong>Total</strong></td>
+              <td class="num"><strong id="rpAccountDrillTotalHours">—</strong></td>
+              <td class="num"><strong id="rpAccountDrillTotalPct">100%</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Toasts ============ -->
+  <div class="toast-stack" id="toastStack"></div>
+</div>
+
+<!-- Chart.js via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<?!= include('JavaScript'); ?>
+</body>
+</html>

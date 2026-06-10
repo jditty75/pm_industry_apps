@@ -1,0 +1,21 @@
+﻿# Project: SLG_ConsultingHub
+
+This project is standalone. No library dependency.
+
+## Conventions
+- V8 runtime: use let/const, arrow functions, classes, template literals.
+- Every public function needs JSDoc with @param and @return.
+- Wrap external service calls (UrlFetchApp, SpreadsheetApp batch ops) in try/catch.
+- Use PropertiesService.getScriptProperties() for secrets. Never hardcode.
+- Prefer batch operations (getValues/setValues) over per-cell reads.
+- All Logger.log calls should prefix with the function name.
+
+## File layout
+- All source files live in ./src
+- src/appsscript.json is the project manifest pushed to Apps Script
+- Never reference scriptIds in code. They live only in .clasp.json
+
+## Workflow reminders
+- 'npm run push' pushes ./src to Apps Script HEAD. This is DEV.
+- 'npm run deploy' creates a new immutable deployment version. This is PROD.
+- Library version bumps happen in src/appsscript.json under dependencies.libraries.

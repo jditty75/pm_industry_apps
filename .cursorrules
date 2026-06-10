@@ -1,0 +1,36 @@
+﻿# Workday Apps Script Monorepo
+
+Single developer: Jeff Ditty (jeffrey.ditty@workday.com)
+Source of truth: this monorepo at C:\JD
+Deployment: via Clasp to Google Apps Script
+
+## Structure
+- libraries/  Shared Apps Script libraries (DepMngr, GoLives)
+- solutions/  Container-bound Apps Script projects attached to Google Sheets
+
+## Dependency map
+- DepMngr is used by: HC_DM, SLG_DM, HENP_DM
+- GoLives is used by: SLG_GoLives, HC_GoLives, HENP_GoLives
+- Standalone (no library): SLG_ConsultingHub, SLG_Capacity, HC_Wellness
+
+## Per-project layout
+Each project has:
+- src/                all .js, .gs, .html, appsscript.json files
+- .clasp.json         pins the Google scriptId
+- .claspignore        pushes only src/
+- package.json        npm scripts for push/pull/deploy/version
+- .cursorrules        project-specific AI conventions
+
+## Workflow conventions
+- HEAD is DEV. 'npm run push' deploys to HEAD.
+- Deployed versions are PROD. 'npm run deploy' creates immutable versions.
+- Library testing: temporarily flip a consumer solution's appsscript.json to point at library HEAD ("0"), test, then revert to a numbered version.
+- Library version cutting: run 'npm run version' inside the library, then bump consumer solutions' appsscript.json to reference the new number.
+
+## Global coding rules
+- V8 runtime always
+- JSDoc on all public functions
+- Logger.log prefixed with function name
+- No hardcoded scriptIds, sheet IDs, or secrets. Use PropertiesService.
+- Batch SpreadsheetApp reads/writes
+- try/catch around UrlFetchApp and other external calls

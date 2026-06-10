@@ -1,0 +1,20 @@
+# Default: auto-detect text files and normalize line endings to LF in repo
+* text=auto eol=lf
+
+# Apps Script source files - always LF
+*.js   text eol=lf
+*.gs   text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+
+# Windows scripts - keep CRLF
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary files - never normalize
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.pdf  binary

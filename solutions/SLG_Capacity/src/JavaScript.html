@@ -1,0 +1,2975 @@
+<script>
+  // ============================================================
+  // Client state — applied filters (what the server currently sees)
+  // + draft filters (what the user is staging inside the drawer)
+  //
+  // Priority 2 rename: State.filters.teams → State.filters.managers.
+  // Server param contract stays as `teams`; client translates at
+  // every server call site via buildServerParams_.
+  //
+  // Priority 3: Worker Scope has per-view defaults via
+  // VIEW_WORKER_SCOPE_DEFAULTS. State.workerScopeChangedManually
+  // tracks whether the user has explicitly overridden the view's
+  // default, so navigation auto-flips only when they haven't.
+  // ============================================================
+  const FILTER_DEFAULTS = Object.freeze({
+    quarter: null,
+    managers: [],
+    teamLabel: null,
+    viewMode: 'Committed',
+    groupBy: 'Individual',
+    scenarioId: null,
+    includeTimeOff: true,
+    workerScope: 'All',     // global fallback; per-view overrides below
+    includeMyManagers: true  // Priority 1: include-reports defaults on
+  });
+
+  // Priority 3: per-view Worker Scope defaults.
+  // Views not listed inherit FILTER_DEFAULTS.workerScope.
+  const VIEW_WORKER_SCOPE_DEFAULTS = Object.freeze({
+    dashboard: 'SLG',
+    explorer: 'SLG',
+    reporting: 'All'
+    // pipeline, deployments, scenarios, admin — inherit FILTER_DEFAULTS.workerScope
+  });
+
+  const State = {
+    ref: null,
+    filters: Object.assign({}, FILTER_DEFAULTS),
+    draftFilters: Object.assign({}, FILTER_DEFAULTS),
+    workerScopeChangedManually: false,  // Priority 3
+    dashboard: null,
+    opportunities: [],
+    deployments: [],
+    scenarios: [],
+    currentView: 'dashboard',
+    selectedResource: null,
+    selectedScenario: null,
+    reporting: null,
+    rpAccountsAll: [],
+    rpHoursTotal: 0,
+    rpExpandedTeams: null,
+    rpExpandedAccounts: null,
+    rpDiagnosticsOpen: false,
+    rpActiveDrill: null,
+    charts: {}
+  };
+
+  // ============================================================
+  // Utilities
+  // ============================================================
+  const $  = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  function fmtPct(v) {
+    if (v == null || isNaN(v)) return '—';
+    return Math.round(v * 100) + '%';
+  }
+  function fmtPct1(v) {
+    if (v == null || isNaN(v)) return '—';
+    return (Math.round(v * 1000) / 10).toFixed(1) + '%';
+  }
+  function fmtFte(v) {
+    if (v == null || isNaN(v)) return '—';
+    return (Math.round(v * 10) / 10).toFixed(1);
+  }
+  function fmtMoney(v) {
+    if (!v) return '$0';
+    if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return '$' + Math.round(v / 1e3) + 'K';
+    return '$' + v;
+  }
+  function fmtHours(v) {
+    if (v == null || isNaN(v)) return '—';
+    return Math.round(v).toLocaleString();
+  }
+  function fmtDate(d) {
+    if (!d) return '—';
+    const x = new Date(d);
+    if (isNaN(x)) return '—';
+    return x.toISOString().slice(0, 10);
+  }
+  function fmtDateTime(d) {
+    if (!d) return '—';
+    const x = new Date(d);
+    if (isNaN(x)) return String(d);
+    return x.toLocaleString('en-US', {
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
+  }
+  function fmtMonth(monthKey) {
+    const [y, m] = monthKey.split('-');
+    const dt = new Date(+y, +m - 1, 1);
+    return dt.toLocaleString('en', { month: 'short', year: '2-digit' });
+  }
+  function call(fn, ...args) {
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)[fn](...args);
+    });
+  }
+  function toast(msg, kind) {
+    const el = document.createElement('div');
+    el.className = 'toast ' + (kind || '');
+    el.textContent = msg;
+    $('#toastStack').appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+  function escapeHtml_(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ============================================================
+  // Priority 2: build server params with rename translation.
+  // Client state uses `managers` and `teamLabel`. Server param
+  // contract stays as `teams`. Centralizing the translation here
+  // means every server call site stays consistent.
+  // ============================================================
+  function buildServerParams_(extra) {
+    const f = State.filters;
+    return Object.assign({
+      teams: (f.managers && f.managers.length) ? f.managers : null,
+      teamLabel: f.teamLabel || null,
+      includeMyManagers: !!f.includeMyManagers,
+      workerScope: f.workerScope || 'All',
+      viewMode: f.viewMode || 'Committed',
+      scenarioId: f.scenarioId || null,
+      quarter: f.quarter || null,
+      includeTimeOff: !!f.includeTimeOff,
+      groupBy: f.groupBy || 'Individual'
+    }, extra || {});
+  }
+
+  // ============================================================
+  // Priority 3: per-view Worker Scope helpers.
+  //
+  // workerScopeDefaultForView_(view): returns the default scope for a
+  //   given view ('dashboard' → 'SLG', etc.). Falls back to
+  //   FILTER_DEFAULTS.workerScope for views without a specific default.
+  //
+  // applyViewWorkerScope_(view): if the user hasn't manually overridden
+  //   Worker Scope, set State.filters.workerScope to the view's default.
+  //   Returns true if the scope actually changed (so callers can know
+  //   whether to invalidate a downstream load).
+  //
+  // currentViewWorkerScopeDefault_(): convenience for chip-strip
+  //   comparison and reset behavior.
+  // ============================================================
+  function workerScopeDefaultForView_(view) {
+    return VIEW_WORKER_SCOPE_DEFAULTS[view] || FILTER_DEFAULTS.workerScope;
+  }
+  function currentViewWorkerScopeDefault_() {
+    return workerScopeDefaultForView_(State.currentView);
+  }
+  function applyViewWorkerScope_(view) {
+    if (State.workerScopeChangedManually) return false;
+    const target = workerScopeDefaultForView_(view);
+    if (State.filters.workerScope === target) return false;
+    State.filters.workerScope = target;
+    return true;
+  }
+
+  // Heatmap color (diverging relative to ICP)
+  function cellColor(utilization, icpTarget) {
+    if (!utilization && utilization !== 0) {
+      return { bg: 'var(--business-card)', fg: 'var(--staple)' };
+    }
+    const ratio = icpTarget > 0 ? utilization / icpTarget : 1;
+    if (ratio < 0.60) return { bg: '#D6EBF9', fg: '#0a3d7c' };
+    if (ratio < 0.85) return { bg: 'var(--blue-sky)', fg: '#0a3d7c' };
+    if (ratio < 1.00) return { bg: '#FFF1B8', fg: '#6b4e00' };
+    if (ratio < 1.10) return { bg: 'var(--pencil)', fg: '#3d2e00' };
+    if (ratio < 1.25) return { bg: 'var(--happy-hour)', fg: '#fff' };
+    return { bg: 'var(--thumbtack)', fg: '#fff' };
+  }
+
+  const GROUP_LABELS = {
+    Individual: 'Individual',
+    Team: 'SLG Team',
+    Role: 'Job Profile',
+    Function: 'Project Function'
+  };
+
+  const WORKER_SCOPE_LABELS = {
+    SLG: 'SLG',
+    NonSLG: 'NonSLG',
+    Partners: 'Partners',
+    WorkdayOnly: 'Workday Only',
+    All: 'All'
+  };
+
+  function cssVar_(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  // ============================================================
+  // Month helpers — current month and later + planning window
+  // ============================================================
+  function monthKeyOnOrAfterToday(monthKey) {
+    if (!monthKey) return false;
+    const parts = monthKey.split('-');
+    if (parts.length < 2) return false;
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (!y || !m) return false;
+    const today = new Date();
+    const cy = today.getFullYear();
+    const cm = today.getMonth() + 1;
+    return y > cy || (y === cy && m >= cm);
+  }
+
+  function applyPlanningWindow(dashboardData) {
+    const allMonths = dashboardData.heatmap?.months || [];
+    if (!allMonths.length) return dashboardData;
+
+    const windowMonths = (State.ref && State.ref.planningWindowMonths) ||
+                         dashboardData.planningWindowMonths || 6;
+
+    const desired = [];
+    const today = new Date();
+    for (let i = 0; i < windowMonths; i++) {
+      const dt = new Date(today.getFullYear(), today.getMonth() + i, 1);
+      const key = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+      desired.push(key);
+    }
+    const desiredSet = new Set(desired);
+
+    let keepMonths = allMonths.filter(m => desiredSet.has(m));
+    if (!keepMonths.length) keepMonths = allMonths.slice(-windowMonths);
+
+    const monthSet = new Set(keepMonths);
+    dashboardData.heatmap.months = keepMonths;
+    if (dashboardData.heatmap.cells) {
+      dashboardData.heatmap.cells = dashboardData.heatmap.cells.filter(c => monthSet.has(c.monthKey));
+    }
+    if (dashboardData.trend) {
+      dashboardData.trend = dashboardData.trend.filter(t => monthSet.has(t.monthKey));
+    }
+    dashboardData.monthsInView = keepMonths;
+    return dashboardData;
+  }
+
+  function recomputeKpisForClient(d, quarterFilter) {
+    const monthsInView = d.monthsInView || (d.heatmap ? d.heatmap.months : []);
+    const baseMonthSet = new Set(monthsInView);
+    let monthSet = baseMonthSet;
+
+    if (quarterFilter) {
+      const qSet = new Set();
+      monthsInView.forEach(mk => {
+        const [y, m] = mk.split('-');
+        const dt = new Date(+y, +m - 1, 1);
+        const qKey = dt.getFullYear() + '-Q' + (Math.floor(dt.getMonth() / 3) + 1);
+        if (qKey === quarterFilter) qSet.add(mk);
+      });
+      if (qSet.size) monthSet = qSet;
+    }
+
+    const includePTO = State.filters.includeTimeOff;
+    let totalCommittedHours = 0;
+    let totalScenarioHours = 0;
+    let usedSum = 0, capSum = 0;
+
+    const byResource = d.byResource || [];
+    const over = [];
+    const under = [];
+
+    if (byResource.length) {
+      byResource.forEach(r => {
+        let numUtil = 0, denUtil = 0;
+        r.months.forEach(m => {
+          if (!monthSet.has(m.monthKey)) return;
+          const committedWork = m.committed || 0;
+          const ptoHours = m.timeOff || 0;
+          const scenarioHours = m.scenario || 0;
+          const cap = Number(m.capacity) || 0;
+          const usedHours = includePTO ? committedWork + ptoHours : committedWork;
+          totalCommittedHours += usedHours;
+          totalScenarioHours += scenarioHours;
+          if (cap > 0) {
+            usedSum += usedHours;
+            capSum += cap;
+            numUtil += usedHours / cap;
+            denUtil += 1;
+          }
+        });
+        if (!denUtil) return;
+        const avgUtil = numUtil / denUtil;
+        if (avgUtil > 1.05) over.push({ name: r.resource, avgUtil });
+        else if (avgUtil < 0.75) under.push({ name: r.resource, avgUtil });
+      });
+    } else if (d.heatmap && d.heatmap.cells) {
+      d.heatmap.cells.forEach(c => {
+        if (!monthSet.has(c.monthKey)) return;
+        const committedWork = Number(c.committed) || 0;
+        const ptoHours = Number(c.timeOff) || 0;
+        const cap = Number(c.capacity) || 0;
+        const usedHours = includePTO ? committedWork + ptoHours : committedWork;
+        totalCommittedHours += usedHours;
+        if (cap > 0) { usedSum += usedHours; capSum += cap; }
+      });
+    }
+
+    const avgUtilization = capSum > 0 ? usedSum / capSum : 0;
+    const headcount = byResource.length;
+
+    return {
+      totalCommittedHours,
+      scenarioDemandHours: totalScenarioHours,
+      overUtilized: over,
+      underUtilized: under,
+      avgUtilization,
+      headcount
+    };
+  }
+
+  function computeTrendForClient(d, quarterFilter) {
+    const monthsInView = d.monthsInView || (d.heatmap ? d.heatmap.months : []);
+    const baseMonthSet = new Set(monthsInView);
+    let monthSet = baseMonthSet;
+
+    if (quarterFilter) {
+      const qSet = new Set();
+      monthsInView.forEach(mk => {
+        const [y, m] = mk.split('-');
+        const dt = new Date(+y, +m - 1, 1);
+        const qKey = dt.getFullYear() + '-Q' + (Math.floor(dt.getMonth() / 3) + 1);
+        if (qKey === quarterFilter) qSet.add(mk);
+      });
+      if (qSet.size) monthSet = qSet;
+    }
+
+    const includePTO = State.filters.includeTimeOff;
+    const byMonth = {};
+    if (d.byResource) {
+      d.byResource.forEach(r => {
+        r.months.forEach(m => {
+          if (!monthSet.has(m.monthKey)) return;
+          const key = m.monthKey;
+          if (!byMonth[key]) byMonth[key] = { used: 0, capacity: 0 };
+          const committed = Number(m.committed) || 0;
+          const timeOff = Number(m.timeOff) || 0;
+          const cap = Number(m.capacity) || 0;
+          const usedHours = includePTO ? committed + timeOff : committed;
+          byMonth[key].used += usedHours;
+          byMonth[key].capacity += cap;
+        });
+      });
+    }
+    return Object.keys(byMonth).sort().map(k => {
+      const row = byMonth[k];
+      const util = row.capacity > 0 ? row.used / row.capacity : 0;
+      return { monthKey: k, utilization: util };
+    });
+  }
+
+  // ============================================================
+  // Routing
+  //
+  // Priority 3: showView() applies the view's Worker Scope default
+  // BEFORE the view-specific load function fires, so the load
+  // happens with the correct scope on the first request.
+  // ============================================================
+  function showView(name) {
+    const previousView = State.currentView;
+    State.currentView = name;
+
+    // Priority 3: apply view-default Worker Scope before load.
+    // Returns true if the scope changed; we don't need to act on
+    // that here because the load function below will use the new
+    // value via buildServerParams_.
+    applyViewWorkerScope_(name);
+
+    $$('.view').forEach(v => { v.hidden = v.dataset.view !== name; });
+    $$('.nav-item').forEach(n =>
+      n.classList.toggle('active', n.dataset.view === name)
+    );
+
+    // If scope changed, the chip strip needs to re-render even if
+    // the load function doesn't trigger onAppliedFiltersChanged_.
+    if (previousView !== name) {
+      renderChipStrip_();
+      updateFilterCountBadge_();
+    }
+
+    if (name === 'dashboard') loadDashboard();
+    if (name === 'explorer') renderResourceList();
+    if (name === 'pipeline') loadOpportunities();
+    if (name === 'deployments') loadDeployments();
+    if (name === 'scenarios') loadScenarios();
+    if (name === 'reporting') loadReporting();
+    if (name === 'admin') loadAdmin();
+    if (window.innerWidth <= 768) $('#sidebar').classList.remove('open');
+  }
+  $$('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => showView(btn.dataset.view));
+  });
+  $('#hamburger').addEventListener('click', () =>
+    $('#sidebar').classList.toggle('open')
+  );
+
+  // ============================================================
+  // Init
+  // ============================================================
+  async function init() {
+    try {
+      State.ref = await call('api_getReference');
+      $('#userChip').textContent = State.ref.user || 'unknown';
+
+      const qSel = $('#quarterFilter');
+      qSel.innerHTML = '<option value="">All quarters</option>' +
+        State.ref.quarters.map(q => `<option value="${q}">${q}</option>`).join('');
+      qSel.value = '';
+      qSel.addEventListener('change', () => {
+        State.filters.quarter = qSel.value || null;
+        onAppliedFiltersChanged_();
+      });
+
+      renderTeamLabelSelect();   // Priority 2 — Team dropdown
+      renderTeamsSelect();        // Manager dropdown
+
+      $('#openFiltersBtn').addEventListener('click', openFiltersDrawer_);
+      $('#refreshBtn').addEventListener('click', () => { reloadCurrentView_(); });
+
+      initFiltersDrawer_();
+
+      $('#chipStrip').addEventListener('click', onChipStripClick_);
+      $('#chipClearAll').addEventListener('click', clearAllFilters_);
+
+      initReportingHandlers_();
+
+      // Priority 1: apply auto-manager defaults based on logged-in user.
+      applyAutoManagerDefaults_();
+
+      // Priority 3: apply initial view's Worker Scope default
+      // (Dashboard → SLG). Must run AFTER applyAutoManagerDefaults_
+      // so we don't overwrite an intentional state.
+      applyViewWorkerScope_('dashboard');
+
+      renderChipStrip_();
+      updateFilterCountBadge_();
+
+      showView('dashboard');
+      await loadScenariosList();
+    } catch (err) {
+      toast('Init failed: ' + err.message, 'err');
+      console.error(err);
+    }
+  }
+  document.addEventListener('DOMContentLoaded', init);
+
+  // ============================================================
+  // Priority 1: Auto-set Manager filter from logged-in user
+  // ============================================================
+  function applyAutoManagerDefaults_() {
+    const ref = State.ref || {};
+    const matched = ref.matchedManager || null;
+    const recognized = !!ref.recognized;
+
+    const bannerWrap = $('#autoManagerBannerWrap');
+
+    if (matched) {
+      State.filters.managers = [matched];
+      State.filters.includeMyManagers = true;
+      const sel = $('#teamsSelect');
+      if (sel) sel.value = matched;
+      if (bannerWrap) bannerWrap.hidden = true;
+      return;
+    }
+
+    State.filters.managers = [];
+    const sel = $('#teamsSelect');
+    if (sel) sel.value = '';
+
+    if (bannerWrap) {
+      bannerWrap.hidden = recognized;
+    }
+  }
+
+  function onAppliedFiltersChanged_() {
+    renderChipStrip_();
+    updateFilterCountBadge_();
+    reloadCurrentView_();
+  }
+
+  function reloadCurrentView_() {
+  if (State.currentView === 'dashboard') loadDashboard();
+  else if (State.currentView === 'pipeline') loadOpportunities();
+  else if (State.currentView === 'scenarios') loadScenarios();
+  else if (State.currentView === 'reporting') loadReporting();
+  else if (State.currentView === 'admin') loadAdmin();
+  else if (State.currentView === 'explorer') {
+    renderResourceList();
+    // If a worker is currently selected, re-fetch their detail so
+    // the chart reflects current View Mode / scenarioId filters.
+    // Without this, the chart stays stale showing data loaded at
+    // last-click time even after the user switches View Mode.
+    if (State.selectedResource) {
+      loadResourceDetail_(State.selectedResource);
+    }
+  }
+}
+</script>
+
+<script>
+  // ============================================================
+  // Manager filter dropdown (#teamsSelect — id retained for
+  // backwards-compat; underlying state is State.filters.managers).
+  // ============================================================
+  function renderTeamsSelect() {
+    const sel = $('#teamsSelect');
+    const source = (State.ref && Array.isArray(State.ref.managerOrgs))
+      ? State.ref.managerOrgs : [];
+
+    const managerOptions = source
+      .map(t => `<option value="${t.replace(/"/g, '&quot;')}">${t}</option>`)
+      .join('');
+
+    sel.innerHTML = `<option value="">All managers</option>` + managerOptions;
+    sel.value = State.filters.managers.length ? State.filters.managers[0] : '';
+
+    sel.addEventListener('change', () => {
+      const val = sel.value;
+      State.filters.managers = val ? [val] : [];
+      onAppliedFiltersChanged_();
+    });
+  }
+
+  // ============================================================
+  // Priority 2: Team filter dropdown (#teamLabelFilter).
+  // ============================================================
+  function renderTeamLabelSelect() {
+    const sel = $('#teamLabelFilter');
+    if (!sel) return;
+    const source = (State.ref && Array.isArray(State.ref.teamLabels))
+      ? State.ref.teamLabels : [];
+
+    const opts = source
+      .map(t => `<option value="${t.replace(/"/g, '&quot;')}">${t}</option>`)
+      .join('');
+
+    sel.innerHTML = `<option value="">All teams</option>` + opts;
+    sel.value = State.filters.teamLabel || '';
+
+    sel.addEventListener('change', () => {
+      const val = sel.value;
+      State.filters.teamLabel = val || null;
+      onAppliedFiltersChanged_();
+    });
+  }
+</script>
+
+<script>
+  // ============================================================
+  // Filters drawer (apply-on-click)
+  //
+  // Priority 3: Worker Scope drawer click marks workerScopeChangedManually.
+  // ============================================================
+  function initFiltersDrawer_() {
+    $('#drawerViewModeSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      $$('#drawerViewModeSeg button').forEach(x => x.classList.toggle('on', x === b));
+      State.draftFilters.viewMode = b.dataset.val;
+      $('#drawerScenarioField').hidden = State.draftFilters.viewMode !== 'Scenario';
+      markDirty_(b);
+    });
+
+    $('#drawerWorkerScopeSeg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      $$('#drawerWorkerScopeSeg button').forEach(x => x.classList.toggle('on', x === b));
+      State.draftFilters.workerScope = b.dataset.val || 'All';
+      markDirty_(b);
+    });
+
+    $('#drawerGroupBySeg').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      $$('#drawerGroupBySeg button').forEach(x => x.classList.toggle('on', x === b));
+      State.draftFilters.groupBy = b.dataset.val;
+      markDirty_(b);
+    });
+
+    $('#drawerIncludeMyManagers').addEventListener('change', (e) => {
+      State.draftFilters.includeMyManagers = !!e.target.checked;
+      markDirty_(e.target);
+    });
+
+    $('#drawerIncludeTimeOffToggle').addEventListener('change', (e) => {
+      State.draftFilters.includeTimeOff = !!e.target.checked;
+      markDirty_(e.target);
+    });
+
+    $('#drawerScenarioSelect').addEventListener('change', (e) => {
+      State.draftFilters.scenarioId = e.target.value || null;
+      markDirty_(e.target);
+    });
+
+    $('#filtersApplyBtn').addEventListener('click', applyDraftFilters_);
+    $('#filtersResetBtn').addEventListener('click', resetDraftFiltersToDefaults_);
+
+    $('#filtersDrawer').addEventListener('click', (e) => {
+      if (e.target.dataset && e.target.dataset.close !== undefined) {
+        closeFiltersDrawer_();
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const d = $('#filtersDrawer');
+        if (d && !d.hidden) closeFiltersDrawer_();
+      }
+    });
+  }
+
+  function markDirty_(el) {
+    const field = el && el.closest && el.closest('.field');
+    if (field) field.classList.add('dirty');
+  }
+  function clearDirtyMarks_() {
+    $$('#filtersDrawer .field.dirty').forEach(f => f.classList.remove('dirty'));
+  }
+  function openFiltersDrawer_() {
+    State.draftFilters = Object.assign({}, State.filters);
+    syncDrawerInputsToDraft_();
+    clearDirtyMarks_();
+    $('#filtersDrawer').hidden = false;
+  }
+  function closeFiltersDrawer_() {
+    $('#filtersDrawer').hidden = true;
+    clearDirtyMarks_();
+  }
+
+  function syncDrawerInputsToDraft_() {
+    const d = State.draftFilters;
+
+    $('#drawerIncludeMyManagers').checked = !!d.includeMyManagers;
+
+    let ws = String(d.workerScope || 'All');
+    if (ws === 'External') ws = 'NonSLG';
+    if (ws === 'Both') ws = 'All';
+    $$('#drawerWorkerScopeSeg button').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.val === ws);
+    });
+
+    $$('#drawerViewModeSeg button').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.val === d.viewMode);
+    });
+
+    $('#drawerScenarioField').hidden = d.viewMode !== 'Scenario';
+
+    const scenSel = $('#drawerScenarioSelect');
+    if (scenSel) {
+      scenSel.innerHTML = '<option value="">— No scenario —</option>' +
+        (State.scenarios || [])
+          .filter(s => s.status !== 'Archived')
+          .map(s => `<option value="${s.scenario_id}">${escapeHtml_(s.name)}</option>`)
+          .join('');
+      scenSel.value = d.scenarioId || '';
+    }
+
+    $('#drawerIncludeTimeOffToggle').checked = !!d.includeTimeOff;
+
+    $$('#drawerGroupBySeg button').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.val === d.groupBy);
+    });
+  }
+
+  function applyDraftFilters_() {
+    // Priority 3: if Worker Scope changed via the drawer, mark it manual.
+    if (State.draftFilters.workerScope !== State.filters.workerScope) {
+      State.workerScopeChangedManually = true;
+    }
+
+    State.filters = Object.assign({}, State.draftFilters);
+
+    const mgrSel = $('#teamsSelect');
+    if (mgrSel) mgrSel.value = State.filters.managers.length ? State.filters.managers[0] : '';
+
+    const teamSel = $('#teamLabelFilter');
+    if (teamSel) teamSel.value = State.filters.teamLabel || '';
+
+    closeFiltersDrawer_();
+    onAppliedFiltersChanged_();
+    toast('Filters applied', 'ok');
+  }
+
+  function resetDraftFiltersToDefaults_() {
+    // Priority 3: reset honors the CURRENT VIEW's Worker Scope default,
+    // not the global FILTER_DEFAULTS.
+    State.draftFilters = Object.assign({}, FILTER_DEFAULTS);
+    State.draftFilters.workerScope = currentViewWorkerScopeDefault_();
+    // Preserve pinned topbar fields that user sets directly outside drawer
+    State.draftFilters.quarter = State.filters.quarter;
+    State.draftFilters.managers = State.filters.managers.slice();
+    State.draftFilters.teamLabel = State.filters.teamLabel;
+    syncDrawerInputsToDraft_();
+    $$('#filtersDrawer .field.dirty').forEach(f => f.classList.add('dirty'));
+  }
+</script>
+
+<script>
+  // ============================================================
+  // Chip strip — active-filter summary with inline ✕ clear
+  //
+  // Priority 3: Worker Scope chip compares against current-view default,
+  // not global FILTER_DEFAULTS. So a Dashboard user at SLG sees no chip
+  // (it's the view default); a Reporting user at SLG sees a chip
+  // (override of the view default).
+  // ============================================================
+  function getActiveFilterChips_() {
+    const chips = [];
+    const f = State.filters;
+
+    if (f.quarter) {
+      chips.push({ key: 'quarter', label: 'Quarter', value: f.quarter });
+    }
+    if (f.teamLabel) {
+      chips.push({ key: 'teamLabel', label: 'Team', value: f.teamLabel });
+    }
+    if (f.managers && f.managers.length) {
+      chips.push({
+        key: 'managers',
+        label: 'Manager',
+        value: f.managers[0],
+        suspended: !!f.teamLabel,
+        suspendedReason: 'Manager filter suspended while Team filter is active'
+      });
+    }
+    if (f.includeMyManagers && !f.teamLabel) {
+      chips.push({ key: 'includeMyManagers', label: 'Manager scope', value: 'Include reports' });
+    }
+
+    // Priority 3: compare Worker Scope against current-view default.
+    const viewWsDefault = currentViewWorkerScopeDefault_();
+    if (f.workerScope && f.workerScope !== viewWsDefault) {
+      const lbl = WORKER_SCOPE_LABELS[f.workerScope] || f.workerScope;
+      chips.push({ key: 'workerScope', label: 'Worker scope', value: lbl });
+    }
+
+    if (f.viewMode && f.viewMode !== FILTER_DEFAULTS.viewMode) {
+      chips.push({ key: 'viewMode', label: 'View mode', value: f.viewMode });
+    }
+    if (f.viewMode === 'Scenario' && f.scenarioId) {
+      const sc = (State.scenarios || []).find(s => s.scenario_id === f.scenarioId);
+      chips.push({ key: 'scenarioId', label: 'Scenario', value: sc ? sc.name : f.scenarioId });
+    }
+    if (f.includeTimeOff !== FILTER_DEFAULTS.includeTimeOff) {
+      chips.push({
+        key: 'includeTimeOff', label: 'Time off',
+        value: f.includeTimeOff ? 'Include PTO/Holiday' : 'Exclude PTO/Holiday'
+      });
+    }
+    if (f.groupBy && f.groupBy !== FILTER_DEFAULTS.groupBy) {
+      chips.push({ key: 'groupBy', label: 'Group by', value: GROUP_LABELS[f.groupBy] || f.groupBy });
+    }
+    return chips;
+  }
+
+  function renderChipStrip_() {
+    const chips = getActiveFilterChips_();
+    const strip = $('#chipStrip');
+    const items = $('#chipStripItems');
+    const clearAll = $('#chipClearAll');
+
+    if (!chips.length) {
+      strip.hidden = true;
+      items.innerHTML = '';
+      clearAll.hidden = true;
+      return;
+    }
+
+    strip.hidden = false;
+    items.innerHTML = chips.map(c => {
+      const suspended = !!c.suspended;
+      const title = suspended
+        ? (c.suspendedReason || 'This filter is suspended')
+        : 'Click to change in the Filters drawer · ✕ to clear';
+      const cls = 'chip' + (suspended ? ' chip-suspended' : '');
+      return `
+        <span class="${cls}" data-chip-key="${c.key}" title="${escapeHtml_(title)}">
+          <span class="chip-label"><strong>${escapeHtml_(c.label)}:</strong> ${escapeHtml_(String(c.value))}</span>
+          <button type="button" class="chip-clear" data-clear-key="${c.key}" title="Clear ${escapeHtml_(c.label)}">✕</button>
+        </span>`;
+    }).join('');
+    clearAll.hidden = false;
+  }
+
+  function onChipStripClick_(e) {
+    const clearBtn = e.target.closest('.chip-clear');
+    if (clearBtn) {
+      e.stopPropagation();
+      clearSingleFilter_(clearBtn.dataset.clearKey);
+      return;
+    }
+    const chip = e.target.closest('.chip');
+    if (chip) {
+      openFiltersDrawer_();
+    }
+  }
+
+  function clearSingleFilter_(key) {
+    if (!key) return;
+    switch (key) {
+      case 'quarter':
+        State.filters.quarter = null;
+        $('#quarterFilter').value = '';
+        break;
+      case 'teamLabel':
+        State.filters.teamLabel = null;
+        $('#teamLabelFilter').value = '';
+        break;
+      case 'managers':
+        State.filters.managers = [];
+        $('#teamsSelect').value = '';
+        break;
+      case 'includeMyManagers':
+        State.filters.includeMyManagers = false;
+        break;
+      case 'workerScope':
+        // Priority 3: clearing the workerScope chip resets to the
+        // current view's default and clears the manual-override flag.
+        State.workerScopeChangedManually = false;
+        State.filters.workerScope = currentViewWorkerScopeDefault_();
+        break;
+      case 'viewMode':
+        State.filters.viewMode = FILTER_DEFAULTS.viewMode;
+        State.filters.scenarioId = null;
+        break;
+      case 'scenarioId':
+        State.filters.scenarioId = null;
+        break;
+      case 'includeTimeOff':
+        State.filters.includeTimeOff = FILTER_DEFAULTS.includeTimeOff;
+        break;
+      case 'groupBy':
+        State.filters.groupBy = FILTER_DEFAULTS.groupBy;
+        break;
+      default:
+        return;
+    }
+    onAppliedFiltersChanged_();
+  }
+
+  function clearAllFilters_() {
+    // Reset to defaults, re-apply auto-manager match, then apply the
+    // CURRENT VIEW's Worker Scope default (Priority 3). "Clear all"
+    // means "back to your personalized default state."
+    State.filters = Object.assign({}, FILTER_DEFAULTS);
+    State.workerScopeChangedManually = false;
+    $('#quarterFilter').value = '';
+    $('#teamsSelect').value = '';
+    $('#teamLabelFilter').value = '';
+    applyAutoManagerDefaults_();
+    applyViewWorkerScope_(State.currentView);
+    onAppliedFiltersChanged_();
+  }
+
+  function updateFilterCountBadge_() {
+    const chips = getActiveFilterChips_();
+    const drawerChipCount = chips.filter(
+      c => c.key !== 'quarter' && c.key !== 'managers' && c.key !== 'teamLabel'
+    ).length;
+    const badge = $('#filterCount');
+    if (drawerChipCount > 0) {
+      badge.textContent = String(drawerChipCount);
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  }
+</script>
+
+<script>
+  // ============================================================
+  // Dashboard: KPIs, heatmap, trend
+  // ============================================================
+  async function loadDashboard() {
+    const grid = $('#heatmap');
+    grid.innerHTML = '<div style="padding:32px;text-align:center;color:var(--staple)">Loading…</div>';
+    grid.style.gridTemplateColumns = '1fr';
+
+    try {
+      const params = buildServerParams_({ quarter: null });
+      let d = await call('api_getDashboard', params);
+      d = applyPlanningWindow(d);
+      State.dashboard = d;
+
+      const quarterFilter = State.filters.quarter;
+      const kpis = recomputeKpisForClient(d, quarterFilter);
+      const clientTrend = computeTrendForClient(d, quarterFilter);
+
+      renderKpis(kpis);
+      renderHeatmap(d.heatmap);
+      renderHeadcountGap(d.headcountByTeam || []);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => renderTrend(clientTrend));
+      });
+    } catch (err) {
+      toast('Dashboard load failed: ' + err.message, 'err');
+      console.error(err);
+    }
+  }
+
+  function renderKpis(k) {
+    $('#kpiUtil').textContent = k ? fmtPct(k.avgUtilization) : '—';
+    $('#kpiUtilSub').textContent = k ? ((k.headcount || 0) + ' resources in scope') : '';
+    $('#kpiCommitted').textContent = k ? Math.round(k.totalCommittedHours).toLocaleString() : '—';
+    $('#kpiCommittedSub').textContent = State.filters.includeTimeOff
+      ? 'Includes PTO/Holiday'
+      : 'Excludes PTO/Holiday';
+    $('#kpiScenario').textContent = k ? Math.round(k.scenarioDemandHours).toLocaleString() : '—';
+
+    const overCount = k ? k.overUtilized.length : 0;
+    const underCount = k ? k.underUtilized.length : 0;
+    $('#kpiOverUnder').textContent = overCount + ' / ' + underCount;
+
+    const overNames = (k ? k.overUtilized : []).map(o => o.name + ' (' + fmtPct(o.avgUtil) + ')');
+    const underNames = (k ? k.underUtilized : []).map(u => u.name + ' (' + fmtPct(u.avgUtil) + ')');
+    const tooltipLines = [];
+    if (overNames.length) { tooltipLines.push('Over-utilized:'); tooltipLines.push(...overNames); }
+    if (underNames.length) {
+      if (tooltipLines.length) tooltipLines.push('');
+      tooltipLines.push('Under-utilized:'); tooltipLines.push(...underNames);
+    }
+    const tooltipText = tooltipLines.join('\n') || 'No over/under-utilization in current view';
+    $('#kpiOverUnder').title = tooltipText;
+    $('#kpiOverUnderSub').title = tooltipText;
+  }
+
+  function renderHeatmap(h) {
+    const grid = $('#heatmap');
+    const rows = h.rows || [];
+    const months = h.months || [];
+    grid.style.gridTemplateColumns = `minmax(180px, 240px) repeat(${months.length}, minmax(80px, 1fr))`;
+    const idx = {};
+    (h.cells || []).forEach(c => { idx[c.rowKey + '|' + c.monthKey] = c; });
+
+    const html = [];
+    const label = GROUP_LABELS[State.filters.groupBy] || State.filters.groupBy;
+    html.push(`<div class="heatmap-head heatmap-label" style="left:0;position:sticky;z-index:3">${label}</div>`);
+    months.forEach(m => { html.push(`<div class="heatmap-head">${fmtMonth(m)}</div>`); });
+
+    rows.forEach(r => {
+      html.push(`<div class="heatmap-label" title="${r}">${r}</div>`);
+      months.forEach(m => {
+        const c = idx[r + '|' + m];
+        if (!c) {
+          html.push(`<div class="heatmap-cell empty">—</div>`);
+        } else {
+          const includePTO = State.filters.includeTimeOff;
+          const committedWork = Number(c.committed) || 0;
+          const timeOff = Number(c.timeOff) || 0;
+          const capacity = Number(c.capacity) || 0;
+          const committedTotal = includePTO ? (committedWork + timeOff) : committedWork;
+          const util = capacity > 0 ? (committedTotal / capacity) : 0;
+          const color = cellColor(util, c.icpTarget);
+          const title = [
+            `${r} · ${fmtMonth(m)}`,
+            `Utilization: ${fmtPct(util)}`,
+            `ICP target: ${fmtPct(c.icpTarget)}`,
+            `Committed: ${Math.round(committedTotal)}h`,
+            `Capacity: ${Math.round(capacity)}h`,
+            `Time off: ${Math.round(timeOff)}h`,
+            `Headcount: ${c.headcount}`
+          ].join('\n');
+          html.push(
+            `<div class="heatmap-cell" style="background:${color.bg};color:${color.fg}" title="${title.replace(/"/g, '&quot;')}">${fmtPct(util)}</div>`
+          );
+        }
+      });
+    });
+    grid.innerHTML = html.join('');
+  }
+
+  function renderTrend(trend) {
+    const ctx = $('#trendChart').getContext('2d');
+    if (State.charts.trend) State.charts.trend.destroy();
+    const cs = getComputedStyle(document.documentElement);
+    const data = Array.isArray(trend) ? trend : [];
+    State.charts.trend = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.map(t => fmtMonth(t.monthKey)),
+        datasets: [{
+          label: 'Avg Utilization',
+          data: data.map(t => Math.round(t.utilization * 1000) / 10),
+          borderColor: cs.getPropertyValue('--ballpoint').trim(),
+          backgroundColor: 'rgba(8,117,193,.12)',
+          tension: .3, fill: true, pointRadius: 3
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false, resizeDelay: 100,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, ticks: { callback: v => v + '%' }, grid: { color: '#ECEEF1' } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+  }
+
+    function renderHeadcountGap(rows) {
+    const body = $('#kpiHeadcountBody');
+    const sub = $('#kpiHeadcountSub');
+    if (!body) return;
+    if (!rows || !rows.length) {
+      body.innerHTML = '<tr><td colspan="10" class="muted" style="padding:12px">' +
+        'No SLG headcount data in current scope.</td></tr>';
+      if (sub) sub.textContent = 'SLG only · current filters';
+      return;
+    }
+
+    const order = ['EM', 'PD', 'DA', 'CS_FUNC', 'CS_TECH'];
+    const sorted = rows.slice().sort(function (a, b) {
+      const ia = order.indexOf(a.role);
+      const ib = order.indexOf(b.role);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return -1;
+      if (ib !== -1) return 1;
+      return String(a.role || '').localeCompare(String(b.role || ''));
+    });
+
+    function fmtMonthShort(mk) {
+      if (!mk || typeof mk !== 'string') return '—';
+      const parts = mk.split('-');
+      if (parts.length < 2) return mk;
+      const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+      if (isNaN(dt.getTime())) return mk;
+      return dt.toLocaleString('en', { month: 'short', year: '2-digit' });
+    }
+
+    body.innerHTML = sorted.map(function (r) {
+      const heads = Number(r.suggestedHeads) || 0;
+      const peakGap = Number(r.peakGap) || 0;
+      const peakUtil = Number(r.peakUtil) || 0;
+      const avgUtil = Number(r.avgUtil) || 0;
+      let cls = '';
+      if (peakGap > 0) cls = 'warn-row';
+      else if (peakUtil >= 0.95) cls = 'hot-row';
+      return (
+        '<tr class="' + cls + '">' +
+        '<td>' + escapeHtml_(r.team || 'Unclassified') + '</td>' +
+        '<td class="num">' + fmtFte(r.capacityFte) + '</td>' +
+        '<td class="num">' + fmtFte(r.peakDemandFte) + '</td>' +
+        '<td class="num">' + fmtPct(peakUtil) + '</td>' +
+        '<td class="num">' + fmtFte(peakGap) + '</td>' +
+        '<td class="num">' + heads + '</td>' +
+        '<td>' + escapeHtml_(fmtMonthShort(r.peakMonth)) + '</td>' +
+        '<td class="num">' + fmtFte(r.avgDemandFte) + '</td>' +
+        '<td class="num">' + fmtPct(avgUtil) + '</td>' +
+        '<td class="num">' + fmtFte(r.avgGap) + '</td>' +
+        '</tr>'
+      );
+    }).join('');
+
+    if (sub) {
+      const windowMonths = (State.ref && State.ref.planningWindowMonths) ||
+                           (State.dashboard && State.dashboard.planningWindowMonths) || 6;
+      const ptoNote = State.filters.includeTimeOff ? 'Includes PTO/Holiday' : 'Excludes PTO/Holiday';
+      sub.textContent = 'SLG only · ' + windowMonths + '-month planning window · ' + ptoNote;
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const seg = e.target.closest('#groupBySeg button');
+    if (!seg) return;
+    $$('#groupBySeg button').forEach(x => x.classList.toggle('on', x === seg));
+    State.filters.groupBy = seg.dataset.val;
+    renderChipStrip_();
+    updateFilterCountBadge_();
+    loadDashboard();
+  });
+</script>
+
+<script>
+  // ============================================================
+  // Reporting & Metrics view
+  // ============================================================
+  async function loadReporting() {
+    rpShowLoadingState_();
+
+    try {
+      const params = buildServerParams_();
+      const summary = await call('api_getReportingSummary', params);
+
+      State.reporting = summary;
+      State.rpAccountsAll = summary.byAccount || [];
+      State.rpHoursTotal = Number((summary.totals || {}).totalHours || 0);
+      if (!State.rpExpandedTeams) State.rpExpandedTeams = new Set();
+      if (!State.rpExpandedAccounts) State.rpExpandedAccounts = new Set();
+
+      renderReportingSummary(summary);
+    } catch (err) {
+      const msg = (err && (err.message || err.toString())) || 'unknown error';
+      console.error('loadReporting failed:', err);
+      toast('Failed to load Reporting & Metrics: ' + msg, 'err');
+      rpShowFailureState_(msg);
+    }
+  }
+
+  function rpShowLoadingState_() {
+    const ids = [
+      'rpTeamBody', 'rpAccountBody', 'rpRoleCategoryBody', 'rpJobProfileBody',
+      'rpTop5AccountsBody', 'rpTop5RolesBody', 'rpDonutLegendBody',
+      'rpUnmappedBody', 'rpBlankClassBody'
+    ];
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<tr><td class="muted" style="padding:12px" colspan="7">Loading…</td></tr>';
+    });
+    const legendEl = document.getElementById('rpHorizontalBarLegend');
+    if (legendEl) legendEl.innerHTML = '<div class="muted" style="padding:12px">Loading…</div>';
+  }
+
+  function rpShowFailureState_(msg) {
+    const html =
+      '<tr><td class="muted" style="padding:12px;color:var(--thumbtack);" colspan="7">Failed to load: ' +
+      escapeHtml_(msg) + '</td></tr>';
+    [
+      'rpTeamBody', 'rpAccountBody', 'rpRoleCategoryBody', 'rpJobProfileBody',
+      'rpTop5AccountsBody', 'rpTop5RolesBody', 'rpDonutLegendBody',
+      'rpUnmappedBody', 'rpBlankClassBody'
+    ].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = html;
+    });
+  }
+
+  function renderReportingSummary(summary) {
+    summary = summary || {};
+    const totals = summary.totals || {};
+    const byTeam = summary.byTeam || [];
+    const byAccount = summary.byAccount || [];
+    const byRoleCat = summary.byRoleCategory || [];
+    const byJobProf = summary.byJobProfile || [];
+    const topAccounts = summary.topAccounts || [];
+    const topRoles = summary.topRoles || [];
+    const diag = summary.diagnostics || {};
+
+    renderReportingBanners_(totals);
+    renderReportingKpis_(totals);
+    renderReportingComposition_(totals);
+    renderReportingTeamTable_(byTeam, totals);
+    renderReportingAccountTable_(byAccount, totals);
+    renderReportingRoleCategoryTable_(byRoleCat, totals);
+    renderReportingJobProfileTable_(byJobProf, totals);
+    renderReportingTop5_(topAccounts, topRoles, totals);
+    renderReportingDiagnostics_(diag, totals);
+  }
+
+  // Banners
+  function renderReportingBanners_(totals) {
+    const container = $('#reportBanners');
+    if (!container) return;
+    const banners = [];
+
+    if (totals && totals.reconcileOk === false) {
+      banners.push({
+        kind: 'err', icon: '⚠',
+        title: 'Numbers do not reconcile.',
+        body: 'The team, account, and worker-class totals do not all equal the headline total. See diagnostics below.'
+      });
+    }
+
+    if (State.filters.viewMode === 'Scenario') {
+      const scen = (State.scenarios || []).find(s => s.scenario_id === State.filters.scenarioId);
+      banners.push({
+        kind: 'warn', icon: 'ℹ',
+        title: 'Scenario view mode.',
+        body: 'Including modeled hours' + (scen ? ' from "' + escapeHtml_(scen.name) + '"' : '') +
+              '. Numbers are forecast, not committed.'
+      });
+    }
+
+    // Priority 3: compare workerScope against current-view default, not global FILTER_DEFAULTS.
+    const ws = String(State.filters.workerScope || 'All');
+    const viewWsDefault = currentViewWorkerScopeDefault_();
+    if (ws !== viewWsDefault) {
+      const lbl = WORKER_SCOPE_LABELS[ws] || ws;
+      const filteredOut = Number((totals || {}).scopeFilteredOutHours || 0);
+      const filteredOutText = filteredOut > 0 ? ' ' + fmtHours(filteredOut) + ' hrs hidden by this scope.' : '';
+      banners.push({
+        kind: 'info', icon: 'ℹ',
+        title: 'Worker scope: ' + lbl + '.',
+        body: 'Showing only ' + lbl + ' workers.' + filteredOutText,
+        action: { label: 'Reset to view default', clearKey: 'workerScope' }
+      });
+    }
+
+    if (State.filters.teamLabel) {
+      banners.push({
+        kind: 'info', icon: 'ℹ',
+        title: 'Team filter active.',
+        body: 'Scoped to "' + escapeHtml_(State.filters.teamLabel) + '". Manager filter is suspended while Team is set.',
+        action: { label: 'Clear', clearKey: 'teamLabel' }
+      });
+    }
+
+    if (State.filters.managers && State.filters.managers.length && !State.filters.teamLabel) {
+      const mgr = State.filters.managers[0];
+      const inc = State.filters.includeMyManagers ? ' (including reports)' : '';
+      banners.push({
+        kind: 'info', icon: 'ℹ',
+        title: 'Manager filter active.',
+        body: 'Filtered to "' + escapeHtml_(mgr) + '"' + inc + '.',
+        action: { label: 'Clear', clearKey: 'managers' }
+      });
+    }
+
+    const practiceHrs = Number((totals || {}).externalHoursByPracticeOwnership || 0);
+    if (State.filters.managers && State.filters.managers.length && !State.filters.teamLabel && practiceHrs > 0) {
+      banners.push({
+        kind: 'info', icon: 'ℹ',
+        title: 'Practice ownership applied.',
+        body: 'Including ' + fmtHours(practiceHrs) + ' External hrs attributed via practice ownership in addition to direct reports.'
+      });
+    }
+
+    if (State.filters.quarter) {
+      banners.push({
+        kind: 'info', icon: 'ℹ',
+        title: 'Quarter filter active.',
+        body: 'Showing ' + escapeHtml_(State.filters.quarter) + ' only.',
+        action: { label: 'Clear', clearKey: 'quarter' }
+      });
+    }
+
+    if (!banners.length) {
+      container.hidden = true;
+      container.innerHTML = '';
+      return;
+    }
+
+    const MAX_VISIBLE = 3;
+    const visible = banners.slice(0, MAX_VISIBLE);
+    const overflow = banners.length - visible.length;
+
+    container.innerHTML = visible.map(b => {
+      const actionHtml = b.action
+        ? `<button type="button" class="banner-action" data-banner-action="${escapeHtml_(b.action.clearKey)}">${escapeHtml_(b.action.label)}</button>`
+        : '';
+      return `
+        <div class="report-banner ${b.kind}">
+          <span class="report-banner-icon">${b.icon}</span>
+          <span><strong>${escapeHtml_(b.title)}</strong> ${b.body}</span>
+          ${actionHtml}
+        </div>`;
+    }).join('') +
+    (overflow > 0
+      ? `<div class="report-banner info">
+           <span class="report-banner-icon">…</span>
+           <span>+${overflow} more active filter${overflow === 1 ? '' : 's'}. See chip strip above for details.</span>
+         </div>`
+      : '');
+    container.hidden = false;
+  }
+
+  // KPIs
+  function renderReportingKpis_(totals) {
+    totals = totals || {};
+    const total = Number(totals.totalHours || 0);
+    const slgHours = Number(totals.slgHours || 0);
+    const nonSlg = Number(totals.nonSlgHours || 0);
+    const partner = Number(totals.partnerHours || 0);
+    const slgPct = Number(totals.slgPct || 0);
+    const nonSlgPct = Number(totals.nonSlgPct || 0);
+    const partPct = Number(totals.partnerPct || 0);
+    const util = Number(totals.avgUtilization || 0);
+    const months = Number(totals.monthsInScope || 0);
+    const headcount = Number(totals.headcount || 0);
+
+    $('#rpKpiTotal').textContent = fmtHours(total);
+    $('#rpKpiTotalSub').textContent = headcount + ' workers · ' + months + ' months in scope';
+    $('#rpKpiSlg').textContent = fmtHours(slgHours);
+    $('#rpKpiSlgPct').textContent = fmtPct1(slgPct) + ' of total';
+    $('#rpKpiNonSlg').textContent = fmtHours(nonSlg);
+    $('#rpKpiNonSlgPct').textContent = fmtPct1(nonSlgPct) + ' of total';
+    $('#rpKpiPartner').textContent = fmtHours(partner);
+    $('#rpKpiPartnerPct').textContent = fmtPct1(partPct) + ' of total';
+    $('#rpKpiUtil').textContent = fmtPct(util);
+    $('#rpKpiUtilSub').textContent = total > 0
+      ? 'against ' + fmtHours(Number(totals.capacityHours || 0)) + ' hrs capacity'
+      : 'no data in scope';
+
+    const reconCard = $('#rpKpiReconcile').closest('.kpi-card');
+    const reconValue = $('#rpKpiReconcile');
+    const reconSub = $('#rpKpiReconcileSub');
+    if (total === 0) {
+      if (reconCard) reconCard.setAttribute('data-state', '');
+      reconValue.textContent = 'No data';
+      reconSub.textContent = 'No hours in current scope.';
+      reconSub.title = '';
+    } else if (totals.reconcileOk) {
+      if (reconCard) reconCard.setAttribute('data-state', 'ok');
+      reconValue.textContent = '✓ Reconciled';
+      reconSub.textContent = 'All totals tie';
+      const d = totals.reconciliationDetail || {};
+      reconSub.title = 'totalHours: ' + fmtHours(d.totalHours) + '\n' +
+                      'teamSum: ' + fmtHours(d.teamSum) + '\n' +
+                      'accountSum: ' + fmtHours(d.accountSum) + '\n' +
+                      'workerClassSum: ' + fmtHours(d.workerClassSum);
+    } else {
+      if (reconCard) reconCard.setAttribute('data-state', 'warn');
+      reconValue.textContent = '⚠ Mismatch';
+      reconSub.textContent = 'See diagnostics';
+      const d = totals.reconciliationDetail || {};
+      const c = d.checks || {};
+      const tt = [];
+      if (!c.teamMatches) tt.push('team sum ≠ total');
+      if (!c.accountMatches) tt.push('account sum ≠ total');
+      if (!c.workerClassMatches) tt.push('worker class sum ≠ total');
+      reconSub.title = tt.length ? tt.join('; ') : 'See diagnostics';
+    }
+  }
+
+  // Composition
+  function renderReportingComposition_(totals) {
+    totals = totals || {};
+    const slgReal = Number(totals.slgRealHours || 0);
+    const slgGeneric = Number(totals.slgGenericHours || 0);
+    const nonSlg = Number(totals.nonSlgHours || 0);
+    const partner = Number(totals.partnerHours || 0);
+    const total = slgReal + slgGeneric + nonSlg + partner;
+
+    const colSlg = cssVar_('--wc-slg');
+    const colSlgGen = cssVar_('--wc-slg-generic');
+    const colNonSlg = cssVar_('--wc-nonslg');
+    const colPartner = cssVar_('--wc-partner');
+
+    const donutCtx = $('#rpDonutChart').getContext('2d');
+    if (State.charts.rpDonut) State.charts.rpDonut.destroy();
+    State.charts.rpDonut = new Chart(donutCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['SLG (Workday SLG)', 'SLG Generic', 'Workday Non-SLG', 'Partner'],
+        datasets: [{
+          data: [slgReal, slgGeneric, nonSlg, partner],
+          backgroundColor: [colSlg, colSlgGen, colNonSlg, colPartner],
+          borderWidth: 1, borderColor: '#fff'
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        cutout: '62%',
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const v = ctx.parsed;
+                const pct = total > 0 ? (v / total) : 0;
+                return ctx.label + ': ' + fmtHours(v) + ' hrs (' + fmtPct1(pct) + ')';
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const legendRows = [
+      { label: 'SLG (Workday SLG)', hours: slgReal, color: colSlg, cls: 'slg' },
+      { label: 'SLG Generic', hours: slgGeneric, color: colSlgGen, cls: 'slg-generic' },
+      { label: 'Workday Non-SLG', hours: nonSlg, color: colNonSlg, cls: 'nonslg' },
+      { label: 'Partner', hours: partner, color: colPartner, cls: 'partner' }
+    ];
+    $('#rpDonutLegendBody').innerHTML = legendRows.map(r => {
+      const pct = total > 0 ? (r.hours / total) : 0;
+      return `
+        <tr>
+          <td>
+            <span class="wc-swatch ${r.cls}"></span>
+            ${escapeHtml_(r.label)}
+          </td>
+          <td class="num">${fmtHours(r.hours)}</td>
+          <td class="num">${fmtPct1(pct)}</td>
+        </tr>`;
+    }).join('');
+
+    const slgCombined = slgReal + slgGeneric;
+    const barCtx = $('#rpHorizontalBarChart').getContext('2d');
+    if (State.charts.rpHBar) State.charts.rpHBar.destroy();
+    State.charts.rpHBar = new Chart(barCtx, {
+      type: 'bar',
+      data: {
+        labels: ['SLG vs Everyone Else'],
+        datasets: [
+          { label: 'SLG', data: [slgCombined], backgroundColor: colSlg, stack: 'mix' },
+          { label: 'Workday Non-SLG', data: [nonSlg], backgroundColor: colNonSlg, stack: 'mix' },
+          { label: 'Partner', data: [partner], backgroundColor: colPartner, stack: 'mix' }
+        ]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const v = ctx.parsed.x;
+                const pct = total > 0 ? (v / total) : 0;
+                return ctx.dataset.label + ': ' + fmtHours(v) + ' hrs (' + fmtPct1(pct) + ')';
+              }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, display: false, max: total > 0 ? total : 1 },
+          y: { stacked: true, display: false }
+        }
+      }
+    });
+
+    const barLegendRows = [
+      { label: 'SLG', hours: slgCombined, cls: 'slg' },
+      { label: 'Workday Non-SLG', hours: nonSlg, cls: 'nonslg' },
+      { label: 'Partner', hours: partner, cls: 'partner' }
+    ];
+    $('#rpHorizontalBarLegend').innerHTML = barLegendRows.map(r => {
+      const pct = total > 0 ? (r.hours / total) : 0;
+      return `
+        <div class="lg-row">
+          <span class="lg-swatch wc-mix-seg ${r.cls}"></span>
+          <span class="lg-label">${escapeHtml_(r.label)}</span>
+          <span class="lg-value">${fmtHours(r.hours)} · ${fmtPct1(pct)}</span>
+        </div>`;
+    }).join('');
+  }
+
+  // Worker class mix bar
+  function wcMixBarHtml_(wcb, rowTotal) {
+    wcb = wcb || {};
+    const slg = Number(wcb.slg || 0);
+    const slgGen = Number(wcb.slgGeneric || 0);
+    const nonSlg = Number(wcb.nonSlg || 0);
+    const partner = Number(wcb.partner || 0);
+    const sum = slg + slgGen + nonSlg + partner;
+    if (sum <= 0) {
+      return '<div class="wc-mix-bar" title="No worker class breakdown"></div>';
+    }
+    const denom = rowTotal > 0 ? rowTotal : sum;
+    const seg = (val, cls, name) => {
+      if (val <= 0) return '';
+      const pct = (val / denom) * 100;
+      return `<div class="wc-mix-seg ${cls}" style="width:${pct}%;" title="${name}: ${fmtHours(val)} hrs (${fmtPct1(val/denom)})"></div>`;
+    };
+    const title = 'SLG: ' + fmtHours(slg) + ' · ' +
+                  'SLG Generic: ' + fmtHours(slgGen) + ' · ' +
+                  'Workday Non-SLG: ' + fmtHours(nonSlg) + ' · ' +
+                  'Partner: ' + fmtHours(partner);
+    return `<div class="wc-mix-bar" title="${escapeHtml_(title)}">
+      ${seg(slg, 'slg', 'SLG')}
+      ${seg(slgGen, 'slg-generic', 'SLG Generic')}
+      ${seg(nonSlg, 'nonslg', 'Workday Non-SLG')}
+      ${seg(partner, 'partner', 'Partner')}
+    </div>`;
+  }
+
+  // Team table
+  function renderReportingTeamTable_(byTeam, totals) {
+    const body = $('#rpTeamBody');
+    const foot = $('#rpTeamFooter');
+    const total = $('#rpTeamTotalHours');
+    const grand = Number((totals || {}).totalHours || 0);
+    if (!byTeam.length) {
+      body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:12px">No data in current scope.</td></tr>';
+      foot.hidden = true;
+      return;
+    }
+    body.innerHTML = byTeam.map(r => {
+      const hrs = Number(r.hours || 0);
+      const pct = grand > 0 ? (hrs / grand) : 0;
+      const isUnclassified = r.team === 'Unclassified';
+      const baseCls = isUnclassified ? 'warn-row' : '';
+      const isExpanded = State.rpExpandedTeams.has(r.team);
+      const expandCls = isExpanded ? 'team-row expanded' : 'team-row';
+      const safeTeam = escapeHtml_(r.team || 'Unclassified');
+      return `
+        <tr class="${baseCls} ${expandCls} rp-team-row" data-team="${safeTeam}" style="cursor:pointer;">
+          <td>
+            <span class="team-toggle" aria-hidden="true">${isExpanded ? '▼' : '▶'}</span>
+            ${safeTeam}
+          </td>
+          <td class="num">${fmtHours(hrs)}</td>
+          <td class="num">${fmtPct1(pct)}</td>
+          <td>${wcMixBarHtml_(r.workerClassBreakdown, hrs)}</td>
+        </tr>
+        ${isExpanded ? renderTeamDrillInlineRow_(r) : ''}`;
+    }).join('');
+    foot.hidden = false;
+    total.textContent = fmtHours(grand);
+  }
+
+  function renderTeamDrillInlineRow_(teamRow) {
+    const topRC = teamRow.topRoleCategories || [];
+    const topAccts = teamRow.topAccounts || [];
+    const topProjs = teamRow.topProjects || [];
+    const hasMoreRC = (teamRow.allRoleCategories || []).length > topRC.length || topRC.some(x => x.isOther);
+    const hasMoreAct = (teamRow.allAccounts || []).length > topAccts.length || topAccts.some(x => x.isOther);
+    const hasMorePj = (teamRow.allProjects || []).length > topProjs.length || topProjs.some(x => x.isOther);
+
+    function renderMiniRow_(x) {
+      const pct = Number(x.pct || 0);
+      const pctW = Math.max(2, Math.min(100, pct * 100));
+      const cls = x.isOther ? 'drill-other' : '';
+      return `
+        <tr class="${cls}">
+          <td class="drill-label">${escapeHtml_(x.label || '')}</td>
+          <td class="drill-hours num">${fmtHours(x.hours || 0)}</td>
+          <td class="drill-bar">
+            <div class="bar-wrap">
+              <div class="bar-fill" style="width:${pctW}%;"></div>
+              <span class="bar-pct">${fmtPct(pct)}</span>
+            </div>
+          </td>
+        </tr>`;
+    }
+
+    const rcRows = topRC.length
+      ? topRC.map(renderMiniRow_).join('')
+      : '<tr><td colspan="3" class="muted" style="padding:8px 10px;">No role categories</td></tr>';
+    const acctRows = topAccts.length
+      ? topAccts.map(renderMiniRow_).join('')
+      : '<tr><td colspan="3" class="muted" style="padding:8px 10px;">No accounts</td></tr>';
+    const projRows = topProjs.length
+      ? topProjs.map(renderMiniRow_).join('')
+      : '<tr><td colspan="3" class="muted" style="padding:8px 10px;">No projects</td></tr>';
+
+    const safeTeam = escapeHtml_(teamRow.team || 'Unclassified');
+    return `
+      <tr class="team-drill-row" data-team="${safeTeam}">
+        <td colspan="4" style="padding:0; background:#FBFCFE;">
+          <div class="drill-grid" style="grid-template-columns:1fr 1fr 1fr;">
+            <div class="drill-pane">
+              <div class="drill-head">
+                <span class="drill-title">Top role categories</span>
+                ${hasMoreRC ? `<a href="#" class="drill-showall rp-drill-showall" data-scope="team" data-kind="roleCategories" data-key="${safeTeam}">Show all →</a>` : ''}
+              </div>
+              <table class="drill-table"><tbody>${rcRows}</tbody></table>
+            </div>
+            <div class="drill-pane">
+              <div class="drill-head">
+                <span class="drill-title">Top accounts</span>
+                ${hasMoreAct ? `<a href="#" class="drill-showall rp-drill-showall" data-scope="team" data-kind="accounts" data-key="${safeTeam}">Show all →</a>` : ''}
+              </div>
+              <table class="drill-table"><tbody>${acctRows}</tbody></table>
+            </div>
+            <div class="drill-pane">
+              <div class="drill-head">
+                <span class="drill-title">Top projects</span>
+                ${hasMorePj ? `<a href="#" class="drill-showall rp-drill-showall" data-scope="team" data-kind="projects" data-key="${safeTeam}">Show all →</a>` : ''}
+              </div>
+              <table class="drill-table"><tbody>${projRows}</tbody></table>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+  }
+
+  // Account table
+  function renderReportingAccountTable_(byAccount, totals) {
+    const body = $('#rpAccountBody');
+    const foot = $('#rpAccountFooter');
+    const lbl = $('#rpAccountFooterLabel');
+    const hrsEl = $('#rpAccountFooterHours');
+    const pctEl = $('#rpAccountFooterPct');
+    const grand = Number((totals || {}).totalHours || 0);
+    if (!byAccount.length) {
+      body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:12px">No data in current scope.</td></tr>';
+      foot.hidden = true;
+      $('#rpAccountViewAllBtn').hidden = true;
+      return;
+    }
+    const top10 = byAccount.slice(0, 10);
+    const total = byAccount.length;
+    const sumTop = top10.reduce((s, r) => s + Number(r.hours || 0), 0);
+
+    body.innerHTML = top10.map(r => {
+      const hrs = Number(r.hours || 0);
+      const pct = grand > 0 ? (hrs / grand) : 0;
+      const isExpanded = State.rpExpandedAccounts.has(r.account);
+      const expandCls = isExpanded ? 'team-row expanded' : 'team-row';
+      const safeAcct = escapeHtml_(r.account || 'Unspecified');
+      return `
+        <tr class="${expandCls} rp-account-row" data-account="${safeAcct}" style="cursor:pointer;">
+          <td>
+            <span class="team-toggle" aria-hidden="true">${isExpanded ? '▼' : '▶'}</span>
+            ${safeAcct}
+          </td>
+          <td class="num">${fmtHours(hrs)}</td>
+          <td class="num">${fmtPct1(pct)}</td>
+          <td>${wcMixBarHtml_(r.workerClassBreakdown, hrs)}</td>
+        </tr>
+        ${isExpanded ? renderAccountDrillInlineRow_(r) : ''}`;
+    }).join('');
+
+    foot.hidden = false;
+    lbl.textContent = 'Top ' + Math.min(10, total) + ' of ' + total;
+    hrsEl.textContent = fmtHours(sumTop);
+    pctEl.textContent = grand > 0 ? fmtPct1(sumTop / grand) : '—';
+
+    const viewAllBtn = $('#rpAccountViewAllBtn');
+    if (viewAllBtn) {
+      viewAllBtn.hidden = total <= 10;
+      viewAllBtn.textContent = 'View all ' + total + ' accounts';
+    }
+  }
+
+  function renderAccountDrillInlineRow_(acctRow) {
+    const topRoles = acctRow.topRoles || [];
+    const topProjs = acctRow.topProjects || [];
+    const hasMoreR = (acctRow.allRoles || []).length > topRoles.length || topRoles.some(x => x.isOther);
+    const hasMoreP = (acctRow.allProjects || []).length > topProjs.length || topProjs.some(x => x.isOther);
+
+    function renderMiniRow_(x) {
+      const pct = Number(x.pct || 0);
+      const pctW = Math.max(2, Math.min(100, pct * 100));
+      const cls = x.isOther ? 'drill-other' : '';
+      return `
+        <tr class="${cls}">
+          <td class="drill-label">${escapeHtml_(x.label || '')}</td>
+          <td class="drill-hours num">${fmtHours(x.hours || 0)}</td>
+          <td class="drill-bar">
+            <div class="bar-wrap">
+              <div class="bar-fill" style="width:${pctW}%;"></div>
+              <span class="bar-pct">${fmtPct(pct)}</span>
+            </div>
+          </td>
+        </tr>`;
+    }
+
+    const wcb = acctRow.workerClassBreakdown || {};
+    const wcRows = [
+      { label: 'SLG (Workday SLG)', hours: Number(wcb.slg || 0), cls: 'slg' },
+      { label: 'SLG Generic', hours: Number(wcb.slgGeneric || 0), cls: 'slg-generic' },
+      { label: 'Workday Non-SLG', hours: Number(wcb.nonSlg || 0), cls: 'nonslg' },
+      { label: 'Partner', hours: Number(wcb.partner || 0), cls: 'partner' }
+    ].filter(r => r.hours > 0);
+    const wcTotal = wcRows.reduce((s, r) => s + r.hours, 0);
+
+    const wcMiniRows = wcRows.length
+      ? wcRows.map(r => {
+          const pct = wcTotal > 0 ? (r.hours / wcTotal) : 0;
+          const pctW = Math.max(2, Math.min(100, pct * 100));
+          return `
+            <tr>
+              <td class="drill-label">
+                <span class="wc-swatch ${r.cls}"></span>
+                ${escapeHtml_(r.label)}
+              </td>
+              <td class="drill-hours num">${fmtHours(r.hours)}</td>
+              <td class="drill-bar">
+                <div class="bar-wrap">
+                  <div class="bar-fill" style="width:${pctW}%;background:var(--wc-${r.cls});opacity:1;"></div>
+                  <span class="bar-pct">${fmtPct(pct)}</span>
+                </div>
+              </td>
+            </tr>`;
+        }).join('')
+      : '<tr><td colspan="3" class="muted" style="padding:8px 10px;">No worker class breakdown</td></tr>';
+
+    const roleRows = topRoles.length
+      ? topRoles.map(renderMiniRow_).join('')
+      : '<tr><td colspan="3" class="muted" style="padding:8px 10px;">No roles</td></tr>';
+    const projRows = topProjs.length
+      ? topProjs.map(renderMiniRow_).join('')
+      : '<tr><td colspan="3" class="muted" style="padding:8px 10px;">No projects</td></tr>';
+
+    const safeAcct = escapeHtml_(acctRow.account || 'Unspecified');
+    return `
+      <tr class="team-drill-row" data-account="${safeAcct}">
+        <td colspan="4" style="padding:0; background:#FBFCFE;">
+          <div class="drill-grid" style="grid-template-columns:1fr 1fr 1fr;">
+            <div class="drill-pane">
+              <div class="drill-head">
+                <span class="drill-title">Worker class breakdown</span>
+              </div>
+              <table class="drill-table"><tbody>${wcMiniRows}</tbody></table>
+            </div>
+            <div class="drill-pane">
+              <div class="drill-head">
+                <span class="drill-title">Top roles</span>
+                ${hasMoreR ? `<a href="#" class="drill-showall rp-drill-showall" data-scope="account" data-kind="roles" data-key="${safeAcct}">Show all →</a>` : ''}
+              </div>
+              <table class="drill-table"><tbody>${roleRows}</tbody></table>
+            </div>
+            <div class="drill-pane">
+              <div class="drill-head">
+                <span class="drill-title">Top projects</span>
+                ${hasMoreP ? `<a href="#" class="drill-showall rp-drill-showall" data-scope="account" data-kind="projects" data-key="${safeAcct}">Show all →</a>` : ''}
+              </div>
+              <table class="drill-table"><tbody>${projRows}</tbody></table>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+  }
+
+  function renderReportingRoleCategoryTable_(rows, totals) {
+    const body = $('#rpRoleCategoryBody');
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="3" class="muted" style="padding:12px">No data in current scope.</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map(r => `
+      <tr>
+        <td>${escapeHtml_(r.roleCategory || 'Unclassified')}</td>
+        <td class="num">${fmtHours(r.hours || 0)}</td>
+        <td class="num">${fmtPct1(r.pctOfTotal || 0)}</td>
+      </tr>`).join('');
+  }
+
+  function renderReportingJobProfileTable_(rows, totals) {
+    const body = $('#rpJobProfileBody');
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="3" class="muted" style="padding:12px">No data in current scope.</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map(r => `
+      <tr>
+        <td>${escapeHtml_(r.jobProfile || 'Unspecified')}</td>
+        <td class="num">${fmtHours(r.hours || 0)}</td>
+        <td class="num">${fmtPct1(r.pctOfTotal || 0)}</td>
+      </tr>`).join('');
+  }
+
+  function renderReportingTop5_(topAccounts, topRoles, totals) {
+    function renderTop5Row_(x) {
+      const hrs = Number(x.hours || 0);
+      const pct = Number(x.pct || 0);
+      const pctW = Math.max(2, Math.min(100, pct * 100));
+      return `
+        <tr>
+          <td>${escapeHtml_(x.label || '')}</td>
+          <td class="num">${fmtHours(hrs)}</td>
+          <td class="cell-with-bar" style="min-width:100px;">
+            <div class="cell-bar-wrap">
+              <div class="cell-bar-fill" style="width:${pctW}%;"></div>
+              <span class="cell-bar-text">${fmtPct(pct)}</span>
+            </div>
+          </td>
+        </tr>`;
+    }
+
+    const acctBody = $('#rpTop5AccountsBody');
+    if (!topAccounts.length) {
+      acctBody.innerHTML = '<tr><td colspan="3" class="muted" style="padding:8px 10px">No accounts in scope</td></tr>';
+    } else {
+      acctBody.innerHTML = topAccounts.map(renderTop5Row_).join('');
+    }
+
+    const roleBody = $('#rpTop5RolesBody');
+    if (!topRoles.length) {
+      roleBody.innerHTML = '<tr><td colspan="3" class="muted" style="padding:8px 10px">No roles in scope</td></tr>';
+    } else {
+      roleBody.innerHTML = topRoles.map(renderTop5Row_).join('');
+    }
+  }
+
+  function renderReportingDiagnostics_(diag, totals) {
+    diag = diag || {};
+    const grand = Number((totals || {}).totalHours || 0);
+    const unmapped = diag.unmapped || [];
+    const blank = diag.blankClassWorkers || { count: 0, totalHours: 0, sampleNames: [] };
+
+    const summaryParts = [];
+    if (unmapped.length) summaryParts.push(unmapped.length + ' unmapped categor' + (unmapped.length === 1 ? 'y' : 'ies'));
+    if (blank.count) summaryParts.push(blank.count + ' blank-class worker' + (blank.count === 1 ? '' : 's'));
+    const summaryText = summaryParts.length ? summaryParts.join(' · ') : 'All clear';
+    $('#rpDiagnosticsSummary').textContent = summaryText;
+
+    if (!unmapped.length) {
+      $('#rpUnmappedBody').innerHTML = '<tr><td colspan="3" class="muted" style="padding:12px">No unmapped categories — all rows classified.</td></tr>';
+      $('#rpUnmappedBadge').className = 'badge ghost';
+      $('#rpUnmappedBadge').textContent = '0';
+    } else {
+      const sumUn = unmapped.reduce((s, u) => s + Number(u.hours || 0), 0);
+      $('#rpUnmappedBadge').className = 'badge amber';
+      $('#rpUnmappedBadge').textContent = fmtHours(sumUn) + ' hrs · ' + unmapped.length;
+      $('#rpUnmappedBody').innerHTML = unmapped.map(u => {
+        const hrs = Number(u.hours || 0);
+        const pct = grand > 0 ? (hrs / grand) : 0;
+        return `
+          <tr>
+            <td><code>${escapeHtml_(u.key || '')}</code></td>
+            <td class="num">${fmtHours(hrs)}</td>
+            <td class="num">${fmtPct1(pct)}</td>
+          </tr>`;
+      }).join('');
+    }
+
+    if (!blank.count) {
+      $('#rpBlankClassBody').innerHTML = '<tr><td colspan="2" class="muted" style="padding:12px">No blank-class workers detected.</td></tr>';
+      $('#rpBlankClassBadge').className = 'badge ghost';
+      $('#rpBlankClassBadge').textContent = '0';
+    } else {
+      $('#rpBlankClassBadge').className = 'badge amber';
+      $('#rpBlankClassBadge').textContent = fmtHours(blank.totalHours) + ' hrs · ' + blank.count;
+      const sample = blank.sampleNames || [];
+      $('#rpBlankClassBody').innerHTML = sample.map(s => `
+        <tr>
+          <td>${escapeHtml_(s.name || '')}</td>
+          <td class="num">${fmtHours(s.hours || 0)}</td>
+        </tr>`).join('') +
+        (blank.count > sample.length
+          ? `<tr><td colspan="2" class="muted" style="padding:8px 12px">
+               +${blank.count - sample.length} more not shown · resolve in Admin → Worker Exclusions
+             </td></tr>`
+          : '');
+    }
+  }
+
+  // Event handlers + modals
+  function initReportingHandlers_() {
+    document.addEventListener('click', (e) => {
+      const banAction = e.target.closest('[data-banner-action]');
+      if (banAction) {
+        clearSingleFilter_(banAction.dataset.bannerAction);
+        return;
+      }
+
+      if (e.target.closest('#rpDiagnosticsHeader')) {
+        rpToggleDiagnostics_();
+        return;
+      }
+
+      const showAll = e.target.closest('.rp-drill-showall');
+      if (showAll) {
+        e.preventDefault();
+        openRpDrillModal_({
+          scope: showAll.dataset.scope,
+          kind: showAll.dataset.kind,
+          key: showAll.dataset.key
+        });
+        return;
+      }
+
+      if (e.target.closest('#rpAccountViewAllBtn')) {
+        openRpAccountsModal_();
+        return;
+      }
+
+      const inDrill = e.target.closest('#rpTeamDrillModal, #rpAccountDrillModal');
+      if (inDrill && e.target.dataset && e.target.dataset.close !== undefined) {
+        closeRpDrillModal_();
+        return;
+      }
+
+      const inAcctsModal = e.target.closest('#rpAccountsModal');
+      if (inAcctsModal && e.target.dataset && e.target.dataset.close !== undefined) {
+        closeRpAccountsModal_();
+        return;
+      }
+
+      const teamRow = e.target.closest('tr.rp-team-row');
+      if (teamRow && !e.target.closest('tr.team-drill-row')) {
+        const t = teamRow.dataset.team;
+        if (t) rpToggleTeam_(t);
+        return;
+      }
+
+      const acctRow = e.target.closest('tr.rp-account-row');
+      if (acctRow && !e.target.closest('tr.team-drill-row')) {
+        const a = acctRow.dataset.account;
+        if (a) rpToggleAccount_(a);
+        return;
+      }
+    });
+
+    document.addEventListener('input', (e) => {
+      if (e.target && e.target.id === 'rpAccountsModalSearch') {
+        renderRpAccountsModalRows_(
+          State.rpAccountsAll || [],
+          State.rpHoursTotal || 0,
+          e.target.value
+        );
+      }
+      if (e.target && (e.target.id === 'rpTeamDrillSearch' || e.target.id === 'rpAccountDrillSearch')) {
+        renderRpDrillModalRows_();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      [['rpTeamDrillModal', closeRpDrillModal_],
+       ['rpAccountDrillModal', closeRpDrillModal_],
+       ['rpAccountsModal', closeRpAccountsModal_]].forEach(([id, closer]) => {
+        const m = document.getElementById(id);
+        if (m && !m.hidden) closer();
+      });
+    });
+
+    $('#rpDiagnosticsHeader')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        rpToggleDiagnostics_();
+      }
+    });
+  }
+
+  function rpToggleDiagnostics_() {
+    State.rpDiagnosticsOpen = !State.rpDiagnosticsOpen;
+    const body = $('#rpDiagnosticsBody');
+    const chev = $('#rpDiagnosticsChev');
+    if (!body) return;
+    body.hidden = !State.rpDiagnosticsOpen;
+    if (chev) chev.classList.toggle('open', State.rpDiagnosticsOpen);
+  }
+
+    function rpToggleTeam_(teamName) {
+    if (!State.rpExpandedTeams) State.rpExpandedTeams = new Set();
+    if (State.rpExpandedTeams.has(teamName)) State.rpExpandedTeams.delete(teamName);
+    else State.rpExpandedTeams.add(teamName);
+    if (State.reporting) {
+      renderReportingTeamTable_(State.reporting.byTeam || [], State.reporting.totals || {});
+    }
+  }
+
+  function rpToggleAccount_(account) {
+    if (!State.rpExpandedAccounts) State.rpExpandedAccounts = new Set();
+    if (State.rpExpandedAccounts.has(account)) State.rpExpandedAccounts.delete(account);
+    else State.rpExpandedAccounts.add(account);
+    if (State.reporting) {
+      renderReportingAccountTable_(State.reporting.byAccount || [], State.reporting.totals || {});
+    }
+  }
+
+  function openRpDrillModal_(ctx) {
+    if (!State.reporting) return;
+    let list = []; let title = ''; let sub = '';
+    let labelHeader = 'Label'; let modal = null;
+
+    if (ctx.scope === 'team') {
+      const team = (State.reporting.byTeam || []).find(t => t.team === ctx.key);
+      if (!team) return;
+      if (ctx.kind === 'roleCategories') { list = team.allRoleCategories || []; labelHeader = 'Role Category'; title = team.team + ' — All role categories'; }
+      else if (ctx.kind === 'accounts')   { list = team.allAccounts || [];        labelHeader = 'Account';       title = team.team + ' — All accounts'; }
+      else if (ctx.kind === 'projects')   { list = team.allProjects || [];        labelHeader = 'Project';       title = team.team + ' — All projects'; }
+      modal = $('#rpTeamDrillModal');
+      sub = (list.length || 0) + ' items';
+    } else if (ctx.scope === 'account') {
+      const acct = (State.reporting.byAccount || []).find(a => a.account === ctx.key);
+      if (!acct) return;
+      if (ctx.kind === 'roles')    { list = acct.allRoles || [];    labelHeader = 'Role';    title = acct.account + ' — All roles'; }
+      else if (ctx.kind === 'projects') { list = acct.allProjects || []; labelHeader = 'Project'; title = acct.account + ' — All projects'; }
+      modal = $('#rpAccountDrillModal');
+      sub = (list.length || 0) + ' items';
+    }
+
+    if (!modal) return;
+    State.rpActiveDrill = { ctx: ctx, list: list, modal: modal };
+
+    if (ctx.scope === 'team') {
+      $('#rpTeamDrillTitle').textContent = title;
+      $('#rpTeamDrillSub').textContent = sub;
+      $('#rpTeamDrillLabelHeader').textContent = labelHeader;
+      const search = $('#rpTeamDrillSearch');
+      if (search) search.value = '';
+    } else {
+      $('#rpAccountDrillTitle').textContent = title;
+      $('#rpAccountDrillSub').textContent = sub;
+      $('#rpAccountDrillLabelHeader').textContent = labelHeader;
+      const search = $('#rpAccountDrillSearch');
+      if (search) search.value = '';
+    }
+
+    renderRpDrillModalRows_();
+    modal.hidden = false;
+  }
+
+  function renderRpDrillModalRows_() {
+    if (!State.rpActiveDrill) return;
+    const { ctx, list } = State.rpActiveDrill;
+    const isTeam = ctx.scope === 'team';
+    const searchEl = isTeam ? $('#rpTeamDrillSearch') : $('#rpAccountDrillSearch');
+    const bodyEl = isTeam ? $('#rpTeamDrillBody') : $('#rpAccountDrillBody');
+    const totalHrsEl = isTeam ? $('#rpTeamDrillTotalHours') : $('#rpAccountDrillTotalHours');
+    const totalPctEl = isTeam ? $('#rpTeamDrillTotalPct') : $('#rpAccountDrillTotalPct');
+
+    const q = String((searchEl && searchEl.value) || '').toLowerCase().trim();
+    const filtered = q
+      ? list.filter(x => String(x.label || '').toLowerCase().indexOf(q) >= 0)
+      : list.slice();
+
+    const grand = filtered.reduce((s, x) => s + Number(x.hours || 0), 0);
+
+    bodyEl.innerHTML = filtered.length
+      ? filtered.map((x, i) => {
+          const hrs = Number(x.hours || 0);
+          const pct = grand > 0 ? (hrs / grand) : 0;
+          return `
+            <tr>
+              <td class="num">${i + 1}</td>
+              <td>${escapeHtml_(x.label || '')}</td>
+              <td class="num">${fmtHours(hrs)}</td>
+              <td class="num">${fmtPct1(pct)}</td>
+            </tr>`;
+        }).join('')
+      : '<tr><td colspan="4" class="muted" style="padding:12px">No matches.</td></tr>';
+
+    totalHrsEl.textContent = fmtHours(grand);
+    totalPctEl.textContent = grand > 0 ? '100%' : '—';
+  }
+
+  function closeRpDrillModal_() {
+    const team = $('#rpTeamDrillModal');
+    const acct = $('#rpAccountDrillModal');
+    if (team) team.hidden = true;
+    if (acct) acct.hidden = true;
+    State.rpActiveDrill = null;
+  }
+
+  function openRpAccountsModal_() {
+    const modal = $('#rpAccountsModal');
+    if (!modal) return;
+    const list = State.rpAccountsAll || [];
+    const total = State.rpHoursTotal || 0;
+    $('#rpAccountsModalSub').textContent = list.length + ' accounts in scope';
+    const search = $('#rpAccountsModalSearch');
+    if (search) search.value = '';
+    renderRpAccountsModalRows_(list, total, '');
+    modal.hidden = false;
+  }
+
+  function renderRpAccountsModalRows_(list, total, query) {
+    const body = $('#rpAccountsModalBody');
+    const totalHrsEl = $('#rpAccountsModalTotalHours');
+    const totalPctEl = $('#rpAccountsModalTotalPct');
+    if (!body) return;
+
+    const q = String(query || '').toLowerCase().trim();
+    const filtered = q
+      ? list.filter(r => String(r.account || '').toLowerCase().indexOf(q) >= 0)
+      : list.slice();
+
+    const sumFiltered = filtered.reduce((s, r) => s + Number(r.hours || 0), 0);
+    const grand = total > 0 ? total : sumFiltered;
+
+    body.innerHTML = filtered.length
+      ? filtered.map((r, i) => {
+          const hrs = Number(r.hours || 0);
+          const pct = grand > 0 ? (hrs / grand) : 0;
+          return `
+            <tr>
+              <td class="num">${i + 1}</td>
+              <td>${escapeHtml_(r.account || 'Unspecified')}</td>
+              <td class="num">${fmtHours(hrs)}</td>
+              <td class="num">${fmtPct1(pct)}</td>
+            </tr>`;
+        }).join('')
+      : '<tr><td colspan="4" class="muted" style="padding:12px">No matches.</td></tr>';
+
+    totalHrsEl.textContent = fmtHours(sumFiltered);
+    totalPctEl.textContent = grand > 0 ? fmtPct1(sumFiltered / grand) : '—';
+  }
+
+  function closeRpAccountsModal_() {
+    const modal = $('#rpAccountsModal');
+    if (modal) modal.hidden = true;
+  }
+</script>
+
+<script>
+  // ============================================================
+  // Capacity Explorer
+  //
+  // Priority 3: resource list now respects Worker Scope (defaults
+  // to SLG for this view) + Team filter + Manager filter. All
+  // filtering is client-side against State.ref.resources (which
+  // includes pre-computed resolvedTeam) and the search box.
+  // Auto-updates on filter change because reloadCurrentView_
+  // calls renderResourceList() when current view is 'explorer'.
+  // ============================================================
+  function renderResourceList() {
+    const list = $('#resourceList');
+    const search = ($('#resourceSearch').value || '').toLowerCase();
+    const resources = (State.ref && State.ref.resources) || [];
+    const f = State.filters;
+
+    // Build effective manager set (Manager + descendants if include-reports)
+    const managerDescendants = (State.ref && State.ref.managerDescendants) || {};
+    let effectiveManagers = null;
+    if (f.managers && f.managers.length && !f.teamLabel) {
+      effectiveManagers = {};
+      const selected = f.managers[0];
+      effectiveManagers[selected] = true;
+      if (f.includeMyManagers && managerDescendants[selected]) {
+        managerDescendants[selected].forEach(m => { effectiveManagers[m] = true; });
+      }
+    }
+
+    function workerInScope_(wc) {
+      const cls = String(wc || '');
+      const scope = String(f.workerScope || 'All');
+      switch (scope) {
+        case 'SLG':         return cls === 'SLG_Real' || cls === 'SLG_Generic';
+        case 'NonSLG':      return cls === 'External_NonSLG';
+        case 'Partners':    return cls === 'External_Contractor';
+        case 'WorkdayOnly': return cls === 'SLG_Real' || cls === 'SLG_Generic' || cls === 'External_NonSLG';
+        case 'All':
+        case 'Both':        return cls === 'SLG_Real' || cls === 'SLG_Generic' || cls === 'External_NonSLG' || cls === 'External_Contractor';
+        case 'External':    return cls === 'External_NonSLG' || cls === 'External_Contractor';
+        default:            return false;
+      }
+    }
+
+    const filtered = resources.filter(r => {
+      // Search filter
+      if (search && r.name.toLowerCase().indexOf(search) < 0) return false;
+
+      // Worker Scope filter
+      if (!workerInScope_(r.worker_class)) return false;
+
+      // Team filter (overrides Manager)
+      if (f.teamLabel) {
+        if (r.resolvedTeam !== f.teamLabel) return false;
+        return true;
+      }
+
+      // Manager filter (only when Team is not set)
+      if (effectiveManagers) {
+        if (!effectiveManagers[r.manager_org]) return false;
+      }
+
+      return true;
+    });
+
+    if (!filtered.length) {
+      list.innerHTML = '<div class="muted" style="padding:16px;text-align:center;">No resources match the current filters.</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map(r => `
+      <div class="resource-item" data-resource="${escapeHtml_(r.name)}">
+        <div>
+          <div class="resource-name">${escapeHtml_(r.name)}</div>
+          <div class="resource-meta">${escapeHtml_(r.manager_org || '—')} · ${escapeHtml_(r.resolvedTeam || r.icp || '—')}</div>
+        </div>
+      </div>
+    `).join('');
+
+    $$('#resourceList .resource-item').forEach(el => {
+      el.addEventListener('click', () => {
+        $$('#resourceList .resource-item').forEach(x => x.classList.remove('active'));
+        el.classList.add('active');
+        State.selectedResource = el.dataset.resource;
+        loadResourceDetail_(State.selectedResource);
+      });
+    });
+  }
+
+  $('#resourceSearch')?.addEventListener('input', renderResourceList);
+
+  async function loadResourceDetail_(name) {
+    if (!name) return;
+    try {
+      const detail = await call('api_getResourceDetail', {
+        resource: name,
+        viewMode: State.filters.viewMode,
+        scenarioId: State.filters.scenarioId
+      });
+      renderResourceChart_(name, detail);
+    } catch (err) {
+      toast('Resource detail failed: ' + err.message, 'err');
+    }
+  }
+
+  function renderResourceChart_(name, months) {
+    $('#resourceTitle').textContent = name;
+    const meta = (State.ref.resources || []).find(r => r.name === name);
+    $('#resourceSub').textContent = meta
+      ? (meta.manager_org || '—') + ' · ' + (meta.resolvedTeam || meta.icp || meta.role_category || '—')
+      : '';
+
+    const ctx = $('#resourceChart').getContext('2d');
+    if (State.charts.resource) State.charts.resource.destroy();
+    State.charts.resource = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: months.map(m => fmtMonth(m.monthKey)),
+        datasets: [
+          { label: 'Billable', data: months.map(m => m.billable), backgroundColor: cssVar_('--ballpoint') },
+          { label: 'Internal', data: months.map(m => m.internal), backgroundColor: cssVar_('--water-cooler') },
+          { label: 'Education', data: months.map(m => m.education), backgroundColor: cssVar_('--tack') },
+          { label: 'PTO/Holiday', data: months.map(m => m.pto), backgroundColor: cssVar_('--pencil') },
+          { label: 'Scenario', data: months.map(m => m.scenario), backgroundColor: cssVar_('--happy-hour') }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { position: 'bottom' } },
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true } }
+      }
+    });
+  }
+</script>
+
+<script>
+  // ============================================================
+  // Pipeline / Deployments / Scenarios
+  // ============================================================
+  async function loadOpportunities() {
+    try {
+      State.opportunities = await call('api_listOpportunities', {
+        segment: $('#segmentFilter').value || '',
+        stageMin: $('#stageFilter').value || '',
+        search: $('#oppSearch').value || ''
+      });
+      renderOpportunities_();
+    } catch (err) {
+      toast('Pipeline load failed: ' + err.message, 'err');
+    }
+  }
+  ['#segmentFilter', '#stageFilter', '#oppSearch'].forEach(sel => {
+    const el = $(sel);
+    if (el) el.addEventListener('input', loadOpportunities);
+  });
+
+  function renderOpportunities_() {
+    const body = $('#oppBody');
+    body.innerHTML = State.opportunities.map(o => `
+      <tr>
+        <td>${escapeHtml_(o.opportunity_name)}</td>
+        <td>${escapeHtml_(o.account)}</td>
+        <td>${escapeHtml_(o.segment || '—')}</td>
+        <td>${escapeHtml_(o.stage)}</td>
+        <td class="num">${fmtPct(o.probability / 100)}</td>
+        <td class="num">${fmtMoney(o.acv)}</td>
+        <td>${fmtDate(o.expected_start)}</td>
+        <td>${fmtDate(o.expected_end)}</td>
+        <td class="num">${o.ee_count || '—'}</td>
+        <td><button class="btn-ghost row-btn" data-opp="${o.opportunity_id}">Assign</button></td>
+      </tr>
+    `).join('');
+
+    $$('#oppBody button[data-opp]').forEach(btn => {
+      btn.addEventListener('click', () => openAssignDrawer_(btn.dataset.opp));
+    });
+  }
+
+  async function loadDeployments() {
+    try {
+      State.deployments = await call('api_listDeployments');
+      renderDeployments_();
+    } catch (err) {
+      toast('Deployments load failed: ' + err.message, 'err');
+    }
+  }
+  $('#deploySearch')?.addEventListener('input', renderDeployments_);
+
+  function renderDeployments_() {
+    const body = $('#deployBody');
+    const q = ($('#deploySearch').value || '').toLowerCase();
+    const filtered = State.deployments.filter(d =>
+      d.deployment_name.toLowerCase().indexOf(q) >= 0 ||
+      d.account_name.toLowerCase().indexOf(q) >= 0
+    );
+    body.innerHTML = filtered.map(d => `
+      <tr>
+        <td>${escapeHtml_(d.deployment_name)}</td>
+        <td>${escapeHtml_(d.account_name)}</td>
+        <td>${escapeHtml_(d.deployment_stage)}</td>
+        <td>${escapeHtml_(d.deployment_health)}</td>
+        <td>${fmtDate(d.current_mtp_date)}</td>
+        <td>${escapeHtml_(d.em_name)}</td>
+        <td>${escapeHtml_(d.dam_name)}</td>
+        <td><button class="btn-ghost row-btn" data-dep="${d.deployment_id}">Assign</button></td>
+      </tr>
+    `).join('');
+
+    $$('#deployBody button[data-dep]').forEach(btn => {
+      btn.addEventListener('click', () => openAssignDrawer_(btn.dataset.dep, 'deployment'));
+    });
+  }
+
+  async function loadScenariosList() {
+  State.scenarios = await call('api_listScenarios');
+  }
+
+  async function loadScenarios() {
+    await loadScenariosList();
+    const list = $('#scenarioList');
+    list.innerHTML = State.scenarios.map(s => `
+      <div class="scenario-item ${s.scenario_id === State.selectedScenario ? 'active' : ''}" data-id="${s.scenario_id}">
+        <div>
+          <div class="resource-name">${escapeHtml_(s.name)}</div>
+          <div class="resource-meta">${escapeHtml_(s.status)} · ${fmtDate(s.modified_at)}</div>
+        </div>
+      </div>
+    `).join('');
+
+    $$('#scenarioList .scenario-item').forEach(el => {
+      el.addEventListener('click', () => {
+        State.selectedScenario = el.dataset.id;
+        loadScenarios();
+        loadScenarioAssignments_(el.dataset.id);
+      });
+    });
+
+    $('#newScenarioBtn')?.addEventListener('click', () => openScenarioModal_());
+    $('#commitScenarioBtn')?.addEventListener('click', () => commitSelectedScenario_());
+    $('#archiveScenarioBtn')?.addEventListener('click', () => archiveSelectedScenario_());
+  }
+
+    async function loadScenarioAssignments_(scenarioId) {
+    const assigns = await call('api_listAssignments', { scenario_id: scenarioId });
+    const body = $('#scenarioAssignmentsBody');
+    // Priority 4: Role column displays resource_type (the user's literal
+    // dropdown selection). Falls back to a.role (ICP role) for any rows
+    // saved before the schema change — though that data is wiped per the
+    // demo prep step.
+    body.innerHTML = assigns.map(a => `
+      <tr>
+        <td>${escapeHtml_(a.opportunity_id)}</td>
+        <td>${escapeHtml_(a.resource_type || a.role || '—')}</td>
+        <td>${escapeHtml_(a.resource_name || '—')}</td>
+        <td>${fmtDate(a.start_date)}</td>
+        <td>${fmtDate(a.end_date)}</td>
+        <td class="num">${a.estimated_hours}</td>
+        <td>${escapeHtml_(a.distribution)}</td>
+        <td>${escapeHtml_(a.status)}</td>
+      </tr>
+    `).join('');
+
+    const sel = State.scenarios.find(s => s.scenario_id === scenarioId);
+    if (sel) {
+      $('#scenarioTitle').textContent = sel.name;
+      $('#commitScenarioBtn').disabled = sel.status === 'Archived';
+      $('#archiveScenarioBtn').disabled = sel.status === 'Archived';
+    }
+  }
+
+  function openScenarioModal_(scenario) {
+    const modal = $('#scenarioModal');
+    $('#s_id').value = scenario ? scenario.scenario_id : '';
+    $('#s_name').value = scenario ? scenario.name : '';
+    $('#s_desc').value = scenario ? (scenario.description || '') : '';
+    modal.hidden = false;
+  }
+
+  $('#scenarioForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      scenario_id: $('#s_id').value || null,
+      name: $('#s_name').value,
+      description: $('#s_desc').value,
+      status: 'Active'
+    };
+    await call('api_saveScenario', payload);
+    $('#scenarioModal').hidden = true;
+    await loadScenarios();
+  });
+
+  $('#scenarioModal')?.addEventListener('click', (e) => {
+    if (e.target.dataset && e.target.dataset.close !== undefined) {
+      $('#scenarioModal').hidden = true;
+    }
+  });
+
+  async function commitSelectedScenario_() {
+    if (!State.selectedScenario) return;
+    if (!confirm('Commit all modeled assignments in this scenario?')) return;
+    await call('api_commitScenario', State.selectedScenario);
+    toast('Scenario committed', 'ok');
+    await loadScenarios();
+    if (State.currentView === 'dashboard') loadDashboard();
+  }
+
+  async function archiveSelectedScenario_() {
+    if (!State.selectedScenario) return;
+    if (!confirm('Archive this scenario?')) return;
+    await call('api_archiveScenario', State.selectedScenario);
+    toast('Scenario archived', 'ok');
+    State.selectedScenario = null;
+    await loadScenarios();
+  }
+</script>
+
+<script>
+  // ============================================================
+  // Assign drawer (Pipeline / Deployments)
+  //
+  // NOTE: Priority 4 will substantially restructure this drawer
+  // (Role dropdown from Config_Resource_Type, Resource filtered
+  // to SLG-only, both required, save resource_type + team_label).
+  // This block is the pre-Priority-4 implementation, unchanged.
+  // ============================================================
+    // ============================================================
+  // Priority 4: Assign drawer with resource_type-sourced Role
+  // dropdown and SLG-only Resource dropdown. Both required.
+  //
+  // Role:     populated from State.ref.resourceTypeOptions (Config_Resource_Type).
+  // Resource: filtered to worker_class in (SLG_Real, SLG_Generic),
+  //           including Generic_Resources (which are stamped SLG_Generic
+  //           server-side via _resourceIndex_).
+  // Both have empty-value placeholders to fail browser native required validation.
+  // ============================================================
+  function openAssignDrawer_(opportunityId, source) {
+    const drawer = $('#assignDrawer');
+    const opp = State.opportunities.find(o => o.opportunity_id === opportunityId) ||
+                State.deployments.find(d => d.deployment_id === opportunityId);
+    if (!opp) return;
+
+    $('#drawerAccount').textContent = opp.account || opp.account_name || '—';
+    $('#drawerOppName').textContent = opp.opportunity_name || opp.deployment_name || 'Assign';
+    $('#drawerStage').textContent = opp.stage || opp.deployment_stage || '—';
+    $('#drawerProb').textContent = opp.probability ? fmtPct(opp.probability / 100) : '—';
+    $('#drawerSegment').textContent = opp.segment || opp.industry || '—';
+
+    $('#f_assignment_id').value = '';
+    $('#f_opportunity_id').value = opportunityId;
+
+    // Priority 4: Role dropdown sourced from Config_Resource_Type.
+    // resourceTypeOptions is sorted alphabetically server-side.
+    const roleSel = $('#f_role');
+    const resourceTypeOptions = (State.ref && State.ref.resourceTypeOptions) || [];
+    roleSel.innerHTML = '<option value="">— Select role —</option>' +
+      resourceTypeOptions
+        .map(rt => `<option value="${escapeHtml_(rt)}">${escapeHtml_(rt)}</option>`)
+        .join('');
+
+    // Priority 4: Resource dropdown filtered to SLG workers only
+    // (SLG_Real + SLG_Generic, including Generic_Resources).
+    const resSel = $('#f_resource');
+    const allResources = (State.ref && State.ref.resources) || [];
+    const slgResources = allResources.filter(r =>
+      r.worker_class === 'SLG_Real' || r.worker_class === 'SLG_Generic'
+    );
+    resSel.innerHTML = '<option value="">— Select resource —</option>' +
+      slgResources
+        .map(r => `<option value="${escapeHtml_(r.name)}">${escapeHtml_(r.name)}</option>`)
+        .join('');
+
+    // Populate scenarios (unchanged)
+    const scenSel = $('#f_scenario');
+    scenSel.innerHTML = '<option value="">— No scenario —</option>' +
+      (State.scenarios || [])
+        .filter(s => s.status !== 'Archived')
+        .map(s => `<option value="${s.scenario_id}">${escapeHtml_(s.name)}</option>`).join('');
+
+    $('#f_start').value = '';
+    $('#f_end').value = '';
+    $('#f_hours').value = '';
+    $('#f_notes').value = '';
+    $$('#f_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
+
+    drawer.hidden = false;
+  }
+
+  $('#assignDrawer')?.addEventListener('click', (e) => {
+    if (e.target.dataset && e.target.dataset.close !== undefined) {
+      $('#assignDrawer').hidden = true;
+    }
+  });
+
+  $$('#f_distribution button').forEach(b => {
+    b.addEventListener('click', () => {
+      $$('#f_distribution button').forEach(x => x.classList.toggle('on', x === b));
+    });
+  });
+
+  $('#f_newScenarioBtn')?.addEventListener('click', () => {
+    openScenarioModal_();
+  });
+
+  $('#assignForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await saveAssignment_('Modeled');
+  });
+
+  $('#commitNowBtn')?.addEventListener('click', async () => {
+    await saveAssignment_('Committed');
+  });
+
+    // ============================================================
+  // Priority 4: required-field validation + resource_type payload.
+  //
+  // Client sends the user's literal Role-dropdown selection as
+  // resource_type. Server enriches team_label, role (ICP), and team
+  // via saveAssignment_ in Assignments.gs. Whatever the client sends
+  // for role/team/team_label is overwritten server-side; we send role
+  // as an empty string to be explicit about this.
+  //
+  // Both Role and Resource are required. Client-side validation
+  // catches both the form-submit path (Save as Modeled) and the
+  // direct button-click path (Commit Now) which bypasses native
+  // browser required validation.
+  // ============================================================
+  async function saveAssignment_(status) {
+    const resourceType = $('#f_role').value;
+    const resourceName = $('#f_resource').value;
+
+    // Required-field validation (covers Commit Now bypass of native required)
+    if (!resourceType) {
+      toast('Role is required.', 'err');
+      return;
+    }
+    if (!resourceName) {
+      toast('Resource is required.', 'err');
+      return;
+    }
+
+        const dist = $$('#f_distribution button').find(b => b.classList.contains('on'));
+    const distVal = dist ? dist.dataset.val : 'Even';
+    // Custom Distribution: serialize per-month inputs into custom_monthly_json.
+    // Server's expandAssignmentToMonthly_ will use these literal values
+    // instead of computing weights. Empty for non-Custom distributions.
+    const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
+
+    const payload = {
+      assignment_id: $('#f_assignment_id').value || null,
+      opportunity_id: $('#f_opportunity_id').value,
+      resource_type: resourceType,              // Priority 4: canonical role field
+      role: '',                                  // Priority 4: server derives from team_label
+      resource_name: resourceName,
+      start_date: $('#f_start').value,
+      end_date: $('#f_end').value,
+      estimated_hours: Number($('#f_hours').value) || 0,
+      distribution: distVal,
+      custom_monthly_json: customJson,           // Custom Distribution v1
+      scenario_id: $('#f_scenario').value || null,
+      notes: $('#f_notes').value,
+      status: status
+    };
+    try {
+      await call('api_saveAssignment', payload);
+      toast('Assignment saved as ' + status, 'ok');
+      $('#assignDrawer').hidden = true;
+      if (State.currentView === 'dashboard') loadDashboard();
+      else if (State.currentView === 'scenarios') loadScenarios();
+    } catch (err) {
+      toast('Save failed: ' + err.message, 'err');
+    }
+  }
+
+    // ============================================================
+  // Priority 4 patch: restore Monthly Load Preview chart.
+  //
+  // Wires the drawer's #previewChart canvas to api_previewAssignment.
+  // Triggered on distribution change OR debounced input on start/end/
+  // hours fields. Chart is destroyed on drawer close to prevent
+  // duplicate instances on re-open.
+  //
+  // collectFormForPreview_ sends only what api_previewAssignment needs
+  // (dates, hours, distribution). It does NOT mirror the save-time
+  // payload — Priority 4's resource_type/role/team_label enrichment is
+  // server-side at save time and irrelevant to monthly preview math.
+  // ============================================================
+  function closeDrawer_() {
+    $('#assignDrawer').hidden = true;
+    if (State.charts.preview) {
+      State.charts.preview.destroy();
+      State.charts.preview = null;
+    }
+  }
+
+    function collectFormForPreview_() {
+    const dist = $$('#f_distribution button').find(b => b.classList.contains('on'));
+    const distVal = dist ? dist.dataset.val : 'Even';
+    // Custom Distribution: send the per-month inputs to the server so
+    // the preview chart reflects exactly what the user is editing.
+    const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
+    return {
+      start_date: $('#f_start').value,
+      end_date: $('#f_end').value,
+      estimated_hours: Number($('#f_hours').value) || 0,
+      distribution: distVal,
+      custom_monthly_json: customJson
+    };
+  }
+
+  async function updatePreview_() {
+    const a = collectFormForPreview_();
+    if (!a.start_date || !a.end_date || !a.estimated_hours) return;
+    try {
+      const months = await call('api_previewAssignment', a);
+      renderPreviewChart_(months);
+    } catch (err) {
+      // silent during typing
+    }
+  }
+
+    function renderPreviewChart_(months) {
+    const filtered = months.filter(m => monthKeyOnOrAfterToday(m.monthKey));
+    const src = filtered.length ? filtered : months;
+    const ctx = $('#previewChart').getContext('2d');
+    if (State.charts.preview) State.charts.preview.destroy();
+    const cs = getComputedStyle(document.documentElement);
+    State.charts.preview = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: src.map(m => fmtMonth(m.monthKey)),
+        datasets: [{
+          label: 'Hours',
+          data: src.map(m => Math.round(m.hours)),
+          backgroundColor: cs.getPropertyValue('--ballpoint').trim()
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false, resizeDelay: 100,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false } },
+          y: { grid: { color: '#ECEEF1' }, title: { display: true, text: 'Hours' } }
+        }
+      }
+    });
+  }
+
+  // ============================================================
+  // Custom Distribution per-month inputs
+  //
+  // Rendered when Distribution = Custom. Pre-fills with Even
+  // distribution. User edits any month; live total updates
+  // immediately, chart updates debounced. Resets to Even on
+  // date/hours change (with toast warning) or on Reset button.
+  // ============================================================
+
+  /**
+   * Generate the list of month keys between f_start and f_end.
+   * Returns array of {monthKey, monthLabel} pairs.
+   * Empty array if either date is missing or invalid.
+   */
+  function customMonthsRange_() {
+    const startStr = $('#f_start').value;
+    const endStr = $('#f_end').value;
+    if (!startStr || !endStr) return [];
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return [];
+    if (end < start) return [];
+    const out = [];
+    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+    const last = new Date(end.getFullYear(), end.getMonth(), 1);
+    while (cur <= last) {
+      const mk = cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0');
+      out.push({ monthKey: mk, monthLabel: fmtMonth(mk) });
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+    return out;
+  }
+
+  /**
+   * Render per-month input rows into #customMonthsList.
+   * Pre-fills inputs with Even distribution (estimated_hours / monthCount,
+   * with remainder added to the last month to keep total exact).
+   */
+  function renderCustomMonths_() {
+    const list = $('#customMonthsList');
+    if (!list) return;
+    const months = customMonthsRange_();
+    const estHours = Number($('#f_hours').value) || 0;
+
+    $('#customMonthsTarget').textContent = String(estHours);
+
+    if (!months.length) {
+      list.innerHTML = '<div class="muted" style="padding:8px 0;">' +
+        'Set Start date and End date above to define month rows.</div>';
+      $('#customMonthsTotal').textContent = '0';
+      $('#customMonthsDelta').textContent = '';
+      $('#customMonthsDelta').className = 'custom-months-delta';
+      return;
+    }
+
+    // Even distribution: floor(estHours / n) per month, remainder on last month.
+    const n = months.length;
+    const evenBase = Math.floor(estHours / n);
+    const remainder = estHours - (evenBase * n);
+
+    list.innerHTML = months.map(function (m, i) {
+      const initialValue = (i === n - 1) ? (evenBase + remainder) : evenBase;
+      return '' +
+        '<div class="custom-month-row">' +
+          '<span class="custom-month-label">' + escapeHtml_(m.monthLabel) + '</span>' +
+          '<input type="number" min="0" step="1" ' +
+            'class="input custom-month-input" ' +
+            'data-month-key="' + escapeHtml_(m.monthKey) + '" ' +
+            'value="' + initialValue + '">' +
+          '<span class="muted custom-month-hrs">hrs</span>' +
+        '</div>';
+    }).join('');
+
+    updateCustomMonthsTotal_();
+  }
+
+  /**
+   * Read all per-month inputs, compute total, update footer display.
+   * Color-codes the delta indicator: green (matched), amber (mismatch).
+   */
+  function updateCustomMonthsTotal_() {
+    const inputs = $$('.custom-month-input');
+    const total = inputs.reduce(function (sum, el) {
+      return sum + (Number(el.value) || 0);
+    }, 0);
+    const target = Number($('#f_hours').value) || 0;
+    const delta = total - target;
+
+    $('#customMonthsTotal').textContent = String(total);
+    $('#customMonthsTarget').textContent = String(target);
+
+    const deltaEl = $('#customMonthsDelta');
+    if (delta === 0) {
+      deltaEl.textContent = '✓ matched';
+      deltaEl.className = 'custom-months-delta matched';
+    } else if (delta > 0) {
+      deltaEl.textContent = '(+' + delta + ' over)';
+      deltaEl.className = 'custom-months-delta mismatch';
+    } else {
+      deltaEl.textContent = '(' + delta + ' short)';
+      deltaEl.className = 'custom-months-delta mismatch';
+    }
+  }
+
+  /**
+   * Read per-month inputs, return JSON-stringified {monthKey: hours} map.
+   * Returns empty string if no inputs exist (e.g., dates not set).
+   */
+  function collectCustomMonthsJson_() {
+    const inputs = $$('.custom-month-input');
+    if (!inputs.length) return '';
+    const obj = {};
+    inputs.forEach(function (el) {
+      const mk = el.dataset.monthKey;
+      const hrs = Number(el.value) || 0;
+      if (mk) obj[mk] = hrs;
+    });
+    return JSON.stringify(obj);
+  }
+
+  /**
+   * Show or hide the Custom Months section.
+   * On show, regenerates the rows from current dates and hours.
+   */
+  function showCustomMonthsSection_(show) {
+    const field = $('#customMonthsField');
+    if (!field) return;
+    if (show) {
+      renderCustomMonths_();
+      field.hidden = false;
+    } else {
+      field.hidden = true;
+    }
+  }
+
+  /**
+   * Reset all per-month inputs to Even distribution. Wired to the
+   * "Reset to Even" button inside the Custom Months section.
+   */
+  function resetCustomMonthsToEven_() {
+    renderCustomMonths_();
+    updatePreview_();
+    toast('Custom hours reset to Even distribution', 'ok');
+  }
+
+    // Event wiring — distribution segmented control change
+  $('#f_distribution')?.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    // The visual .on toggle is already handled elsewhere (in the
+    // existing $$('#f_distribution button').forEach handler).
+    // Show/hide Custom Months section based on selection.
+    const isCustom = (b.dataset.val === 'Custom');
+    showCustomMonthsSection_(isCustom);
+    updatePreview_();
+  });
+
+  // Custom Months inline event wiring — input changes update total
+  // immediately and trigger debounced preview chart refresh.
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('custom-month-input')) {
+      updateCustomMonthsTotal_();
+      clearTimeout(window._previewTimer);
+      window._previewTimer = setTimeout(updatePreview_, 200);
+    }
+  });
+
+  // Reset to Even button inside Custom Months section
+  $('#customMonthsResetBtn')?.addEventListener('click', resetCustomMonthsToEven_);
+
+    // Event wiring — date and hours inputs (debounced 200ms).
+  // If Distribution is Custom, regenerate the per-month rows
+  // (resets to Even) and toast a warning.
+  ['f_start', 'f_end', 'f_hours'].forEach(id => {
+    $('#' + id)?.addEventListener('input', () => {
+      // Check if Custom is currently active
+      const activeBtn = $$('#f_distribution button').find(b => b.classList.contains('on'));
+      const isCustom = activeBtn && activeBtn.dataset.val === 'Custom';
+      if (isCustom) {
+        // Regenerate rows on date/hours change. Warn user that custom
+        // entries were reset (only when there's been actual user input).
+        renderCustomMonths_();
+        toast('Custom hours reset — date or hours changed', 'warn');
+      }
+      clearTimeout(window._previewTimer);
+      window._previewTimer = setTimeout(updatePreview_, 200);
+    });
+  });
+
+  // Drawer close — destroy chart instance to prevent leaks on re-open
+  $('#assignDrawer')?.addEventListener('click', (e) => {
+    if (e.target.dataset && e.target.dataset.close !== undefined) {
+      if (State.charts.preview) {
+        State.charts.preview.destroy();
+        State.charts.preview = null;
+      }
+    }
+  });
+</script>
+
+<script>
+  // ============================================================
+  // Admin
+  // ============================================================
+  async function loadAdmin() {
+    try {
+      const ref = State.ref;
+      const icpBody = $('#icpBody');
+      icpBody.innerHTML = (ref.icp || []).map(r => `
+        <tr>
+          <td><input type="text" class="input" data-icp-role value="${escapeHtml_(r.role)}"></td>
+          <td><input type="number" step="0.01" class="input num" data-icp-target value="${r.target_utilization}"></td>
+          <td><input type="number" step="0.01" class="input num" data-icp-red value="${r.red_threshold}"></td>
+        </tr>
+      `).join('');
+
+      const rolesBody = $('#rolesBody');
+      rolesBody.innerHTML = (ref.roles || []).map(r => `
+        <tr>
+          <td><input type="text" class="input" data-role-name value="${escapeHtml_(r.role)}"></td>
+          <td><input type="number" step="1" class="input num" data-role-hours value="${r.monthly_capacity_hours}"></td>
+        </tr>
+      `).join('');
+
+      const log = await call('api_getRefreshLog');
+      $('#refreshLogBody').innerHTML = log.map(l => `
+        <tr>
+          <td>${fmtDateTime(l.timestamp)}</td>
+          <td>${escapeHtml_(l.source)}</td>
+          <td class="num">${l.rows_in}</td>
+          <td class="num">${l.rows_out}</td>
+          <td class="num">${l.months_detected}</td>
+          <td>${escapeHtml_(l.user)}</td>
+        </tr>
+      `).join('');
+
+      const pipeLog = await call('api_getPipelineRefreshLog');
+      $('#pipelineLogBody').innerHTML = (pipeLog || []).map(l => `
+        <tr>
+          <td>${fmtDateTime(l['Refresh Time'])}</td>
+          <td>${escapeHtml_(l['Sheet'])}</td>
+          <td>${escapeHtml_(l['Operation'])}</td>
+          <td>${escapeHtml_(l['Status'])}</td>
+          <td>${escapeHtml_(l['User'])}</td>
+        </tr>
+      `).join('');
+
+      const generics = await call('api_listGenericResources');
+      const gBody = $('#genericBody');
+      if (generics.length) {
+        gBody.innerHTML = generics.map(g => `
+          <tr>
+            <td>${escapeHtml_(g.name)}</td>
+            <td>${escapeHtml_(g.resource_type)}</td>
+            <td>${escapeHtml_(g.project_role)}</td>
+            <td>${escapeHtml_(g.manager_org)}</td>
+            <td>${escapeHtml_(g.team)}</td>
+            <td>${escapeHtml_(g.practice)}</td>
+            <td class="num">${g.capacity_hours}</td>
+            <td>${escapeHtml_(g.status)}</td>
+          </tr>
+        `).join('');
+      }
+
+      const excl = await call('api_getExclusions');
+      $('#exclusionsBody').innerHTML = (excl || []).map(w => `
+        <tr>
+          <td><input type="checkbox" data-excl-active ${String(w.active).toLowerCase() === 'yes' ? 'checked' : ''}></td>
+          <td>${escapeHtml_(w.worker_name)}</td>
+          <td>${escapeHtml_(w.manager_org)}</td>
+          <td>${escapeHtml_(w.reason || '')}</td>
+        </tr>
+      `).join('');
+    } catch (err) {
+      toast('Admin load failed: ' + err.message, 'err');
+    }
+  }
+
+  $('#saveIcpBtn')?.addEventListener('click', async () => {
+    const rows = $$('#icpBody tr').map(tr => ({
+      role: tr.querySelector('[data-icp-role]').value,
+      target_utilization: Number(tr.querySelector('[data-icp-target]').value),
+      red_threshold: Number(tr.querySelector('[data-icp-red]').value)
+    }));
+    await call('api_saveIcp', rows);
+    toast('ICP saved', 'ok');
+  });
+
+  $('#saveRolesBtn')?.addEventListener('click', async () => {
+    const rows = $$('#rolesBody tr').map(tr => ({
+      role: tr.querySelector('[data-role-name]').value,
+      monthly_capacity_hours: Number(tr.querySelector('[data-role-hours]').value)
+    }));
+    await call('api_saveRoles', rows);
+    toast('Roles saved', 'ok');
+  });
+
+  $('#flushCachesBtn')?.addEventListener('click', async () => {
+    await call('api_flushCaches');
+    toast('Caches flushed', 'ok');
+    State.ref = await call('api_getReference');
+    reloadCurrentView_();
+  });
+
+  $('#refreshOppsBtn')?.addEventListener('click', async () => {
+    await call('api_refreshOpportunities');
+    toast('Opportunities refreshed', 'ok');
+    loadAdmin();
+  });
+
+  // PSA upload
+  const uploadZone = $('#uploadZone');
+  const staffFile = $('#staffFile');
+  $('#browseBtn')?.addEventListener('click', () => staffFile.click());
+  uploadZone?.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('drag'); });
+  uploadZone?.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+  uploadZone?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag');
+    if (e.dataTransfer.files.length) handleStaffFile_(e.dataTransfer.files[0]);
+  });
+  staffFile?.addEventListener('change', () => {
+    if (staffFile.files.length) handleStaffFile_(staffFile.files[0]);
+  });
+
+  function handleStaffFile_(file) {
+    const status = $('#uploadStatus');
+    status.hidden = false;
+    status.className = 'status info';
+    status.textContent = 'Uploading ' + file.name + '…';
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result.split(',')[1];
+        const result = await call('api_uploadStaffFile', base64, file.name);
+        status.className = 'status ok';
+        status.textContent = 'Uploaded: ' + result.rowsOut + ' rows normalized · ' + result.monthsDetected + ' months';
+        State.ref = await call('api_getReference');
+        if (State.currentView === 'dashboard') loadDashboard();
+      } catch (err) {
+        status.className = 'status err';
+        status.textContent = 'Upload failed: ' + err.message;
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+</script>

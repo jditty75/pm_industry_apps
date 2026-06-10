@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <?!= include('Styles'); ?>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" aria-hidden="true" focusable="false">
+          <g>
+            <rect fill="#ffffff" x="0" y="0" width="1540" height="2000"/>
+            <path fill="#0f2e66" d="M1221.5,1999.8h-179.3c-26.9,0-49-12.3-56.3-41.9l-216-760.4-216,760.6c-7.3,29.6-29.4,41.9-56.3,41.9h-179.3c-29.4,0-46.7-12.3-56.3-41.9C146.5,1637.3,68.1,1318.5,1.8,997.7c-7.3-32.3,7.3-54.4,41.5-54.4h159.7c29.4,0,49,14.8,54.2,41.9,41.5,227.3,90.9,461.5,157.2,691.5l191.4-691.5c7.3-27.1,26.9-41.9,56.3-41.9h216c29.4,0,49,14.8,56.3,41.9l191.4,691.5c66.3-229.4,115.7-464.2,157.2-691.5,4.8-27.1,24.6-41.9,54.2-41.9h159.7c34.2,0,49,22.3,41.5,54.4-66.3,320.9-144.7,639.6-260.1,960.4-10,29.6-27.1,41.7-56.5,41.7Z"/>
+            <path fill="#fc5b05" d="M375.1,408.1c105.5-105.7,245.7-163.7,395-163.9,149.1,0,289.2,58,394.4,163.3,54.8,54.8,96.6,118.9,124.3,188.7,6.3,16.1,22.1,26.7,39.4,26.7h168.7c28.2,0,49-27.1,40.9-54-37.7-124.9-105.7-239.2-200.4-334.1C1185.9,83.6,984.5,0,770.3,0S354.2,83.6,202.6,235.4C107.7,330.3,39.8,444.6,2.4,569.1c-8.1,26.9,12.7,54,40.9,54h168.7c17.3,0,33-10.6,39.4-26.7,27.5-69.7,69.2-133.7,123.7-188.3Z"/>
+          </g>
+        </svg>
+        <span class="brand-text">SLG Consulting Topic Hub</span>
+      </div>
+      <div class="user">
+        <span id="userEmail" title="<?= user.email ?>">
+          <?= user.displayName || user.email ?>
+        </span>
+        <span class="badge <?= user.isAdmin ? 'admin' : '' ?>">
+          <?= user.isAdmin ? 'Admin' : 'Consultant' ?>
+        </span>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-area="ALL">All</button>
+      <button class="tab" data-area="HCM">HCM</button>
+      <button class="tab" data-area="FIN">FIN</button>
+      <button class="tab" data-area="PATT">PATT</button>
+
+      <div class="grow"></div>
+
+      <!-- Filters: Priority + Target Month + (admin) Show Archived -->
+      <select id="priorityFilter" class="inline-filter" aria-label="Filter by priority">
+        <option value="">Any priority</option>
+        <option value="High">High</option>
+        <option value="Medium">Medium</option>
+        <option value="Low">Low</option>
+      </select>
+      <input type="month" id="targetMonthFilter" class="inline-filter" aria-label="Filter by target month" />
+      <label class="inline-toggle <?= user.isAdmin ? '' : 'hidden' ?>">
+        <input type="checkbox" id="showArchived" />
+        <span>Show archived</span>
+      </label>
+
+      <input id="search" placeholder="Search topics..." aria-label="Search topics" />
+      <button id="newTopicBtn" class="primary">+ New Topic</button>
+    </nav>
+
+    <main>
+      <!-- Main topics table container (rendered by JavaScript) -->
+      <section id="topicList" class="cards" aria-live="polite"></section>
+
+      <!-- Comments Backdrop + Side Panel -->
+      <div id="commentsBackdrop" class="comments-backdrop hidden"></div>
+      <aside id="commentsPanel" class="comments-panel hidden" aria-labelledby="commentsTitle" aria-hidden="true">
+        <div class="comments-header">
+          <div class="comments-title-block">
+            <div id="commentsTopicId" class="comments-topic-id"></div>
+            <h3 id="commentsTitle" class="comments-title">Comments</h3>
+            <div id="commentsTopicMeta" class="comments-topic-meta"></div>
+          </div>
+          <button type="button" id="closeCommentsBtn" class="comments-close" aria-label="Close comments">&times;</button>
+        </div>
+
+        <div id="commentsBody" class="comments-body">
+          <div id="commentsList" class="comments-list" aria-live="polite"></div>
+        </div>
+
+        <div class="comments-composer">
+          <label class="sr-label" for="commentInput">Add a comment</label>
+          <textarea id="commentInput" rows="3" placeholder="Add a comment..."></textarea>
+          <div class="comments-composer-footer">
+            <span id="commentInputCount" class="char-count">0 / 2000</span>
+            <div class="grow"></div>
+            <button type="button" id="cancelEditCommentBtn" class="link hidden">Cancel edit</button>
+            <button type="button" id="saveCommentBtn" class="primary">Post comment</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- New / Edit Topic Modal (non-admin submit) -->
+    <div id="topicModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="topicModalTitle">
+      <div class="modal-body">
+        <h3 id="topicModalTitle">New Topic</h3>
+
+        <label>Functional areas</label>
+        <div class="row" id="f_areas">
+          <label><input type="checkbox" value="HCM"> HCM</label>
+          <label><input type="checkbox" value="FIN"> FIN</label>
+          <label><input type="checkbox" value="PATT"> PATT</label>
+        </div>
+
+        <label>Title
+          <input id="f_title" maxlength="120" />
+        </label>
+
+        <label>Description
+          <textarea id="f_description" rows="5"></textarea>
+        </label>
+
+        <label>Submitter name (optional)
+          <input id="f_submitter" />
+        </label>
+
+        <div class="row end">
+          <button id="cancelTopic" data-close="topicModal">Cancel</button>
+          <button id="saveTopic" class="primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manage Topic Modal (admin only) -->
+    <div id="manageModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="manageModalTitle">
+      <div class="modal-body wide">
+        <h3 id="manageModalTitle">Manage Topic</h3>
+
+        <div id="m_audit" class="manage-audit"></div>
+
+        <!-- Section: Core -->
+        <h4 class="section-title">Core</h4>
+
+        <label>Functional areas</label>
+        <div class="row" id="m_areas">
+          <label><input type="checkbox" value="HCM"> HCM</label>
+          <label><input type="checkbox" value="FIN"> FIN</label>
+          <label><input type="checkbox" value="PATT"> PATT</label>
+        </div>
+
+        <label>Title
+          <input id="m_title" maxlength="120" />
+        </label>
+
+        <label>Description
+          <textarea id="m_description" rows="4"></textarea>
+        </label>
+
+        <div class="row two-col">
+          <label>Submitter name
+            <input id="m_submitter" />
+          </label>
+          <label>Status
+            <select id="m_status">
+              <option value="Proposed">Proposed</option>
+              <option value="Scheduled">Scheduled</option>
+              <option value="Discussed">Discussed</option>
+              <option value="Archived">Archived</option>
+            </select>
+          </label>
+        </div>
+
+        <label>Tags (comma or semicolon separated)
+          <input id="m_tags" />
+        </label>
+
+        <!-- Section: Planning -->
+        <h4 class="section-title">Planning</h4>
+
+        <div class="row three-col">
+          <label class="presenter-field">
+            Presenters
+            <div class="presenter-multi">
+              <div id="m_presenterChips" class="presenter-chips"></div>
+              <input
+                id="m_presenterInput"
+                list="presenterOptions"
+                placeholder="Type a name and press Enter"
+              />
+            </div>
+            <!-- Hidden field with the semicolon-separated presenter list -->
+            <input type="hidden" id="m_presenter" />
+          </label>
+
+          <label>Targeted meeting month
+            <input type="month" id="m_targetMonth" />
+          </label>
+
+          <label>Priority
+            <select id="m_priority">
+              <option value="">—</option>
+              <option value="Low">Low</option>
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
+            </select>
+          </label>
+        </div>
+
+        <!-- Presenter autocomplete options (populated via listUsers()) -->
+        <datalist id="presenterOptions"></datalist>
+
+        <!-- Section: Notes (admin-only) -->
+        <h4 class="section-title">Notes <span class="section-hint">visible to admins only</span></h4>
+        <label class="sr-label" for="m_notes">Notes</label>
+        <textarea id="m_notes" rows="3" maxlength="5000" placeholder="Internal admin notes (not visible to consultants)"></textarea>
+        <div class="char-count"><span id="m_notes_count">0</span> / 5000</div>
+
+        <!-- Section: Drive Links -->
+        <h4 class="section-title">Drive links <span class="section-hint">visible to everyone</span></h4>
+        <div id="m_links" class="links-list"></div>
+        <div class="row">
+          <button type="button" id="m_addLink">+ Add link</button>
+        </div>
+
+        <!-- Footer actions -->
+        <div class="row end manage-footer">
+          <button type="button" id="m_archive" class="danger-ghost">Archive</button>
+          <button type="button" id="m_restore" class="hidden">Restore</button>
+
+          <div class="grow"></div>
+
+          <button type="button" data-close="manageModal">Cancel</button>
+          <button type="button" id="m_save" class="primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agenda Builder Modal (admin) -->
+    <div id="agendaModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="agendaModalTitle">
+      <div class="modal-body wide">
+        <h3 id="agendaModalTitle">Build Agenda</h3>
+
+        <div class="row">
+          <label>Area
+            <select id="a_area">
+              <option>HCM</option>
+              <option>FIN</option>
+              <option>PATT</option>
+            </select>
+          </label>
+          <label>Meeting date
+            <input type="date" id="a_date" />
+          </label>
+        </div>
+
+        <div id="a_topics" class="agenda-picker" aria-label="Eligible topics"></div>
+
+        <div class="row end">
+          <button id="cancelAgenda" data-close="agendaModal">Cancel</button>
+          <button id="buildAgenda" class="primary">Generate Agenda</button>
+        </div>
+
+        <div id="agendaOutput" class="agenda-output hidden">
+          <h4>Agenda HTML (copy &amp; paste into email)</h4>
+          <div class="row">
+            <button id="copyAgenda">Copy HTML</button>
+            <button id="previewAgenda">Preview</button>
+          </div>
+          <textarea id="agendaHtml" rows="10" readonly></textarea>
+          <iframe id="agendaPreview" class="hidden" title="Agenda preview"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <!-- Meetings / Mark Discussed Modal (admin) -->
+    <div id="meetingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="meetingsTitle">
+      <div class="modal-body wide">
+        <h3 id="meetingsTitle">Meetings</h3>
+
+        <div class="row">
+          <label>Area
+            <select id="m_area">
+              <option value="">All</option>
+              <option>HCM</option>
+              <option>FIN</option>
+              <option>PATT</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="m_list" class="meeting-list"></div>
+
+        <div class="row end">
+          <button data-close="meetingsModal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Topic History Modal -->
+    <div id="historyModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
+      <div class="modal-body">
+        <h3 id="historyTitle">Topic History</h3>
+        <div id="h_body"></div>
+        <div class="row end">
+          <button data-close="historyModal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Monthly Rollup Modal (admin) -->
+    <div id="rollupModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rollupTitle">
+      <div class="modal-body wide">
+        <h3 id="rollupTitle">Monthly Rollup</h3>
+
+        <div class="row">
+          <label>Range
+            <select id="r_months">
+              <option value="3">Last 3 months</option>
+              <option value="6" selected>Last 6 months</option>
+              <option value="12">Last 12 months</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="r_body"></div>
+
+        <div class="row end">
+          <button data-close="rollupModal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin Tools Modal (admin) -->
+    <div id="adminToolsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="adminToolsTitle">
+      <div class="modal-body">
+        <h3 id="adminToolsTitle">Admin Tools</h3>
+
+        <h4 class="section-title">Notifications</h4>
+        <p class="tool-help">
+          Send a test email to yourself to verify deliverability and confirm the <em>From</em> address.
+          The notification will use the currently configured email provider.
+        </p>
+        <div class="row">
+          <button type="button" id="sendTestEmailBtn" class="primary">Send test email</button>
+          <span id="testEmailStatus" class="tool-status"></span>
+        </div>
+
+        <? if (user.isAdmin && sheetUrl) { ?>
+          <div class="admin-sheet-link" style="margin-top: 16px;">
+            <a href="<?= sheetUrl ?>"
+               target="_blank"
+               rel="noopener noreferrer"
+               class="link">
+              Open Google Sheet (admin)
+            </a>
+          </div>
+        <? } ?>
+
+        <div class="row end" style="margin-top: 16px;">
+          <button type="button" data-close="adminToolsModal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+    <!-- Admin FAB cluster -->
+    <div class="fab-cluster <?= user.isAdmin ? '' : 'hidden' ?>">
+      <button id="adminToolsBtn" class="fab ghost" title="Admin tools">Tools</button>
+      <button id="rollupBtn" class="fab ghost" title="Monthly rollup">Rollup</button>
+      <button id="meetingsBtn" class="fab ghost" title="Meetings">Meetings</button>
+      <button id="adminAgendaBtn" class="fab" title="Build agenda">Build Agenda</button>
+    </div>
+
+    <!-- Bootstrap object -->
+    <script>
+      window.__BOOT__ = {
+        email: <?= JSON.stringify(user.email) ?>,
+        isAdmin: <?= user.isAdmin ? 'true' : 'false' ?>,
+        displayName: <?= JSON.stringify(user.displayName || '') ?>
+      };
+    </script>
+
+    <?!= include('JavaScript'); ?>
+  </body>
+</html>

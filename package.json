@@ -1,0 +1,9 @@
+﻿{
+  "name": "wd-apps-script-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Workday Apps Script solutions monorepo",
+  "devDependencies": {
+    "shx": "^0.3.4"
+  }
+}

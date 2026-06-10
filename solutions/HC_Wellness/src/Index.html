@@ -1,0 +1,2527 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <style>
+      :root {
+        --bg: #f5f5f7;
+        --card-bg: #ffffff;
+        --accent: #2563eb;
+        --accent-soft: rgba(37, 99, 235, 0.06);
+        --accent-strong: #1d4ed8;
+        --text-main: #0f172a;
+        --text-muted: #6b7280;
+        --border-subtle: #e5e7eb;
+        --danger: #dc2626;
+        --danger-soft: rgba(220, 38, 38, 0.06);
+        --success: #16a34a;
+        --success-soft: rgba(22, 163, 74, 0.06);
+        --radius-lg: 16px;
+        --radius-md: 10px;
+        --shadow-soft: 0 18px 40px rgba(15, 23, 42, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                     "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at top left, #e5e7eb 0, #f9fafb 45%, #fdfdfd 100%);
+        color: var(--text-main);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 16px;
+      }
+      #shell {
+        width: 100%;
+        max-width: 1200px;
+        background: var(--bg);
+        border-radius: 22px;
+        padding: 20px 18px 24px;
+        box-shadow: var(--shadow-soft);
+        border: 1px solid rgba(148, 163, 184, 0.35);
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 1.6rem;
+        letter-spacing: 0.01em;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      header h1 span.badge {
+        font-size: 0.75rem;
+        color: var(--accent-strong);
+        background: var(--accent-soft);
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(37, 99, 235, 0.25);
+      }
+      .subtitle {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+      .reviewer {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 220px;
+      }
+      .reviewer label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+      .reviewer input {
+        background: #ffffff;
+        border-radius: 999px;
+        border: 1px solid var(--border-subtle);
+        padding: 6px 10px;
+        color: var(--text-main);
+        font-size: 0.85rem;
+        outline: none;
+      }
+      .reviewer input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.25);
+      }
+      #loading {
+        font-style: italic;
+        color: var(--text-muted);
+      }
+      .main-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .summary-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 14px;
+      }
+      .summary-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+      }
+      .summary-pill strong {
+        color: var(--text-main);
+        font-weight: 600;
+      }
+      .summary-pill.total {
+        background: var(--accent-soft);
+        border-color: rgba(37, 99, 235, 0.4);
+        color: var(--accent-strong);
+      }
+      .card {
+        background: var(--card-bg);
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--border-subtle);
+        padding: 12px 12px 14px;
+        margin-bottom: 10px;
+      }
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 8px;
+      }
+      .card-header h2 {
+        margin: 0;
+        font-size: 1.05rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: #111827;
+      }
+      .card-header span.sub {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+      .tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border-subtle);
+        margin-bottom: 6px;
+      }
+      .tab-button {
+        flex: 0 0 auto;
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        margin-right: 4px;
+      }
+      .tab-button-active {
+        color: #111827;
+        border-bottom-color: var(--accent-strong);
+        font-weight: 600;
+      }
+      .tab-content { display: none; }
+      .tab-content-active { display: block; }
+      .list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .item-row {
+        border-radius: var(--radius-md);
+        border: 1px solid #e5e7eb;
+        padding: 8px 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        background: #ffffff;
+        transition: border-color 0.15s ease, background-color 0.15s ease,
+                    transform 0.08s ease, box-shadow 0.08s ease;
+      }
+      .item-row:hover {
+        border-color: rgba(37, 99, 235, 0.38);
+        background: #f9fafb;
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+      }
+      .item-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .item-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .item-meta {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        border: 1px solid #d1d5db;
+        background: #f9fafb;
+        color: #6b7280;
+      }
+      .pill.pill-high-risk {
+        background: #b91c1c !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        border-color: #b91c1c !important;
+      }
+      .pill.health-red {
+        color: #b91c1c;
+        background: var(--danger-soft);
+        border-color: rgba(220, 38, 38, 0.48);
+      }
+      .pill.health-yellow {
+        color: #92400e;
+        background: rgba(234, 179, 8, 0.06);
+        border-color: rgba(234, 179, 8, 0.5);
+      }
+      .pill.health-green {
+        color: #166534;
+        background: var(--success-soft);
+        border-color: rgba(22, 163, 74, 0.5);
+      }
+      .pill-added {
+        color: #166534;
+        background: var(--success-soft);
+        border-color: rgba(22, 163, 74, 0.6);
+      }
+      .pill-partner-wps {
+        background: var(--accent-strong);
+        color: #ffffff;
+        border-color: rgba(37, 99, 235, 0.85);
+      }
+      .item-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: flex-end;
+      }
+      .btn {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        background: transparent;
+        color: var(--text-main);
+        transition: background-color 0.12s ease, color 0.12s ease,
+                    border-color 0.12s ease, transform 0.08s ease,
+                    box-shadow 0.08s ease;
+        white-space: nowrap;
+      }
+      .btn:hover {
+        transform: translateY(-0.5px);
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, var(--accent-strong), #4f46e5);
+        border-color: rgba(37, 99, 235, 0.6);
+        color: #ffffff;
+      }
+      .btn-secondary {
+        background: #f3f4f6;
+        border-color: #d1d5db;
+        color: #111827;
+      }
+      .btn-danger {
+        background: linear-gradient(135deg, var(--danger), #b91c1c);
+        border-color: rgba(248, 113, 113, 0.9);
+        color: #ffffff;
+      }
+      .btn-ghost {
+        background: transparent;
+        border-color: transparent;
+        color: var(--text-muted);
+      }
+      .btn-ghost:hover {
+        background: #f3f4f6;
+        border-color: #e5e7eb;
+      }
+      .actions-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .field {
+        margin-bottom: 6px;
+      }
+      .field label {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-bottom: 2px;
+      }
+      .field input[type="text"],
+      .field textarea,
+      .field select {
+        width: 100%;
+        background: #ffffff;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        color: var(--text-main);
+        font-size: 0.8rem;
+        padding: 5px 7px;
+        resize: vertical;
+        outline: none;
+      }
+      .field input[type="text"]:focus,
+      .field textarea:focus,
+      .field select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.25);
+      }
+      .readonly {
+        background: #f9fafb;
+        color: var(--text-muted);
+      }
+      .required {
+        color: var(--danger);
+        margin-left: 2px;
+        font-weight: 600;
+      }
+      .modal-backdrop {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(15, 23, 42, 0.28);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        padding: 12px;
+      }
+      .modal {
+        background: #ffffff;
+        padding: 14px;
+        border-radius: 16px;
+        max-width: 800px;
+        width: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.25);
+      }
+      .modal h3 {
+        margin-top: 0;
+        margin-bottom: 4px;
+        font-size: 1.05rem;
+      }
+      .modal-subtitle {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+      }
+      .modal-footer {
+        margin-top: 8px;
+        text-align: right;
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
+      #previewFrameModal {
+        width: 100%;
+        height: 60vh;
+        border-radius: var(--radius-md);
+        border: 1px solid #e5e7eb;
+        background: #ffffff;
+      }
+      @media (max-width: 640px) {
+        #shell {
+          border-radius: 18px;
+          padding: 14px 12px 18px;
+        }
+        header {
+          flex-direction: column;
+        }
+      }
+      .wow-section-header {
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin: 6px 0 2px;
+        background: #1d4ed8;
+        color: #ffffff;
+        padding: 4px 8px;
+        border-radius: 999px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="shell">
+      <header>
+        <div style="display:flex; align-items:flex-start; gap:10px;">
+          <div style="flex:0 0 auto;">
+            <svg xmlns="http://www.w3.org/2000/svg" version="1.1"
+                 viewBox="0 0 1540 2000" width="40" height="40">
+              <defs>
+                <style>
+                  .cls-0 { fill: #ffffff; }
+                  .cls-1 { fill: #0f2e66; }
+                  .cls-2 { fill: #fc5b05; }
+                </style>
+              </defs>
+              <g>
+                <g id="Layer_1">
+                  <rect class="cls-0" x="0" y="0" width="1540" height="2000" />
+                  <path class="cls-1"
+                    d="M1221.5,1999.8h-179.3c-26.9,0-49-12.3-56.3-41.9l-216-760.4-216,760.6
+                       c-7.3,29.6-29.4,41.9-56.3,41.9h-179.3c-29.4,0-46.7-12.3-56.3-41.9
+                       C146.5,1637.3,68.1,1318.5,1.8,997.7c-7.3-32.3,7.3-54.4,41.5-54.4h159.7
+                       c29.4,0,49,14.8,54.2,41.9c41.5,227.3,90.9,461.5,157.2,691.5l191.4-691.5
+                       c7.3-27.1,26.9-41.9,56.3-41.9h216c29.4,0,49,14.8,56.3,41.9l191.4,691.5
+                       c66.3-229.4,115.7-464.2,157.2-691.5c4.8-27.1,24.6-41.9,54.2-41.9h159.7
+                       c34.2,0,49,22.3,41.5,54.4c-66.3,320.9-144.7,639.6-260.1,960.4
+                       c-10,29.6-27.1,41.7-56.5,41.7Z"/>
+                  <path class="cls-2"
+                    d="M375.1,408.1c105.5-105.7,245.7-163.7,395-163.9c149.1,0,289.2,58,394.4,163.3
+                       c54.8,54.8,96.6,118.9,124.3,188.7c6.3,16.1,22.1,26.7,39.4,26.7h168.7
+                       c28.2,0,49-27.1,40.9-54c-37.7-124.9-105.7-239.2-200.4-334.1
+                       C1185.9,83.6,984.5,0,770.3,0S354.2,83.6,202.6,235.4
+                       C107.7,330.3,39.8,444.6,2.4,569.1c-8.1,26.9,12.7,54,40.9,54h168.7
+                       c17.3,0,33-10.6,39.4-26.7C302.7,526.7,344.4,462.7,398.9,408.1Z"/>
+                </g>
+              </g>
+            </svg>
+          </div>
+          <div>
+            <h1>
+              Healthcare Wellness Leadership Agenda
+              <span class="badge">Healthcare Wellness Leadership</span>
+            </h1>
+            <div class="subtitle">
+              Select deployment and CSAT items, capture context, and generate a
+              ready-to-share Healthcare Wellness Leadership agenda.
+            </div>
+          </div>
+        </div>
+        <div class="reviewer">
+          <label for="reviewerName">
+            Reviewer name (used in agenda selections)
+          </label>
+          <input type="text" id="reviewerName" value="Jeff Ditty">
+        </div>
+      </header>
+
+      <div class="main-actions">
+        <button class="btn btn-primary" onclick="buildPreview()">Preview Agenda</button>
+        <button class="btn btn-secondary" onclick="saveAll()">Save Selections &amp; Agenda</button>
+        <button class="btn btn-ghost" onclick="exportAsHtml()">Export as HTML</button>
+        <button class="btn btn-ghost" onclick="exportAsPdf()">Export as PDF</button>
+        <button class="btn btn-secondary" onclick="openManualModal()">Add Manual Item</button>
+      </div>
+
+      <div id="summaryBar" class="summary-bar" style="display:none;">
+        <div class="summary-pill">
+          <strong id="summaryDeployments">0</strong> Deployments
+        </div>
+        <div class="summary-pill">
+          <strong id="summaryCsat">0</strong> CSAT
+        </div>
+        <div class="summary-pill">
+          <strong id="summaryManual">0</strong> Manual
+        </div>
+        <div class="summary-pill total">
+          <strong id="summaryTotal">0</strong>
+          total items on Healthcare Wellness Leadership agenda
+        </div>
+      </div>
+
+      <div id="loading">Loading external system data...</div>
+
+      <div id="app" style="display:none;">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h2>Agenda Sources</h2>
+              <span class="sub">Toggle between source lists</span>
+            </div>
+          </div>
+          <div class="tabs">
+            <button id="tabBtnDeployments" class="tab-button tab-button-active"
+                    onclick="setAgendaTab('DEPLOYMENT')">
+              Deployments
+            </button>
+            <button id="tabBtnCsat" class="tab-button"
+                    onclick="setAgendaTab('CSAT')">
+              CSAT
+            </button>
+            <button id="tabBtnQualtrix" class="tab-button"
+                    onclick="setAgendaTab('QUALTRIX')">
+              Qualtrix
+            </button>
+            <button id="tabBtnManual" class="tab-button"
+                    onclick="setAgendaTab('MANUAL')">
+              Manual
+            </button>
+          </div>
+
+          <div id="tabDeployments" class="tab-content tab-content-active">
+            <div class="list" id="deployments"></div>
+          </div>
+          <div id="tabCsat" class="tab-content">
+            <div class="list" id="csats"></div>
+          </div>
+          <div id="tabManual" class="tab-content">
+            <div class="list" id="manual-items"></div>
+          </div>
+          <div id="tabQualtrix" class="tab-content">
+            <div class="list" id="qualtrix-list"></div>
+          </div>
+
+          <!-- Deployment Modal -->
+          <div id="deploymentModalBackdrop" class="modal-backdrop">
+            <div class="modal">
+              <h3>Deployment Agenda Item</h3>
+              <div class="modal-subtitle">
+                Provide context for why this deployment belongs on the
+                Healthcare Wellness Leadership agenda.
+                <br>
+                Fields marked <span class="required">*</span> are required.
+              </div>
+              <div id="deploymentModalBody"></div>
+              <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeDeploymentModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveDeploymentModal()">Save to Agenda</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CSAT Modal -->
+          <div id="csatModalBackdrop" class="modal-backdrop">
+            <div class="modal">
+              <h3>CSAT Agenda Item</h3>
+              <div class="modal-subtitle">
+                Capture the key narrative and outcome for this CSAT item
+                on the Healthcare Wellness Leadership agenda.
+                <br>
+                Fields marked <span class="required">*</span> are required.
+              </div>
+              <div id="csatModalBody"></div>
+              <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeCsatModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveCsatModal()">Save to Agenda</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Qualtrix Modal -->
+          <div id="qualtrixModalBackdrop" class="modal-backdrop">
+            <div class="modal">
+              <h3>Qualtrix Agenda Item</h3>
+              <div class="modal-subtitle">
+                Provide context for why this Qualtrix item belongs on
+                the Healthcare Wellness Leadership agenda.
+                <br>
+                Fields marked <span class="required">*</span> are required.
+              </div>
+              <div id="qualtrixModalBody"></div>
+              <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeQualtrixModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveQualtrixModal()">Save to Agenda</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Manual Item Modal -->
+          <div id="manualModalBackdrop" class="modal-backdrop">
+            <div class="modal">
+              <h3>Manual Agenda Item</h3>
+              <div class="modal-subtitle">
+                Fill out this form to add a custom item to the Healthcare
+                Wellness Leadership agenda.
+                <br>
+                Fields marked <span class="required">*</span> are required.
+              </div>
+              <div id="manualModalBody">
+                <div class="field">
+                  <label>Account / Topic</label>
+                  <input type="text" id="manualAccount">
+                </div>
+                <div class="field">
+                  <label>Topic Category<span class="required">*</span></label>
+                  <select id="manualCategory">
+                    <option value="DEPLOYMENT">Deployment</option>
+                    <option value="CSAT">CSAT</option>
+                    <option value="QUALTRIX">Qualtrix</option>
+                    <option value="BUDGET_EAC">EAC / Budget</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Lead<span class="required">*</span></label>
+                  <input type="text" id="manualLead">
+                </div>
+                <div class="field">
+                  <label>Current State</label>
+                  <textarea id="manualCurrent"></textarea>
+                </div>
+                <div class="field">
+                  <label>Desired Outcome<span class="required">*</span></label>
+                  <textarea id="manualDesired"></textarea>
+                </div>
+                <div class="field">
+                  <label>Future State<span class="required">*</span></label>
+                  <textarea id="manualFuture"></textarea>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeManualModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveManualModal()">Save to Agenda</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Preview Modal -->
+          <div id="previewModalBackdrop" class="modal-backdrop">
+            <div class="modal">
+              <h3>Healthcare Wellness Leadership Agenda Preview</h3>
+              <div class="modal-subtitle">
+                Review the assembled Healthcare Wellness Leadership agenda
+                as it will appear in HTML / PDF.
+              </div>
+              <iframe id="previewFrameModal"></iframe>
+              <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closePreviewModal()">Close</button>
+              </div>
+            </div>
+          </div>
+        </div> <!-- end .card -->
+
+        <script>
+          let deployments = [];
+          let csats = [];
+          let qualtrixItems = [];
+          let wowItems = [];
+
+          let deploymentSelections = [];
+          let csatSelections = [];
+          let manualItems = [];
+          let qualtrixSelections = [];
+          let wowSelections = [];
+
+          let currentDeploymentIndex = null;
+          let currentCsatIndex = null;
+          let currentQualtrixIndex = null;
+          let currentWowIndex = null;
+          let currentManualIndex = null; // for manual edit
+
+          let deploymentModalFromCheckbox = false;
+          let csatModalFromCheckbox = false;
+          let qualtrixModalFromCheckbox = false;
+          let wowModalFromCheckbox = false;
+
+          let currentAgendaTab = 'DEPLOYMENT';
+
+          function setAgendaTab(tab) {
+            currentAgendaTab = tab;
+
+            const tabBtnDep = document.getElementById('tabBtnDeployments');
+            const tabBtnCsat = document.getElementById('tabBtnCsat');
+            const tabBtnManual = document.getElementById('tabBtnManual');
+            const tabBtnQualtrix = document.getElementById('tabBtnQualtrix');
+            const tabBtnWowBudget = document.getElementById('tabBtnWowBudget');
+            const tabBtnWowInvest = document.getElementById('tabBtnWowInvest');
+
+            const tabDep = document.getElementById('tabDeployments');
+            const tabCsat = document.getElementById('tabCsat');
+            const tabManual = document.getElementById('tabManual');
+            const tabQual = document.getElementById('tabQualtrix');
+            const tabWowBudget = document.getElementById('tabWowBudget');
+            const tabWowInvest = document.getElementById('tabWowInvest');
+
+            [
+              tabBtnDep,
+              tabBtnCsat,
+              tabBtnManual,
+              tabBtnQualtrix,
+              tabBtnWowBudget,
+              tabBtnWowInvest
+            ].forEach(b => { if (b) b.classList.remove('tab-button-active'); });
+
+            [
+              tabDep,
+              tabCsat,
+              tabManual,
+              tabQual,
+              tabWowBudget,
+              tabWowInvest
+            ].forEach(c => { if (c) c.classList.remove('tab-content-active'); });
+
+            if (tab === 'DEPLOYMENT') {
+              tabBtnDep.classList.add('tab-button-active');
+              tabDep.classList.add('tab-content-active');
+            } else if (tab === 'CSAT') {
+              tabBtnCsat.classList.add('tab-button-active');
+              tabCsat.classList.add('tab-content-active');
+            } else if (tab === 'MANUAL') {
+              tabBtnManual.classList.add('tab-button-active');
+              tabManual.classList.add('tab-content-active');
+            } else if (tab === 'QUALTRIX') {
+              tabBtnQualtrix.classList.add('tab-button-active');
+              tabQual.classList.add('tab-content-active');
+            } else if (tab === 'WOW_BUDGET') {
+              if (tabBtnWowBudget && tabWowBudget) {
+                tabBtnWowBudget.classList.add('tab-button-active');
+                tabWowBudget.classList.add('tab-content-active');
+              }
+            }
+          }
+
+          function init() {
+            google.script.run
+              .withSuccessHandler(data => {
+                deployments = (data.deployments || []).slice();
+                csats = (data.csats || []).slice();
+                qualtrixItems = (data.qualtrix || []).slice();
+                wowItems = (data.wow || []).slice();
+
+                const agendaSelections = data.agendaSelections || [];
+
+                // Filter out Evisort / Hiredscore deployments
+                deployments = deployments.filter(d => {
+                  const name = (d.title || '').toLowerCase();
+                  return !name.includes('evisort') && !name.includes('hiredscore');
+                });
+
+                // Sort deployments by health ascending (string compare)
+                deployments.sort((a, b) => {
+                  const ha = (a.healthStatus || '').toString();
+                  const hb = (b.healthStatus || '').toString();
+                  return ha.localeCompare(hb);
+                });
+
+                // Sort CSAT by health descending
+                const score = status => {
+                  const s = (status || '').toString().toLowerCase();
+                  if (s === 'unfavorable') return 3;
+                  if (s === 'neutral') return 2;
+                  if (s === 'favorable') return 1;
+                  return 0;
+                };
+                csats.sort((a, b) => score(b.healthStatus) - score(a.healthStatus));
+
+                deploymentSelections = [];
+                csatSelections = [];
+                manualItems = [];
+                qualtrixSelections = [];
+                wowSelections = [];
+
+                agendaSelections.forEach(row => {
+                const source = (row.source || '').toUpperCase();
+
+                // 1) Manual items: detect by ID prefix, regardless of Source
+                if (String(row.id || '').startsWith('MANUAL-')) {
+                  manualItems.push({
+                    id: row.id || '',
+                    account: row.account || '',
+                    lead: row.lead || '',
+                    currentState: row.currentState || '',
+                    desiredOutcome: row.desiredOutcome || '',
+                    futureState: row.futureState || '',
+                    topicSource: source || 'MANUAL',        // CSAT for your Stanford row
+                    addedBy: row.user || 'Previously saved'
+                  });
+
+                // 2) Deployments
+                } else if (source === 'DEPLOYMENT') {
+                  deploymentSelections.push({
+                    id: row.id || '',
+                    account: row.account || '',
+                    deploymentName: row.account || '',
+                    lead: row.lead || '',
+                    currentState: row.currentState || '',
+                    desiredOutcome: row.desiredOutcome || '',
+                    futureState: row.futureState || '',
+                    healthStatus: row.healthStatus || '',
+                    addedBy: row.user || 'Previously saved'
+                  });
+
+                // 3) CSAT
+                } else if (source === 'CSAT') {
+                  csatSelections.push({
+                    id: row.id || '',
+                    account: row.account || '',
+                    csatIndicator: row.healthStatus || '',
+                    lead: row.lead || '',
+                    currentState: row.currentState || '',
+                    desiredOutcome: row.desiredOutcome || '',
+                    futureState: row.futureState || '',
+                    healthStatus: row.healthStatus || '',
+                    addedBy: row.user || 'Previously saved'
+                  });
+
+                // 4) Qualtrix
+                } else if (source === 'QUALTRIX') {
+                  qualtrixSelections.push({
+                    id: row.id || '',
+                    account: row.account || '',
+                    detail: row.currentState || row.desiredOutcome || '',
+                    lead: row.lead || '',
+                    currentState: row.currentState || '',
+                    desiredOutcome: row.desiredOutcome || '',
+                    futureState: row.futureState || '',
+                    healthStatus: row.healthStatus || '',
+                    addedBy: row.user || 'Previously saved'
+                  });
+
+                // 5) Budget / EAC
+                } else if (source === 'BUDGET_EAC') {
+                  wowSelections.push({
+                    id: row.id || '',
+                    project: row.account || '',
+                    lead: row.lead || '',
+                    currentState: row.currentState || '',
+                    desiredOutcome: row.desiredOutcome || '',
+                    futureState: row.futureState || '',
+                    healthStatus: row.healthStatus || '',
+                    addedBy: row.user || 'Previously saved'
+                  });
+                }
+                });
+
+                renderDeploymentList();
+                renderCsatList();
+                renderManualItems();
+                renderQualtrixList();
+                renderWowTabs();
+                updateSummary();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                document.getElementById('summaryBar').style.display = 'flex';
+
+                setAgendaTab('DEPLOYMENT');
+              })
+              .withFailureHandler(err => {
+                document.getElementById('loading').textContent =
+                  'Error loading external system data: ' + err.message;
+                console.error(err);
+              })
+              .getInitialAgendaData();
+          }
+
+          function getReviewerName() {
+            return document.getElementById('reviewerName').value || 'Unknown reviewer';
+          }
+
+          function healthClass(health) {
+            const h = (health || '').toLowerCase();
+            if (h === 'red' || h === 'unfavorable') return 'health-red';
+            if (h === 'yellow' || h === 'neutral') return 'health-yellow';
+            if (h === 'green' || h === 'favorable') return 'health-green';
+            return '';
+          }
+
+          function formatPercent(raw) {
+            if (raw === null || raw === undefined || raw === '') return '';
+            const n = Number(raw);
+            if (isNaN(n)) return String(raw);
+            const value = n > 0 && n < 3 ? n * 100 : n;
+            return value.toFixed(1) + '%';
+          }
+
+          function updateSummary() {
+            const depCount = deploymentSelections.length;
+            const csatCount = csatSelections.length;
+            const manualCount = manualItems.filter(m =>
+              m.account || m.currentState || m.desiredOutcome || m.futureState
+            ).length;
+            const qualCount = qualtrixSelections.length;
+            const wowCount = wowSelections.length;
+            const total = depCount + csatCount + manualCount + qualCount + wowCount;
+
+            document.getElementById('summaryDeployments').textContent = depCount;
+            document.getElementById('summaryCsat').textContent = csatCount;
+            document.getElementById('summaryManual').textContent = manualCount;
+            document.getElementById('summaryTotal').textContent = total;
+          }
+
+          function renderDeploymentList() {
+            const container = document.getElementById('deployments');
+            container.innerHTML = '';
+
+            deployments.forEach((d, idx) => {
+              const sel = deploymentSelections.find(s => s.id === d.id);
+              const isSelected = !!sel;
+              const addedBy = sel ? sel.addedBy : null;
+
+              const div = document.createElement('div');
+              div.className = 'item-row';
+
+              const healthCls = healthClass(d.healthStatus);
+              let agendaLabel = '';
+              if (isSelected) {
+                agendaLabel =
+                  addedBy ? `On agenda and added by ${addedBy}` : 'On agenda';
+              }
+
+              let partnerPillHtml = '';
+              if (d.partner) {
+                const partner = d.partner.trim();
+                const isWps = partner === 'Workday Professional Services';
+                const partnerClass = isWps ? 'pill-partner-wps' : 'pill';
+                partnerPillHtml =
+                  `<span class="${partnerClass}">Partner: ${partner}</span>`;
+              }
+
+              div.innerHTML = `
+                <div class="item-info">
+                  <div class="item-title" title="${d.account} – ${d.title}">
+                    ${d.account} – ${d.title}
+                  </div>
+                  <div class="item-meta">
+                    <span class="pill ${healthCls}">
+                      Health: ${d.healthStatus || 'N/A'}
+                    </span>
+                    ${partnerPillHtml}
+                    ${
+                      agendaLabel
+                        ? `<span class="pill pill-added">${agendaLabel}</span>`
+                        : ''
+                    }
+                  </div>
+                </div>
+                <div class="item-actions">
+                  <label style="font-size:0.75rem; color:${
+                    isSelected ? '#16a34a' : '#6b7280'
+                  };">
+                    <input type="checkbox" ${isSelected ? 'checked' : ''}
+                           onchange="toggleDeploymentCheckbox(${idx}, this.checked)">
+                    On agenda
+                  </label>
+                  <button class="btn btn-secondary"
+                          onclick="openDeploymentModal(${idx}, false)">
+                    ${isSelected ? 'Edit' : 'Details'}
+                  </button>
+                  ${
+                    isSelected
+                      ? `<button class="btn btn-ghost"
+                                 onclick="removeDeploymentSelection('${d.id}')">
+                           Remove
+                         </button>`
+                      : ''
+                  }
+                </div>
+              `;
+              container.appendChild(div);
+            });
+          }
+
+          function renderCsatList() {
+            const container = document.getElementById('csats');
+            container.innerHTML = '';
+
+            csats.forEach((c, idx) => {
+              const sel = csatSelections.find(s => s.id === c.id);
+              const isSelected = !!sel;
+              const addedBy = sel ? sel.addedBy : null;
+
+              const div = document.createElement('div');
+              div.className = 'item-row';
+
+              const healthCls = healthClass(c.healthStatus);
+              let agendaLabel = '';
+              if (isSelected) {
+                agendaLabel =
+                  addedBy ? `On agenda and added by ${addedBy}` : 'On agenda';
+              }
+
+              const csmLabel = c.csm ? `CSM: ${c.csm}` : '';
+              const isHighRisk =
+                String(c.highRiskFlag || '').toLowerCase() === 'true';
+
+              div.innerHTML = `
+                <div class="item-info">
+                  <div class="item-title" title="${c.account}">
+                    ${c.account}
+                  </div>
+                  <div class="item-meta">
+                    <span class="pill ${healthCls}">
+                      CSAT: ${c.healthStatus || 'N/A'}
+                    </span>
+                    ${
+                      isHighRisk
+                        ? `<span class="pill pill-high-risk">High Risk</span>`
+                        : ''
+                    }
+                    ${
+                      csmLabel
+                        ? `<span class="pill">${csmLabel}</span>`
+                        : ''
+                    }
+                    ${
+                      agendaLabel
+                        ? `<span class="pill pill-added">${agendaLabel}</span>`
+                        : ''
+                    }
+                  </div>
+                </div>
+                <div class="item-actions">
+                  <label style="font-size:0.75rem; color:${
+                    isSelected ? '#16a34a' : '#6b7280'
+                  };">
+                    <input type="checkbox" ${isSelected ? 'checked' : ''}
+                           onchange="toggleCsatCheckbox(${idx}, this.checked)">
+                    On agenda
+                  </label>
+                  <button class="btn btn-secondary"
+                          onclick="openCsatModal(${idx}, false)">
+                    ${isSelected ? 'Edit' : 'Details'}
+                  </button>
+                  ${
+                    isSelected
+                      ? `<button class="btn btn-ghost"
+                                 onclick="removeCsatSelection('${c.id}')">
+                           Remove
+                         </button>`
+                      : ''
+                  }
+                </div>
+              `;
+              container.appendChild(div);
+            });
+          }
+
+          function renderManualItems() {
+            const container = document.getElementById('manual-items');
+            container.innerHTML = '';
+
+            const topicLabelMap = {
+              'DEPLOYMENT': 'Deployment',
+              'CSAT': 'CSAT',
+              'QUALTRIX': 'Qualtrix',
+              'BUDGET_EAC': 'Budget / EAC',
+              'MANUAL': 'Manual'
+            };
+
+            manualItems.forEach((m, idx) => {
+              const div = document.createElement('div');
+              div.className = 'item-row';
+
+              const topicSource = m.topicSource || 'MANUAL';
+              const topicLabel = topicLabelMap[topicSource] || 'Manual';
+              const addedBy = m.addedBy || getReviewerName();
+              const agendaLabel = `On agenda and added by ${addedBy}`;
+
+              div.innerHTML = `
+                <div class="item-info">
+                  <div class="item-title" title="${m.account || ''}">
+                    ${m.account || 'Manual Agenda Item'}
+                  </div>
+                  <div class="item-meta">
+                    <span class="pill">Topic: ${topicLabel}</span>
+                    ${
+                      m.lead
+                        ? `<span class="pill">Lead: ${m.lead}</span>`
+                        : `<span class="pill">Lead: (required)</span>`
+                    }
+                    ${
+                      m.desiredOutcome
+                        ? `<span class="pill">Desired Outcome set</span>`
+                        : `<span class="pill">Desired Outcome: (required)</span>`
+                    }
+                    ${
+                      m.futureState
+                        ? `<span class="pill">Future State set</span>`
+                        : `<span class="pill">Future State: (required)</span>`
+                    }
+                    <span class="pill pill-added">${agendaLabel}</span>
+                  </div>
+                </div>
+                <div class="item-actions">
+                  <label style="font-size:0.75rem; color:#16a34a;">
+                    <input type="checkbox" checked
+                          onchange="toggleManualCheckbox(${idx}, this.checked)">
+                    On agenda
+                  </label>
+                  <button class="btn btn-secondary"
+                          onclick="openManualEdit(${idx})">
+                    Edit
+                  </button>
+                  <button class="btn btn-ghost"
+                          onclick="removeManualItem(${idx})">
+                    Remove
+                  </button>
+                </div>
+              `;
+              container.appendChild(div);
+            });
+          }
+
+          function renderQualtrixList() {
+            const container = document.getElementById('qualtrix-list');
+            if (!container) return;
+            container.innerHTML = '';
+
+            qualtrixItems.forEach((q, idx) => {
+              const sel = qualtrixSelections.find(s => s.id === q.id);
+              const isSelected = !!sel;
+              const addedBy = sel ? sel.addedBy : null;
+
+              let agendaLabel = '';
+              if (isSelected) {
+                agendaLabel =
+                  addedBy ? `On agenda and added by ${addedBy}` : 'On agenda';
+              }
+
+              const div = document.createElement('div');
+              div.className = 'item-row';
+
+              div.innerHTML = `
+                <div class="item-info">
+                  <div class="item-title" title="${q.account}">
+                    ${q.account}
+                  </div>
+                  <div class="item-meta">
+                    <span class="pill">Source: Qualtrix</span>
+                    ${
+                      q.detail
+                        ? `<span class="pill">Detail: ${q.detail}</span>`
+                        : ''
+                    }
+                    ${
+                      q.colC
+                        ? `<span class="pill">EM: ${q.colC}</span>`
+                        : ''
+                    }
+                    ${
+                      q.colI
+                        ? `<span class="pill">I: ${q.colI}</span>`
+                        : ''
+                    }
+                    ${
+                      q.colJ
+                        ? `<span class="pill">Score: ${q.colJ}</span>`
+                        : ''
+                    }
+                    ${
+                      q.colK
+                        ? `<span class="pill">K: ${q.colK}</span>`
+                        : ''
+                    }
+                    ${
+                      q.colM
+                        ? `<span class="pill">DD: ${q.colM}</span>`
+                        : ''
+                    }
+                    ${
+                      agendaLabel
+                        ? `<span class="pill pill-added">${agendaLabel}</span>`
+                        : ''
+                    }
+                  </div>
+                </div>
+                <div class="item-actions">
+                  <label style="font-size:0.75rem; color:${
+                    isSelected ? '#16a34a' : '#6b7280'
+                  };">
+                    <input type="checkbox" ${isSelected ? 'checked' : ''}
+                           onchange="toggleQualtrixCheckbox(${idx}, this.checked)">
+                    On agenda
+                  </label>
+                  <button class="btn btn-secondary"
+                          onclick="openQualtrixModal(${idx}, false)">
+                    ${isSelected ? 'Edit' : 'Details'}
+                  </button>
+                  ${
+                    isSelected
+                      ? `<button class="btn btn-ghost"
+                                 onclick="removeQualtrixSelection('${q.id}')">
+                           Remove
+                         </button>`
+                      : ''
+                  }
+                </div>
+              `;
+              container.appendChild(div);
+            });
+          }
+
+          function renderWowListForContainer(containerId, filterFn) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+
+            const base = wowItems.filter(filterFn);
+            const overBudget = base.filter(w => w.category === 'OVER_BUDGET');
+            const redInvest = base.filter(w => w.category === 'RED_INVESTMENT');
+
+            const makeSection = (title, items) => {
+              if (!items.length) return;
+
+              const header = document.createElement('div');
+              header.className = 'wow-section-header';
+              header.textContent = title;
+              container.appendChild(header);
+
+              items.forEach(w => {
+                const sel = wowSelections.find(s => s.id === w.id);
+                const isSelected = !!sel;
+                const addedBy = sel ? sel.addedBy : null;
+
+                const div = document.createElement('div');
+                div.className = 'item-row';
+
+                const pills = [];
+                if (w.projectOwner) {
+                  pills.push(
+                    `<span class="pill">Owner: ${w.projectOwner}</span>`
+                  );
+                }
+                if (w.deliveryDirector) {
+                  pills.push(
+                    `<span class="pill">Director: ${w.deliveryDirector}</span>`
+                  );
+                }
+
+                if (w.category === 'OVER_BUDGET') {
+                  if (w.pct !== '') {
+                    const pctLabel = formatPercent(w.pct);
+                    pills.push(
+                      `<span class="pill">PCT: <span style="color:#b91c1c;font-weight:600;">${pctLabel}</span></span>`
+                    );
+                  }
+                } else if (w.category === 'RED_INVESTMENT') {
+                  if (w.adjustedBacToEacHrs !== '') {
+                    const hrsLabel = formatPercent(w.adjustedBacToEacHrs);
+                    pills.push(
+                      `<span class="pill">Adj BAC→EAC Hrs: <span style="color:#b91c1c;font-weight:600;">${hrsLabel}</span></span>`
+                    );
+                  }
+                  if (w.adjustedBacToEacPct !== '') {
+                    const pctLabel = formatPercent(w.adjustedBacToEacPct);
+                    pills.push(
+                      `<span class="pill">Adj BAC→EAC %: <span style="color:#b91c1c;font-weight:600;">${pctLabel}</span></span>`
+                    );
+                  }
+                }
+
+                let agendaLabel = '';
+                if (isSelected) {
+                  agendaLabel =
+                    addedBy ? `On agenda and added by ${addedBy}` : 'On agenda';
+                  pills.push(
+                    `<span class="pill pill-added">${agendaLabel}</span>`
+                  );
+                }
+
+                const idxGlobal = wowItems.indexOf(w);
+
+                div.innerHTML = `
+                  <div class="item-info">
+                    <div class="item-title" title="${w.project}">
+                      ${w.project || 'Budget / EAC Item'}
+                    </div>
+                    <div class="item-meta">
+                      <span class="pill">Source: Budget / EAC</span>
+                      ${pills.join(' ')}
+                    </div>
+                  </div>
+                  <div class="item-actions">
+                    <label style="font-size:0.75rem; color:${
+                      isSelected ? '#16a34a' : '#6b7280'
+                    };">
+                      <input type="checkbox" ${isSelected ? 'checked' : ''}
+                             onchange="toggleWowCheckbox(${idxGlobal}, this.checked)">
+                      On agenda
+                    </label>
+                    <button class="btn btn-secondary"
+                            onclick="openWowModal(${idxGlobal}, false)">
+                      ${isSelected ? 'Edit' : 'Details'}
+                    </button>
+                    ${
+                      isSelected
+                        ? `<button class="btn btn-ghost"
+                                   onclick="removeWowSelection('${w.id}')">
+                             Remove
+                           </button>`
+                        : ''
+                    }
+                  </div>
+                `;
+                container.appendChild(div);
+              });
+            };
+
+            makeSection(
+              'Over Budget Projects (EAC > 105% of BAC)',
+              overBudget
+            );
+            makeSection('Red Investment Projects', redInvest);
+          }
+
+          function renderWowTabs() {
+            renderWowListForContainer(
+              'wow-budget-list',
+              w => String(w.wellnessInvestment || '') === 'NA'
+            );
+            renderWowListForContainer(
+              'wow-invest-list',
+              w => String(w.wellnessInvestment || '') === 'Investment'
+            );
+          }
+
+          function openManualModal() {
+            currentManualIndex = null;
+            document.getElementById('manualAccount').value = '';
+            document.getElementById('manualCategory').value = 'DEPLOYMENT';
+            document.getElementById('manualLead').value = '';
+            document.getElementById('manualCurrent').value = '';
+            document.getElementById('manualDesired').value = '';
+            document.getElementById('manualFuture').value = '';
+            document.getElementById('manualModalBackdrop').style.display = 'flex';
+          }
+
+          function openManualEdit(idx) {
+            const m = manualItems[idx];
+            if (!m) return;
+            currentManualIndex = idx;
+
+            document.getElementById('manualAccount').value = m.account || '';
+            document.getElementById('manualCategory').value =
+              m.topicSource || 'MANUAL';
+            document.getElementById('manualLead').value = m.lead || '';
+            document.getElementById('manualCurrent').value = m.currentState || '';
+            document.getElementById('manualDesired').value = m.desiredOutcome || '';
+            document.getElementById('manualFuture').value = m.futureState || '';
+
+            document.getElementById('manualModalBackdrop').style.display = 'flex';
+          }
+
+          function closeManualModal() {
+            currentManualIndex = null;
+            document.getElementById('manualModalBackdrop').style.display = 'none';
+          }
+
+          function saveManualModal() {
+            const account = document.getElementById('manualAccount').value || '';
+            const topicSource = document.getElementById('manualCategory').value;
+            const lead = document.getElementById('manualLead').value.trim();
+            const currentState =
+              document.getElementById('manualCurrent').value || '';
+            const desiredOutcome =
+              document.getElementById('manualDesired').value.trim();
+            const futureState =
+              document.getElementById('manualFuture').value.trim();
+
+            if (!lead || !desiredOutcome || !futureState) {
+              alert(
+                'Please enter Lead, Desired Outcome, and Future State before saving this manual item to the agenda.'
+              );
+              return;
+            }
+            if (!(account || currentState || desiredOutcome || futureState)) {
+              alert('Please enter at least one field for the manual agenda item.');
+              return;
+            }
+
+            const addedBy = getReviewerName();
+
+            if (currentManualIndex == null) {
+              const id =
+                'MANUAL-' + Date.now() + '-' +
+                Math.random().toString(36).slice(2, 8);
+
+              const item = {
+                id: id,
+                account: account,
+                lead: lead,
+                currentState: currentState,
+                desiredOutcome: desiredOutcome,
+                futureState: futureState,
+                topicSource: topicSource,
+                addedBy: addedBy
+              };
+              manualItems.push(item);
+
+              const agendaItem = {
+                source: topicSource,
+                id: id,
+                account: account,
+                lead: lead,
+                currentState: currentState,
+                desiredOutcome: desiredOutcome,
+                futureState: futureState,
+                healthStatus: '',
+                user: addedBy
+              };
+
+              google.script.run
+                .withFailureHandler(err => {
+                  alert('Error saving manual item to agenda: ' + err.message);
+                })
+                .upsertAgendaItem(agendaItem);
+            } else {
+              const item = manualItems[currentManualIndex];
+              item.account = account;
+              item.lead = lead;
+              item.currentState = currentState;
+              item.desiredOutcome = desiredOutcome;
+              item.futureState = futureState;
+              item.topicSource = topicSource;
+              item.addedBy = item.addedBy || addedBy;
+
+              const agendaItem = {
+                source: topicSource,
+                id: item.id,
+                account: item.account,
+                lead: item.lead,
+                currentState: item.currentState,
+                desiredOutcome: item.desiredOutcome,
+                futureState: item.futureState,
+                healthStatus: '',
+                user: item.addedBy
+              };
+
+              google.script.run
+                .withFailureHandler(err => {
+                  alert('Error updating manual item on agenda: ' + err.message);
+                })
+                .upsertAgendaItem(agendaItem);
+            }
+
+            closeManualModal();
+            renderManualItems();
+            updateSummary();
+          }
+
+          function toggleManualCheckbox(idx, checked) {
+            const m = manualItems[idx];
+            if (!m) return;
+            const topicSource = m.topicSource || 'MANUAL';
+            const id = m.id || '';
+
+            if (!checked) {
+              // Remove from agenda & Manual panel
+              manualItems.splice(idx, 1);
+              renderManualItems();
+              updateSummary();
+
+              if (id) {
+                google.script.run
+                  .withFailureHandler(err => {
+                    alert('Error removing manual item from agenda: ' + err.message);
+                  })
+                  .removeAgendaItem(topicSource, id);
+              }
+            }
+          }
+
+          function removeManualItem(idx) {
+            const m = manualItems[idx];
+            if (!m) return;
+            const id = m.id || '';
+            const topicSource = m.topicSource || 'MANUAL';
+
+            manualItems.splice(idx, 1);
+            renderManualItems();
+            updateSummary();
+
+            if (id) {
+              google.script.run
+                .withFailureHandler(err => {
+                  alert(
+                    'Error removing manual item from agenda: ' + err.message
+                  );
+                })
+                .removeAgendaItem(topicSource, id);
+            }
+          }
+
+          function toggleDeploymentCheckbox(idx, checked) {
+            const d = deployments[idx];
+            if (checked) {
+              const existing = deploymentSelections.find(s => s.id === d.id);
+              if (!existing) {
+                deploymentModalFromCheckbox = true;
+                openDeploymentModal(idx, true);
+              }
+            } else {
+              removeDeploymentSelection(d.id);
+            }
+          }
+
+          function toggleCsatCheckbox(idx, checked) {
+            const c = csats[idx];
+            if (checked) {
+              const existing = csatSelections.find(s => s.id === c.id);
+              if (!existing) {
+                csatModalFromCheckbox = true;
+                openCsatModal(idx, true);
+              }
+            } else {
+              removeCsatSelection(c.id);
+            }
+          }
+
+          function toggleQualtrixCheckbox(idx, checked) {
+            const q = qualtrixItems[idx];
+            if (checked) {
+              const existing = qualtrixSelections.find(s => s.id === q.id);
+              if (!existing) {
+                qualtrixModalFromCheckbox = true;
+                openQualtrixModal(idx, true);
+              }
+            } else {
+              removeQualtrixSelection(q.id);
+            }
+          }
+
+          function toggleWowCheckbox(idx, checked) {
+            const w = wowItems[idx];
+            if (checked) {
+              const existing = wowSelections.find(s => s.id === w.id);
+              if (!existing) {
+                wowModalFromCheckbox = true;
+                openWowModal(idx, true);
+              }
+            } else {
+              removeWowSelection(w.id);
+            }
+          }
+
+          function removeDeploymentSelection(id) {
+            deploymentSelections =
+              deploymentSelections.filter(s => s.id !== id);
+            renderDeploymentList();
+            updateSummary();
+
+            google.script.run
+              .withFailureHandler(err => {
+                alert('Error removing deployment from agenda: ' + err.message);
+              })
+              .removeAgendaItem('DEPLOYMENT', id);
+          }
+
+          function removeCsatSelection(id) {
+            csatSelections =
+              csatSelections.filter(s => s.id !== id);
+            renderCsatList();
+            updateSummary();
+
+            google.script.run
+              .withFailureHandler(err => {
+                alert('Error removing CSAT from agenda: ' + err.message);
+              })
+              .removeAgendaItem('CSAT', id);
+          }
+
+          function removeQualtrixSelection(id) {
+            qualtrixSelections =
+              qualtrixSelections.filter(s => s.id !== id);
+            renderQualtrixList();
+            updateSummary();
+
+            google.script.run
+              .withFailureHandler(err => {
+                alert('Error removing Qualtrix item from agenda: ' + err.message);
+              })
+              .removeAgendaItem('QUALTRIX', id);
+          }
+
+          function removeWowSelection(id) {
+            wowSelections =
+              wowSelections.filter(s => s.id !== id);
+            renderWowTabs();
+            updateSummary();
+
+            google.script.run
+              .withFailureHandler(err => {
+                alert('Error removing Budget / EAC item from agenda: ' + err.message);
+              })
+              .removeAgendaItem('BUDGET_EAC', id);
+          }
+
+          function openDeploymentModal(idx, fromCheckbox) {
+            currentDeploymentIndex = idx;
+            deploymentModalFromCheckbox = !!fromCheckbox;
+
+            const d = deployments[idx];
+            let existing = deploymentSelections.find(s => s.id === d.id);
+            if (!existing) {
+              existing = {
+                id: d.id,
+                account: d.account,
+                deploymentName: d.title,
+                lead: '',
+                currentState: d.summary || '',
+                desiredOutcome: '',
+                futureState: '',
+                healthStatus: d.healthStatus || '',
+                addedBy: getReviewerName()
+              };
+            }
+
+            const partner = d.partner || '';
+
+            const container =
+              document.getElementById('deploymentModalBody');
+            container.innerHTML = `
+              <div class="field">
+                <label>Account</label>
+                <input type="text" id="depAccount"
+                       class="readonly"
+                       value="${existing.account || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Deployment Name</label>
+                <input type="text" id="depName"
+                       class="readonly"
+                       value="${existing.deploymentName || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Deployment Partner</label>
+                <input type="text" id="depPartner"
+                       class="readonly"
+                       value="${partner}" readonly>
+              </div>
+              <div class="field">
+                <label>Health</label>
+                <input type="text" id="depHealth"
+                       class="readonly"
+                       value="${existing.healthStatus || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>
+                  Lead<span class="required">*</span>
+                  (who will speak to this for Healthcare Wellness Leadership?)
+                </label>
+                <input type="text" id="depLead"
+                       value="${existing.lead || ''}">
+              </div>
+              <div class="field">
+                <label>Current State (what’s happening now?)</label>
+                <textarea id="depCurrent">
+${existing.currentState || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Desired Outcome<span class="required">*</span>
+                  for this Healthcare Wellness Leadership meeting
+                </label>
+                <textarea id="depDesired">
+${existing.desiredOutcome || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Future State<span class="required">*</span> / Next Steps
+                </label>
+                <textarea id="depFuture">
+${existing.futureState || ''}</textarea>
+              </div>
+            `;
+
+            document.getElementById('deploymentModalBackdrop')
+              .style.display = 'flex';
+          }
+
+          function closeDeploymentModal() {
+            const d =
+              currentDeploymentIndex != null
+                ? deployments[currentDeploymentIndex]
+                : null;
+
+            currentDeploymentIndex = null;
+            document.getElementById('deploymentModalBackdrop')
+              .style.display = 'none';
+
+            if (deploymentModalFromCheckbox && d) {
+              const exists =
+                deploymentSelections.some(s => s.id === d.id);
+              if (!exists) {
+                renderDeploymentList();
+                updateSummary();
+              }
+            }
+            deploymentModalFromCheckbox = false;
+          }
+
+          function saveDeploymentModal() {
+            if (currentDeploymentIndex == null) return;
+            const d = deployments[currentDeploymentIndex];
+
+            const account =
+              document.getElementById('depAccount').value;
+            const deploymentName =
+              document.getElementById('depName').value;
+            const lead =
+              document.getElementById('depLead').value.trim();
+            const currentState =
+              document.getElementById('depCurrent').value;
+            const desiredOutcome =
+              document.getElementById('depDesired').value.trim();
+            const futureState =
+              document.getElementById('depFuture').value.trim();
+            const healthStatus =
+              document.getElementById('depHealth').value;
+
+            if (!lead || !desiredOutcome || !futureState) {
+              alert(
+                'Please enter Lead, Desired Outcome, and Future State before ' +
+                'saving this deployment to the agenda.'
+              );
+              return;
+            }
+
+            const existingSel =
+              deploymentSelections.find(s => s.id === d.id);
+            const addedBy =
+              existingSel && existingSel.addedBy
+                ? existingSel.addedBy
+                : getReviewerName();
+
+            const sel = {
+              id: d.id,
+              account: account,
+              deploymentName: deploymentName,
+              lead: lead,
+              currentState: currentState,
+              desiredOutcome: desiredOutcome,
+              futureState: futureState,
+              healthStatus: healthStatus,
+              addedBy: addedBy
+            };
+
+            const idxExisting =
+              deploymentSelections.findIndex(s => s.id === sel.id);
+            if (idxExisting >= 0) {
+              deploymentSelections[idxExisting] = sel;
+            } else {
+              deploymentSelections.push(sel);
+            }
+
+            const agendaItem = {
+              source: 'DEPLOYMENT',
+              id: sel.id,
+              account: sel.account,
+              lead: sel.lead,
+              currentState: sel.currentState,
+              desiredOutcome: sel.desiredOutcome,
+              futureState: sel.futureState,
+              healthStatus: sel.healthStatus,
+              user: sel.addedBy
+            };
+
+            google.script.run
+              .withFailureHandler(err => {
+                alert('Error saving deployment to agenda: ' + err.message);
+              })
+              .upsertAgendaItem(agendaItem);
+
+            closeDeploymentModal();
+            renderDeploymentList();
+            updateSummary();
+          }
+
+          function openCsatModal(idx, fromCheckbox) {
+            currentCsatIndex = idx;
+            csatModalFromCheckbox = !!fromCheckbox;
+
+            const c = csats[idx];
+            let existing = csatSelections.find(s => s.id === c.id);
+            if (!existing) {
+              existing = {
+                id: c.id,
+                account: c.account,
+                csatIndicator: c.healthStatus || '',
+                lead: '',
+                currentState: c.wellnessUpdate || c.summaryOfIssues || '',
+                desiredOutcome: '',
+                futureState: '',
+                healthStatus: c.healthStatus || '',
+                addedBy: getReviewerName()
+              };
+            }
+
+            const csm = c.csm || '';
+
+            const container = document.getElementById('csatModalBody');
+            container.innerHTML = `
+              <div class="field">
+                <label>Account</label>
+                <input type="text" id="csAccount"
+                       class="readonly"
+                       value="${existing.account || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>CSAT Indicator</label>
+                <input type="text" id="csIndicator"
+                       class="readonly"
+                       value="${existing.csatIndicator || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>CSM</label>
+                <input type="text"
+                       class="readonly"
+                       value="${csm}" readonly>
+              </div>
+              <div class="field">
+                <label>
+                  Lead<span class="required">*</span>
+                  (who will speak to this for Healthcare Wellness Leadership?)
+                </label>
+                <input type="text" id="csLead"
+                       value="${existing.lead || ''}">
+              </div>
+              <div class="field">
+                <label>Current State (what’s happening now?)</label>
+                <textarea id="csCurrent">
+${existing.currentState || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Desired Outcome<span class="required">*</span>
+                  for this Healthcare Wellness Leadership meeting
+                </label>
+                <textarea id="csDesired">
+${existing.desiredOutcome || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Future State<span class="required">*</span> / Next Steps
+                </label>
+                <textarea id="csFuture">
+${existing.futureState || ''}</textarea>
+              </div>
+            `;
+
+            document.getElementById('csatModalBackdrop').style.display = 'flex';
+          }
+
+          function closeCsatModal() {
+            const c =
+              currentCsatIndex != null ? csats[currentCsatIndex] : null;
+            currentCsatIndex = null;
+            document.getElementById('csatModalBackdrop')
+              .style.display = 'none';
+
+            if (csatModalFromCheckbox && c) {
+              const exists =
+                csatSelections.some(s => s.id === c.id);
+              if (!exists) {
+                renderCsatList();
+                updateSummary();
+              }
+            }
+            csatModalFromCheckbox = false;
+          }
+
+          function saveCsatModal() {
+            if (currentCsatIndex == null) return;
+            const c = csats[currentCsatIndex];
+
+            const account =
+              document.getElementById('csAccount').value;
+            const indicator =
+              document.getElementById('csIndicator').value;
+            const lead =
+              document.getElementById('csLead').value.trim();
+            const currentState =
+              document.getElementById('csCurrent').value;
+            const desiredOutcome =
+              document.getElementById('csDesired').value.trim();
+            const futureState =
+              document.getElementById('csFuture').value.trim();
+
+            if (!lead || !desiredOutcome || !futureState) {
+              alert(
+                'Please enter Lead, Desired Outcome, and Future State before ' +
+                'saving this CSAT item to the agenda.'
+              );
+              return;
+            }
+
+            const existingSel =
+              csatSelections.find(s => s.id === c.id);
+            const addedBy =
+              existingSel && existingSel.addedBy
+                ? existingSel.addedBy
+                : getReviewerName();
+
+            const sel = {
+              id: c.id,
+              account: account,
+              csatIndicator: indicator,
+              lead: lead,
+              currentState: currentState,
+              desiredOutcome: desiredOutcome,
+              futureState: futureState,
+              healthStatus: indicator,
+              addedBy: addedBy
+            };
+
+            const idxExisting =
+              csatSelections.findIndex(s => s.id === sel.id);
+            if (idxExisting >= 0) {
+              csatSelections[idxExisting] = sel;
+            } else {
+              csatSelections.push(sel);
+            }
+
+            const agendaItem = {
+              source: 'CSAT',
+              id: sel.id,
+              account: sel.account,
+              lead: sel.lead,
+              currentState: sel.currentState,
+              desiredOutcome: sel.desiredOutcome,
+              futureState: sel.futureState,
+              healthStatus: sel.healthStatus,
+              user: sel.addedBy
+            };
+
+            google.script.run
+              .withFailureHandler(err => {
+                alert('Error saving CSAT item to agenda: ' + err.message);
+              })
+              .upsertAgendaItem(agendaItem);
+
+            closeCsatModal();
+            renderCsatList();
+            updateSummary();
+          }
+
+                    function openQualtrixModal(idx, fromCheckbox) {
+            currentQualtrixIndex = idx;
+            qualtrixModalFromCheckbox = !!fromCheckbox;
+
+            const q = qualtrixItems[idx];
+            let existing = qualtrixSelections.find(s => s.id === q.id);
+            if (!existing) {
+              existing = {
+                id: q.id,
+                account: q.account,
+                detail: q.detail || '',
+                lead: '',
+                currentState: q.detail || '',
+                desiredOutcome: '',
+                futureState: '',
+                healthStatus: '',
+                addedBy: getReviewerName()
+              };
+            }
+
+            const container =
+              document.getElementById('qualtrixModalBody');
+            container.innerHTML = `
+              <div class="field">
+                <label>Account</label>
+                <input type="text" id="qxAccount"
+                       class="readonly"
+                       value="${existing.account || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Column B</label>
+                <input type="text"
+                       class="readonly"
+                       value="${q.account || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>EM (Column C)</label>
+                <input type="text"
+                       class="readonly"
+                       value="${q.colC || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Detail (Column F)</label>
+                <textarea id="qxDetail" class="readonly" readonly>
+${existing.detail || q.detail || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>Column I</label>
+                <input type="text"
+                       class="readonly"
+                       value="${q.colI || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Score (Column J)</label>
+                <input type="text"
+                       class="readonly"
+                       value="${q.colJ || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Column K</label>
+                <input type="text"
+                       class="readonly"
+                       value="${q.colK || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>DD (Column M)</label>
+                <input type="text"
+                       class="readonly"
+                       value="${q.colM || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>
+                  Lead<span class="required">*</span>
+                  (who will speak to this for Healthcare Wellness Leadership?)
+                </label>
+                <input type="text" id="qxLead"
+                       value="${existing.lead || ''}">
+              </div>
+              <div class="field">
+                <label>Current State (what’s happening now?)</label>
+                <textarea id="qxCurrent">
+${existing.currentState || q.detail || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Desired Outcome<span class="required">*</span>
+                  for this Healthcare Wellness Leadership meeting
+                </label>
+                <textarea id="qxDesired">
+${existing.desiredOutcome || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Future State<span class="required">*</span> / Next Steps
+                </label>
+                <textarea id="qxFuture">
+${existing.futureState || ''}</textarea>
+              </div>
+            `;
+
+            document.getElementById('qualtrixModalBackdrop')
+              .style.display = 'flex';
+          }
+
+          function closeQualtrixModal() {
+            const q =
+              currentQualtrixIndex != null
+                ? qualtrixItems[currentQualtrixIndex]
+                : null;
+            currentQualtrixIndex = null;
+            document.getElementById('qualtrixModalBackdrop')
+              .style.display = 'none';
+
+            if (qualtrixModalFromCheckbox && q) {
+              const exists =
+                qualtrixSelections.some(s => s.id === q.id);
+              if (!exists) {
+                renderQualtrixList();
+                updateSummary();
+              }
+            }
+            qualtrixModalFromCheckbox = false;
+          }
+
+          function saveQualtrixModal() {
+            if (currentQualtrixIndex == null) return;
+            const q = qualtrixItems[currentQualtrixIndex];
+
+            const account =
+              document.getElementById('qxAccount').value;
+            const detail =
+              document.getElementById('qxDetail').value;
+            const lead =
+              document.getElementById('qxLead').value.trim();
+            const currentState =
+              document.getElementById('qxCurrent').value;
+            const desiredOutcome =
+              document.getElementById('qxDesired').value.trim();
+            const futureState =
+              document.getElementById('qxFuture').value.trim();
+
+            if (!lead || !desiredOutcome || !futureState) {
+              alert(
+                'Please enter Lead, Desired Outcome, and Future State before ' +
+                'saving this Qualtrix item to the agenda.'
+              );
+            } else {
+              const existingSel =
+                qualtrixSelections.find(s => s.id === q.id);
+              const addedBy =
+                existingSel && existingSel.addedBy
+                  ? existingSel.addedBy
+                  : getReviewerName();
+
+              const sel = {
+                id: q.id,
+                account: account,
+                detail: detail,
+                lead: lead,
+                currentState: currentState,
+                desiredOutcome: desiredOutcome,
+                futureState: futureState,
+                healthStatus: '',
+                addedBy: addedBy
+              };
+
+              const idxExisting =
+                qualtrixSelections.findIndex(s => s.id === sel.id);
+              if (idxExisting >= 0) {
+                qualtrixSelections[idxExisting] = sel;
+              } else {
+                qualtrixSelections.push(sel);
+              }
+
+              const agendaItem = {
+                source: 'QUALTRIX',
+                id: sel.id,
+                account: sel.account,
+                lead: sel.lead,
+                currentState: sel.currentState,
+                desiredOutcome: sel.desiredOutcome,
+                futureState: sel.futureState,
+                healthStatus: sel.healthStatus,
+                user: sel.addedBy
+              };
+
+              google.script.run
+                .withFailureHandler(err => {
+                  alert('Error saving Qualtrix item to agenda: ' + err.message);
+                })
+                .upsertAgendaItem(agendaItem);
+
+              closeQualtrixModal();
+              renderQualtrixList();
+              updateSummary();
+            }
+          }
+
+          function openWowModal(idx, fromCheckbox) {
+            currentWowIndex = idx;
+            wowModalFromCheckbox = !!fromCheckbox;
+
+            const w = wowItems[idx];
+            let existing = wowSelections.find(s => s.id === w.id);
+            if (!existing) {
+              existing = {
+                id: w.id,
+                project: w.project,
+                lead: '',
+                currentState: '',
+                desiredOutcome: '',
+                futureState: '',
+                healthStatus: '',
+                addedBy: getReviewerName()
+              };
+            }
+
+            const categoryLabel =
+              w.category === 'OVER_BUDGET'
+                ? 'Over Budget Project (EAC > 105% of BAC)'
+                : 'Red Investment Project';
+
+            const metricsHtml =
+              w.category === 'OVER_BUDGET'
+                ? `
+                  <div class="field">
+                    <label>PCT</label>
+                    <input type="text"
+                           class="readonly"
+                           value="${w.pct !== '' ? formatPercent(w.pct) : ''}"
+                           style="color:#b91c1c;font-weight:600;" readonly>
+                  </div>
+                `
+                : `
+                  <div class="field">
+                    <label>Adjusted BAC to EAC Hrs (Column O)</label>
+                    <input type="text"
+                           class="readonly"
+                           value="${
+                             w.adjustedBacToEacHrs !== ''
+                               ? formatPercent(w.adjustedBacToEacHrs)
+                               : ''
+                           }"
+                           style="color:#b91c1c;font-weight:600;" readonly>
+                  </div>
+                  <div class="field">
+                    <label>Adjusted BAC to EAC % (Column P)</label>
+                    <input type="text"
+                           class="readonly"
+                           value="${
+                             w.adjustedBacToEacPct !== ''
+                               ? formatPercent(w.adjustedBacToEacPct)
+                               : ''
+                           }"
+                           style="color:#b91c1c;font-weight:600;" readonly>
+                  </div>
+                `;
+
+            const container = document.getElementById('wowModalBody');
+            container.innerHTML = `
+              <div class="field">
+                <label>Project</label>
+                <input type="text" id="wowProject"
+                       class="readonly"
+                       value="${w.project || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Category</label>
+                <input type="text"
+                       class="readonly"
+                       value="${categoryLabel}" readonly>
+              </div>
+              <div class="field">
+                <label>Project Owner</label>
+                <input type="text"
+                       class="readonly"
+                       value="${w.projectOwner || ''}" readonly>
+              </div>
+              <div class="field">
+                <label>Delivery Director Sponsor</label>
+                <input type="text"
+                       class="readonly"
+                       value="${w.deliveryDirector || ''}" readonly>
+              </div>
+              ${metricsHtml}
+              <div class="field">
+                <label>
+                  Lead<span class="required">*</span>
+                  (who will speak to this for Healthcare Wellness Leadership?)
+                </label>
+                <input type="text" id="wowLead" value="${existing.lead || ''}">
+              </div>
+              <div class="field">
+                <label>Current State (what’s happening now?)</label>
+                <textarea id="wowCurrent">
+${existing.currentState || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Desired Outcome<span class="required">*</span>
+                  for this Healthcare Wellness Leadership meeting
+                </label>
+                <textarea id="wowDesired">
+${existing.desiredOutcome || ''}</textarea>
+              </div>
+              <div class="field">
+                <label>
+                  Future State<span class="required">*</span> / Next Steps
+                </label>
+                <textarea id="wowFuture">
+${existing.futureState || ''}</textarea>
+              </div>
+            `;
+
+            document.getElementById('wowModalBackdrop').style.display = 'flex';
+          }
+
+          function closeWowModal() {
+            const w =
+              currentWowIndex != null ? wowItems[currentWowIndex] : null;
+            currentWowIndex = null;
+            document.getElementById('wowModalBackdrop').style.display = 'none';
+
+            if (wowModalFromCheckbox && w) {
+              const exists = wowSelections.some(s => s.id === w.id);
+              if (!exists) {
+                renderWowTabs();
+                updateSummary();
+              }
+            }
+            wowModalFromCheckbox = false;
+          }
+
+          function saveWowModal() {
+            if (currentWowIndex == null) return;
+            const w = wowItems[currentWowIndex];
+
+            const project =
+              document.getElementById('wowProject').value;
+            const lead =
+              document.getElementById('wowLead').value.trim();
+            const currentState =
+              document.getElementById('wowCurrent').value;
+            const desiredOutcome =
+              document.getElementById('wowDesired').value.trim();
+            const futureState =
+              document.getElementById('wowFuture').value.trim();
+
+            if (!lead || !desiredOutcome || !futureState) {
+              alert(
+                'Please enter Lead, Desired Outcome, and Future State before ' +
+                'saving this Budget / EAC item to the agenda.'
+              );
+              return;
+            }
+
+            const existingSel = wowSelections.find(s => s.id === w.id);
+            const addedBy =
+              existingSel && existingSel.addedBy
+                ? existingSel.addedBy
+                : getReviewerName();
+
+            const sel = {
+              id: w.id,
+              project: project,
+              lead: lead,
+              currentState: currentState,
+              desiredOutcome: desiredOutcome,
+              futureState: futureState,
+              healthStatus: '',
+              addedBy: addedBy
+            };
+
+            const idxExisting = wowSelections.findIndex(s => s.id === sel.id);
+            if (idxExisting >= 0) {
+              wowSelections[idxExisting] = sel;
+            } else {
+              wowSelections.push(sel);
+            }
+
+            const agendaItem = {
+              source: 'BUDGET_EAC',
+              id: sel.id,
+              account: sel.project,
+              lead: sel.lead,
+              currentState: sel.currentState,
+              desiredOutcome: sel.desiredOutcome,
+              futureState: sel.futureState,
+              healthStatus: sel.healthStatus,
+              user: sel.addedBy
+            };
+
+            google.script.run
+              .withFailureHandler(err => {
+                alert('Error saving Budget / EAC item to agenda: ' + err.message);
+              })
+              .upsertAgendaItem(agendaItem);
+
+            closeWowModal();
+            renderWowTabs();
+            updateSummary();
+          }
+
+          // Build payload for preview/save/export
+          function buildPayload() {
+            const reviewerName = getReviewerName();
+            const cleanedManuals = manualItems.filter(m =>
+              m.account || m.currentState || m.desiredOutcome || m.futureState
+            );
+
+            return {
+              reviewerName: reviewerName,
+              deploymentSelections: deploymentSelections.slice(),
+              csatSelections: csatSelections.slice(),
+              manualItems: cleanedManuals.slice(),   // shallow copy, keeps topicSource
+              qualtrixSelections: qualtrixSelections.slice(),
+              wowSelections: wowSelections.slice()
+            };
+          }
+
+          // Build agenda items for preview/export (grouping)
+          function buildAgendaItemsFromPayload(payload) {
+            const agendaItems = [];
+
+            // Deployments
+            (payload.deploymentSelections || []).forEach(sel => {
+              agendaItems.push({
+                source: 'DEPLOYMENT',
+                id: sel.id || '',
+                account: sel.account || '',
+                lead: sel.lead || '',
+                currentState: sel.currentState || '',
+                desiredOutcome: sel.desiredOutcome || '',
+                futureState: sel.futureState || '',
+                healthStatus: sel.healthStatus || ''
+              });
+            });
+
+            // CSAT
+            (payload.csatSelections || []).forEach(sel => {
+              const status = sel.healthStatus || sel.csatIndicator || '';
+              agendaItems.push({
+                source: 'CSAT',
+                id: sel.id || '',
+                account: sel.account || '',
+                lead: sel.lead || '',
+                currentState: sel.currentState || '',
+                desiredOutcome: sel.desiredOutcome || '',
+                futureState: sel.futureState || '',
+                healthStatus: status
+              });
+            });
+
+            // Manual (use topicSource to group with real topic)
+            (payload.manualItems || []).forEach(m => {
+              const topicSource = m.topicSource || 'MANUAL';
+              agendaItems.push({
+                source: topicSource,
+                id: m.id || '',
+                account: m.account || '',
+                lead: m.lead || '',
+                currentState: m.currentState || '',
+                desiredOutcome: m.desiredOutcome || '',
+                futureState: m.futureState || '',
+                healthStatus: ''
+              });
+            });
+
+            // Qualtrix
+            (payload.qualtrixSelections || []).forEach(sel => {
+              agendaItems.push({
+                source: 'QUALTRIX',
+                id: sel.id || '',
+                account: sel.account || '',
+                lead: sel.lead || '',
+                currentState: sel.currentState || '',
+                desiredOutcome: sel.desiredOutcome || '',
+                futureState: sel.futureState || '',
+                healthStatus: sel.healthStatus || ''
+              });
+            });
+
+            // Budget / EAC (WoW)
+            (payload.wowSelections || []).forEach(sel => {
+              agendaItems.push({
+                source: 'BUDGET_EAC',
+                id: sel.id || '',
+                account: sel.project || '',
+                lead: sel.lead || '',
+                currentState: sel.currentState || '',
+                desiredOutcome: sel.desiredOutcome || '',
+                futureState: sel.futureState || '',
+                healthStatus: sel.healthStatus || ''
+              });
+            });
+
+            return agendaItems;
+          }
+
+          function openPreviewModal(html) {
+            const frame = document.getElementById('previewFrameModal');
+            frame.srcdoc = html;
+            document.getElementById('previewModalBackdrop').style.display = 'flex';
+          }
+
+          function closePreviewModal() {
+            document.getElementById('previewModalBackdrop').style.display = 'none';
+          }
+
+          function buildPreview() {
+            google.script.run
+              .withSuccessHandler(html => {
+                openPreviewModal(html);
+              })
+              .withFailureHandler(err => {
+                alert('Error building agenda preview: ' + err.message);
+              })
+              .buildAgendaPreviewHtmlFromSheet();
+          }
+
+          function saveAll() {
+            const payload = buildPayload();
+
+            google.script.run
+              .withSuccessHandler(res => {
+                alert(
+                  'Saved.\n' +
+                  'Deployment selections: ' + res.deploymentSelectionCount + '\n' +
+                  'CSAT selections: ' + res.csatSelectionCount + '\n' +
+                  'Manual items: ' + res.manualItemCount + '\n' +
+                  'Agenda rows written: ' + res.agendaRowsWritten
+                );
+              })
+              .withFailureHandler(err => {
+                alert('Error saving: ' + err.message);
+              })
+              .saveSelectionsAndAgenda(payload);
+          }
+
+          function exportAsHtml() {
+            google.script.run
+              .withSuccessHandler(html => {
+                const w = window.open();
+                w.document.write(html);
+                w.document.close();
+              })
+              .withFailureHandler(err => {
+                alert('Error exporting HTML: ' + err.message);
+              })
+              .buildAgendaPreviewHtmlFromSheet();
+          }
+
+          function exportAsPdf() {
+            google.script.run
+              .withSuccessHandler(html => {
+                const w = window.open('', '_blank');
+                w.document.write(html);
+                w.document.close();
+              })
+              .withFailureHandler(err => {
+                alert('Error generating PDF: ' + err.message);
+              })
+              .buildAgendaPreviewHtmlFromSheet();
+          }
+
+          window.onload = init;
+        </script>
+      </div> <!-- #app -->
+    </div> <!-- #shell -->
+  </body>
+</html>

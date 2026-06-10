@@ -8,6 +8,9 @@
  *                  consolidation, Manage Overrides added); personalization
  *                  enabled; new goLivesTab, manageOverrides blocks; deployments
  *                  table gains expandable rows and default Health filter preset.
+ *   Phase 3a (v11): salesforce block added; SFDC_DeploymentProductFunctions
+ *                   sheet registered; isPhased / upcomingDates enrichment
+ *                   flows through CoreData → UI.
  *
  * NOTE:
  *   - Assumes the Core library is added as "CoreLib" in Project → Libraries.
@@ -34,7 +37,9 @@ var APP_CONFIG = {
     dashboard:             'Dashboard',
     // Phase 2 sheets
     appUsers:              'AppUsers',
-    ddAssignment:          'DD Assignment'
+    ddAssignment:          'DD Assignment',
+    // Phase 3a: Salesforce deployment product-function detail
+    sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions'
   },
 
   namedRanges: {
@@ -101,6 +106,14 @@ var APP_CONFIG = {
         { label: 'Special Districts', match: ['Special Districts'] }
       ]
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Salesforce enrichment (Phase 3a). Consumed by CoreLib.CoreSalesforce.
+  // upcomingWindowDays: how far ahead to look for product go-live dates.
+  // ---------------------------------------------------------------------------
+  salesforce: {
+    upcomingWindowDays: 90
   },
 
   // ---------------------------------------------------------------------------

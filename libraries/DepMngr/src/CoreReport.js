@@ -989,6 +989,16 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     );
   }
 
+  /**
+   * Phase 3a: Renders the Upcoming Go Lives table.
+   *
+   * For phased rows (isPhased = true):
+   *   The MTP Date cell shows each upcoming date on its own line,
+   *   followed by the product list: "Jun 15, 2026: HCM, Payroll"
+   *
+   * For non-phased rows (legacy or fallback):
+   *   Single date rendered as before; deployment name in the Deployment Names cell.
+   */
   function buildFutureGoLivesHtmlTableFromEffectiveData_(config, tableCfg) {
     var cfg  = CoreConfig.withDefaults(config);
     var rows = CoreReportHelpers.getEffectiveFutureGoLivesForExport_(cfg);
@@ -1004,7 +1014,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       'padding:6px 8px; text-align:left; white-space:nowrap; font-size:11px;';
     var TD_STYLE =
       'border:1px solid #dddddd; padding:5px 8px; ' +
-      'text-align:left; font-size:11px;';
+      'text-align:left; font-size:11px; vertical-align:top;';
 
     var includeIndustry = !!cfg.report.includeIndustryGoLives;
 
@@ -1026,38 +1036,53 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       .map(function (row, ri) {
         var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
 
-        function td(content) {
+        function td(innerHtml, rawText) {
+          var content = (rawText !== undefined)
+            ? CoreUtils.escapeHtml(rawText || '')
+            : innerHtml;
           return (
             '<td style="' + TD_STYLE + ' background-color:' + defaultBg + ';">' +
-            CoreUtils.escapeHtml(content || '') +
+            content +
             '</td>'
           );
         }
 
-        var dateStr = '';
-        if (row.mtpDate) {
-          var d = new Date(row.mtpDate);
-          if (!isNaN(d.getTime())) {
-            dateStr = d.toLocaleDateString('en-US', {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric'
-            });
-          } else {
-            dateStr = row.mtpDate;
-          }
+        function fmtDate(isoStr) {
+          if (!isoStr) return '';
+          var d = new Date(isoStr);
+          if (isNaN(d.getTime())) return isoStr;
+          return d.toLocaleDateString('en-US', {
+            year: 'numeric', month: 'short', day: 'numeric'
+          });
+        }
+
+        var dateCellHtml;
+        if (row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {
+          // Multi-line: each entry is "Date: Product1, Product2"
+          var lines = row.upcomingDates.map(function (ud) {
+            var dateLabel = fmtDate(ud.date);
+            var productLabel = (ud.products && ud.products.length)
+              ? ': ' + ud.products.join(', ')
+              : '';
+            return CoreUtils.escapeHtml(dateLabel + productLabel);
+          });
+          dateCellHtml = td(lines.join('<br>'));
+        } else {
+          // Single date (non-phased or fallback)
+          var singleDate = row.nextGoLiveDate || row.mtpDate || '';
+          dateCellHtml = td(null, fmtDate(singleDate));
         }
 
         var tds = [
-          td(dateStr),
-          td(row.accountName)
+          dateCellHtml,
+          td(null, row.accountName)
         ];
         if (includeIndustry) {
-          tds.push(td(row.industry || ''));
+          tds.push(td(null, row.industry || ''));
         }
         tds.push(
-          td(row.deploymentName),
-          td(row.partner)
+          td(null, row.deploymentName),
+          td(null, row.partner)
         );
 
         return '<tr>' + tds.join('') + '</tr>';

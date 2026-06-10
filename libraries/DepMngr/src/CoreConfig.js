@@ -12,6 +12,8 @@
  *   Phase 1 (v9): no schema additions — design tokens live entirely in CoreUI_Css.
  *   Phase 2 (v10): adds cfg.ui.goLivesTab, cfg.ui.manageOverrides, expands
  *                  cfg.ui.personalization and cfg.ui.deploymentsTable.
+ *   Phase 3a (v11): adds cfg.sheets.sfdcDeploymentProductFunctions and
+ *                   cfg.salesforce block (upcomingWindowDays).
  */
 
 /**
@@ -27,8 +29,14 @@
  * @property {string} healthMonthlySummary
  * @property {string} healthYtdSummary
  * @property {string} dashboard
- * @property {string} appUsers           Phase 2: "AppUsers"
- * @property {string} ddAssignment       Phase 2: "DD Assignment"
+ * @property {string} appUsers                          Phase 2: "AppUsers"
+ * @property {string} ddAssignment                      Phase 2: "DD Assignment"
+ * @property {string} sfdcDeploymentProductFunctions    Phase 3a: "SFDC_DeploymentProductFunctions"
+ */
+
+/**
+ * @typedef {Object} SalesforceConfig  (Phase 3a)
+ * @property {number} upcomingWindowDays  Days ahead to consider for upcoming go-live dates.
  */
 
 // (Other typedefs unchanged from Phase 1 — kept inline below for completeness.)
@@ -171,6 +179,7 @@
  * @property {AppNamedRangesConfig}  namedRanges
  * @property {ColumnsConfig}         columns
  * @property {ReportConfig}          report
+ * @property {SalesforceConfig}      [salesforce]  Phase 3a
  * @property {UIConfig}              [ui]
  */
 
@@ -200,6 +209,16 @@ var CoreConfig = (function () {
     if (!cfg.sheets.dashboard)             cfg.sheets.dashboard             = 'Dashboard';
     if (!cfg.sheets.appUsers)              cfg.sheets.appUsers              = 'AppUsers';
     if (!cfg.sheets.ddAssignment)          cfg.sheets.ddAssignment          = 'DD Assignment';
+    // Phase 3a
+    if (!cfg.sheets.sfdcDeploymentProductFunctions)
+      cfg.sheets.sfdcDeploymentProductFunctions = 'SFDC_DeploymentProductFunctions';
+
+    // -------------------------------------------------------------------------
+    // Salesforce (Phase 3a)
+    // -------------------------------------------------------------------------
+    cfg.salesforce = cfg.salesforce || {};
+    if (cfg.salesforce.upcomingWindowDays === undefined || cfg.salesforce.upcomingWindowDays === null)
+      cfg.salesforce.upcomingWindowDays = 90;
 
     // -------------------------------------------------------------------------
     // Named ranges

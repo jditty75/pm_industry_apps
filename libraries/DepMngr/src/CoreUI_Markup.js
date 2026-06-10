@@ -16,6 +16,10 @@
  *                  Go Lives consolidates into one tab with toggle; Upcoming
  *                  tab markup removed; Manage Overrides tab added; edit modal
  *                  gains classification selector; confirmation modal added.
+ *   Phase 3a (v11): Portfolio Health gains "Phased Go-Lives" KPI tile.
+ *                   Deployment row expanded-detail section updated to show
+ *                   upcomingDates[] for phased rows (rendered by CoreUI_Js.js).
+ *                   Phased pill badge injected by CoreUI_Js.js — no new columns.
  *
  * Approved by Jeff in Phase 2 Design Brief 7joemhuqDkrv on 2026-06-09 14:07 EDT.
  *
@@ -407,6 +411,14 @@ function _CoreUI_Markup_buildPortfolioTab_(ui) {
     '          </div>',
     '          <div class="ph-kpi-sub" id="ph-kpi-red-pct"></div>',
     '          <svg class="ph-spark" id="ph-spark-red" preserveAspectRatio="none"></svg>',
+    '        </div>',
+    // Phase 3a: Phased Go-Lives KPI tile
+    '        <div class="ph-kpi phased" data-key="phased">',
+    '          <div class="ph-kpi-label">Phased Go-Lives</div>',
+    '          <div class="ph-kpi-row">',
+    '            <div class="ph-kpi-value" id="ph-kpi-phased">–</div>',
+    '          </div>',
+    '          <div class="ph-kpi-sub">Upcoming (' + (((ui || {}).goLivesTab || {}).upcomingWindowDays || 90) + ' days)</div>',
     '        </div>',
     '      </div>',
     '      <div class="ph-grid">',

@@ -12,6 +12,10 @@
  *                  rows, dynamic KPI cards, consolidated Go Lives toggle, Manage
  *                  Overrides rendering, bulk clear flow, audit modal, classification
  *                  selectors.
+ *   Phase 3a (v11): deployment row injects "Phased" pill badge when isPhased=true;
+ *                   expanded-row detail shows upcomingDates[] for phased rows;
+ *                   renderPortfolioHealth populates ph-kpi-phased KPI tile;
+ *                   upcoming GoLives view shows multi-date cell for phased rows.
  *
  * Approved by Jeff in Phase 2 Design Brief 7joemhuqDkrv on 2026-06-09 14:07 EDT.
  *
@@ -911,7 +915,12 @@ function renderDeploymentsTable() {
     cells.push('<td><span class="status-badge status-' + row.health.toLowerCase() + '">' + row.health + '</span></td>');
     cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
     if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
-    cells.push('<td>' + escapeHtml(row.deploymentName) + '</td>');
+    // Phase 3a: inject phased pill alongside deployment name
+    var deployNameHtml = escapeHtml(row.deploymentName);
+    if (row.isPhased) {
+      deployNameHtml += ' <span class="phased-pill">Phased</span>';
+    }
+    cells.push('<td>' + deployNameHtml + '</td>');
     cells.push('<td>' + escapeHtml(row.partner) + '</td>');
     if (showEm) cells.push('<td>' + escapeHtml(row.wdEngManager || '') + '</td>');
     cells.push('<td>' + (row.mtpDate ? formatDate(row.mtpDate) : '-') + '</td>');
@@ -952,6 +961,21 @@ function renderExpandedRowDetail_(row, colspan) {
       '<span class="detail-value">' + escapeHtml(f.value) + '</span>' +
       '</div>';
   });
+
+  // Phase 3a: phased deployment upcoming dates
+  if (row.isPhased && row.upcomingDates && row.upcomingDates.length) {
+    var datesHtml = row.upcomingDates.map(function(ud) {
+      var dateStr = ud.date ? formatDate(ud.date) : '—';
+      var productStr = (ud.products && ud.products.length)
+        ? ud.products.join(', ')
+        : '—';
+      return '<div style="margin-bottom:2px;"><strong>' + escapeHtml(dateStr) + '</strong>: ' + escapeHtml(productStr) + '</div>';
+    }).join('');
+    html += '<div class="detail-full-width">' +
+      '<span class="detail-label">Upcoming Go-Live Dates</span>' +
+      '<div class="detail-value">' + datesHtml + '</div>' +
+      '</div>';
+  }
 
   if (row.currentUpdate) {
     html += '<div class="detail-full-width">' +
@@ -1078,7 +1102,7 @@ function renderGoLivesTable() {
     }
 
     // Choose the date field — prefer goLiveDate (Recent) over mtpDate (Upcoming)
-    var dateValue = row.goLiveDate || row.mtpDate || '';
+    var dateValue = row.goLiveDate || row.nextGoLiveDate || row.mtpDate || '';
     // Choose the product/deployment value based on view (or what's populated in All)
     var productOrDeployment;
     if (view === 'recent') {
@@ -1090,10 +1114,27 @@ function renderGoLivesTable() {
     }
 
     var cells = [];
-    cells.push('<td><strong>' + (dateValue ? formatDate(dateValue) : '-') + '</strong></td>');
-    cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
-    if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
-    cells.push('<td>' + escapeHtml(productOrDeployment) + '</td>');
+
+    // Phase 3a: phased upcoming rows show multi-line date cell
+    var isUpcomingRow = (view === 'upcoming') || (view === 'all' && row._isUpcoming);
+    if (isUpcomingRow && row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {
+      var phasedDateHtml = row.upcomingDates.map(function(ud) {
+        var ds = ud.date ? formatDate(ud.date) : '—';
+        var ps = (ud.products && ud.products.length) ? ': ' + ud.products.join(', ') : '';
+        return '<div><strong>' + escapeHtml(ds) + '</strong>' + escapeHtml(ps) + '</div>';
+      }).join('');
+      cells.push('<td style="vertical-align:top;">' + phasedDateHtml + '</td>');
+      // Product/deployment cell: show name + Phased pill
+      cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
+      if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
+      cells.push('<td>' + escapeHtml(productOrDeployment) + ' <span class="phased-pill">Phased</span></td>');
+    } else {
+      cells.push('<td><strong>' + (dateValue ? formatDate(dateValue) : '-') + '</strong></td>');
+      cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
+      if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
+      cells.push('<td>' + escapeHtml(productOrDeployment) + '</td>');
+    }
+
     cells.push('<td>' + escapeHtml(row.partner) + '</td>');
     cells.push('<td><button class="action-btn" onclick="openGoLivesModal(' + index + ')">Edit</button></td>');
     rowsHtml += '<tr>' + cells.join('') + '</tr>';
@@ -1727,6 +1768,14 @@ function renderPortfolioHealth(d) {
   document.getElementById('ph-kpi-green-pct').textContent  = formatPct(d.totals.greenPct);
   document.getElementById('ph-kpi-yellow-pct').textContent = formatPct(d.totals.yellowPct);
   document.getElementById('ph-kpi-red-pct').textContent    = formatPct(d.totals.redPct);
+
+  // Phase 3a: Phased Go-Lives KPI tile
+  var phasedEl = document.getElementById('ph-kpi-phased');
+  if (phasedEl) {
+    phasedEl.textContent = (d.phasedDeployments !== undefined && d.phasedDeployments !== null)
+      ? d.phasedDeployments
+      : '–';
+  }
 
   var hist = d.history || null;
   renderPhTrendAndSpark('total',  hist, '#0F4C81', 'neutral');

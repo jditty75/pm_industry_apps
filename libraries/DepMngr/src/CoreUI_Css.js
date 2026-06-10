@@ -858,6 +858,28 @@ function _CoreUI_Css_getStylesheet() {
     '.audit-action-pill.bulk_clear { background: var(--color-status-red-bg);   color: var(--color-status-red-fg); }',
 
     // =========================================================================
+    // PHASE 3a: Phased pill + Portfolio Health phased KPI tile
+    // =========================================================================
+    // Phased badge — appears inline with deployment name in Deployments tab
+    // and in the GoLives Upcoming tab for multi-date rows.
+    '.phased-pill {',
+    '  display: inline-block;',
+    '  padding: 1px 7px;',
+    '  border-radius: var(--radius-pill);',
+    '  font-size: 10px;',
+    '  font-weight: 700;',
+    '  text-transform: uppercase;',
+    '  letter-spacing: 0.5px;',
+    '  background: #ede9fe;',
+    '  color: #6d28d9;',
+    '  margin-left: 4px;',
+    '  vertical-align: middle;',
+    '  white-space: nowrap;',
+    '}',
+    // Phased KPI tile accent (purple top border)
+    '.ph-kpi.phased::before { background: #6d28d9; }',
+
+    // =========================================================================
     // MODALS (Phase 1) + Phase 2 confirmation modal variant
     // =========================================================================
     '.modal-overlay {',
@@ -1125,7 +1147,7 @@ function _CoreUI_Css_getStylesheet() {
 
     '.ph-kpis {',
     '  display: grid;',
-    '  grid-template-columns: repeat(4, 1fr);',
+    '  grid-template-columns: repeat(5, 1fr);',
     '  gap: 12px;',
     '  margin-bottom: 18px;',
     '}',

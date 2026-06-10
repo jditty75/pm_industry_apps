@@ -16,6 +16,15 @@
  *     are logged but do not throw — the mutation succeeds regardless.
  *   - Bulk-clear endpoints check the current user's role and reject non-PM
  *     callers.
+ *
+ * Phase 3a notes (v11):
+ *   - getUpcomingGoLives() now calls CoreSalesforce.getDeploymentEnrichmentMap()
+ *     to get phased deployment detail. Returns one row per deployment (not per
+ *     account+date). Each row gains: upcomingDates[], isPhased, nextGoLiveDate.
+ *   - getAllDeployments() injects isPhased from the enrichment map so the
+ *     Deployments tab can show the "Phased" pill.
+ *   - Both functions degrade gracefully when the SFDC_DeploymentProductFunctions
+ *     sheet is absent: enrichment map returns {}, fallback path runs unchanged.
  */
 
 var CoreData = (function () {
@@ -356,12 +365,29 @@ var CoreData = (function () {
   /**
    * Phase 2: Returns ALL effective deployments (Red, Yellow, Green) for
    * the Expanded Deployments tab. Caller-side filtering by Health is done in JS.
+   *
+   * Phase 3a: Injects `isPhased` on each row using CoreSalesforce enrichment.
+   * Rows not found in the enrichment map get isPhased = false.
    */
   function getAllDeployments(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var allEffective = getAllEffectiveDeployments_(cfg);
 
-    var sorted = allEffective.sort(function (a, b) {
+    // Phase 3a: enrich with isPhased. Degrade gracefully when sheet is absent.
+    var enrichmentMap = {};
+    try {
+      enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getAllDeployments: CoreSalesforce enrichment failed — ' +
+                 'isPhased will default to false. Error: ' + err);
+    }
+
+    var sorted = allEffective.map(function (row) {
+      var enrichment = enrichmentMap[row.deploymentId];
+      return Object.assign({}, row, {
+        isPhased: enrichment ? !!enrichment.isPhased : false
+      });
+    }).sort(function (a, b) {
       var rank = { 'Red': 0, 'Yellow': 1, 'Green': 2 };
       var ar = rank[a.health] !== undefined ? rank[a.health] : 99;
       var br = rank[b.health] !== undefined ? rank[b.health] : 99;
@@ -491,109 +517,155 @@ var CoreData = (function () {
     return applyViewModeFilter_(cfg, effective, viewModeOpts);
   }
 
+  /**
+   * Phase 3a: Returns upcoming go-live rows for the 90-day window.
+   *
+   * Strategy:
+   *   Pass 1 — deployments found in the CoreSalesforce enrichment map:
+   *     One row per deployment, with upcomingDates[], isPhased, nextGoLiveDate.
+   *   Pass 2 — fallback for deployments NOT in the enrichment map:
+   *     Use Current_MTP_Date__c from ActiveDeployments (preserves Phase 1/2 behavior).
+   *     upcomingDates = single-entry array, isPhased = false.
+   *
+   * GoLivesOverrides (exclusion + partner/date override) are applied in both passes.
+   *
+   * Backward-compatible output shape — adds new fields alongside existing ones:
+   *   { ...existing..., deploymentId, upcomingDates[], isPhased, nextGoLiveDate }
+   *   mtpDate is set to nextGoLiveDate for backward compatibility with callers
+   *   that still use row.mtpDate.
+   */
   function getUpcomingGoLives(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var ss = getSpreadsheet_();
-    var sheet = ss.getSheetByName(cfg.sheets.activeDeployments);
-    if (!sheet) throw new Error('ActiveDeployments sheet not found: ' + cfg.sheets.activeDeployments);
 
-    var lastRow = sheet.getLastRow();
-    if (lastRow < 2) return [];
+    // Get the effective view of all deployments (post-meta + post-overrides).
+    var allEffective = getAllEffectiveDeployments_(cfg);
 
-    var cols = cfg.columns.deployments;
-    var lastCol = sheet.getLastColumn();
-    var usedCols = Math.max(lastCol, cols.DEPLOYMENT_ID);
-    var dataRange = sheet.getRange(2, 1, lastRow - 1, usedCols);
-    var values = dataRange.getValues();
+    // Get GoLives overrides (exclusion, partner override, date override).
+    var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+
+    // Get Salesforce enrichment. Degrade gracefully on any error.
+    var enrichmentMap = {};
+    try {
+      enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getUpcomingGoLives: CoreSalesforce enrichment failed — ' +
+                 'running in fallback-only mode. Error: ' + err);
+    }
 
     var now = new Date();
     now.setHours(0, 0, 0, 0);
-    var ninetyDaysFromNow = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    var windowDays = (cfg.salesforce && cfg.salesforce.upcomingWindowDays) || 90;
+    var windowEnd = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
 
-    var allUpcoming = values
-      .map(function (row, index) {
-        var rawMtp = row[cols.CURRENT_MTP_DATE - 1];
-        var dateObj = null;
-        var dateString = '';
-        if (rawMtp) {
-          dateObj = (rawMtp instanceof Date) ? rawMtp : new Date(rawMtp);
-          if (!isNaN(dateObj.getTime())) {
-            dateString = CoreUtils.formatDateToIsoString(dateObj);
-          }
-        }
-        return {
-          rowIndex:         index + 2,
-          accountName:      String(row[cols.ACCOUNT_NAME - 1] || ''),
-          deploymentName:   String(row[cols.DEPLOYMENT_NAME - 1] || ''),
-          servicesApproach: String(row[cols.SERVICES_APPROACH - 1] || ''),
-          industry:         String(row[cols.INDUSTRY - 1] || ''),
-          partner:          String(row[cols.PARTNER - 1] || ''),
-          stage:            String(row[cols.DEPLOYMENT_STAGE - 1] || ''),
-          health:           String(row[cols.DEPLOYMENT_HEALTH - 1] || ''),
-          dateObj:          dateObj,
-          mtpDateString:    dateString,
-          dam:              String(row[cols.DAM_FULL_NAME - 1] || ''),
-          wdEngManager:     String(row[cols.WD_ENG_MANAGER - 1] || '')
-        };
-      })
-      .filter(function (row) {
-        if (!(row.accountName || row.deploymentName) || !row.dateObj) return false;
-        if (isNaN(row.dateObj.getTime())) return false;
-        return row.dateObj >= now && row.dateObj <= ninetyDaysFromNow;
+    var results = [];
+    var seenDeploymentIds = {};
+
+    // -----------------------------------------------------------------------
+    // Pass 1: enrichment map — one row per deployment with product-function data.
+    // -----------------------------------------------------------------------
+    allEffective.forEach(function (dep) {
+      if (!dep.deploymentId) return;
+
+      var enrichment = enrichmentMap[dep.deploymentId];
+      if (!enrichment) return;
+
+      var ov = goLivesOverrides[dep.accountName] || {};
+      if (ov.exclude) return;
+
+      // Filter upcomingDates to those within the window.
+      var datesInWindow = (enrichment.upcomingDates || []).filter(function (ud) {
+        if (!ud.date) return false;
+        var d = new Date(ud.date);
+        return !isNaN(d.getTime()) && d >= now && d <= windowEnd;
       });
+      if (datesInWindow.length === 0) return;
 
-    var groupedByAccountDate = {};
-    allUpcoming.forEach(function (row) {
-      var key = row.accountName + '||' + row.mtpDateString;
-      if (!groupedByAccountDate[key]) {
-        groupedByAccountDate[key] = {
-          accountName:      row.accountName,
-          industry:         row.industry,
-          dam:              row.dam,
-          wdEngManager:     row.wdEngManager,
-          partner:          row.partner,
-          servicesApproach: row.servicesApproach,
-          stage:            row.stage,
-          health:           row.health,
-          mtpDateString:    row.mtpDateString,
-          dateObj:          row.dateObj,
-          deploymentNames:  []
-        };
-      }
-      if (row.deploymentName && groupedByAccountDate[key].deploymentNames.indexOf(row.deploymentName) === -1) {
-        groupedByAccountDate[key].deploymentNames.push(row.deploymentName);
-      }
+      // Apply override date to nextGoLiveDate if set.
+      var nextGoLiveDate = ov.overrideDate
+        ? CoreUtils.formatDateToIsoString(ov.overrideDate)
+        : datesInWindow[0].date;
+
+      seenDeploymentIds[dep.deploymentId] = true;
+      results.push({
+        rowIndex:          dep.rowIndex,
+        deploymentId:      dep.deploymentId,
+        accountName:       dep.accountName,
+        deploymentName:    dep.deploymentName,
+        servicesApproach:  dep.servicesApproach,
+        industry:          dep.industry,
+        subRegion:         dep.subRegion,
+        partner:           ov.overridePartner || dep.partner,
+        stage:             dep.stage,
+        health:            dep.health,
+        dam:               dep.dam,
+        wdEngManager:      dep.wdEngManager,
+        deliveryDirector:  dep.deliveryDirector,
+        ddNotes:           dep.ddNotes,
+        upcomingDates:     datesInWindow,
+        isPhased:          enrichment.isPhased,
+        nextGoLiveDate:    nextGoLiveDate,
+        mtpDate:           nextGoLiveDate,  // backward compat alias
+        excludeFromReport: !!ov.exclude,
+        reviewUsername:    ov.lastEditedBy || dep.reviewUsername || '',
+        reviewTimestamp:   ov.lastEditedAt || dep.reviewTimestamp || ''
+      });
     });
 
-    var overrides = getGoLivesOverridesMap_(cfg);
-    var upcoming = Object.keys(groupedByAccountDate)
-      .map(function (key) {
-        var group = groupedByAccountDate[key];
-        var ov = overrides[group.accountName] || {};
-        if (ov.exclude) return null;
-        var effDate = ov.overrideDate
-          ? CoreUtils.formatDateToIsoString(ov.overrideDate)
-          : group.mtpDateString;
-        return {
-          accountName:       group.accountName,
-          industry:          group.industry,
-          dam:               group.dam,
-          wdEngManager:      group.wdEngManager,
-          partner:           ov.overridePartner || group.partner,
-          deploymentName:    group.deploymentNames.join(', '),
-          servicesApproach:  group.servicesApproach,
-          stage:             group.stage,
-          health:            group.health,
-          mtpDate:           effDate,
-          excludeFromReport: !!ov.exclude,
-          reviewUsername:    ov.lastEditedBy || '',
-          reviewTimestamp:   ov.lastEditedAt || ''
-        };
-      })
-      .filter(Boolean)
-      .sort(function (a, b) { return new Date(a.mtpDate) - new Date(b.mtpDate); });
+    // -----------------------------------------------------------------------
+    // Pass 2: fallback — deployments not in the enrichment map,
+    // using Current_MTP_Date__c from ActiveDeployments.
+    // -----------------------------------------------------------------------
+    allEffective.forEach(function (dep) {
+      if (!dep.deploymentId) return;
+      if (seenDeploymentIds[dep.deploymentId]) return;
 
-    return applyViewModeFilter_(cfg, upcoming, viewModeOpts);
+      var ov = goLivesOverrides[dep.accountName] || {};
+      if (ov.exclude) return;
+
+      var mtpDate = ov.overrideDate
+        ? CoreUtils.formatDateToIsoString(ov.overrideDate)
+        : dep.mtpDate;
+      if (!mtpDate) return;
+
+      var d = new Date(mtpDate);
+      if (isNaN(d.getTime())) return;
+      if (d < now || d > windowEnd) return;
+
+      results.push({
+        rowIndex:          dep.rowIndex,
+        deploymentId:      dep.deploymentId,
+        accountName:       dep.accountName,
+        deploymentName:    dep.deploymentName,
+        servicesApproach:  dep.servicesApproach,
+        industry:          dep.industry,
+        subRegion:         dep.subRegion,
+        partner:           ov.overridePartner || dep.partner,
+        stage:             dep.stage,
+        health:            dep.health,
+        dam:               dep.dam,
+        wdEngManager:      dep.wdEngManager,
+        deliveryDirector:  dep.deliveryDirector,
+        ddNotes:           dep.ddNotes,
+        upcomingDates:     [{ date: mtpDate, products: [] }],
+        isPhased:          false,
+        nextGoLiveDate:    mtpDate,
+        mtpDate:           mtpDate,
+        excludeFromReport: !!ov.exclude,
+        reviewUsername:    ov.lastEditedBy || dep.reviewUsername || '',
+        reviewTimestamp:   ov.lastEditedAt || dep.reviewTimestamp || ''
+      });
+    });
+
+    // Sort by nextGoLiveDate ascending.
+    results.sort(function (a, b) {
+      return new Date(a.nextGoLiveDate) - new Date(b.nextGoLiveDate);
+    });
+
+    Logger.log('CoreData.getUpcomingGoLives: ' + results.length + ' upcoming rows ' +
+               '(pass1=' + Object.keys(seenDeploymentIds).length + ', ' +
+               'pass2=' + (results.length - Object.keys(seenDeploymentIds).length) + ').');
+
+    return applyViewModeFilter_(cfg, results, viewModeOpts);
   }
 
     // ===========================================================================

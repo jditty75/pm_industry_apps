@@ -107,6 +107,18 @@ var CorePortfolioHealth = (function () {
     if (history.series.yellow.length) history.series.yellow[history.series.yellow.length - 1] = totals.yellow;
     if (history.series.red.length)    history.series.red[history.series.red.length - 1]       = totals.red;
 
+    // ---- Phase 3a: Phased deployments count (upcoming window) ---------------
+    var phasedDeployments = 0;
+    try {
+      var upcomingRows = CoreData.getUpcomingGoLives(cfg) || [];
+      phasedDeployments = upcomingRows.filter(function (r) {
+        return !!r.isPhased && !r.excludeFromReport;
+      }).length;
+    } catch (err) {
+      Logger.log('CorePortfolioHealth.getSnapshot: phasedDeployments count failed — ' +
+                 'defaulting to 0. Error: ' + err);
+    }
+
     // ---- Labels / branding --------------------------------------------------
     var monthLabel     = Utilities.formatDate(now, tz, 'MMMM yyyy');
     var generatedLabel = Utilities.formatDate(now, tz, 'MMMM d, yyyy');
@@ -127,9 +139,10 @@ var CorePortfolioHealth = (function () {
         windowDays: cfg.report.goLivesWindowDays || ph.recentGoLivesWindowDays || 60,
         accounts:   recentGoLivesAccounts
       },
-      partnerSplit:  partnerSplit,
-      industrySplit: industrySplit,
-      history:       history
+      partnerSplit:    partnerSplit,
+      industrySplit:   industrySplit,
+      history:         history,
+      phasedDeployments: phasedDeployments
     };
   }
 

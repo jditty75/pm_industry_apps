@@ -47,22 +47,22 @@ var APP_CONFIG = {
   },
 
   columns: {
-    deployments: {
-      ACCOUNT_NAME: 1,  // A
-      DEPLOYMENT_NAME: 2,  // B
-      SERVICES_APPROACH: 3,  // C
-      INDUSTRY: 4,  // D
-      SUB_REGION: 5,  // E
-      PARTNER: 6,  // F
-      DEPLOYMENT_STAGE: 7,  // G
-      DEPLOYMENT_HEALTH: 8,  // H
-      CURRENT_MTP_DATE: 9,  // I
-      PROF_SERVICES_LOCS: 10,  // J
-      PROF_SERVICES_DETAILS: 11,  // K
-      DAM_FULL_NAME: 12,  // L
-      WD_ENG_MANAGER: 13,  // M
-      CURRENT_DEPLOYMENT_UPDATE: 14, // N
-      DEPLOYMENT_ID: 15  // O
+  deployments: {
+    ACCOUNT_NAME: 1,              // A: Customer__r.Name
+    INDUSTRY: 2,                  // B: Customer__r.Industry
+    SUB_REGION: 3,                // C: Customer__r.PS_Sub_Region__c
+    // 4: Customer__r.Consultant_Location_Restriction_Details__c (unused)
+    // 5: Customer__r.Restriction_on_Consultant_Location__c       (unused)
+    DEPLOYMENT_NAME: 6,           // F: Name
+    DEPLOYMENT_PHASE: 7,          // G: Deployment_Phase__c (if used)
+    PARTNER: 8,                   // H: Deployment_Partner_Name__c
+    DEPLOYMENT_STAGE: 9,          // I: Deployment_Stage__c
+    DEPLOYMENT_HEALTH: 10,        // J: Overall_Health__c
+    CURRENT_MTP_DATE: 11,         // K: Current_MTP_Date__c
+    // 12: Delivery_Assurance_Manager__r (DAM) — optional, not currently wired
+    WD_ENG_MANAGER: 13,           // M: Workday_Engagement_Manager__r.Name
+    CURRENT_DEPLOYMENT_UPDATE: 14,// N: Deployment_Summary__c
+    DEPLOYMENT_ID: 15             // O: Id (full SF Id)
     },
     goLives: {
       ACCOUNT_NAME: 1,  // A
@@ -186,3 +186,26 @@ var APP_CONFIG = {
     }
   }
 };
+
+/**
+ * Smoke test for Phase 3a CoreSalesforce module.
+ * Runs against SLG's actual APP_CONFIG.
+ */
+function _test_phase3a_SLG() {
+  var map = CoreLib.CoreSalesforce.getDeploymentEnrichmentMap(APP_CONFIG);
+  Logger.log('Enrichment map size: ' + Object.keys(map).length);
+
+  var phasedCount = 0;
+  var sampleId = null;
+  Object.keys(map).forEach(function(id) {
+    if (map[id].isPhased) phasedCount++;
+    if (!sampleId && map[id].isPhased) sampleId = id;
+  });
+  Logger.log('Phased count: ' + phasedCount);
+
+  if (sampleId) {
+    Logger.log('Sample phased deployment: ' + JSON.stringify(map[sampleId], null, 2));
+  } else {
+    Logger.log('No phased deployments found in this enrichment map.');
+  }
+}

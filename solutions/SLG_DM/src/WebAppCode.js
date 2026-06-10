@@ -214,3 +214,93 @@ function bulkClearMonthlyOverridesForUI() {
 function bulkClearAllOverridesForUI() {
   return CoreLib.CoreData.bulkClearAllOverrides(APP_CONFIG);
 }
+
+/**
+ * Diagnostic: Lists which deployments are Phased and verifies they're also
+ * flagged correctly in the data that feeds the Deployments tab.
+ *
+ * Logs three sections:
+ *   1. The raw enrichment map's phased deployments (from CoreSalesforce)
+ *   2. The same deployments after going through CoreData.getAllDeployments
+ *      (which is what the WebApp's Deployments tab actually consumes)
+ *   3. Any mismatches between the two
+ */
+function _diagnose_phased_deployments() {
+  Logger.log('=== PART 1: Phased deployments from enrichment map ===');
+  var enrichmentMap = CoreLib.CoreSalesforce.getDeploymentEnrichmentMap(APP_CONFIG);
+  var phasedFromEnrichment = [];
+
+  Object.keys(enrichmentMap).forEach(function(deploymentId) {
+    var enrichment = enrichmentMap[deploymentId];
+    if (enrichment.isPhased) {
+      phasedFromEnrichment.push({
+        deploymentId: deploymentId,
+        upcomingDates: enrichment.upcomingDates,
+        nextGoLiveDate: enrichment.nextGoLiveDate,
+        productFunctionCount: enrichment.productFunctionCount
+      });
+    }
+  });
+
+  Logger.log('Total deployments in enrichment map: ' + Object.keys(enrichmentMap).length);
+  Logger.log('Phased deployments in enrichment map: ' + phasedFromEnrichment.length);
+  phasedFromEnrichment.forEach(function(item, i) {
+    Logger.log('\nPhased ' + (i + 1) + ': ' + item.deploymentId);
+    Logger.log('  Next go-live: ' + item.nextGoLiveDate);
+    Logger.log('  Total products: ' + item.productFunctionCount);
+    item.upcomingDates.forEach(function(date) {
+      Logger.log('  ' + date.date + ': ' + date.products.join(', '));
+    });
+  });
+
+  Logger.log('\n=== PART 2: Same deployments via CoreData.getAllDeployments ===');
+  Logger.log('(This is what the Deployments tab actually reads.)');
+
+  // Call the function the Deployments tab uses, with no viewMode (full team view)
+  var allDeployments = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+
+  // Find phased deployments by looking for isPhased: true
+  var phasedFromAllDeployments = allDeployments.filter(function(row) {
+    return row.isPhased === true;
+  });
+
+  Logger.log('Total deployments from getAllDeployments: ' + allDeployments.length);
+  Logger.log('Deployments with isPhased=true: ' + phasedFromAllDeployments.length);
+
+  if (phasedFromAllDeployments.length > 0) {
+    Logger.log('\nPhased deployments (with account names):');
+    phasedFromAllDeployments.forEach(function(row, i) {
+      Logger.log((i + 1) + ': ' + row.accountName + ' [' + row.deploymentId + '] (' + row.health + ')');
+    });
+  } else {
+    Logger.log('\nWARNING: No deployments have isPhased=true in getAllDeployments output.');
+    Logger.log('This means CoreData.getAllDeployments is NOT injecting the flag.');
+  }
+
+  Logger.log('\n=== PART 3: Cross-check ===');
+  var enrichmentIds = phasedFromEnrichment.map(function(p) { return p.deploymentId; });
+  var allDeploymentIds = phasedFromAllDeployments.map(function(p) { return p.deploymentId; });
+
+  // Find IDs in enrichment but missing from getAllDeployments output
+  var missingFromAll = enrichmentIds.filter(function(id) {
+    return allDeploymentIds.indexOf(id) === -1;
+  });
+
+  if (missingFromAll.length > 0) {
+    Logger.log('\nDeploymentIDs that are phased in enrichment but missing isPhased=true in getAllDeployments:');
+    missingFromAll.forEach(function(id) {
+      Logger.log('  ' + id);
+      // Look up what getAllDeployments has for this deployment
+      var match = allDeployments.find(function(row) { return row.deploymentId === id; });
+      if (match) {
+        Logger.log('    Found in getAllDeployments output: accountName="' + match.accountName + '", health="' + match.health + '", isPhased=' + match.isPhased);
+      } else {
+        Logger.log('    Not found in getAllDeployments output at all.');
+      }
+    });
+  } else if (phasedFromEnrichment.length > 0) {
+    Logger.log('\nAll phased deployments from enrichment are correctly flagged in getAllDeployments. ✓');
+  }
+
+  Logger.log('\n=== END DIAGNOSTIC ===');
+}

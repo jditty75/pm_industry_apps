@@ -1,4 +1,4 @@
-/**
+﻿/**
  * CoreUI_Js.gs
  *
  * Client-side JS bundle for the WebApp UI. Defines a top-level helper
@@ -16,6 +16,10 @@
  *                   expanded-row detail shows upcomingDates[] for phased rows;
  *                   renderPortfolioHealth populates ph-kpi-phased KPI tile;
  *                   upcoming GoLives view shows multi-date cell for phased rows.
+ *   Phase 3g (v12): Trends tab — loadTrendsTab() fires 7 parallel GAS calls;
+ *                   per-tier renderers populate all five tiers; drilldown panels
+ *                   for Time-in-Red and Stage Outliers; tab switch and
+ *                   refreshAllPersonalizedTabs() both trigger reload.
  *
  * Approved by Jeff in Phase 2 Design Brief 7joemhuqDkrv on 2026-06-09 14:07 EDT.
  *
@@ -29,2141 +33,2579 @@ var _CoreUI_Js_CACHE = null;
 function _CoreUI_Js_getJsBundle() {
   if (_CoreUI_Js_CACHE !== null) return _CoreUI_Js_CACHE;
 
-  _CoreUI_Js_CACHE = `
-// ============================================================
-// CoreUI client JS bundle (Phase 2 — v10)
-// Reads window.APP_UI_CONFIG for per-app variation.
-// ============================================================
-
-var APP_UI_CONFIG = window.APP_UI_CONFIG || {};
-var UI_DT = APP_UI_CONFIG.deploymentsTable || {};
-var UI_GT = APP_UI_CONFIG.goLivesTable     || {};
-var UI_GLT = APP_UI_CONFIG.goLivesTab      || {};
-var UI_MO = APP_UI_CONFIG.manageOverrides  || {};
-var UI_PERS = APP_UI_CONFIG.personalization || {};
-
-// ============================================================
-// PHASE 2 STATE
-// ============================================================
-
-// Identity, resolved once on page load.
-var currentUser = null;       // { email, displayName, role, isAdmin, active, unknown } | null
-var activeUsersCache = [];    // Array of AppUsers, populated for VP/PM dropdown
-
-// Personalization view state. Session-only — no localStorage per Jeff edit 5.
-//   { viewMode: 'my' | 'all', ddDisplayName: string }
-// For DDs: viewMode toggles, ddDisplayName is always self.
-// For VPs/PMs: viewMode is 'all' or 'my'; if 'my', ddDisplayName is the picked DD.
-var viewState = {
-  viewMode: 'all',
-  ddDisplayName: ''
-};
-
-// Deployments tab Phase 2 state
-var allDeploymentsData = [];          // Phase 2: full portfolio (was deploymentsData/Red+Yellow only)
-var deploymentsFilters = {
-  search: '',
-  health: [],                          // ['Red', 'Yellow'] etc.
-  owner: 'All',
-  partner: 'All',
-  stage: 'All',
-  industry: 'All'
-};
-var filteredDeployments = [];
-var expandedRowId = null;              // deploymentId of the currently-expanded row, if any
-
-// Go Lives Phase 2 state (consolidated tab)
-var allGoLivesRecent = [];             // past 60 days
-var allGoLivesUpcoming = [];           // next 90 days
-var currentGoLivesView = 'recent';     // 'recent' | 'upcoming' | 'all'
-var filteredGoLives = [];
-var goLivesSearch = '';
-
-// Manage Overrides state
-var activeOverridesData = [];
-var auditLogData = [];
-var overridesFilters = { type: 'all', classification: 'all' };
-var auditTrailWindowDays = 30;         // toggled to 0 (all history) when user expands
-
-// Modal/transient state
-var currentGoLivesIndex = null;
-var execSummaryIsSaving = false;
-var confirmModalCallback = null;       // function called when confirm modal "Confirm" clicked
-
-// Phase 3c: Monthly Report Preview view format toggle
-var reportViewMode = 'outlook';        // 'outlook' | 'inline' — Outlook is the default
-
-// ============================================================
-// BOOT
-// ============================================================
-
-window.onload = function() {
-  bootPhase2();
-};
-
-function bootPhase2() {
-  // Resolve identity first (synchronous server call). All downstream UI
-  // setup depends on knowing role.
-  google.script.run
-    .withSuccessHandler(function(resp) {
-      currentUser = resp && resp.user ? resp.user : null;
-      activeUsersCache = resp && resp.activeUsers ? resp.activeUsers : [];
-      initializeViewState();
-      initializeHeaderRight();
-      maybeShowWelcomeBanner();
-      // Now load initial tab data.
-      loadDeploymentsData();
-      loadGoLivesData_both();
-      // Audit/overrides tabs lazy-load on first switch.
-    })
-    .withFailureHandler(function(err) {
-      // Identity resolution failed — degrade to anonymous behavior.
-      console.warn('Identity boot failed: ' + err);
-      currentUser = null;
-      activeUsersCache = [];
-      initializeViewState();
-      // Header-right stays hidden.
-      loadDeploymentsData();
-      loadGoLivesData_both();
-    })
-    .getIdentityBoot();
-}
-
-/**
- * Decide the initial viewMode + ddDisplayName based on user role and
- * APP_CONFIG.ui.personalization.defaultViewMode.
- */
-function initializeViewState() {
-  if (!UI_PERS.enabled) {
-    viewState = { viewMode: 'all', ddDisplayName: '' };
-    return;
-  }
-  if (!currentUser || !currentUser.active) {
-    viewState = { viewMode: 'all', ddDisplayName: '' };
-    return;
-  }
-  if (currentUser.role === 'DD') {
-    var defaultMode = UI_PERS.defaultViewMode || 'myPortfolio';
-    viewState.viewMode = (defaultMode === 'myPortfolio') ? 'my' : 'all';
-    viewState.ddDisplayName = currentUser.displayName;
-  } else {
-    // VP / PM: default to All; ddDisplayName empty until they pick one.
-    viewState.viewMode = 'all';
-    viewState.ddDisplayName = '';
-  }
-}
-
-// ============================================================
-// HEADER-RIGHT: TOGGLE OR DROPDOWN
-// ============================================================
-
-function initializeHeaderRight() {
-  if (!UI_PERS.enabled) return;
-  if (!currentUser || !currentUser.active) return;
-
-  var container = document.getElementById('header-right');
-  var inner = document.getElementById('header-mode-control');
-  if (!container || !inner) return;
-
-  if (currentUser.role === 'DD') {
-    renderDDSegmentedControl(inner);
-  } else {
-    renderVPPMDropdown(inner);
-  }
-  container.classList.remove('hidden');
-}
-
-function renderDDSegmentedControl(inner) {
-  var myActive = viewState.viewMode === 'my';
-  inner.innerHTML =
-    '<div class="seg-control">' +
-    '  <button class="seg-control-btn ' + (myActive ? 'active' : '') + '" onclick="setViewMode(\\'my\\')">My Portfolio</button>' +
-    '  <button class="seg-control-btn ' + (myActive ? '' : 'active') + '" onclick="setViewMode(\\'all\\')">All</button>' +
-    '</div>';
-}
-
-function renderVPPMDropdown(inner) {
-  var dds = activeUsersCache.filter(function(u) { return u.role === 'DD'; });
-  var currentLabel = (viewState.viewMode === 'all')
-    ? 'Showing: All'
-    : 'Showing: ' + viewState.ddDisplayName;
-
-  var menuHtml = '<div class="dd-dropdown-option ' +
-    (viewState.viewMode === 'all' ? 'selected' : '') +
-    '" onclick="pickVPPMOption(\\'all\\', \\'\\')">Showing: All</div>';
-
-  dds.forEach(function(dd) {
-    var sel = (viewState.viewMode === 'my' && viewState.ddDisplayName === dd.displayName);
-    menuHtml += '<div class="dd-dropdown-option ' + (sel ? 'selected' : '') +
-      '" onclick="pickVPPMOption(\\'my\\', \\'' + escapeJs(dd.displayName) + '\\')">Showing: ' + escapeHtml(dd.displayName) + '</div>';
-  });
-
-  inner.innerHTML =
-    '<div class="dd-dropdown" id="dd-dropdown-wrapper">' +
-    '  <button class="dd-dropdown-trigger" onclick="toggleVPPMDropdown(event)">' +
-    '    <span>' + escapeHtml(currentLabel) + '</span><span class="caret">▼</span>' +
-    '  </button>' +
-    '  <div class="dd-dropdown-menu">' + menuHtml + '</div>' +
-    '</div>';
-}
-
-function setViewMode(mode) {
-  viewState.viewMode = mode;
-  if (currentUser && currentUser.role === 'DD') {
-    viewState.ddDisplayName = currentUser.displayName;
-  }
-  // Re-render header-right + refresh data.
-  var inner = document.getElementById('header-mode-control');
-  if (inner) renderDDSegmentedControl(inner);
-  refreshAllPersonalizedTabs();
-}
-
-function pickVPPMOption(mode, ddDisplayName) {
-  viewState.viewMode = mode;
-  viewState.ddDisplayName = ddDisplayName;
-  // Close dropdown
-  var wrapper = document.getElementById('dd-dropdown-wrapper');
-  if (wrapper) wrapper.classList.remove('open');
-  // Re-render header-right + refresh data.
-  var inner = document.getElementById('header-mode-control');
-  if (inner) renderVPPMDropdown(inner);
-  refreshAllPersonalizedTabs();
-}
-
-function toggleVPPMDropdown(evt) {
-  evt.stopPropagation();
-  var wrapper = document.getElementById('dd-dropdown-wrapper');
-  if (wrapper) wrapper.classList.toggle('open');
-}
-
-// Click-outside to close dropdown
-document.addEventListener('click', function() {
-  var wrapper = document.getElementById('dd-dropdown-wrapper');
-  if (wrapper) wrapper.classList.remove('open');
-});
-
-function refreshAllPersonalizedTabs() {
-  // Re-fetch deployments + go lives. Manage Overrides re-fetches on tab switch.
-  loadDeploymentsData();
-  loadGoLivesData_both();
-  // If Manage Overrides tab is currently visible, refresh it too.
-  var overridesTab = document.getElementById('overrides-tab');
-  if (overridesTab && overridesTab.classList.contains('active')) {
-    refreshOverridesTab();
-  }
-}
-
-// ============================================================
-// WELCOME BANNER
-// ============================================================
-
-function maybeShowWelcomeBanner() {
-  if (!UI_PERS.enabled) return;
-  if (!UI_PERS.welcomeMessageEnabled) return;
-  if (!currentUser || !currentUser.active) return;
-  if (currentUser.role !== 'DD') return;
-  // Per Jeff edit 5: no localStorage. Welcome shows once per page load only.
-  var banner = document.getElementById('welcome-banner');
-  var text   = document.getElementById('welcome-banner-text');
-  if (!banner || !text) return;
-  text.innerHTML = '👋 Welcome, ' + escapeHtml(currentUser.displayName || 'there') +
-    '. We&rsquo;ve added a personalized view of your assigned deployments. ' +
-    'Use the toggle in the header to switch between My Portfolio and All Deployments.';
-  banner.classList.remove('hidden');
-}
-
-function dismissWelcomeBanner() {
-  var banner = document.getElementById('welcome-banner');
-  if (banner) banner.classList.add('hidden');
-}
-
-// ============================================================
-// TAB SWITCHING
-// ============================================================
-
-function switchTab(tabName) {
-  document.querySelectorAll('.tab').forEach(function(tab) { tab.classList.remove('active'); });
-  document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
-  if (typeof event !== 'undefined' && event && event.target) {
-    event.target.classList.add('active');
-  }
-  var contentEl = document.getElementById(tabName + '-tab');
-  if (contentEl) contentEl.classList.add('active');
-
-  if (tabName === 'report') {
-    var container = document.getElementById('report-preview-container');
-    var hasContent = container && container.querySelector('iframe') !== null;
-    if (!hasContent) { loadReportPreview(); }
-  } else if (tabName === 'execsummary') {
-    var editor = document.getElementById('exec-editor');
-    var current = (editor.innerHTML || '').trim();
-    if (!current || current === '' || current === '&nbsp;') {
-      loadExecSummaryFromServer();
-    }
-  } else if (tabName === 'overrides') {
-    refreshOverridesTab();
-  }
-}
-
-// ============================================================
-// COLSPAN HELPERS
-// ============================================================
-
-function computeDeploymentsColspan_() {
-  // Base: chevron, Health, Account, Deployment, Partner, MTP, Owner-or-EM,
-  // Actions, Meta = 9 (with expandable chevron always present in Phase 2).
-  var n = UI_DT.expandableRows !== false ? 9 : 8;
-  if (UI_DT.showIndustry) n++;
-  return n;
-}
-
-function computeGoLivesColspan_() {
-  // Date, Account, Product/Deployment, Partner, Actions = 5
-  var n = 5;
-  if (UI_GT.showIndustry) n++;
-  return n;
-}
-
-// ============================================================
-// VIEW MODE ACCESSOR — passed to server endpoints
-// ============================================================
-
-function getViewModeOpts_() {
-  if (!UI_PERS.enabled) return null;
-  if (viewState.viewMode === 'all') {
-    return { viewMode: 'all', ddDisplayName: '' };
-  }
-  return { viewMode: 'my', ddDisplayName: viewState.ddDisplayName };
-}
-
-// ============================================================
-// DEPLOYMENTS DATA
-// ============================================================
-
-function loadDeploymentsData() {
-  var colspan = computeDeploymentsColspan_();
-  showLoading('deployments-tbody', colspan);
-  google.script.run
-    .withSuccessHandler(function(data) {
-      allDeploymentsData = data || [];
-      initializeDeploymentsFilters();
-      applyDeploymentsFilters();
-      renderDeploymentsKPIs();
-    })
-    .withFailureHandler(function(error) {
-      showToast('Error loading deployments: ' + error, 'error');
-    })
-    .getAllDeploymentsForUI(getViewModeOpts_());
-}
-
-function initializeDeploymentsFilters() {
-  // Default Health filter from config.
-  var defaultHealth = Array.isArray(UI_DT.defaultHealthFilter)
-    ? UI_DT.defaultHealthFilter.slice()
-    : ['Red', 'Yellow'];
-  deploymentsFilters.health = defaultHealth;
-  deploymentsFilters.search = '';
-  deploymentsFilters.owner = 'All';
-  deploymentsFilters.partner = 'All';
-  deploymentsFilters.stage = 'All';
-  deploymentsFilters.industry = 'All';
-  renderHealthChips();
-  populateOwnerFilter();
-  populatePartnerFilter();
-  populateStageFilter();
-  populateIndustryFilter();
-}
-
-// ============================================================
-// GO LIVES DATA (consolidated tab — fetches both windows)
-// ============================================================
-
-function loadGoLivesData_both() {
-  var colspan = computeGoLivesColspan_();
-  showLoading('golives-tbody', colspan);
-
-  var pending = 2;
-  function maybeRender() {
-    pending--;
-    if (pending === 0) {
-      applyGoLivesView();
-    }
-  }
-
-  // Phase 3i: call getRecentGoLivesData (SOQL-backed) instead of the legacy getGoLivesData.
-  google.script.run
-    .withSuccessHandler(function(data) { allGoLivesRecent = data || []; maybeRender(); })
-    .withFailureHandler(function(error) {
-      showToast('Error loading recent go lives: ' + error, 'error');
-      allGoLivesRecent = [];
-      maybeRender();
-    })
-    .getRecentGoLivesData(getViewModeOpts_());
-
-  google.script.run
-    .withSuccessHandler(function(data) { allGoLivesUpcoming = data || []; maybeRender(); })
-    .withFailureHandler(function(error) {
-      showToast('Error loading upcoming go lives: ' + error, 'error');
-      allGoLivesUpcoming = [];
-      maybeRender();
-    })
-    .getUpcomingGoLivesData(getViewModeOpts_());
-}
-
-function switchGoLivesView(view) {
-  currentGoLivesView = view;
-  // Update segmented control active state
-  document.querySelectorAll('[data-golives-view]').forEach(function(btn) {
-    if (btn.getAttribute('data-golives-view') === view) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
-    }
-  });
-  // Update column headers contextually
-  var dateHeader = document.getElementById('golives-date-header');
-  var productHeader = document.getElementById('golives-product-header');
-  if (dateHeader) {
-    dateHeader.textContent = (view === 'recent') ? 'Go Live Date'
-                          : (view === 'upcoming') ? 'MTP Date'
-                          : 'Date';
-  }
-  if (productHeader) {
-    productHeader.textContent = (view === 'recent') ? 'Product Areas'
-                             : (view === 'upcoming') ? 'Deployment Names'
-                             : 'Product / Deployment';
-  }
-  applyGoLivesView();
-}
-
-// ============================================================
-// OVERRIDES + AUDIT DATA (lazy-loaded on tab switch)
-// ============================================================
-
-function refreshOverridesTab() {
-  loadActiveOverrides();
-  loadAuditLog();
-  updateBulkClearMonthLabel();
-}
-
-function loadActiveOverrides() {
-  var tbody = document.getElementById('active-overrides-tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;">Loading…</td></tr>';
-  google.script.run
-    .withSuccessHandler(function(data) {
-      activeOverridesData = data || [];
-      renderActiveOverridesTable();
-    })
-    .withFailureHandler(function(error) {
-      showToast('Error loading active overrides: ' + error, 'error');
-      activeOverridesData = [];
-      renderActiveOverridesTable();
-    })
-    .getAllActiveOverridesForUI(getViewModeOpts_());
-}
-
-function loadAuditLog() {
-  var tbody = document.getElementById('audit-trail-tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;">Loading…</td></tr>';
-  google.script.run
-    .withSuccessHandler(function(data) {
-      auditLogData = data || [];
-      renderAuditLog();
-    })
-    .withFailureHandler(function(error) {
-      showToast('Error loading audit log: ' + error, 'error');
-      auditLogData = [];
-      renderAuditLog();
-    })
-    .getOverrideAuditLogForUI({ sinceDays: auditTrailWindowDays, limit: auditTrailWindowDays === 0 ? 500 : 0 });
-}
-
-function updateBulkClearMonthLabel() {
-  var label = document.getElementById('bulk-clear-month-label');
-  if (!label) return;
-  var now = new Date();
-  var monthName = now.toLocaleString('en-US', { month: 'long' });
-  label.textContent = monthName + ' ' + now.getFullYear();
-}
-
-function toggleAuditTrailWindow() {
-  auditTrailWindowDays = (auditTrailWindowDays === 30) ? 0 : 30;
-  var label = document.getElementById('audit-trail-window-label');
-  var btn = document.getElementById('audit-trail-toggle-btn');
-  if (label) label.textContent = (auditTrailWindowDays === 0) ? '(all history, max 500)' : '(last 30 days)';
-  if (btn) btn.textContent = (auditTrailWindowDays === 0) ? 'Show recent only' : 'Show all history';
-  loadAuditLog();
-}
-
-// ============================================================
-// EXECUTIVE SUMMARY (Phase 1 — unchanged)
-// ============================================================
-
-function loadExecSummaryFromServer() {
-  var editor = document.getElementById('exec-editor');
-  editor.innerHTML = '<p style="color:' + getComputedStyle(document.body).getPropertyValue('--color-text-muted') + ';">Loading executive summary...</p>';
-  google.script.run
-    .withSuccessHandler(function(htmlContent) {
-      if (htmlContent && htmlContent.trim().length > 0) {
-        editor.innerHTML = htmlContent;
-      } else {
-        editor.innerHTML = '<p>Paste or type the executive summary here...</p>';
-      }
-    })
-    .withFailureHandler(function(error) {
-      editor.innerHTML = '<p style="color:#c62828;">Error loading executive summary: ' + escapeHtml(error.toString()) + '</p>';
-      showToast('Error loading executive summary: ' + error, 'error');
-    })
-    .getExecutiveSummaryHtml();
-}
-
-function saveExecSummaryToServer() {
-  if (execSummaryIsSaving) return;
-  var editor = document.getElementById('exec-editor');
-  var html = editor.innerHTML || '';
-  execSummaryIsSaving = true;
-  google.script.run
-    .withSuccessHandler(function() {
-      execSummaryIsSaving = false;
-      showToast('Executive summary saved', 'success');
-    })
-    .withFailureHandler(function(error) {
-      execSummaryIsSaving = false;
-      showToast('Error saving executive summary: ' + error, 'error');
-    })
-    .saveExecutiveSummaryHtml(html);
-}
-
-// ============================================================
-// REPORT PREVIEW (Phase 1 — unchanged)
-// ============================================================
-
-// Phase 3c: switches the report view format and re-renders.
-function switchReportView(mode) {
-  reportViewMode = mode;
-  document.querySelectorAll('[data-report-view]').forEach(function(btn) {
-    if (btn.getAttribute('data-report-view') === mode) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
-    }
-  });
-  loadReportPreview();
-}
-
-function loadReportPreview() {
-  var container = document.getElementById('report-preview-container');
-  container.innerHTML =
-    '<div class="report-loading">' +
-    '  <div class="spinner-large"></div>' +
-    '  <p>Generating monthly report preview...</p>' +
-    '  <p style="font-size: 0.875rem; margin-top: 0.5rem;">This may take a few moments</p>' +
-    '</div>';
-
-  var onSuccess = function(htmlContent) { renderReportPreview(htmlContent); };
-  var onFailure = function(error) {
-    container.innerHTML =
-      '<div style="text-align: center; padding: 4rem 2rem; color: var(--color-status-red-fg);">' +
-      '  <p style="font-size: 1.2rem; margin-bottom: 0.5rem;">\u274C Error Loading Report</p>' +
-      '  <p style="font-size: 0.875rem;">' + escapeHtml(error.toString()) + '</p>' +
-      '  <button class="btn btn-primary" onclick="loadReportPreview()" style="margin-top: 1rem;">Try Again</button>' +
-      '</div>';
-    showToast('Error loading report: ' + error, 'error');
-  };
-
-  // Phase 3c: dispatch to the server function matching the selected view format.
-  if (reportViewMode === 'inline') {
-    google.script.run
-      .withSuccessHandler(onSuccess)
-      .withFailureHandler(onFailure)
-      .getHtmlReportPreview();
-  } else {
-    google.script.run
-      .withSuccessHandler(onSuccess)
-      .withFailureHandler(onFailure)
-      .getHtmlReportPreviewOutlook();
-  }
-}
-
-function renderReportPreview(htmlContent) {
-  var container = document.getElementById('report-preview-container');
-  if (!htmlContent || htmlContent.trim().length === 0) {
-    container.innerHTML = '<div style="text-align: center; padding: 4rem 2rem; color: var(--color-text-subtle);"><p>No report content available</p></div>';
-    return;
-  }
-  var iframe = document.createElement('iframe');
-  iframe.style.width = '100%';
-  iframe.style.minHeight = '800px';
-  iframe.style.border = 'none';
-  container.innerHTML = '';
-  container.appendChild(iframe);
-  var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-  iframeDoc.open();
-  iframeDoc.write(htmlContent);
-  iframeDoc.close();
-  iframe.onload = function() {
-    try {
-      var iframeBody = iframeDoc.body;
-      var iframeHtml = iframeDoc.documentElement;
-      var height = Math.max(iframeBody.scrollHeight, iframeBody.offsetHeight, iframeHtml.clientHeight, iframeHtml.scrollHeight, iframeHtml.offsetHeight);
-      iframe.style.height = (height + 50) + 'px';
-    } catch (e) {
-      iframe.style.height = '1200px';
-    }
-  };
-  showToast('Report preview loaded successfully', 'success');
-}
-// ============================================================
-// DEPLOYMENTS FILTER CHIPS
-// ============================================================
-
-function renderHealthChips() {
-  var container = document.getElementById('health-chip-group');
-  if (!container) return;
-  var healths = ['Red', 'Yellow', 'Green'];
-  container.innerHTML = healths.map(function(h) {
-    var active = deploymentsFilters.health.indexOf(h) !== -1;
-    var mark = active ? '✕' : '⊕';
-    return '<button class="filter-chip ' + (active ? 'active' : '') + '" ' +
-      'data-health-chip="' + h + '" onclick="toggleHealthChip(\\'' + h + '\\')">' +
-      escapeHtml(h) + ' <span class="chip-mark">' + mark + '</span>' +
-      '</button>';
-  }).join('');
-}
-
-function toggleHealthChip(health) {
-  var idx = deploymentsFilters.health.indexOf(health);
-  if (idx === -1) {
-    deploymentsFilters.health.push(health);
-  } else {
-    deploymentsFilters.health.splice(idx, 1);
-  }
-  renderHealthChips();
-  applyDeploymentsFilters();
-  renderDeploymentsKPIs();
-}
-
-// ============================================================
-// DEPLOYMENTS FILTER DROPDOWNS
-// ============================================================
-
-function populateOwnerFilter() {
-  var select = document.getElementById('owner-filter');
-  if (!select) return;
-  var owners = {};
-  var hasMissing = false;
-  allDeploymentsData.forEach(function(row) {
-    var o = (row.deliveryDirector || '').toString().trim();
-    if (o) owners[o] = true;
-    else hasMissing = true;
-  });
-  var ownerList = Object.keys(owners).sort();
-  var options = ['<option value="All">All</option>'];
-  if (hasMissing) options.push('<option value="(Missing)">(Missing)</option>');
-  ownerList.forEach(function(o) {
-    options.push('<option value="' + escapeAttr(o) + '">' + escapeHtml(o) + '</option>');
-  });
-  select.innerHTML = options.join('');
-  select.value = deploymentsFilters.owner;
-}
-
-function populatePartnerFilter() {
-  var select = document.getElementById('partner-filter');
-  if (!select) return;
-  var partners = {};
-  allDeploymentsData.forEach(function(row) {
-    var p = (row.partner || '').toString().trim();
-    if (p) partners[p] = true;
-  });
-  var list = Object.keys(partners).sort();
-  var options = ['<option value="All">All</option>'];
-  list.forEach(function(p) {
-    options.push('<option value="' + escapeAttr(p) + '">' + escapeHtml(p) + '</option>');
-  });
-  select.innerHTML = options.join('');
-  select.value = deploymentsFilters.partner;
-}
-
-function populateStageFilter() {
-  var select = document.getElementById('stage-filter');
-  if (!select) return;
-  var stages = {};
-  allDeploymentsData.forEach(function(row) {
-    var s = (row.stage || '').toString().trim();
-    if (s) stages[s] = true;
-  });
-  var list = Object.keys(stages).sort();
-  var options = ['<option value="All">All</option>'];
-  list.forEach(function(s) {
-    options.push('<option value="' + escapeAttr(s) + '">' + escapeHtml(s) + '</option>');
-  });
-  select.innerHTML = options.join('');
-  select.value = deploymentsFilters.stage;
-}
-
-function populateIndustryFilter() {
-  var select = document.getElementById('industry-filter');
-  if (!select) return;  // Only present on HENP
-  var inds = {};
-  allDeploymentsData.forEach(function(row) {
-    var i = (row.industry || '').toString().trim();
-    if (i) inds[i] = true;
-  });
-  var list = Object.keys(inds).sort();
-  var options = ['<option value="All">All</option>'];
-  list.forEach(function(i) {
-    options.push('<option value="' + escapeAttr(i) + '">' + escapeHtml(i) + '</option>');
-  });
-  select.innerHTML = options.join('');
-  select.value = deploymentsFilters.industry;
-}
-
-function onDeploymentFilterChange() {
-  deploymentsFilters.owner = document.getElementById('owner-filter').value;
-  deploymentsFilters.partner = (document.getElementById('partner-filter') || {value:'All'}).value;
-  deploymentsFilters.stage = (document.getElementById('stage-filter') || {value:'All'}).value;
-  var indEl = document.getElementById('industry-filter');
-  deploymentsFilters.industry = indEl ? indEl.value : 'All';
-  updateFilterDrawerBadge();
-  applyDeploymentsFilters();
-  renderDeploymentsKPIs();
-}
-
-function searchDeployments() {
-  deploymentsFilters.search = (document.getElementById('search-input') || {value:''}).value;
-  applyDeploymentsFilters();
-  renderDeploymentsKPIs();
-}
-
-function clearAllDeploymentFilters() {
-  // Reset to defaults
-  initializeDeploymentsFilters();
-  // Clear search box
-  var searchBox = document.getElementById('search-input');
-  if (searchBox) searchBox.value = '';
-  updateFilterDrawerBadge();
-  applyDeploymentsFilters();
-  renderDeploymentsKPIs();
-}
-
-// ============================================================
-// DEPLOYMENTS FILTER DRAWER
-// ============================================================
-
-function toggleFilterDrawer() {
-  var drawer = document.getElementById('filter-drawer');
-  var icon = document.getElementById('filter-drawer-toggle-icon');
-  var text = document.getElementById('filter-drawer-toggle-text');
-  if (!drawer) return;
-  var isOpen = drawer.classList.toggle('open');
-  if (icon) icon.textContent = isOpen ? '⊖' : '⊕';
-  if (text) text.textContent = isOpen ? 'Fewer filters' : 'More filters';
-}
-
-function updateFilterDrawerBadge() {
-  var badge = document.getElementById('filter-drawer-toggle-badge');
-  if (!badge) return;
-  var count = 0;
-  if (deploymentsFilters.partner !== 'All') count++;
-  if (deploymentsFilters.stage !== 'All') count++;
-  if (deploymentsFilters.industry !== 'All') count++;
-  if (count > 0) {
-    badge.textContent = count;
-    badge.classList.remove('hidden');
-    // Auto-open if any secondary filter is active
-    var drawer = document.getElementById('filter-drawer');
-    if (drawer && !drawer.classList.contains('open')) {
-      toggleFilterDrawer();
-    }
-  } else {
-    badge.classList.add('hidden');
-  }
-}
-
-// ============================================================
-// DEPLOYMENTS FILTER APPLICATION
-// ============================================================
-
-function applyDeploymentsFilters() {
-  var f = deploymentsFilters;
-  var q = (f.search || '').toLowerCase();
-  var includeIndustryInSearch = !!UI_DT.showIndustry;
-
-  filteredDeployments = allDeploymentsData.filter(function(row) {
-    // Health filter (multi-select OR within Health, AND with everything else)
-    if (f.health.length > 0 && f.health.indexOf(row.health) === -1) return false;
-
-    // Owner
-    if (f.owner !== 'All') {
-      var rowOwner = (row.deliveryDirector || '').toString().trim();
-      if (f.owner === '(Missing)') {
-        if (rowOwner) return false;
-      } else if (rowOwner !== f.owner) {
-        return false;
-      }
-    }
-    // Partner
-    if (f.partner !== 'All' && (row.partner || '') !== f.partner) return false;
-    // Stage
-    if (f.stage !== 'All' && (row.stage || '') !== f.stage) return false;
-    // Industry
-    if (f.industry !== 'All' && (row.industry || '') !== f.industry) return false;
-
-    // Text search across account, deployment, partner (+ industry on HENP)
-    if (q) {
-      var match = (row.accountName || '').toLowerCase().includes(q) ||
-                  (row.deploymentName || '').toLowerCase().includes(q) ||
-                  (row.partner || '').toLowerCase().includes(q);
-      if (!match && includeIndustryInSearch) {
-        match = (row.industry || '').toLowerCase().includes(q);
-      }
-      if (!match) return false;
-    }
-    return true;
-  });
-
-  renderDeploymentsTable();
-}
-
-// ============================================================
-// DEPLOYMENTS KPI CARDS (dynamic — reflect current filter state)
-// ============================================================
-
-function renderDeploymentsKPIs() {
-  var grid = document.getElementById('deployments-stats-grid');
-  if (!grid) return;
-
-  // KPI cards reflect filteredDeployments
-  var total  = filteredDeployments.length;
-  var red    = filteredDeployments.filter(function(d) { return d.health === 'Red'; }).length;
-  var yellow = filteredDeployments.filter(function(d) { return d.health === 'Yellow'; }).length;
-  var green  = filteredDeployments.filter(function(d) { return d.health === 'Green'; }).length;
-
-  // Build cards based on which health filters are active
-  var healths = deploymentsFilters.health;
-  var cards = [];
-
-  cards.push(
-    '<div class="stat-card">' +
-    '  <h3>Total</h3>' +
-    '  <div class="value">' + total + '</div>' +
-    '  <div class="sub">across current filter</div>' +
-    '</div>'
-  );
-
-  if (healths.indexOf('Red') !== -1 || healths.length === 0) {
-    cards.push(
-      '<div class="stat-card red">' +
-      '  <h3>Red</h3>' +
-      '  <div class="value">' + red + '</div>' +
-      '</div>'
-    );
-  }
-  if (healths.indexOf('Yellow') !== -1 || healths.length === 0) {
-    cards.push(
-      '<div class="stat-card yellow">' +
-      '  <h3>Yellow</h3>' +
-      '  <div class="value">' + yellow + '</div>' +
-      '</div>'
-    );
-  }
-  if (healths.indexOf('Green') !== -1) {
-    cards.push(
-      '<div class="stat-card green">' +
-      '  <h3>Green</h3>' +
-      '  <div class="value">' + green + '</div>' +
-      '</div>'
-    );
-  }
-
-  grid.innerHTML = cards.join('');
-}
-
-// ============================================================
-// DEPLOYMENTS TABLE RENDER + EXPANDABLE ROWS
-// ============================================================
-
-function renderDeploymentsTable() {
-  var tbody = document.getElementById('deployments-tbody');
-  if (!tbody) return;
-  var colspan = computeDeploymentsColspan_();
-
-  if (filteredDeployments.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="' + colspan + '" class="empty-state">' +
-      '<div>No deployments match these filters</div>' +
-      '<div class="empty-state-action"><button class="btn btn-secondary" onclick="clearAllDeploymentFilters()">Clear all filters</button></div>' +
-      '</td></tr>';
-    return;
-  }
-
-  var showIndustry = !!UI_DT.showIndustry;
-  var showEm = !!UI_DT.showEmColumn;
-  var highlightMissing = !!UI_DT.showMissingDDHighlight;
-  var missingMsg = UI_DT.missingDDMessage || 'Delivery Director needs assigned';
-  var expandable = UI_DT.expandableRows !== false;
-
-  var rowsHtml = '';
-  filteredDeployments.forEach(function(row, index) {
-    var deliveryDirector = row.deliveryDirector && row.deliveryDirector.toString().trim() !== ''
-      ? row.deliveryDirector.toString().trim() : '';
-    var hasMeta = (row.reviewUsername && row.reviewUsername.toString().trim() !== '')
-      || (row.reviewTimestamp && row.reviewTimestamp.toString().trim() !== '');
-    var missingDD = !deliveryDirector;
-
-    var metaCellHtml = '';
-    if (highlightMissing && missingDD) {
-      metaCellHtml = '<span style="font-size:0.75rem; color:#c62828; font-weight:600;">' + escapeHtml(missingMsg) + '</span>';
-    } else if (!hasMeta) {
-      metaCellHtml = '<span style="font-size:0.75rem; color:#f57c00; font-weight:600;">Review Required; Please Update</span>';
-    } else {
-      var userText = row.reviewUsername || '';
-      var tsText = row.reviewTimestamp ? formatDateTime(row.reviewTimestamp) : '';
-      var infoText = [userText, tsText].filter(Boolean).join(' \\u00B7 ');
-      metaCellHtml = '<div style="display:flex; align-items:center; gap:6px;">' +
-        '<span class="meta-indicator" title="View meta information" onclick="event.stopPropagation(); openMetaModal(' + index + ')">i</span>' +
-        '<span style="font-size:0.75rem; color:#555555;">' + escapeHtml(infoText) + '</span>' +
-        '</div>';
-    }
-
-    var rowClasses = [];
-    if (highlightMissing && missingDD) rowClasses.push('missing-dd-row');
-    if (expandable) rowClasses.push('expandable-row');
-    var isExpanded = (expandedRowId === row.deploymentId);
-    if (isExpanded) rowClasses.push('expanded');
-
-    var onClick = expandable
-      ? ' onclick="toggleRowExpand(\\'' + escapeJs(row.deploymentId) + '\\', ' + row.rowIndex + ')"'
-      : '';
-
-    var cells = [];
-    if (expandable) {
-      cells.push('<td style="width: 24px;"><span class="row-chevron">▶</span></td>');
-    }
-    cells.push('<td><span class="status-badge status-' + row.health.toLowerCase() + '">' + row.health + '</span></td>');
-    cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
-    if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
-    // Phase 3a: inject phased pill alongside deployment name
-    var deployNameHtml = escapeHtml(row.deploymentName);
-    if (row.isPhased) {
-      deployNameHtml += ' <span class="phased-pill">Phased</span>';
-    }
-    cells.push('<td>' + deployNameHtml + '</td>');
-    cells.push('<td>' + escapeHtml(row.partner) + '</td>');
-    if (showEm) cells.push('<td>' + escapeHtml(row.wdEngManager || '') + '</td>');
-    cells.push('<td>' + (row.mtpDate ? formatDate(row.mtpDate) : '-') + '</td>');
-    if (!showEm) cells.push('<td>' + escapeHtml(deliveryDirector) + '</td>');
-    cells.push('<td onclick="event.stopPropagation();"><button class="action-btn" onclick="openEditModal(' + row.rowIndex + ')">Edit</button></td>');
-    cells.push('<td onclick="event.stopPropagation();">' + metaCellHtml + '</td>');
-
-    rowsHtml += '<tr class="' + rowClasses.join(' ') + '"' + onClick + '>' + cells.join('') + '</tr>';
-
-    if (isExpanded) {
-      rowsHtml += renderExpandedRowDetail_(row, colspan);
-    }
-  });
-
-  tbody.innerHTML = rowsHtml;
-
-  // Phase 3f: load inline audit summary for the expanded row after DOM is ready
-  if (expandedRowId) {
-    loadDeploymentAuditSummary_(expandedRowId);
-  }
-}
-
-function renderExpandedRowDetail_(row, colspan) {
-  var fields = [];
-  if (row.industry)          fields.push({ label: 'Industry',          value: row.industry });
-  if (row.subRegion)         fields.push({ label: 'Sub-Region',        value: row.subRegion });
-  if (row.servicesApproach)  fields.push({ label: 'Services Approach', value: row.servicesApproach });
-  if (row.stage)             fields.push({ label: 'Stage',             value: row.stage });
-  if (row.wdEngManager)      fields.push({ label: 'WD Eng Manager',    value: row.wdEngManager });
-  if (row.dam)               fields.push({ label: 'DAM',               value: row.dam });
-
-  var metaInfo = '';
-  if (row.reviewUsername || row.reviewTimestamp) {
-    var ts = row.reviewTimestamp ? formatDateTime(row.reviewTimestamp) : '';
-    metaInfo = 'Last reviewed by ' + escapeHtml(row.reviewUsername || 'unknown') +
-               (ts ? ' on ' + ts : '');
-  }
-
-  var html = '<div class="row-detail-card">';
-  fields.forEach(function(f) {
-    html += '<div>' +
-      '<span class="detail-label">' + escapeHtml(f.label) + '</span>' +
-      '<span class="detail-value">' + escapeHtml(f.value) + '</span>' +
-      '</div>';
-  });
-
-  // Phase 3a: phased deployment upcoming dates
-  if (row.isPhased && row.upcomingDates && row.upcomingDates.length) {
-    var datesHtml = row.upcomingDates.map(function(ud) {
-      var dateStr = ud.date ? formatDate(ud.date) : '—';
-      var productStr = (ud.products && ud.products.length)
-        ? ud.products.join(', ')
-        : '—';
-      return '<div style="margin-bottom:2px;"><strong>' + escapeHtml(dateStr) + '</strong>: ' + escapeHtml(productStr) + '</div>';
-    }).join('');
-    html += '<div class="detail-full-width">' +
-      '<span class="detail-label">Upcoming Go-Live Dates</span>' +
-      '<div class="detail-value">' + datesHtml + '</div>' +
-      '</div>';
-  }
-
-  if (row.currentUpdate) {
-    html += '<div class="detail-full-width">' +
-      '<span class="detail-label">Current Update</span>' +
-      '<div class="detail-value">' + escapeHtml(row.currentUpdate) + '</div>' +
-      '</div>';
-  }
-
-  if (metaInfo) {
-    html += '<div class="detail-full-width">' +
-      '<span class="detail-label">Meta</span>' +
-      '<div class="detail-value">' + metaInfo + '</div>' +
-      '</div>';
-  }
-
-  // Phase 3f: inline "Recent Activity" audit summary — visible to all roles.
-  // The container is populated asynchronously after the row's DOM is ready.
-  html += '<div class="detail-full-width" id="audit-summary-' + escapeAttr(row.deploymentId) + '">' +
-    '<span class="detail-label">Recent Activity</span>' +
-    '<div class="detail-value" style="font-size:12px; color:var(--color-text-muted);">Loading\u2026</div>' +
-    '</div>';
-
-  // Actions inside the expanded row (Phase 3f: View Audit is now visible to all roles)
-  var actions = '<button class="btn btn-secondary" onclick="event.stopPropagation(); openEditModal(' + row.rowIndex + ')">Edit</button>';
-  actions += ' <button class="btn btn-secondary" onclick="event.stopPropagation(); openAuditForDeployment(\\'' + escapeJs(row.deploymentId) + '\\')">View Audit</button>';
-  html += '<div class="detail-actions">' + actions + '</div>';
-
-  html += '</div>';
-
-  return '<tr class="row-detail"><td colspan="' + colspan + '">' + html + '</td></tr>';
-}
-
-function toggleRowExpand(deploymentId, rowIndex) {
-  if (expandedRowId === deploymentId) {
-    expandedRowId = null;
-  } else {
-    expandedRowId = deploymentId;
-  }
-  renderDeploymentsTable();
-}
-
-// Phase 3f: loads the last 3 audit entries for a deployment and populates
-// the inline "Recent Activity" container in the expanded row detail.
-function loadDeploymentAuditSummary_(deploymentId) {
-  google.script.run
-    .withSuccessHandler(function(rows) {
-      var container = document.getElementById('audit-summary-' + deploymentId);
-      if (!container) return;
-      var valueEl = container.querySelector('.detail-value');
-      if (!valueEl) return;
-
-      if (!rows || rows.length === 0) {
-        valueEl.innerHTML = '<em style="color:var(--color-text-subtle);">No audit history found.</em>';
-        return;
-      }
-
-      var html = rows.map(function(r) {
-        var when = r.timestamp ? formatRelativeTime(r.timestamp) : '?';
-        var action = r.action || '';
-        var who = r.user || '';
-        var whoShort = who.indexOf('@') >= 0 ? who.split('@')[0] : who;
-        return '<div style="margin-bottom:4px; line-height:1.4;">' +
-          '<span style="font-size:11px; color:var(--color-text-subtle);">' + escapeHtml(when) + '</span>' +
-          ' <span class="audit-action-pill ' + escapeHtml(action.toLowerCase()) + '">' +
-            escapeHtml(action) + '</span>' +
-          ' <span>' + escapeHtml(whoShort) + '</span>' +
-          (r.notes ? ' <span style="font-style:italic; color:var(--color-text-muted);">\u2014 ' +
-            escapeHtml(r.notes.length > 50 ? r.notes.substring(0, 50) + '\u2026' : r.notes) +
-            '</span>' : '') +
-          '</div>';
-      }).join('');
-
-      valueEl.innerHTML = html;
-    })
-    .withFailureHandler(function() {
-      var container = document.getElementById('audit-summary-' + deploymentId);
-      if (!container) return;
-      var valueEl = container.querySelector('.detail-value');
-      if (valueEl) valueEl.innerHTML =
-        '<em style="color:var(--color-text-subtle);">Unable to load activity.</em>';
-    })
-    .getDeploymentAuditSummaryForUI(deploymentId, 3);
-}
-
-// ============================================================
-// GO LIVES VIEW APPLICATION
-// ============================================================
-
-function applyGoLivesView() {
-  var view = currentGoLivesView;
-  var search = (goLivesSearch || '').toLowerCase();
-  var includeIndustryInSearch = !!UI_GT.showIndustry;
-
-  // Choose source data based on view
-  var source;
-  if (view === 'recent') {
-    source = allGoLivesRecent;
-  } else if (view === 'upcoming') {
-    source = allGoLivesUpcoming;
-  } else {
-    // 'all' — concatenate, sort chronologically. Tag each row with isUpcoming flag
-    // so we can insert the Today divider in the right spot.
-    var recent   = (allGoLivesRecent   || []).map(function(r) { return Object.assign({}, r, { _isUpcoming: false }); });
-    var upcoming = (allGoLivesUpcoming || []).map(function(r) { return Object.assign({}, r, { _isUpcoming: true,  _dateForSort: r.mtpDate }); });
-    // Phase 3i: recent rows use lastGoLiveDate (getRecentGoLives shape);
-    // fall back to goLiveDate for rows from the legacy path.
-    recent.forEach(function(r) { r._dateForSort = r.lastGoLiveDate || r.goLiveDate; });
-    source = recent.concat(upcoming);
-    source.sort(function(a, b) { return new Date(a._dateForSort) - new Date(b._dateForSort); });
-  }
-
-  // Apply search filter
-  if (search) {
-    source = source.filter(function(row) {
-      var hit = (row.accountName || '').toLowerCase().includes(search);
-      if (!hit && includeIndustryInSearch) {
-        hit = (row.industry || '').toLowerCase().includes(search);
-      }
-      if (!hit) {
-        // Check productArea (legacy shape) or deploymentName
-        hit = (row.productArea || '').toLowerCase().includes(search) ||
-              (row.deploymentName || '').toLowerCase().includes(search);
-      }
-      // Phase 3i: also search in recentDates products (getRecentGoLives shape)
-      if (!hit && row.recentDates) {
-        for (var ri = 0; ri < row.recentDates.length && !hit; ri++) {
-          var prods = row.recentDates[ri].products || [];
-          for (var pi = 0; pi < prods.length && !hit; pi++) {
-            hit = prods[pi].toLowerCase().includes(search);
-          }
-        }
-      }
-      return hit;
-    });
-  }
-
-  filteredGoLives = source;
-  renderGoLivesTable();
-}
-
-function searchGoLives() {
-  goLivesSearch = (document.getElementById('golives-search') || {value:''}).value;
-  applyGoLivesView();
-}
-
-function clearGoLivesSearch() {
-  goLivesSearch = '';
-  var box = document.getElementById('golives-search');
-  if (box) box.value = '';
-  applyGoLivesView();
-}
-
-function renderGoLivesTable() {
-  var tbody = document.getElementById('golives-tbody');
-  if (!tbody) return;
-  var colspan = computeGoLivesColspan_();
-  var view = currentGoLivesView;
-
-  if (filteredGoLives.length === 0) {
-    var emptyMsg;
-    if (view === 'recent')   emptyMsg = 'No go lives in the past 60 days.';
-    else if (view === 'upcoming') emptyMsg = 'No upcoming go lives in the next 90 days.';
-    else                     emptyMsg = 'No go lives recorded in the past 60 days or upcoming 90 days.';
-    tbody.innerHTML = '<tr><td colspan="' + colspan + '" class="empty-state"><div>' + escapeHtml(emptyMsg) + '</div></td></tr>';
-    return;
-  }
-
-  var showIndustry = !!UI_GT.showIndustry;
-  var nowMs = Date.now();
-  var todayDividerInserted = false;
-  var todayLabel = formatDateLong(new Date());
-
-  var rowsHtml = '';
-  filteredGoLives.forEach(function(row, index) {
-    // In 'all' view, insert Today divider at transition between past and future
-    if (view === 'all' && !todayDividerInserted) {
-      // Phase 3i: use lastGoLiveDate for recent rows (getRecentGoLives shape).
-      var rowDate = row._isUpcoming
-        ? new Date(row.mtpDate)
-        : new Date(row.lastGoLiveDate || row.goLiveDate);
-      if (rowDate.getTime() >= nowMs) {
-        rowsHtml += '<tr class="today-divider"><td colspan="' + colspan + '">Today: ' + escapeHtml(todayLabel) + '</td></tr>';
-        todayDividerInserted = true;
-      }
-    }
-
-    // Phase 3i: prefer lastGoLiveDate (getRecentGoLives shape) then fall back
-    // to legacy goLiveDate, nextGoLiveDate, or mtpDate.
-    var dateValue = row.lastGoLiveDate || row.goLiveDate || row.nextGoLiveDate || row.mtpDate || '';
-
-    // Choose the product/deployment value based on view and data shape.
-    var productOrDeployment;
-    if (view === 'recent' || (view === 'all' && !row._isUpcoming)) {
-      if (row.recentDates && row.recentDates.length > 0) {
-        // Phase 3i shape: flatten all products from recentDates[]
-        var allProds = {};
-        row.recentDates.forEach(function(rd) {
-          (rd.products || []).forEach(function(p) { allProds[p] = true; });
-        });
-        var flatProds = Object.keys(allProds).sort();
-        productOrDeployment = flatProds.length ? flatProds.join(', ') : (row.deploymentName || '');
-      } else {
-        productOrDeployment = row.productArea || row.deploymentName || '';
-      }
-    } else if (view === 'upcoming') {
-      productOrDeployment = row.deploymentName || row.productArea || '';
-    } else {
-      productOrDeployment = row.productArea || row.deploymentName || '';
-    }
-
-    var cells = [];
-
-    var isUpcomingRow = (view === 'upcoming') || (view === 'all' && row._isUpcoming);
-    var isRecentRow   = (view === 'recent')   || (view === 'all' && !row._isUpcoming);
-
-    // Phase 3a: phased upcoming rows — multi-line date cell with product hierarchy
-    // Phase 3a-css: stable class hooks express date/product hierarchy clearly
-    if (isUpcomingRow && row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {
-      var phasedDateHtml = row.upcomingDates.map(function(ud) {
-        var ds = ud.date ? formatDate(ud.date) : '\u2014';
-        var ps = (ud.products && ud.products.length) ? ud.products.join(', ') : '';
-        return '<div class="golives-date-entry">' +
-          '<span class="golives-date-label">' + escapeHtml(ds) + '</span>' +
-          (ps ? '<span class="golives-product-list">' + escapeHtml(ps) + '</span>' : '') +
-          '</div>';
-      }).join('');
-      cells.push('<td class="golives-date-cell">' + phasedDateHtml + '</td>');
-      cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
-      if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
-      cells.push('<td>' + escapeHtml(productOrDeployment) + ' <span class="phased-pill">Phased</span></td>');
-
-    // Phase 3i: phased recent rows — multi-line date cell (same CSS pattern)
-    } else if (isRecentRow && row.recentDates && row.recentDates.length > 1) {
-      var recentPhasedHtml = row.recentDates.map(function(rd) {
-        var ds = rd.date ? formatDate(rd.date) : '\u2014';
-        var ps = (rd.products && rd.products.length) ? rd.products.join(', ') : '';
-        return '<div class="golives-date-entry">' +
-          '<span class="golives-date-label">' + escapeHtml(ds) + '</span>' +
-          (ps ? '<span class="golives-product-list">' + escapeHtml(ps) + '</span>' : '') +
-          '</div>';
-      }).join('');
-      cells.push('<td class="golives-date-cell">' + recentPhasedHtml + '</td>');
-      cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
-      if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
-      cells.push('<td>' + escapeHtml(productOrDeployment) + '</td>');
-
-    } else {
-      // Single-date row (upcoming or recent)
-      cells.push('<td><strong>' + (dateValue ? formatDate(dateValue) : '-') + '</strong></td>');
-      cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
-      if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
-      cells.push('<td>' + escapeHtml(productOrDeployment) + '</td>');
-    }
-
-    cells.push('<td>' + escapeHtml(row.partner) + '</td>');
-    cells.push('<td><button class="action-btn" onclick="openGoLivesModal(' + index + ')">Edit</button></td>');
-    rowsHtml += '<tr>' + cells.join('') + '</tr>';
-  });
-
-  // If view is 'all' and we never crossed today, insert the divider at end
-  if (view === 'all' && !todayDividerInserted) {
-    rowsHtml += '<tr class="today-divider"><td colspan="' + colspan + '">Today: ' + escapeHtml(todayLabel) + '</td></tr>';
-  }
-
-  tbody.innerHTML = rowsHtml;
-}
-// ============================================================
-// EDIT MODAL
-// ============================================================
-
-function openEditModal(rowIndex) {
-  var row = allDeploymentsData.find(function(d) { return d.rowIndex === rowIndex; });
-  if (!row) return;
-  document.getElementById('edit-row-index').value = rowIndex;
-  document.getElementById('edit-account').value = row.accountName;
-  document.getElementById('edit-deployment').value = row.deploymentName;
-  var emEl = document.getElementById('edit-em');
-  if (emEl) emEl.value = row.wdEngManager || '';
-  document.getElementById('edit-health').value = '';
-  document.getElementById('edit-stage').value = '';
-  document.getElementById('edit-mtp').value = row.mtpDate ? formatDateForInput(row.mtpDate) : '';
-  document.getElementById('edit-update').value = row.currentUpdate || '';
-  document.getElementById('edit-exclude-report').checked = row.excludeFromReport || false;
-  document.getElementById('edit-delivery-director').value = row.deliveryDirector || '';
-  document.getElementById('edit-notes').value = row.ddNotes || '';
-  // Phase 2: default classification radio to Monthly on every open.
-  setRadioGroupValue('edit-classification', 'Monthly');
-  document.getElementById('edit-modal').classList.add('active');
-}
-
-function closeEditModal() {
-  document.getElementById('edit-modal').classList.remove('active');
-  // Phase 3d: clear the reason field so it doesn't bleed into the next open
-  var reasonEl = document.getElementById('edit-override-reason');
-  if (reasonEl) reasonEl.value = '';
-}
-
-function openMetaModal(index) {
-  var row = filteredDeployments[index];
-  if (!row) return;
-  document.getElementById('meta-account').value = row.accountName || '';
-  document.getElementById('meta-deployment').value = row.deploymentName || '';
-  document.getElementById('meta-delivery-director').value = row.deliveryDirector || '';
-  var metaEm = document.getElementById('meta-em');
-  if (metaEm) metaEm.value = row.wdEngManager || '';
-  document.getElementById('meta-dd-notes').value = row.ddNotes || '';
-  document.getElementById('meta-username').value = row.reviewUsername || '';
-  document.getElementById('meta-timestamp').value = row.reviewTimestamp ? formatDateTime(row.reviewTimestamp) : '';
-  document.getElementById('meta-modal').classList.add('active');
-}
-
-function closeMetaModal() {
-  document.getElementById('meta-modal').classList.remove('active');
-}
-
-function saveDeployment() {
-  var rowIndex = parseInt(document.getElementById('edit-row-index').value, 10);
-  var row = allDeploymentsData.find(function(d) { return d.rowIndex === rowIndex; });
-  if (!row) return;
-
-  var metaData = {
-    deliveryDirector: document.getElementById('edit-delivery-director').value,
-    ddNotes:          document.getElementById('edit-notes').value
-  };
-  var overrideData = {
-    overrideHealth:        document.getElementById('edit-health').value,
-    overrideMtpDate:       document.getElementById('edit-mtp').value,
-    overrideStage:         document.getElementById('edit-stage').value,
-    overrideAccount:       '',
-    overrideDeployment:    '',
-    overrideCurrentUpdate: document.getElementById('edit-update').value,
-    excludeFromReport:     document.getElementById('edit-exclude-report').checked,
-    classification:        getRadioGroupValue('edit-classification') || 'Monthly'
-  };
-  // Phase 3d: capture optional override reason (stored in OverrideAudit.Notes)
-  var overrideReason = (document.getElementById('edit-override-reason') || {value: ''}).value || '';
-
-  document.getElementById('save-btn-text').classList.add('hidden');
-  document.getElementById('save-spinner').classList.remove('hidden');
-
-  google.script.run
-    .withSuccessHandler(function() {
-      showToast('Deployment overrides/meta updated for report', 'success');
-      closeEditModal();
-      loadDeploymentsData();
-      document.getElementById('save-btn-text').classList.remove('hidden');
-      document.getElementById('save-spinner').classList.add('hidden');
-    })
-    .withFailureHandler(function(error) {
-      showToast('Error saving: ' + error, 'error');
-      document.getElementById('save-btn-text').classList.remove('hidden');
-      document.getElementById('save-spinner').classList.add('hidden');
-    })
-    .updateDeploymentWithMetaAndOverride(rowIndex, row.deploymentId, metaData, overrideData, overrideReason);
-}
-
-// ============================================================
-// GO LIVES MODAL (Phase 2 — unified for past + future)
-// ============================================================
-
-function openGoLivesModal(index) {
-  var row = filteredGoLives[index];
-  if (!row) return;
-  currentGoLivesIndex = index;
-
-  // Decide labels based on whether the row is past or future.
-  var rowDate = row.goLiveDate || row.mtpDate || '';
-  var rowDateObj = rowDate ? new Date(rowDate) : null;
-  var isFuture = rowDateObj && !isNaN(rowDateObj.getTime()) && rowDateObj.getTime() >= Date.now();
-
-  var dateLabel = document.getElementById('golives-date-label');
-  if (dateLabel) dateLabel.textContent = isFuture ? 'Override MTP Date' : 'Override Go Live Date';
-
-  var productLabel = document.getElementById('golives-product-label');
-  if (productLabel) productLabel.textContent = isFuture ? 'Deployment Name (source)' : 'Product Areas (source, combined)';
-
-  document.getElementById('golives-account').value = row.accountName || '';
-  document.getElementById('golives-date').value = rowDate ? formatDateForInput(rowDate) : '';
-  document.getElementById('golives-product').value = (isFuture ? row.deploymentName : row.productArea) || '';
-  document.getElementById('golives-partner').value = row.partner || '';
-  document.getElementById('golives-exclude-report').checked = row.excludeFromReport || false;
-  setRadioGroupValue('golives-classification', 'Monthly');
-
-  document.getElementById('golives-modal').classList.add('active');
-}
-
-function closeGoLivesModal() {
-  document.getElementById('golives-modal').classList.remove('active');
-  currentGoLivesIndex = null;
-  // Phase 3d: clear the reason field so it doesn't bleed into the next open
-  var reasonEl = document.getElementById('golives-override-reason');
-  if (reasonEl) reasonEl.value = '';
-}
-
-function saveGoLives() {
-  if (currentGoLivesIndex === null) return;
-  var row = filteredGoLives[currentGoLivesIndex];
-  if (!row) return;
-
-  var overrideData = {
-    overrideDate:      document.getElementById('golives-date').value,
-    overridePartner:   document.getElementById('golives-partner').value,
-    excludeFromReport: document.getElementById('golives-exclude-report').checked,
-    classification:    getRadioGroupValue('golives-classification') || 'Monthly'
-  };
-  // Phase 3d: capture optional override reason
-  var overrideReason = (document.getElementById('golives-override-reason') || {value: ''}).value || '';
-
-  document.getElementById('golives-save-text').classList.add('hidden');
-  document.getElementById('golives-spinner').classList.remove('hidden');
-
-  google.script.run
-    .withSuccessHandler(function() {
-      showToast('Go Lives overrides updated for ' + row.accountName, 'success');
-      closeGoLivesModal();
-      loadGoLivesData_both();
-      document.getElementById('golives-save-text').classList.remove('hidden');
-      document.getElementById('golives-spinner').classList.add('hidden');
-    })
-    .withFailureHandler(function(error) {
-      showToast('Error saving Go Lives override: ' + error, 'error');
-      document.getElementById('golives-save-text').classList.remove('hidden');
-      document.getElementById('golives-spinner').classList.add('hidden');
-    })
-    .updateGoLivesOverride(row.accountName, overrideData, overrideReason);
-}
-
-// ============================================================
-// MANAGE OVERRIDES — ACTIVE OVERRIDES TABLE RENDER
-// ============================================================
-
-function onOverridesFilterChange() {
-  overridesFilters.type = document.getElementById('overrides-type-filter').value;
-  overridesFilters.classification = document.getElementById('overrides-classification-filter').value;
-  renderActiveOverridesTable();
-}
-
-function renderActiveOverridesTable() {
-  var tbody = document.getElementById('active-overrides-tbody');
-  if (!tbody) return;
-  var filtered = activeOverridesData.filter(function(row) {
-    if (overridesFilters.type !== 'all' && row.type !== overridesFilters.type) return false;
-    if (overridesFilters.classification !== 'all' && row.classification !== overridesFilters.classification) return false;
-    return true;
-  });
-
-  if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div>No active overrides match these filters</div></td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = filtered.map(function(row) {
-    var typePillClass = row.type === 'deployment' ? 'deploy' : 'golives';
-    var typePillLabel = row.type === 'deployment' ? 'Deploy' : 'Go Lives';
-    var fieldList = (row.fieldsSet || []).join(', ');
-    var currentVal = formatOverrideValueSummary_(row);
-    var setAtRelative = row.setAt ? formatRelativeTime(row.setAt) : '';
-    var classPillClass = (row.classification || 'Monthly').toLowerCase();
-
-    return '<tr>' +
-      '<td><span class="type-pill ' + typePillClass + '">' + typePillLabel + '</span></td>' +
-      '<td><strong>' + escapeHtml(row.accountName || '') + '</strong></td>' +
-      '<td>' + escapeHtml(fieldList) + '</td>' +
-      '<td>' + escapeHtml(currentVal) + '</td>' +
-      '<td>' + escapeHtml(row.setBy || '') + '</td>' +
-      '<td title="' + escapeAttr(row.setAt || '') + '">' + escapeHtml(setAtRelative) + '</td>' +
-      '<td>' +
-      '  <span class="classification-pill ' + classPillClass +
-        '" onclick="cycleClassification(\\'' + escapeJs(row.type) + '\\', \\'' + escapeJs(row.deploymentId) + '\\', \\'' + escapeJs(row.classification || 'Monthly') + '\\')">' +
-        escapeHtml(row.classification || 'Monthly') +
-      '  </span>' +
-      '</td>' +
-      '</tr>';
-  }).join('');
-}
-
-function formatOverrideValueSummary_(row) {
-  // Compact summary of which overrides are set, suitable for a single cell.
-  var cv = row.currentValues || {};
-  var parts = [];
-  if (cv.health)            parts.push('Health=' + cv.health);
-  if (cv.mtpDate)           parts.push('MTP=' + formatDate(cv.mtpDate));
-  if (cv.stage)             parts.push('Stage=' + cv.stage);
-  if (cv.account)           parts.push('Account=' + cv.account);
-  if (cv.deployment)        parts.push('Deployment=' + cv.deployment);
-  if (cv.currentUpdate)     parts.push('Update=set');
-  if (cv.excludeFromReport) parts.push('Excluded');
-  if (cv.goLiveDate)        parts.push('Date=' + formatDate(cv.goLiveDate));
-  if (cv.partner)           parts.push('Partner=' + cv.partner);
-  return parts.join(' · ');
-}
-
-function cycleClassification(type, idOrAccount, currentValue) {
-  var next = (currentValue === 'Monthly') ? 'Structural' : 'Monthly';
-  google.script.run
-    .withSuccessHandler(function() {
-      showToast('Classification updated to ' + next, 'success');
-      loadActiveOverrides();
-      loadAuditLog();
-    })
-    .withFailureHandler(function(err) {
-      showToast('Error updating classification: ' + err, 'error');
-    })
-    .setOverrideClassificationForUI(type, idOrAccount, next);
-}
-
-// ============================================================
-// MANAGE OVERRIDES — AUDIT LOG RENDER
-// ============================================================
-
-function renderAuditLog() {
-  var tbody = document.getElementById('audit-trail-tbody');
-  if (!tbody) return;
-
-  if (auditLogData.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div>No audit events in this window</div></td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = auditLogData.map(function(row, index) {
-    var actionClass = (row.action || '').toLowerCase();
-    var typePillClass = row.overrideType === 'deployment' ? 'deploy' : 'golives';
-    var typePillLabel = row.overrideType === 'deployment' ? 'Deploy' : 'Go Lives';
-    var whenRelative = row.timestamp ? formatRelativeTime(row.timestamp) : '';
-    // Phase 3d: show truncated reason in the table; full reason visible in audit detail modal
-    var reasonText = row.notes || '';
-    var reasonDisplay = reasonText.length > 60 ? reasonText.substring(0, 60) + '\u2026' : reasonText;
-
-    return '<tr style="cursor:pointer;" onclick="openAuditDetailModal(' + index + ')">' +
-      '<td class="audit-mono" title="' + escapeAttr(row.timestamp || '') + '">' + escapeHtml(whenRelative) + '</td>' +
-      '<td class="audit-mono">' + escapeHtml(row.user || '') + '</td>' +
-      '<td><span class="audit-action-pill ' + actionClass + '">' + escapeHtml(row.action || '') + '</span></td>' +
-      '<td>' + escapeHtml(row.accountName || '') + '</td>' +
-      '<td><span class="type-pill ' + typePillClass + '">' + typePillLabel + '</span></td>' +
-      '<td>' + escapeHtml(row.fieldsAffected || '') + '</td>' +
-      '<td style="color:var(--color-text-muted); font-style:italic;">' + escapeHtml(reasonDisplay) + '</td>' +
-      '</tr>';
-  }).join('');
-}
-
-// ============================================================
-// MANAGE OVERRIDES — BULK CLEAR FLOW
-// ============================================================
-
-function confirmBulkClearMonthly() {
-  var now = new Date();
-  var monthLabel = now.toLocaleString('en-US', { month: 'long' }) + ' ' + now.getFullYear();
-
-  // Compute the count of monthly overrides for this month
-  var ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-  var toClear = activeOverridesData.filter(function(row) {
-    if (row.classification !== 'Monthly') return false;
-    if (!row.setAt) return false;
-    var d = new Date(row.setAt);
-    if (isNaN(d.getTime())) return false;
-    var rowYm = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-    return rowYm === ym;
-  });
-
-  var deploymentCount = toClear.filter(function(r) { return r.type === 'deployment'; }).length;
-  var golivesCount    = toClear.filter(function(r) { return r.type === 'golives'; }).length;
-
-  if (toClear.length === 0) {
-    showToast('No monthly overrides for ' + monthLabel + ' to clear.', 'success');
-    return;
-  }
-
-  var bodyHtml =
-    '<p>This will clear <strong>' + toClear.length + ' overrides</strong> set during ' + escapeHtml(monthLabel) + ':</p>' +
-    '<ul class="modal-list">' +
-    '  <li>' + deploymentCount + ' deployment overrides</li>' +
-    '  <li>' + golivesCount + ' go lives overrides</li>' +
-    '</ul>' +
-    '<p>Structural overrides will not be affected.</p>' +
-    '<p style="color: var(--color-text-muted); font-size: 13px;">This action is logged in the audit trail and cannot be undone.</p>';
-
-  showConfirmModal({
-    title: 'Clear monthly overrides?',
-    bodyHtml: bodyHtml,
-    confirmText: 'Clear ' + toClear.length + ' overrides',
-    onConfirm: function() {
-      executeBulkClearMonthly_();
-    }
-  });
-}
-
-function executeBulkClearMonthly_() {
-  var spinner = document.getElementById('confirm-modal-spinner');
-  var btnText = document.getElementById('confirm-modal-confirm-text');
-  if (spinner) spinner.classList.remove('hidden');
-  if (btnText) btnText.classList.add('hidden');
-
-  google.script.run
-    .withSuccessHandler(function(result) {
-      if (spinner) spinner.classList.add('hidden');
-      if (btnText) btnText.classList.remove('hidden');
-      closeConfirmModal();
-      showToast('Cleared ' + (result.cleared || 0) + ' overrides', 'success');
-      refreshOverridesTab();
-      loadDeploymentsData();
-      loadGoLivesData_both();
-    })
-    .withFailureHandler(function(err) {
-      if (spinner) spinner.classList.add('hidden');
-      if (btnText) btnText.classList.remove('hidden');
-      showToast('Bulk clear failed: ' + err, 'error');
-    })
-    .bulkClearMonthlyOverridesForUI();
-}
-
-function confirmBulkClearAll() {
-  if (activeOverridesData.length === 0) {
-    showToast('No overrides to clear.', 'success');
-    return;
-  }
-
-  var deploymentCount = activeOverridesData.filter(function(r) { return r.type === 'deployment'; }).length;
-  var golivesCount    = activeOverridesData.filter(function(r) { return r.type === 'golives'; }).length;
-
-  var bodyHtml =
-    '<p style="color: var(--color-status-red-fg); font-weight: 600;">⚠️ This will clear ALL ' + activeOverridesData.length + ' active overrides.</p>' +
-    '<ul class="modal-list">' +
-    '  <li>' + deploymentCount + ' deployment overrides</li>' +
-    '  <li>' + golivesCount + ' go lives overrides</li>' +
-    '</ul>' +
-    '<p>This includes <strong>structural overrides</strong> that normally persist across months.</p>' +
-    '<p style="color: var(--color-text-muted); font-size: 13px;">This action is logged in the audit trail and cannot be undone.</p>';
-
-  showConfirmModal({
-    title: 'Clear ALL overrides?',
-    bodyHtml: bodyHtml,
-    confirmText: 'Clear all ' + activeOverridesData.length + ' overrides',
-    destructiveStrong: true,
-    onConfirm: function() {
-      executeBulkClearAll_();
-    }
-  });
-}
-
-function executeBulkClearAll_() {
-  var spinner = document.getElementById('confirm-modal-spinner');
-  var btnText = document.getElementById('confirm-modal-confirm-text');
-  if (spinner) spinner.classList.remove('hidden');
-  if (btnText) btnText.classList.add('hidden');
-
-  google.script.run
-    .withSuccessHandler(function(result) {
-      if (spinner) spinner.classList.add('hidden');
-      if (btnText) btnText.classList.remove('hidden');
-      closeConfirmModal();
-      showToast('Cleared ' + (result.cleared || 0) + ' overrides', 'success');
-      refreshOverridesTab();
-      loadDeploymentsData();
-      loadGoLivesData_both();
-    })
-    .withFailureHandler(function(err) {
-      if (spinner) spinner.classList.add('hidden');
-      if (btnText) btnText.classList.remove('hidden');
-      showToast('Bulk clear failed: ' + err, 'error');
-    })
-    .bulkClearAllOverridesForUI();
-}
-
-// ============================================================
-// CONFIRMATION MODAL
-// ============================================================
-
-function showConfirmModal(opts) {
-  var titleEl = document.getElementById('confirm-modal-title');
-  var bodyEl  = document.getElementById('confirm-modal-body');
-  var btn     = document.getElementById('confirm-modal-confirm-btn');
-  var btnText = document.getElementById('confirm-modal-confirm-text');
-  var overlay = document.getElementById('confirm-modal');
-
-  if (titleEl)  titleEl.textContent = opts.title || 'Confirm';
-  if (bodyEl)   bodyEl.innerHTML = opts.bodyHtml || '';
-  if (btnText)  btnText.textContent = opts.confirmText || 'Confirm';
-  if (btn) {
-    btn.className = 'btn ' + (opts.destructiveStrong ? 'btn-destructive-strong' : 'btn-destructive');
-  }
-  confirmModalCallback = opts.onConfirm || null;
-  if (overlay) overlay.classList.add('active');
-}
-
-function closeConfirmModal() {
-  var overlay = document.getElementById('confirm-modal');
-  if (overlay) overlay.classList.remove('active');
-  confirmModalCallback = null;
-}
-
-function confirmModalConfirm() {
-  if (typeof confirmModalCallback === 'function') {
-    confirmModalCallback();
-  } else {
-    closeConfirmModal();
-  }
-}
-
-// ============================================================
-// AUDIT DETAIL MODAL
-// ============================================================
-
-function openAuditDetailModal(index) {
-  var row = auditLogData[index];
-  if (!row) return;
-  document.getElementById('audit-detail-when').value = row.timestamp ? formatDateTime(row.timestamp) : '';
-  document.getElementById('audit-detail-who').value = row.user || '';
-  document.getElementById('audit-detail-action').value = row.action || '';
-  document.getElementById('audit-detail-type').value = row.overrideType || '';
-  document.getElementById('audit-detail-account').value = row.accountName || '';
-  document.getElementById('audit-detail-deployment-id').value = row.deploymentId || '';
-  document.getElementById('audit-detail-fields').value = row.fieldsAffected || '';
-  document.getElementById('audit-detail-before').value = prettyJson_(row.oldValueSnapshot);
-  document.getElementById('audit-detail-after').value  = prettyJson_(row.newValueSnapshot);
-  // Phase 3d: override reason from OverrideAudit column J
-  var notesEl = document.getElementById('audit-detail-notes');
-  if (notesEl) notesEl.value = row.notes || '';
-  document.getElementById('audit-detail-modal').classList.add('active');
-}
-
-function closeAuditDetailModal() {
-  document.getElementById('audit-detail-modal').classList.remove('active');
-}
-
-function openAuditForDeployment(deploymentId) {
-  // Switch to overrides tab, then load and filter the audit log to this deployment.
-  switchTab('overrides');
-  // Wait a tick for the tab to load
-  setTimeout(function() {
-    auditTrailWindowDays = 0;  // show all history
-    google.script.run
-      .withSuccessHandler(function(rows) {
-        var filtered = (rows || []).filter(function(r) {
-          return r.deploymentId === deploymentId || r.accountName === deploymentId;
-        });
-        if (filtered.length === 0) {
-          showToast('No audit history found for this deployment.', 'success');
-          return;
-        }
-        auditLogData = filtered;
-        renderAuditLog();
-        var label = document.getElementById('audit-trail-window-label');
-        if (label) label.textContent = '(filtered to this deployment)';
-      })
-      .withFailureHandler(function(err) {
-        showToast('Error loading deployment audit: ' + err, 'error');
-      })
-      .getOverrideAuditLogForUI({ sinceDays: 0, limit: 500 });
-  }, 150);
-}
-
-function prettyJson_(jsonStr) {
-  if (!jsonStr) return '';
-  try {
-    var parsed = JSON.parse(jsonStr);
-    return JSON.stringify(parsed, null, 2);
-  } catch (e) {
-    return jsonStr;
-  }
-}
-
-// ============================================================
-// UTILITIES
-// ============================================================
-
-function showLoading(tbodyId, colspan) {
-  var el = document.getElementById(tbodyId);
-  if (!el) return;
-  el.innerHTML = '<tr><td colspan="' + colspan + '" style="text-align:center;padding:2rem;">Loading...</td></tr>';
-}
-
-function showToast(message, type) {
-  type = type || 'success';
-  var toast = document.createElement('div');
-  toast.className = 'toast ' + type;
-  var icon = (type === 'success') ? '\\u2713' : '\\u2717';
-  toast.innerHTML = '<span>' + icon + '</span><span>' + escapeHtml(message) + '</span>';
-  document.body.appendChild(toast);
-  setTimeout(function() { toast.remove(); }, 3000);
-}
-
-function escapeHtml(text) {
-  if (text === null || text === undefined) return '';
-  var div = document.createElement('div');
-  div.textContent = String(text);
-  return div.innerHTML;
-}
-
-function escapeAttr(text) {
-  if (text === null || text === undefined) return '';
-  return String(text).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function escapeJs(text) {
-  // For embedding in inline onclick="foo('<value>')" attributes — only need to
-  // escape single quotes and backslashes.
-  if (text === null || text === undefined) return '';
-  return String(text).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'");
-}
-
-function formatDate(dateString) {
-  if (!dateString) return '';
-  var date = new Date(dateString);
-  if (isNaN(date.getTime())) return dateString;
-  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function formatDateLong(dateString) {
-  if (!dateString) return '';
-  var date = (dateString instanceof Date) ? dateString : new Date(dateString);
-  if (isNaN(date.getTime())) return String(dateString);
-  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-}
-
-function formatDateForInput(dateString) {
-  if (!dateString) return '';
-  var date = new Date(dateString);
-  if (isNaN(date.getTime())) return '';
-  return date.toISOString().split('T')[0];
-}
-
-function formatDateTime(dateString) {
-  if (!dateString) return '';
-  var date = new Date(dateString);
-  if (isNaN(date.getTime())) return dateString;
-  return date.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
-
-function formatRelativeTime(dateString) {
-  if (!dateString) return '';
-  var date = new Date(dateString);
-  if (isNaN(date.getTime())) return dateString;
-  var diffMs = Date.now() - date.getTime();
-  var diffSec = Math.floor(diffMs / 1000);
-  var diffMin = Math.floor(diffSec / 60);
-  var diffHr  = Math.floor(diffMin / 60);
-  var diffDay = Math.floor(diffHr / 24);
-  if (diffSec < 60)  return 'just now';
-  if (diffMin < 60)  return diffMin + ' min ago';
-  if (diffHr  < 24)  return diffHr + ' hr ago';
-  if (diffDay < 7)   return diffDay + ' day' + (diffDay === 1 ? '' : 's') + ' ago';
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function setRadioGroupValue(name, value) {
-  document.querySelectorAll('input[name="' + name + '"]').forEach(function(el) {
-    el.checked = (el.value === value);
-  });
-}
-
-function getRadioGroupValue(name) {
-  var els = document.querySelectorAll('input[name="' + name + '"]');
-  for (var i = 0; i < els.length; i++) {
-    if (els[i].checked) return els[i].value;
-  }
-  return null;
-}
-
-// ============================================================
-// PORTFOLIO HEALTH (Phase 1 — unchanged)
-// ============================================================
-
-var portfolioData = null;
-var PH_INDUSTRY_COLORS = ['#0F4C81', '#0891B2', '#A855F7', '#F97316', '#16A34A'];
-
-var _origSwitchTab = switchTab;
-switchTab = function(tabName) {
-  _origSwitchTab(tabName);
-  if (tabName === 'portfolio' && !portfolioData) {
-    loadPortfolioHealth();
-  }
-};
-
-function loadPortfolioHealth() {
-  document.getElementById('ph-loading').classList.remove('hidden');
-  document.getElementById('ph-content').classList.add('hidden');
-  google.script.run
-    .withSuccessHandler(function(data) {
-      portfolioData = data;
-      renderPortfolioHealth(data);
-      document.getElementById('ph-loading').classList.add('hidden');
-      document.getElementById('ph-content').classList.remove('hidden');
-    })
-    .withFailureHandler(function(err) {
-      document.getElementById('ph-loading').innerHTML =
-        '<p style="color:#c62828;">Error loading Portfolio Health: ' + escapeHtml(err.toString()) + '</p>';
-      showToast('Error loading Portfolio Health: ' + err, 'error');
-    })
-    .getPortfolioHealthData();
-}
-
-function renderPortfolioHealth(d) {
-  document.getElementById('ph-title').textContent = d.title || 'Portfolio Health';
-  document.getElementById('ph-subtitle').textContent = (d.appId ? d.appId + ' \\u00B7 ' : '') + 'Executive Snapshot';
-  document.getElementById('ph-month').textContent = d.monthLabel || '';
-  document.getElementById('ph-generated').textContent = 'Generated ' + (d.generatedLabel || '');
-
-  document.getElementById('ph-kpi-total').textContent  = d.totals.total;
-  document.getElementById('ph-kpi-green').textContent  = d.totals.green;
-  document.getElementById('ph-kpi-yellow').textContent = d.totals.yellow;
-  document.getElementById('ph-kpi-red').textContent    = d.totals.red;
-  document.getElementById('ph-kpi-green-pct').textContent  = formatPct(d.totals.greenPct);
-  document.getElementById('ph-kpi-yellow-pct').textContent = formatPct(d.totals.yellowPct);
-  document.getElementById('ph-kpi-red-pct').textContent    = formatPct(d.totals.redPct);
-
-  // Phase 3a: Phased Go-Lives KPI tile
-  var phasedEl = document.getElementById('ph-kpi-phased');
-  if (phasedEl) {
-    phasedEl.textContent = (d.phasedDeployments !== undefined && d.phasedDeployments !== null)
-      ? d.phasedDeployments
-      : '–';
-  }
-
-  var hist = d.history || null;
-  renderPhTrendAndSpark('total',  hist, '#0F4C81', 'neutral');
-  renderPhTrendAndSpark('green',  hist, '#10b981', 'upGood');
-  renderPhTrendAndSpark('yellow', hist, '#f59e0b', 'upBad');
-  renderPhTrendAndSpark('red',    hist, '#ef4444', 'upBad');
-
-  renderPhList('ph-red-list',    'ph-red-count',    d.redProjects,    'red',    'No Red projects');
-  renderPhList('ph-yellow-list', 'ph-yellow-count', d.yellowProjects, 'yellow', 'No Yellow projects');
-  document.getElementById('ph-golives-title').textContent =
-    'WD Prime Go Lives \\u2014 Last ' + (d.windowDays || 60) + ' Days';
-  renderPhList('ph-golives-list', 'ph-golives-count', d.recentGoLives.accounts, 'blue', 'No WD Prime Go Lives in window');
-
-  renderPhStacked(d.totals);
-
-  document.getElementById('ph-workday-legend').textContent = d.workdayLabel || 'Workday';
-  document.getElementById('ph-other-legend').textContent   = d.otherLabel || 'Partners/Other';
-  renderPhPartnerTable(d.partnerSplit, d.workdayLabel, d.otherLabel);
-  renderPhIndustryTable(d.industrySplit);
-}
-
-function renderPhList(listId, countId, items, dotClass, emptyText) {
-  var list = document.getElementById(listId);
-  var count = document.getElementById(countId);
-  count.textContent = items.length;
-  if (!items || items.length === 0) {
-    list.innerHTML = '<div class="ph-empty">' + escapeHtml(emptyText) + '</div>';
-    return;
-  }
-  list.innerHTML = items.map(function(it) {
-    return '<div class="ph-list-item">' +
-      '<span class="ph-dot ' + dotClass + '"></span>' +
-      '<span>' + escapeHtml(it.accountName) + '</span>' +
-      '</div>';
-  }).join('');
-}
-
-function renderPhStacked(totals) {
-  var el = document.getElementById('ph-stacked');
-  if (!totals.total) {
-    el.innerHTML = '<div style="flex:1; display:flex; align-items:center; justify-content:center; color:#94a3b8; background:#eef2f7;">No data</div>';
-    return;
-  }
-  function seg(count, color) {
-    if (!count) return '';
-    var pct = (count / totals.total) * 100;
-    return '<div style="width:' + pct.toFixed(2) + '%; background:' + color + ';">' + count + '</div>';
-  }
-  el.innerHTML = seg(totals.green, '#10b981') + seg(totals.yellow, '#f59e0b') + seg(totals.red, '#ef4444');
-}
-
-function renderPhPartnerTable(split, workdayLabel, otherLabel) {
-  var tbl = document.getElementById('ph-partner-table');
-  var wlbl = workdayLabel || 'Workday';
-  var olbl = otherLabel   || 'Partners/Other';
-  var rows = split.rows.map(function(r) {
-    return phSplitRow(r.health, [
-      { name: wlbl, count: r.workdayCount, pct: r.workdayPct, color: '#0f4c81' },
-      { name: olbl, count: r.otherCount,   pct: r.otherPct,   color: '#64748b' }
-    ]);
-  });
-  var t = split.totals;
-  rows.push(phSplitTotalsRow([
-    { name: wlbl, count: t.workdayCount, pct: t.workdayPct, color: '#0f4c81' },
-    { name: olbl, count: t.otherCount,   pct: t.otherPct,   color: '#64748b' }
-  ], t.total));
-  tbl.innerHTML = rows.join('');
-}
-
-function renderPhIndustryTable(split) {
-  var tbl = document.getElementById('ph-industry-table');
-  var legend = document.getElementById('ph-industry-legend');
-  legend.innerHTML = split.bucketLabels.map(function(label, i) {
-    return '<span><span class="ph-legend-swatch" style="background:' +
-      PH_INDUSTRY_COLORS[i % PH_INDUSTRY_COLORS.length] + ';"></span>' +
-      escapeHtml(label) + '</span>';
-  }).join('');
-  var rows = split.rows.map(function(r) {
-    var bars = r.buckets.map(function(b, i) {
-      return { name: b.label, count: b.count, pct: b.pct, color: PH_INDUSTRY_COLORS[i % PH_INDUSTRY_COLORS.length] };
-    });
-    return phSplitRow(r.health, bars);
-  });
-  var totalsBars = split.totals.buckets.map(function(b, i) {
-    return { name: b.label, count: b.count, pct: b.pct, color: PH_INDUSTRY_COLORS[i % PH_INDUSTRY_COLORS.length] };
-  });
-  rows.push(phSplitTotalsRow(totalsBars, split.totals.total));
-  tbl.innerHTML = rows.join('');
-}
-
-function phSplitRow(health, bars) {
-  var tag = '<span class="ph-health-tag ' + health.toLowerCase() + '">' + health + '</span>';
-  var barsHtml = bars.map(function(b) {
-    var pct = Math.round((b.pct || 0) * 1000) / 10;
-    return '<div class="ph-bar-row">' +
-      '<span class="ph-bar-name">' + escapeHtml(b.name) + '</span>' +
-      '<div class="ph-bar-track">' +
-      '<div class="ph-bar-fill" style="width:' + pct + '%; background:' + b.color + ';"></div>' +
-      '</div>' +
-      '<span class="ph-bar-value">' + formatPct(b.pct) + ' \\u00B7 ' + b.count + '</span>' +
-      '</div>';
-  }).join('');
-  return '<tr>' +
-    '<td class="ph-split-label">' + tag + '</td>' +
-    '<td class="ph-split-bars">' + barsHtml + '</td>' +
-    '</tr>';
-}
-
-function phSplitTotalsRow(bars, grandTotal) {
-  var barsHtml = bars.map(function(b) {
-    var pct = Math.round((b.pct || 0) * 1000) / 10;
-    return '<div class="ph-bar-row">' +
-      '<span class="ph-bar-name">' + escapeHtml(b.name) + '</span>' +
-      '<div class="ph-bar-track">' +
-      '<div class="ph-bar-fill" style="width:' + pct + '%; background:' + b.color + ';"></div>' +
-      '</div>' +
-      '<span class="ph-bar-value">' + formatPct(b.pct) + ' \\u00B7 ' + b.count + '</span>' +
-      '</div>';
-  }).join('');
-  return '<tr class="ph-split-totals">' +
-    '<td class="ph-split-label">Totals</td>' +
-    '<td class="ph-split-bars">' + barsHtml + '</td>' +
-    '</tr>';
-}
-
-function formatPct(p) {
-  if (p === null || p === undefined || isNaN(p)) return '0.0%';
-  return (p * 100).toFixed(1) + '%';
-}
-
-function renderPhTrendAndSpark(key, hist, color, direction) {
-  var trendEl = document.getElementById('ph-trend-' + key);
-  var sparkEl = document.getElementById('ph-spark-' + key);
-  if (!trendEl || !sparkEl) return;
-  if (!hist || !hist.trend || !hist.trend[key]) {
-    trendEl.className = 'ph-trend flat';
-    trendEl.innerHTML = '<span class="ph-arrow">\\u2013</span> 0';
-    sparkEl.innerHTML = '';
-    return;
-  }
-  var t = hist.trend[key];
-  var series = (hist.series && hist.series[key]) ? hist.series[key] : [];
-  var arrow, klass;
-  if (t.previous === null || t.previous === undefined || t.delta === 0) {
-    arrow = '\\u2013';
-    klass = 'flat';
-  } else if (t.delta > 0) {
-    arrow = '\\u25B2';
-    klass = (direction === 'upGood') ? 'good' : (direction === 'upBad') ? 'bad' : 'flat';
-  } else {
-    arrow = '\\u25BC';
-    klass = (direction === 'upGood') ? 'bad' : (direction === 'upBad') ? 'good' : 'flat';
-  }
-  var sign = t.delta > 0 ? '+' : (t.delta < 0 ? '\\u2212' : '');
-  var absDelta = Math.abs(t.delta);
-  trendEl.className = 'ph-trend ' + klass;
-  trendEl.innerHTML = '<span class="ph-arrow">' + arrow + '</span> ' + sign + absDelta;
-  renderPhSparkline(sparkEl, series, hist.months || [], color);
-}
-
-function renderPhSparkline(svg, series, months, color) {
-  svg.innerHTML = '';
-  if (!series || series.length === 0) return;
-  var W = 100;
-  var H = 28;
-  var padX = 2;
-  var padY = 4;
-  var n = series.length;
-  var min = Math.min.apply(null, series);
-  var max = Math.max.apply(null, series);
-  var range = (max - min) || 1;
-  function xAt(i) { if (n === 1) return W / 2; return padX + (i * (W - 2 * padX)) / (n - 1); }
-  function yAt(v) { return padY + (H - 2 * padY) * (1 - (v - min) / range); }
-  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-  var linePts = series.map(function(v, i) { return xAt(i) + ',' + yAt(v); });
-  var linePath = 'M ' + linePts.join(' L ');
-  var areaPath = linePath + ' L ' + xAt(n - 1) + ',' + (H - padY) + ' L ' + xAt(0) + ',' + (H - padY) + ' Z';
-  var ns = 'http://www.w3.org/2000/svg';
-  var area = document.createElementNS(ns, 'path');
-  area.setAttribute('class', 'ph-spark-area');
-  area.setAttribute('d', areaPath);
-  area.setAttribute('fill', color);
-  svg.appendChild(area);
-  var line = document.createElementNS(ns, 'path');
-  line.setAttribute('class', 'ph-spark-line');
-  line.setAttribute('d', linePath);
-  line.setAttribute('stroke', color);
-  svg.appendChild(line);
-  var dot = document.createElementNS(ns, 'circle');
-  dot.setAttribute('class', 'ph-spark-dot');
-  dot.setAttribute('cx', xAt(n - 1));
-  dot.setAttribute('cy', yAt(series[n - 1]));
-  dot.setAttribute('r', 2.2);
-  dot.setAttribute('fill', color);
-  svg.appendChild(dot);
-  var monthsArr = (months && months.length === n) ? months : series.map(function(_, i) { return 'Pt ' + (i + 1); });
-  var title = document.createElementNS(ns, 'title');
-  title.textContent = monthsArr.map(function(m, i) { return m + ': ' + series[i]; }).join('\\\\n');
-  svg.appendChild(title);
-}
-
-function downloadPortfolioHealthPng() {
-  if (!portfolioData) {
-    showToast('Portfolio Health is still loading\\u2026', 'error');
-    return;
-  }
-  var node = document.getElementById('ph-canvas');
-  var spinner = document.getElementById('ph-spinner');
-  spinner.classList.remove('hidden');
-  html2canvas(node, {
-    backgroundColor: '#ffffff',
-    scale: 2,
-    useCORS: true,
-    ignoreElements: function(el) { return el.classList && el.classList.contains('no-export'); }
-  }).then(function(canvas) {
-    var ym = portfolioDataMonthSuffix();
-    var filename = (portfolioData.appId || 'Portfolio') + '_PortfolioHealth_' + ym + '.png';
-    canvas.toBlob(function(blob) {
-      var link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-      spinner.classList.add('hidden');
-      showToast('Portfolio Health PNG downloaded', 'success');
-    }, 'image/png');
-  }).catch(function(err) {
-    spinner.classList.add('hidden');
-    showToast('Error generating PNG: ' + err, 'error');
-  });
-}
-
-function portfolioDataMonthSuffix() {
-  if (!portfolioData || !portfolioData.generatedAt) return 'snapshot';
-  var d = new Date(portfolioData.generatedAt);
-  if (isNaN(d.getTime())) return 'snapshot';
-  var m = String(d.getMonth() + 1).padStart(2, '0');
-  return d.getFullYear() + '-' + m;
-}
-`;
+  _CoreUI_Js_CACHE = [
+  '// ============================================================',
+  '// CoreUI client JS bundle (Phase 2 — v10)',
+  '// Reads window.APP_UI_CONFIG for per-app variation.',
+  '// ============================================================',
+  '',
+  'var APP_UI_CONFIG = window.APP_UI_CONFIG || {};',
+  'var UI_DT = APP_UI_CONFIG.deploymentsTable || {};',
+  'var UI_GT = APP_UI_CONFIG.goLivesTable     || {};',
+  'var UI_GLT = APP_UI_CONFIG.goLivesTab      || {};',
+  'var UI_MO = APP_UI_CONFIG.manageOverrides  || {};',
+  'var UI_PERS = APP_UI_CONFIG.personalization || {};',
+  '',
+  '// ============================================================',
+  '// PHASE 2 STATE',
+  '// ============================================================',
+  '',
+  '// Identity, resolved once on page load.',
+  'var currentUser = null;       // { email, displayName, role, isAdmin, active, unknown } | null',
+  'var activeUsersCache = [];    // Array of AppUsers, populated for VP/PM dropdown',
+  '',
+  '// Personalization view state. Session-only — no localStorage per Jeff edit 5.',
+  '//   { viewMode: \'my\' | \'all\', ddDisplayName: string }',
+  '// For DDs: viewMode toggles, ddDisplayName is always self.',
+  '// For VPs/PMs: viewMode is \'all\' or \'my\'; if \'my\', ddDisplayName is the picked DD.',
+  'var viewState = {',
+  '  viewMode: \'all\',',
+  '  ddDisplayName: \'\'',
+  '};',
+  '',
+  '// Deployments tab Phase 2 state',
+  'var allDeploymentsData = [];          // Phase 2: full portfolio (was deploymentsData/Red+Yellow only)',
+  'var deploymentsFilters = {',
+  '  search: \'\',',
+  '  health: [],                          // [\'Red\', \'Yellow\'] etc.',
+  '  owner: \'All\',',
+  '  partner: \'All\',',
+  '  stage: \'All\',',
+  '  industry: \'All\'',
+  '};',
+  'var filteredDeployments = [];',
+  'var expandedRowId = null;              // deploymentId of the currently-expanded row, if any',
+  '',
+  '// Go Lives Phase 2 state (consolidated tab)',
+  'var allGoLivesRecent = [];             // past 60 days',
+  'var allGoLivesUpcoming = [];           // next 90 days',
+  'var currentGoLivesView = \'recent\';     // \'recent\' | \'upcoming\' | \'all\'',
+  'var filteredGoLives = [];',
+  'var goLivesSearch = \'\';',
+  '',
+  '// Manage Overrides state',
+  'var activeOverridesData = [];',
+  'var auditLogData = [];',
+  'var overridesFilters = { type: \'all\', classification: \'all\' };',
+  'var auditTrailWindowDays = 30;         // toggled to 0 (all history) when user expands',
+  '',
+  '// Modal/transient state',
+  'var currentGoLivesIndex = null;',
+  'var execSummaryIsSaving = false;',
+  'var confirmModalCallback = null;       // function called when confirm modal "Confirm" clicked',
+  '',
+  '// Phase 3c: Monthly Report Preview view format toggle',
+  'var reportViewMode = \'outlook\';        // \'outlook\' | \'inline\' — Outlook is the default',
+  '',
+  '// ============================================================',
+  '// BOOT',
+  '// ============================================================',
+  '',
+  'window.onload = function() {',
+  '  bootPhase2();',
+  '};',
+  '',
+  'function bootPhase2() {',
+  '  // Resolve identity first (synchronous server call). All downstream UI',
+  '  // setup depends on knowing role.',
+  '  google.script.run',
+  '    .withSuccessHandler(function(resp) {',
+  '      currentUser = resp && resp.user ? resp.user : null;',
+  '      activeUsersCache = resp && resp.activeUsers ? resp.activeUsers : [];',
+  '      initializeViewState();',
+  '      initializeHeaderRight();',
+  '      maybeShowWelcomeBanner();',
+  '      // Now load initial tab data.',
+  '      loadDeploymentsData();',
+  '      loadGoLivesData_both();',
+  '      // Audit/overrides tabs lazy-load on first switch.',
+  '    })',
+  '    .withFailureHandler(function(err) {',
+  '      // Identity resolution failed — degrade to anonymous behavior.',
+  '      console.warn(\'Identity boot failed: \' + err);',
+  '      currentUser = null;',
+  '      activeUsersCache = [];',
+  '      initializeViewState();',
+  '      // Header-right stays hidden.',
+  '      loadDeploymentsData();',
+  '      loadGoLivesData_both();',
+  '    })',
+  '    .getIdentityBoot();',
+  '}',
+  '',
+  '/**',
+  ' * Decide the initial viewMode + ddDisplayName based on user role and',
+  ' * APP_CONFIG.ui.personalization.defaultViewMode.',
+  ' */',
+  'function initializeViewState() {',
+  '  if (!UI_PERS.enabled) {',
+  '    viewState = { viewMode: \'all\', ddDisplayName: \'\' };',
+  '    return;',
+  '  }',
+  '  if (!currentUser || !currentUser.active) {',
+  '    viewState = { viewMode: \'all\', ddDisplayName: \'\' };',
+  '    return;',
+  '  }',
+  '  if (currentUser.role === \'DD\') {',
+  '    var defaultMode = UI_PERS.defaultViewMode || \'myPortfolio\';',
+  '    viewState.viewMode = (defaultMode === \'myPortfolio\') ? \'my\' : \'all\';',
+  '    viewState.ddDisplayName = currentUser.displayName;',
+  '  } else {',
+  '    // VP / PM: default to All; ddDisplayName empty until they pick one.',
+  '    viewState.viewMode = \'all\';',
+  '    viewState.ddDisplayName = \'\';',
+  '  }',
+  '}',
+  '',
+  '// ============================================================',
+  '// HEADER-RIGHT: TOGGLE OR DROPDOWN',
+  '// ============================================================',
+  '',
+  'function initializeHeaderRight() {',
+  '  if (!UI_PERS.enabled) return;',
+  '  if (!currentUser || !currentUser.active) return;',
+  '',
+  '  var container = document.getElementById(\'header-right\');',
+  '  var inner = document.getElementById(\'header-mode-control\');',
+  '  if (!container || !inner) return;',
+  '',
+  '  if (currentUser.role === \'DD\') {',
+  '    renderDDSegmentedControl(inner);',
+  '  } else {',
+  '    renderVPPMDropdown(inner);',
+  '  }',
+  '  container.classList.remove(\'hidden\');',
+  '}',
+  '',
+  'function renderDDSegmentedControl(inner) {',
+  '  var myActive = viewState.viewMode === \'my\';',
+  '  inner.innerHTML =',
+  '    \'<div class="seg-control">\' +',
+  '    \'  <button class="seg-control-btn \' + (myActive ? \'active\' : \'\') + \'" onclick="setViewMode(\\\'my\\\')">My Portfolio</button>\' +',
+  '    \'  <button class="seg-control-btn \' + (myActive ? \'\' : \'active\') + \'" onclick="setViewMode(\\\'all\\\')">All</button>\' +',
+  '    \'</div>\';',
+  '}',
+  '',
+  'function renderVPPMDropdown(inner) {',
+  '  var dds = activeUsersCache.filter(function(u) { return u.role === \'DD\'; });',
+  '  var currentLabel = (viewState.viewMode === \'all\')',
+  '    ? \'Showing: All\'',
+  '    : \'Showing: \' + viewState.ddDisplayName;',
+  '',
+  '  var menuHtml = \'<div class="dd-dropdown-option \' +',
+  '    (viewState.viewMode === \'all\' ? \'selected\' : \'\') +',
+  '    \'" onclick="pickVPPMOption(\\\'all\\\', \\\'\\\')">Showing: All</div>\';',
+  '',
+  '  dds.forEach(function(dd) {',
+  '    var sel = (viewState.viewMode === \'my\' && viewState.ddDisplayName === dd.displayName);',
+  '    menuHtml += \'<div class="dd-dropdown-option \' + (sel ? \'selected\' : \'\') +',
+  '      \'" onclick="pickVPPMOption(\\\'my\\\', \\\'\' + escapeJs(dd.displayName) + \'\\\')">Showing: \' + escapeHtml(dd.displayName) + \'</div>\';',
+  '  });',
+  '',
+  '  inner.innerHTML =',
+  '    \'<div class="dd-dropdown" id="dd-dropdown-wrapper">\' +',
+  '    \'  <button class="dd-dropdown-trigger" onclick="toggleVPPMDropdown(event)">\' +',
+  '    \'    <span>\' + escapeHtml(currentLabel) + \'</span><span class="caret">&#9660;</span>\' +',
+  '    \'  </button>\' +',
+  '    \'  <div class="dd-dropdown-menu">\' + menuHtml + \'</div>\' +',
+  '    \'</div>\';',
+  '}',
+  '',
+  'function setViewMode(mode) {',
+  '  viewState.viewMode = mode;',
+  '  if (currentUser && currentUser.role === \'DD\') {',
+  '    viewState.ddDisplayName = currentUser.displayName;',
+  '  }',
+  '  // Re-render header-right + refresh data.',
+  '  var inner = document.getElementById(\'header-mode-control\');',
+  '  if (inner) renderDDSegmentedControl(inner);',
+  '  refreshAllPersonalizedTabs();',
+  '}',
+  '',
+  'function pickVPPMOption(mode, ddDisplayName) {',
+  '  viewState.viewMode = mode;',
+  '  viewState.ddDisplayName = ddDisplayName;',
+  '  // Close dropdown',
+  '  var wrapper = document.getElementById(\'dd-dropdown-wrapper\');',
+  '  if (wrapper) wrapper.classList.remove(\'open\');',
+  '  // Re-render header-right + refresh data.',
+  '  var inner = document.getElementById(\'header-mode-control\');',
+  '  if (inner) renderVPPMDropdown(inner);',
+  '  refreshAllPersonalizedTabs();',
+  '}',
+  '',
+  'function toggleVPPMDropdown(evt) {',
+  '  evt.stopPropagation();',
+  '  var wrapper = document.getElementById(\'dd-dropdown-wrapper\');',
+  '  if (wrapper) wrapper.classList.toggle(\'open\');',
+  '}',
+  '',
+  '// Click-outside to close dropdown',
+  'document.addEventListener(\'click\', function() {',
+  '  var wrapper = document.getElementById(\'dd-dropdown-wrapper\');',
+  '  if (wrapper) wrapper.classList.remove(\'open\');',
+  '});',
+  '',
+  'function refreshAllPersonalizedTabs() {',
+  '  // Re-fetch deployments + go lives. Manage Overrides re-fetches on tab switch.',
+  '  loadDeploymentsData();',
+  '  loadGoLivesData_both();',
+  '  // If Manage Overrides tab is currently visible, refresh it too.',
+  '  var overridesTab = document.getElementById(\'overrides-tab\');',
+  '  if (overridesTab && overridesTab.classList.contains(\'active\')) {',
+  '    refreshOverridesTab();',
+  '  }',
+  '  // Phase 3g: If Trends tab is currently visible, re-render with new viewModeOpts.',
+  '  var trendsTab = document.getElementById(\'trends-tab\');',
+  '  if (trendsTab && trendsTab.classList.contains(\'active\')) {',
+  '    loadTrendsTab();',
+  '  }',
+  '}',
+  '',
+  '// ============================================================',
+  '// WELCOME BANNER',
+  '// ============================================================',
+  '',
+  'function maybeShowWelcomeBanner() {',
+  '  if (!UI_PERS.enabled) return;',
+  '  if (!UI_PERS.welcomeMessageEnabled) return;',
+  '  if (!currentUser || !currentUser.active) return;',
+  '  if (currentUser.role !== \'DD\') return;',
+  '  // Per Jeff edit 5: no localStorage. Welcome shows once per page load only.',
+  '  var banner = document.getElementById(\'welcome-banner\');',
+  '  var text   = document.getElementById(\'welcome-banner-text\');',
+  '  if (!banner || !text) return;',
+  '  text.innerHTML = \'👋 Welcome, \' + escapeHtml(currentUser.displayName || \'there\') +',
+  '    \'. We&rsquo;ve added a personalized view of your assigned deployments. \' +',
+  '    \'Use the toggle in the header to switch between My Portfolio and All Deployments.\';',
+  '  banner.classList.remove(\'hidden\');',
+  '}',
+  '',
+  'function dismissWelcomeBanner() {',
+  '  var banner = document.getElementById(\'welcome-banner\');',
+  '  if (banner) banner.classList.add(\'hidden\');',
+  '}',
+  '',
+  '// ============================================================',
+  '// TAB SWITCHING',
+  '// ============================================================',
+  '',
+  'function switchTab(tabName) {',
+  '  document.querySelectorAll(\'.tab\').forEach(function(tab) { tab.classList.remove(\'active\'); });',
+  '  document.querySelectorAll(\'.tab-content\').forEach(function(c) { c.classList.remove(\'active\'); });',
+  '  if (typeof event !== \'undefined\' && event && event.target) {',
+  '    event.target.classList.add(\'active\');',
+  '  }',
+  '  var contentEl = document.getElementById(tabName + \'-tab\');',
+  '  if (contentEl) contentEl.classList.add(\'active\');',
+  '',
+  '  if (tabName === \'report\') {',
+  '    var container = document.getElementById(\'report-preview-container\');',
+  '    var hasContent = container && container.querySelector(\'iframe\') !== null;',
+  '    if (!hasContent) { loadReportPreview(); }',
+  '  } else if (tabName === \'execsummary\') {',
+  '    var editor = document.getElementById(\'exec-editor\');',
+  '    var current = (editor.innerHTML || \'\').trim();',
+  '    if (!current || current === \'\' || current === \'&nbsp;\') {',
+  '      loadExecSummaryFromServer();',
+  '    }',
+  '  } else if (tabName === \'overrides\') {',
+  '    refreshOverridesTab();',
+  '  } else if (tabName === \'trends\') {',
+  '    // Phase 3g: auto-load on first switch; re-load on subsequent switches so',
+  '    // data reflects any viewMode change that occurred while on another tab.',
+  '    loadTrendsTab();',
+  '  }',
+  '}',
+  '',
+  '// ============================================================',
+  '// COLSPAN HELPERS',
+  '// ============================================================',
+  '',
+  'function computeDeploymentsColspan_() {',
+  '  // Base: chevron, Health, Account, Deployment, Partner, MTP, Owner-or-EM,',
+  '  // Actions, Meta = 9 (with expandable chevron always present in Phase 2).',
+  '  var n = UI_DT.expandableRows !== false ? 9 : 8;',
+  '  if (UI_DT.showIndustry) n++;',
+  '  return n;',
+  '}',
+  '',
+  'function computeGoLivesColspan_() {',
+  '  // Date, Account, Product/Deployment, Partner, Actions = 5',
+  '  var n = 5;',
+  '  if (UI_GT.showIndustry) n++;',
+  '  return n;',
+  '}',
+  '',
+  '// ============================================================',
+  '// VIEW MODE ACCESSOR — passed to server endpoints',
+  '// ============================================================',
+  '',
+  'function getViewModeOpts_() {',
+  '  if (!UI_PERS.enabled) return null;',
+  '  if (viewState.viewMode === \'all\') {',
+  '    return { viewMode: \'all\', ddDisplayName: \'\' };',
+  '  }',
+  '  return { viewMode: \'my\', ddDisplayName: viewState.ddDisplayName };',
+  '}',
+  '',
+  '// ============================================================',
+  '// DEPLOYMENTS DATA',
+  '// ============================================================',
+  '',
+  'function loadDeploymentsData() {',
+  '  var colspan = computeDeploymentsColspan_();',
+  '  showLoading(\'deployments-tbody\', colspan);',
+  '  google.script.run',
+  '    .withSuccessHandler(function(data) {',
+  '      allDeploymentsData = data || [];',
+  '      initializeDeploymentsFilters();',
+  '      applyDeploymentsFilters();',
+  '      renderDeploymentsKPIs();',
+  '    })',
+  '    .withFailureHandler(function(error) {',
+  '      showToast(\'Error loading deployments: \' + error, \'error\');',
+  '    })',
+  '    .getAllDeploymentsForUI(getViewModeOpts_());',
+  '}',
+  '',
+  'function initializeDeploymentsFilters() {',
+  '  // Default Health filter from config.',
+  '  var defaultHealth = Array.isArray(UI_DT.defaultHealthFilter)',
+  '    ? UI_DT.defaultHealthFilter.slice()',
+  '    : [\'Red\', \'Yellow\'];',
+  '  deploymentsFilters.health = defaultHealth;',
+  '  deploymentsFilters.search = \'\';',
+  '  deploymentsFilters.owner = \'All\';',
+  '  deploymentsFilters.partner = \'All\';',
+  '  deploymentsFilters.stage = \'All\';',
+  '  deploymentsFilters.industry = \'All\';',
+  '  renderHealthChips();',
+  '  populateOwnerFilter();',
+  '  populatePartnerFilter();',
+  '  populateStageFilter();',
+  '  populateIndustryFilter();',
+  '}',
+  '',
+  '// ============================================================',
+  '// GO LIVES DATA (consolidated tab — fetches both windows)',
+  '// ============================================================',
+  '',
+  'function loadGoLivesData_both() {',
+  '  var colspan = computeGoLivesColspan_();',
+  '  showLoading(\'golives-tbody\', colspan);',
+  '',
+  '  var pending = 2;',
+  '  function maybeRender() {',
+  '    pending--;',
+  '    if (pending === 0) {',
+  '      applyGoLivesView();',
+  '    }',
+  '  }',
+  '',
+  '  // Phase 3i: call getRecentGoLivesData (SOQL-backed) instead of the legacy getGoLivesData.',
+  '  google.script.run',
+  '    .withSuccessHandler(function(data) { allGoLivesRecent = data || []; maybeRender(); })',
+  '    .withFailureHandler(function(error) {',
+  '      showToast(\'Error loading recent go lives: \' + error, \'error\');',
+  '      allGoLivesRecent = [];',
+  '      maybeRender();',
+  '    })',
+  '    .getRecentGoLivesData(getViewModeOpts_());',
+  '',
+  '  google.script.run',
+  '    .withSuccessHandler(function(data) { allGoLivesUpcoming = data || []; maybeRender(); })',
+  '    .withFailureHandler(function(error) {',
+  '      showToast(\'Error loading upcoming go lives: \' + error, \'error\');',
+  '      allGoLivesUpcoming = [];',
+  '      maybeRender();',
+  '    })',
+  '    .getUpcomingGoLivesData(getViewModeOpts_());',
+  '}',
+  '',
+  'function switchGoLivesView(view) {',
+  '  currentGoLivesView = view;',
+  '  // Update segmented control active state',
+  '  document.querySelectorAll(\'[data-golives-view]\').forEach(function(btn) {',
+  '    if (btn.getAttribute(\'data-golives-view\') === view) {',
+  '      btn.classList.add(\'active\');',
+  '    } else {',
+  '      btn.classList.remove(\'active\');',
+  '    }',
+  '  });',
+  '  // Update column headers contextually',
+  '  var dateHeader = document.getElementById(\'golives-date-header\');',
+  '  var productHeader = document.getElementById(\'golives-product-header\');',
+  '  if (dateHeader) {',
+  '    dateHeader.textContent = (view === \'recent\') ? \'Go Live Date\'',
+  '                          : (view === \'upcoming\') ? \'MTP Date\'',
+  '                          : \'Date\';',
+  '  }',
+  '  if (productHeader) {',
+  '    productHeader.textContent = (view === \'recent\') ? \'Product Areas\'',
+  '                             : (view === \'upcoming\') ? \'Deployment Names\'',
+  '                             : \'Product / Deployment\';',
+  '  }',
+  '  applyGoLivesView();',
+  '}',
+  '',
+  '// ============================================================',
+  '// OVERRIDES + AUDIT DATA (lazy-loaded on tab switch)',
+  '// ============================================================',
+  '',
+  'function refreshOverridesTab() {',
+  '  loadActiveOverrides();',
+  '  loadAuditLog();',
+  '  updateBulkClearMonthLabel();',
+  '}',
+  '',
+  'function loadActiveOverrides() {',
+  '  var tbody = document.getElementById(\'active-overrides-tbody\');',
+  '  if (!tbody) return;',
+  '  tbody.innerHTML = \'<tr><td colspan="7" style="text-align:center;padding:2rem;">Loading&hellip;</td></tr>\';',
+  '  google.script.run',
+  '    .withSuccessHandler(function(data) {',
+  '      activeOverridesData = data || [];',
+  '      renderActiveOverridesTable();',
+  '    })',
+  '    .withFailureHandler(function(error) {',
+  '      showToast(\'Error loading active overrides: \' + error, \'error\');',
+  '      activeOverridesData = [];',
+  '      renderActiveOverridesTable();',
+  '    })',
+  '    .getAllActiveOverridesForUI(getViewModeOpts_());',
+  '}',
+  '',
+  'function loadAuditLog() {',
+  '  var tbody = document.getElementById(\'audit-trail-tbody\');',
+  '  if (!tbody) return;',
+  '  tbody.innerHTML = \'<tr><td colspan="7" style="text-align:center;padding:2rem;">Loading&hellip;</td></tr>\';',
+  '  google.script.run',
+  '    .withSuccessHandler(function(data) {',
+  '      auditLogData = data || [];',
+  '      renderAuditLog();',
+  '    })',
+  '    .withFailureHandler(function(error) {',
+  '      showToast(\'Error loading audit log: \' + error, \'error\');',
+  '      auditLogData = [];',
+  '      renderAuditLog();',
+  '    })',
+  '    .getOverrideAuditLogForUI({ sinceDays: auditTrailWindowDays, limit: auditTrailWindowDays === 0 ? 500 : 0 });',
+  '}',
+  '',
+  'function updateBulkClearMonthLabel() {',
+  '  var label = document.getElementById(\'bulk-clear-month-label\');',
+  '  if (!label) return;',
+  '  var now = new Date();',
+  '  var monthName = now.toLocaleString(\'en-US\', { month: \'long\' });',
+  '  label.textContent = monthName + \' \' + now.getFullYear();',
+  '}',
+  '',
+  'function toggleAuditTrailWindow() {',
+  '  auditTrailWindowDays = (auditTrailWindowDays === 30) ? 0 : 30;',
+  '  var label = document.getElementById(\'audit-trail-window-label\');',
+  '  var btn = document.getElementById(\'audit-trail-toggle-btn\');',
+  '  if (label) label.textContent = (auditTrailWindowDays === 0) ? \'(all history, max 500)\' : \'(last 30 days)\';',
+  '  if (btn) btn.textContent = (auditTrailWindowDays === 0) ? \'Show recent only\' : \'Show all history\';',
+  '  loadAuditLog();',
+  '}',
+  '',
+  '// ============================================================',
+  '// EXECUTIVE SUMMARY (Phase 1 — unchanged)',
+  '// ============================================================',
+  '',
+  'function loadExecSummaryFromServer() {',
+  '  var editor = document.getElementById(\'exec-editor\');',
+  '  editor.innerHTML = \'<p style="color:\' + getComputedStyle(document.body).getPropertyValue(\'--color-text-muted\') + \';">Loading executive summary...</p>\';',
+  '  google.script.run',
+  '    .withSuccessHandler(function(htmlContent) {',
+  '      if (htmlContent && htmlContent.trim().length > 0) {',
+  '        editor.innerHTML = htmlContent;',
+  '      } else {',
+  '        editor.innerHTML = \'<p>Paste or type the executive summary here...</p>\';',
+  '      }',
+  '    })',
+  '    .withFailureHandler(function(error) {',
+  '      editor.innerHTML = \'<p style="color:#c62828;">Error loading executive summary: \' + escapeHtml(error.toString()) + \'</p>\';',
+  '      showToast(\'Error loading executive summary: \' + error, \'error\');',
+  '    })',
+  '    .getExecutiveSummaryHtml();',
+  '}',
+  '',
+  'function saveExecSummaryToServer() {',
+  '  if (execSummaryIsSaving) return;',
+  '  var editor = document.getElementById(\'exec-editor\');',
+  '  var html = editor.innerHTML || \'\';',
+  '  execSummaryIsSaving = true;',
+  '  google.script.run',
+  '    .withSuccessHandler(function() {',
+  '      execSummaryIsSaving = false;',
+  '      showToast(\'Executive summary saved\', \'success\');',
+  '    })',
+  '    .withFailureHandler(function(error) {',
+  '      execSummaryIsSaving = false;',
+  '      showToast(\'Error saving executive summary: \' + error, \'error\');',
+  '    })',
+  '    .saveExecutiveSummaryHtml(html);',
+  '}',
+  '',
+  '// ============================================================',
+  '// REPORT PREVIEW (Phase 1 — unchanged)',
+  '// ============================================================',
+  '',
+  '// Phase 3c: switches the report view format and re-renders.',
+  'function switchReportView(mode) {',
+  '  reportViewMode = mode;',
+  '  document.querySelectorAll(\'[data-report-view]\').forEach(function(btn) {',
+  '    if (btn.getAttribute(\'data-report-view\') === mode) {',
+  '      btn.classList.add(\'active\');',
+  '    } else {',
+  '      btn.classList.remove(\'active\');',
+  '    }',
+  '  });',
+  '  loadReportPreview();',
+  '}',
+  '',
+  'function loadReportPreview() {',
+  '  var container = document.getElementById(\'report-preview-container\');',
+  '  container.innerHTML =',
+  '    \'<div class="report-loading">\' +',
+  '    \'  <div class="spinner-large"></div>\' +',
+  '    \'  <p>Generating monthly report preview...</p>\' +',
+  '    \'  <p style="font-size: 0.875rem; margin-top: 0.5rem;">This may take a few moments</p>\' +',
+  '    \'</div>\';',
+  '',
+  '  var onSuccess = function(htmlContent) { renderReportPreview(htmlContent); };',
+  '  var onFailure = function(error) {',
+  '    container.innerHTML =',
+  '      \'<div style="text-align: center; padding: 4rem 2rem; color: var(--color-status-red-fg);">\' +',
+  '      \'  <p style="font-size: 1.2rem; margin-bottom: 0.5rem;">\u274C Error Loading Report</p>\' +',
+  '      \'  <p style="font-size: 0.875rem;">\' + escapeHtml(error.toString()) + \'</p>\' +',
+  '      \'  <button class="btn btn-primary" onclick="loadReportPreview()" style="margin-top: 1rem;">Try Again</button>\' +',
+  '      \'</div>\';',
+  '    showToast(\'Error loading report: \' + error, \'error\');',
+  '  };',
+  '',
+  '  // Phase 3c: dispatch to the server function matching the selected view format.',
+  '  if (reportViewMode === \'inline\') {',
+  '    google.script.run',
+  '      .withSuccessHandler(onSuccess)',
+  '      .withFailureHandler(onFailure)',
+  '      .getHtmlReportPreview();',
+  '  } else {',
+  '    google.script.run',
+  '      .withSuccessHandler(onSuccess)',
+  '      .withFailureHandler(onFailure)',
+  '      .getHtmlReportPreviewOutlook();',
+  '  }',
+  '}',
+  '',
+  'function renderReportPreview(htmlContent) {',
+  '  var container = document.getElementById(\'report-preview-container\');',
+  '  if (!htmlContent || htmlContent.trim().length === 0) {',
+  '    container.innerHTML = \'<div style="text-align: center; padding: 4rem 2rem; color: var(--color-text-subtle);"><p>No report content available</p></div>\';',
+  '    return;',
+  '  }',
+  '  var iframe = document.createElement(\'iframe\');',
+  '  iframe.style.width = \'100%\';',
+  '  iframe.style.minHeight = \'800px\';',
+  '  iframe.style.border = \'none\';',
+  '  container.innerHTML = \'\';',
+  '  container.appendChild(iframe);',
+  '  var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;',
+  '  iframeDoc.open();',
+  '  iframeDoc.write(htmlContent);',
+  '  iframeDoc.close();',
+  '  iframe.onload = function() {',
+  '    try {',
+  '      var iframeBody = iframeDoc.body;',
+  '      var iframeHtml = iframeDoc.documentElement;',
+  '      var height = Math.max(iframeBody.scrollHeight, iframeBody.offsetHeight, iframeHtml.clientHeight, iframeHtml.scrollHeight, iframeHtml.offsetHeight);',
+  '      iframe.style.height = (height + 50) + \'px\';',
+  '    } catch (e) {',
+  '      iframe.style.height = \'1200px\';',
+  '    }',
+  '  };',
+  '  showToast(\'Report preview loaded successfully\', \'success\');',
+  '}',
+  '// ============================================================',
+  '// DEPLOYMENTS FILTER CHIPS',
+  '// ============================================================',
+  '',
+  'function renderHealthChips() {',
+  '  var container = document.getElementById(\'health-chip-group\');',
+  '  if (!container) return;',
+  '  var healths = [\'Red\', \'Yellow\', \'Green\'];',
+  '  container.innerHTML = healths.map(function(h) {',
+  '    var active = deploymentsFilters.health.indexOf(h) !== -1;',
+  '    var mark = active ? \'✕\' : \'⊕\';',
+  '    return \'<button class="filter-chip \' + (active ? \'active\' : \'\') + \'" \' +',
+  '      \'data-health-chip="\' + h + \'" onclick="toggleHealthChip(\\\'\' + h + \'\\\')">\' +',
+  '      escapeHtml(h) + \' <span class="chip-mark">\' + mark + \'</span>\' +',
+  '      \'</button>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  'function toggleHealthChip(health) {',
+  '  var idx = deploymentsFilters.health.indexOf(health);',
+  '  if (idx === -1) {',
+  '    deploymentsFilters.health.push(health);',
+  '  } else {',
+  '    deploymentsFilters.health.splice(idx, 1);',
+  '  }',
+  '  renderHealthChips();',
+  '  applyDeploymentsFilters();',
+  '  renderDeploymentsKPIs();',
+  '}',
+  '',
+  '// ============================================================',
+  '// DEPLOYMENTS FILTER DROPDOWNS',
+  '// ============================================================',
+  '',
+  'function populateOwnerFilter() {',
+  '  var select = document.getElementById(\'owner-filter\');',
+  '  if (!select) return;',
+  '  var owners = {};',
+  '  var hasMissing = false;',
+  '  allDeploymentsData.forEach(function(row) {',
+  '    var o = (row.deliveryDirector || \'\').toString().trim();',
+  '    if (o) owners[o] = true;',
+  '    else hasMissing = true;',
+  '  });',
+  '  var ownerList = Object.keys(owners).sort();',
+  '  var options = [\'<option value="All">All</option>\'];',
+  '  if (hasMissing) options.push(\'<option value="(Missing)">(Missing)</option>\');',
+  '  ownerList.forEach(function(o) {',
+  '    options.push(\'<option value="\' + escapeAttr(o) + \'">\' + escapeHtml(o) + \'</option>\');',
+  '  });',
+  '  select.innerHTML = options.join(\'\');',
+  '  select.value = deploymentsFilters.owner;',
+  '}',
+  '',
+  'function populatePartnerFilter() {',
+  '  var select = document.getElementById(\'partner-filter\');',
+  '  if (!select) return;',
+  '  var partners = {};',
+  '  allDeploymentsData.forEach(function(row) {',
+  '    var p = (row.partner || \'\').toString().trim();',
+  '    if (p) partners[p] = true;',
+  '  });',
+  '  var list = Object.keys(partners).sort();',
+  '  var options = [\'<option value="All">All</option>\'];',
+  '  list.forEach(function(p) {',
+  '    options.push(\'<option value="\' + escapeAttr(p) + \'">\' + escapeHtml(p) + \'</option>\');',
+  '  });',
+  '  select.innerHTML = options.join(\'\');',
+  '  select.value = deploymentsFilters.partner;',
+  '}',
+  '',
+  'function populateStageFilter() {',
+  '  var select = document.getElementById(\'stage-filter\');',
+  '  if (!select) return;',
+  '  var stages = {};',
+  '  allDeploymentsData.forEach(function(row) {',
+  '    var s = (row.stage || \'\').toString().trim();',
+  '    if (s) stages[s] = true;',
+  '  });',
+  '  var list = Object.keys(stages).sort();',
+  '  var options = [\'<option value="All">All</option>\'];',
+  '  list.forEach(function(s) {',
+  '    options.push(\'<option value="\' + escapeAttr(s) + \'">\' + escapeHtml(s) + \'</option>\');',
+  '  });',
+  '  select.innerHTML = options.join(\'\');',
+  '  select.value = deploymentsFilters.stage;',
+  '}',
+  '',
+  'function populateIndustryFilter() {',
+  '  var select = document.getElementById(\'industry-filter\');',
+  '  if (!select) return;  // Only present on HENP',
+  '  var inds = {};',
+  '  allDeploymentsData.forEach(function(row) {',
+  '    var i = (row.industry || \'\').toString().trim();',
+  '    if (i) inds[i] = true;',
+  '  });',
+  '  var list = Object.keys(inds).sort();',
+  '  var options = [\'<option value="All">All</option>\'];',
+  '  list.forEach(function(i) {',
+  '    options.push(\'<option value="\' + escapeAttr(i) + \'">\' + escapeHtml(i) + \'</option>\');',
+  '  });',
+  '  select.innerHTML = options.join(\'\');',
+  '  select.value = deploymentsFilters.industry;',
+  '}',
+  '',
+  'function onDeploymentFilterChange() {',
+  '  deploymentsFilters.owner = document.getElementById(\'owner-filter\').value;',
+  '  deploymentsFilters.partner = (document.getElementById(\'partner-filter\') || {value:\'All\'}).value;',
+  '  deploymentsFilters.stage = (document.getElementById(\'stage-filter\') || {value:\'All\'}).value;',
+  '  var indEl = document.getElementById(\'industry-filter\');',
+  '  deploymentsFilters.industry = indEl ? indEl.value : \'All\';',
+  '  updateFilterDrawerBadge();',
+  '  applyDeploymentsFilters();',
+  '  renderDeploymentsKPIs();',
+  '}',
+  '',
+  'function searchDeployments() {',
+  '  deploymentsFilters.search = (document.getElementById(\'search-input\') || {value:\'\'}).value;',
+  '  applyDeploymentsFilters();',
+  '  renderDeploymentsKPIs();',
+  '}',
+  '',
+  'function clearAllDeploymentFilters() {',
+  '  // Reset to defaults',
+  '  initializeDeploymentsFilters();',
+  '  // Clear search box',
+  '  var searchBox = document.getElementById(\'search-input\');',
+  '  if (searchBox) searchBox.value = \'\';',
+  '  updateFilterDrawerBadge();',
+  '  applyDeploymentsFilters();',
+  '  renderDeploymentsKPIs();',
+  '}',
+  '',
+  '// ============================================================',
+  '// DEPLOYMENTS FILTER DRAWER',
+  '// ============================================================',
+  '',
+  'function toggleFilterDrawer() {',
+  '  var drawer = document.getElementById(\'filter-drawer\');',
+  '  var icon = document.getElementById(\'filter-drawer-toggle-icon\');',
+  '  var text = document.getElementById(\'filter-drawer-toggle-text\');',
+  '  if (!drawer) return;',
+  '  var isOpen = drawer.classList.toggle(\'open\');',
+  '  if (icon) icon.textContent = isOpen ? \'⊖\' : \'⊕\';',
+  '  if (text) text.textContent = isOpen ? \'Fewer filters\' : \'More filters\';',
+  '}',
+  '',
+  'function updateFilterDrawerBadge() {',
+  '  var badge = document.getElementById(\'filter-drawer-toggle-badge\');',
+  '  if (!badge) return;',
+  '  var count = 0;',
+  '  if (deploymentsFilters.partner !== \'All\') count++;',
+  '  if (deploymentsFilters.stage !== \'All\') count++;',
+  '  if (deploymentsFilters.industry !== \'All\') count++;',
+  '  if (count > 0) {',
+  '    badge.textContent = count;',
+  '    badge.classList.remove(\'hidden\');',
+  '    // Auto-open if any secondary filter is active',
+  '    var drawer = document.getElementById(\'filter-drawer\');',
+  '    if (drawer && !drawer.classList.contains(\'open\')) {',
+  '      toggleFilterDrawer();',
+  '    }',
+  '  } else {',
+  '    badge.classList.add(\'hidden\');',
+  '  }',
+  '}',
+  '',
+  '// ============================================================',
+  '// DEPLOYMENTS FILTER APPLICATION',
+  '// ============================================================',
+  '',
+  'function applyDeploymentsFilters() {',
+  '  var f = deploymentsFilters;',
+  '  var q = (f.search || \'\').toLowerCase();',
+  '  var includeIndustryInSearch = !!UI_DT.showIndustry;',
+  '',
+  '  filteredDeployments = allDeploymentsData.filter(function(row) {',
+  '    // Health filter (multi-select OR within Health, AND with everything else)',
+  '    if (f.health.length > 0 && f.health.indexOf(row.health) === -1) return false;',
+  '',
+  '    // Owner',
+  '    if (f.owner !== \'All\') {',
+  '      var rowOwner = (row.deliveryDirector || \'\').toString().trim();',
+  '      if (f.owner === \'(Missing)\') {',
+  '        if (rowOwner) return false;',
+  '      } else if (rowOwner !== f.owner) {',
+  '        return false;',
+  '      }',
+  '    }',
+  '    // Partner',
+  '    if (f.partner !== \'All\' && (row.partner || \'\') !== f.partner) return false;',
+  '    // Stage',
+  '    if (f.stage !== \'All\' && (row.stage || \'\') !== f.stage) return false;',
+  '    // Industry',
+  '    if (f.industry !== \'All\' && (row.industry || \'\') !== f.industry) return false;',
+  '',
+  '    // Text search across account, deployment, partner (+ industry on HENP)',
+  '    if (q) {',
+  '      var match = (row.accountName || \'\').toLowerCase().includes(q) ||',
+  '                  (row.deploymentName || \'\').toLowerCase().includes(q) ||',
+  '                  (row.partner || \'\').toLowerCase().includes(q);',
+  '      if (!match && includeIndustryInSearch) {',
+  '        match = (row.industry || \'\').toLowerCase().includes(q);',
+  '      }',
+  '      if (!match) return false;',
+  '    }',
+  '    return true;',
+  '  });',
+  '',
+  '  renderDeploymentsTable();',
+  '}',
+  '',
+  '// ============================================================',
+  '// DEPLOYMENTS KPI CARDS (dynamic — reflect current filter state)',
+  '// ============================================================',
+  '',
+  'function renderDeploymentsKPIs() {',
+  '  var grid = document.getElementById(\'deployments-stats-grid\');',
+  '  if (!grid) return;',
+  '',
+  '  // KPI cards reflect filteredDeployments',
+  '  var total  = filteredDeployments.length;',
+  '  var red    = filteredDeployments.filter(function(d) { return d.health === \'Red\'; }).length;',
+  '  var yellow = filteredDeployments.filter(function(d) { return d.health === \'Yellow\'; }).length;',
+  '  var green  = filteredDeployments.filter(function(d) { return d.health === \'Green\'; }).length;',
+  '',
+  '  // Build cards based on which health filters are active',
+  '  var healths = deploymentsFilters.health;',
+  '  var cards = [];',
+  '',
+  '  cards.push(',
+  '    \'<div class="stat-card">\' +',
+  '    \'  <h3>Total</h3>\' +',
+  '    \'  <div class="value">\' + total + \'</div>\' +',
+  '    \'  <div class="sub">across current filter</div>\' +',
+  '    \'</div>\'',
+  '  );',
+  '',
+  '  if (healths.indexOf(\'Red\') !== -1 || healths.length === 0) {',
+  '    cards.push(',
+  '      \'<div class="stat-card red">\' +',
+  '      \'  <h3>Red</h3>\' +',
+  '      \'  <div class="value">\' + red + \'</div>\' +',
+  '      \'</div>\'',
+  '    );',
+  '  }',
+  '  if (healths.indexOf(\'Yellow\') !== -1 || healths.length === 0) {',
+  '    cards.push(',
+  '      \'<div class="stat-card yellow">\' +',
+  '      \'  <h3>Yellow</h3>\' +',
+  '      \'  <div class="value">\' + yellow + \'</div>\' +',
+  '      \'</div>\'',
+  '    );',
+  '  }',
+  '  if (healths.indexOf(\'Green\') !== -1) {',
+  '    cards.push(',
+  '      \'<div class="stat-card green">\' +',
+  '      \'  <h3>Green</h3>\' +',
+  '      \'  <div class="value">\' + green + \'</div>\' +',
+  '      \'</div>\'',
+  '    );',
+  '  }',
+  '',
+  '  grid.innerHTML = cards.join(\'\');',
+  '}',
+  '',
+  '// ============================================================',
+  '// DEPLOYMENTS TABLE RENDER + EXPANDABLE ROWS',
+  '// ============================================================',
+  '',
+  'function renderDeploymentsTable() {',
+  '  var tbody = document.getElementById(\'deployments-tbody\');',
+  '  if (!tbody) return;',
+  '  var colspan = computeDeploymentsColspan_();',
+  '',
+  '  if (filteredDeployments.length === 0) {',
+  '    tbody.innerHTML = \'<tr><td colspan="\' + colspan + \'" class="empty-state">\' +',
+  '      \'<div>No deployments match these filters</div>\' +',
+  '      \'<div class="empty-state-action"><button class="btn btn-secondary" onclick="clearAllDeploymentFilters()">Clear all filters</button></div>\' +',
+  '      \'</td></tr>\';',
+  '    return;',
+  '  }',
+  '',
+  '  var showIndustry = !!UI_DT.showIndustry;',
+  '  var showEm = !!UI_DT.showEmColumn;',
+  '  var highlightMissing = !!UI_DT.showMissingDDHighlight;',
+  '  var missingMsg = UI_DT.missingDDMessage || \'Delivery Director needs assigned\';',
+  '  var expandable = UI_DT.expandableRows !== false;',
+  '',
+  '  var rowsHtml = \'\';',
+  '  filteredDeployments.forEach(function(row, index) {',
+  '    var deliveryDirector = row.deliveryDirector && row.deliveryDirector.toString().trim() !== \'\'',
+  '      ? row.deliveryDirector.toString().trim() : \'\';',
+  '    var hasMeta = (row.reviewUsername && row.reviewUsername.toString().trim() !== \'\')',
+  '      || (row.reviewTimestamp && row.reviewTimestamp.toString().trim() !== \'\');',
+  '    var missingDD = !deliveryDirector;',
+  '',
+  '    var metaCellHtml = \'\';',
+  '    if (highlightMissing && missingDD) {',
+  '      metaCellHtml = \'<span style="font-size:0.75rem; color:#c62828; font-weight:600;">\' + escapeHtml(missingMsg) + \'</span>\';',
+  '    } else if (!hasMeta) {',
+  '      metaCellHtml = \'<span style="font-size:0.75rem; color:#f57c00; font-weight:600;">Review Required; Please Update</span>\';',
+  '    } else {',
+  '      var userText = row.reviewUsername || \'\';',
+  '      var tsText = row.reviewTimestamp ? formatDateTime(row.reviewTimestamp) : \'\';',
+  '      var infoText = [userText, tsText].filter(Boolean).join(\' \\u00B7 \');',
+  '      metaCellHtml = \'<div style="display:flex; align-items:center; gap:6px;">\' +',
+  '        \'<span class="meta-indicator" title="View meta information" onclick="event.stopPropagation(); openMetaModal(\' + index + \')">i</span>\' +',
+  '        \'<span style="font-size:0.75rem; color:#555555;">\' + escapeHtml(infoText) + \'</span>\' +',
+  '        \'</div>\';',
+  '    }',
+  '',
+  '    var rowClasses = [];',
+  '    if (highlightMissing && missingDD) rowClasses.push(\'missing-dd-row\');',
+  '    if (expandable) rowClasses.push(\'expandable-row\');',
+  '    var isExpanded = (expandedRowId === row.deploymentId);',
+  '    if (isExpanded) rowClasses.push(\'expanded\');',
+  '',
+  '    var onClick = expandable',
+  '      ? \' onclick="toggleRowExpand(\\\'\' + escapeJs(row.deploymentId) + \'\\\', \' + row.rowIndex + \')"\'',
+  '      : \'\';',
+  '',
+  '    var cells = [];',
+  '    if (expandable) {',
+  '      cells.push(\'<td style="width: 24px;"><span class="row-chevron">▶</span></td>\');',
+  '    }',
+  '    cells.push(\'<td><span class="status-badge status-\' + row.health.toLowerCase() + \'">\' + row.health + \'</span></td>\');',
+  '    cells.push(\'<td><strong>\' + escapeHtml(row.accountName) + \'</strong></td>\');',
+  '    if (showIndustry) cells.push(\'<td>\' + escapeHtml(row.industry || \'\') + \'</td>\');',
+  '    // Phase 3a: inject phased pill alongside deployment name',
+  '    var deployNameHtml = escapeHtml(row.deploymentName);',
+  '    if (row.isPhased) {',
+  '      deployNameHtml += \' <span class="phased-pill">Phased</span>\';',
+  '    }',
+  '    cells.push(\'<td>\' + deployNameHtml + \'</td>\');',
+  '    cells.push(\'<td>\' + escapeHtml(row.partner) + \'</td>\');',
+  '    if (showEm) cells.push(\'<td>\' + escapeHtml(row.wdEngManager || \'\') + \'</td>\');',
+  '    cells.push(\'<td>\' + (row.mtpDate ? formatDate(row.mtpDate) : \'-\') + \'</td>\');',
+  '    if (!showEm) cells.push(\'<td>\' + escapeHtml(deliveryDirector) + \'</td>\');',
+  '    cells.push(\'<td onclick="event.stopPropagation();"><button class="action-btn" onclick="openEditModal(\' + row.rowIndex + \')">Edit</button></td>\');',
+  '    cells.push(\'<td onclick="event.stopPropagation();">\' + metaCellHtml + \'</td>\');',
+  '',
+  '    rowsHtml += \'<tr class="\' + rowClasses.join(\' \') + \'"\' + onClick + \'>\' + cells.join(\'\') + \'</tr>\';',
+  '',
+  '    if (isExpanded) {',
+  '      rowsHtml += renderExpandedRowDetail_(row, colspan);',
+  '    }',
+  '  });',
+  '',
+  '  tbody.innerHTML = rowsHtml;',
+  '',
+  '  // Phase 3f: load inline audit summary for the expanded row after DOM is ready',
+  '  if (expandedRowId) {',
+  '    loadDeploymentAuditSummary_(expandedRowId);',
+  '  }',
+  '}',
+  '',
+  'function renderExpandedRowDetail_(row, colspan) {',
+  '  var fields = [];',
+  '  if (row.industry)          fields.push({ label: \'Industry\',          value: row.industry });',
+  '  if (row.subRegion)         fields.push({ label: \'Sub-Region\',        value: row.subRegion });',
+  '  if (row.servicesApproach)  fields.push({ label: \'Services Approach\', value: row.servicesApproach });',
+  '  if (row.stage)             fields.push({ label: \'Stage\',             value: row.stage });',
+  '  if (row.wdEngManager)      fields.push({ label: \'WD Eng Manager\',    value: row.wdEngManager });',
+  '  if (row.dam)               fields.push({ label: \'DAM\',               value: row.dam });',
+  '',
+  '  var metaInfo = \'\';',
+  '  if (row.reviewUsername || row.reviewTimestamp) {',
+  '    var ts = row.reviewTimestamp ? formatDateTime(row.reviewTimestamp) : \'\';',
+  '    metaInfo = \'Last reviewed by \' + escapeHtml(row.reviewUsername || \'unknown\') +',
+  '               (ts ? \' on \' + ts : \'\');',
+  '  }',
+  '',
+  '  var html = \'<div class="row-detail-card">\';',
+  '  fields.forEach(function(f) {',
+  '    html += \'<div>\' +',
+  '      \'<span class="detail-label">\' + escapeHtml(f.label) + \'</span>\' +',
+  '      \'<span class="detail-value">\' + escapeHtml(f.value) + \'</span>\' +',
+  '      \'</div>\';',
+  '  });',
+  '',
+  '  // Phase 3a: phased deployment upcoming dates',
+  '  if (row.isPhased && row.upcomingDates && row.upcomingDates.length) {',
+  '    var datesHtml = row.upcomingDates.map(function(ud) {',
+  '      var dateStr = ud.date ? formatDate(ud.date) : \'\\u2014\';',
+  '      var productStr = (ud.products && ud.products.length)',
+  '        ? ud.products.join(\', \')',
+  '        : \'\\u2014\';',
+  '      return \'<div style="margin-bottom:2px;"><strong>\' + escapeHtml(dateStr) + \'</strong>: \' + escapeHtml(productStr) + \'</div>\';',
+  '    }).join(\'\');',
+  '    html += \'<div class="detail-full-width">\' +',
+  '      \'<span class="detail-label">Upcoming Go-Live Dates</span>\' +',
+  '      \'<div class="detail-value">\' + datesHtml + \'</div>\' +',
+  '      \'</div>\';',
+  '  }',
+  '',
+  '  if (row.currentUpdate) {',
+  '    html += \'<div class="detail-full-width">\' +',
+  '      \'<span class="detail-label">Current Update</span>\' +',
+  '      \'<div class="detail-value">\' + escapeHtml(row.currentUpdate) + \'</div>\' +',
+  '      \'</div>\';',
+  '  }',
+  '',
+  '  if (metaInfo) {',
+  '    html += \'<div class="detail-full-width">\' +',
+  '      \'<span class="detail-label">Meta</span>\' +',
+  '      \'<div class="detail-value">\' + metaInfo + \'</div>\' +',
+  '      \'</div>\';',
+  '  }',
+  '',
+  '  // Phase 3f: inline "Recent Activity" audit summary — visible to all roles.',
+  '  // The container is populated asynchronously after the row\'s DOM is ready.',
+  '  html += \'<div class="detail-full-width" id="audit-summary-\' + escapeAttr(row.deploymentId) + \'">\' +',
+  '    \'<span class="detail-label">Recent Activity</span>\' +',
+  '    \'<div class="detail-value" style="font-size:12px; color:var(--color-text-muted);">Loading\u2026</div>\' +',
+  '    \'</div>\';',
+  '',
+  '  // Actions inside the expanded row (Phase 3f: View Audit is now visible to all roles)',
+  '  var actions = \'<button class="btn btn-secondary" onclick="event.stopPropagation(); openEditModal(\' + row.rowIndex + \')">Edit</button>\';',
+  '  actions += \' <button class="btn btn-secondary" onclick="event.stopPropagation(); openAuditForDeployment(\\\'\' + escapeJs(row.deploymentId) + \'\\\')">View Audit</button>\';',
+  '  html += \'<div class="detail-actions">\' + actions + \'</div>\';',
+  '',
+  '  html += \'</div>\';',
+  '',
+  '  return \'<tr class="row-detail"><td colspan="\' + colspan + \'">\' + html + \'</td></tr>\';',
+  '}',
+  '',
+  'function toggleRowExpand(deploymentId, rowIndex) {',
+  '  if (expandedRowId === deploymentId) {',
+  '    expandedRowId = null;',
+  '  } else {',
+  '    expandedRowId = deploymentId;',
+  '  }',
+  '  renderDeploymentsTable();',
+  '}',
+  '',
+  '// Phase 3f: loads the last 3 audit entries for a deployment and populates',
+  '// the inline "Recent Activity" container in the expanded row detail.',
+  'function loadDeploymentAuditSummary_(deploymentId) {',
+  '  google.script.run',
+  '    .withSuccessHandler(function(rows) {',
+  '      var container = document.getElementById(\'audit-summary-\' + deploymentId);',
+  '      if (!container) return;',
+  '      var valueEl = container.querySelector(\'.detail-value\');',
+  '      if (!valueEl) return;',
+  '',
+  '      if (!rows || rows.length === 0) {',
+  '        valueEl.innerHTML = \'<em style="color:var(--color-text-subtle);">No audit history found.</em>\';',
+  '        return;',
+  '      }',
+  '',
+  '      var html = rows.map(function(r) {',
+  '        var when = r.timestamp ? formatRelativeTime(r.timestamp) : \'?\';',
+  '        var action = r.action || \'\';',
+  '        var who = r.user || \'\';',
+  '        var whoShort = who.indexOf(\'@\') >= 0 ? who.split(\'@\')[0] : who;',
+  '        return \'<div style="margin-bottom:4px; line-height:1.4;">\' +',
+  '          \'<span style="font-size:11px; color:var(--color-text-subtle);">\' + escapeHtml(when) + \'</span>\' +',
+  '          \' <span class="audit-action-pill \' + escapeHtml(action.toLowerCase()) + \'">\' +',
+  '            escapeHtml(action) + \'</span>\' +',
+  '          \' <span>\' + escapeHtml(whoShort) + \'</span>\' +',
+  '          (r.notes ? \' <span style="font-style:italic; color:var(--color-text-muted);">\u2014 \' +',
+  '            escapeHtml(r.notes.length > 50 ? r.notes.substring(0, 50) + \'\u2026\' : r.notes) +',
+  '            \'</span>\' : \'\') +',
+  '          \'</div>\';',
+  '      }).join(\'\');',
+  '',
+  '      valueEl.innerHTML = html;',
+  '    })',
+  '    .withFailureHandler(function() {',
+  '      var container = document.getElementById(\'audit-summary-\' + deploymentId);',
+  '      if (!container) return;',
+  '      var valueEl = container.querySelector(\'.detail-value\');',
+  '      if (valueEl) valueEl.innerHTML =',
+  '        \'<em style="color:var(--color-text-subtle);">Unable to load activity.</em>\';',
+  '    })',
+  '    .getDeploymentAuditSummaryForUI(deploymentId, 3);',
+  '}',
+  '',
+  '// ============================================================',
+  '// GO LIVES VIEW APPLICATION',
+  '// ============================================================',
+  '',
+  'function applyGoLivesView() {',
+  '  var view = currentGoLivesView;',
+  '  var search = (goLivesSearch || \'\').toLowerCase();',
+  '  var includeIndustryInSearch = !!UI_GT.showIndustry;',
+  '',
+  '  // Choose source data based on view',
+  '  var source;',
+  '  if (view === \'recent\') {',
+  '    source = allGoLivesRecent;',
+  '  } else if (view === \'upcoming\') {',
+  '    source = allGoLivesUpcoming;',
+  '  } else {',
+  '    // \'all\' — concatenate, sort chronologically. Tag each row with isUpcoming flag',
+  '    // so we can insert the Today divider in the right spot.',
+  '    var recent   = (allGoLivesRecent   || []).map(function(r) { return Object.assign({}, r, { _isUpcoming: false }); });',
+  '    var upcoming = (allGoLivesUpcoming || []).map(function(r) { return Object.assign({}, r, { _isUpcoming: true,  _dateForSort: r.mtpDate }); });',
+  '    // Phase 3i: recent rows use lastGoLiveDate (getRecentGoLives shape);',
+  '    // fall back to goLiveDate for rows from the legacy path.',
+  '    recent.forEach(function(r) { r._dateForSort = r.lastGoLiveDate || r.goLiveDate; });',
+  '    source = recent.concat(upcoming);',
+  '    source.sort(function(a, b) { return new Date(a._dateForSort) - new Date(b._dateForSort); });',
+  '  }',
+  '',
+  '  // Apply search filter',
+  '  if (search) {',
+  '    source = source.filter(function(row) {',
+  '      var hit = (row.accountName || \'\').toLowerCase().includes(search);',
+  '      if (!hit && includeIndustryInSearch) {',
+  '        hit = (row.industry || \'\').toLowerCase().includes(search);',
+  '      }',
+  '      if (!hit) {',
+  '        // Check productArea (legacy shape) or deploymentName',
+  '        hit = (row.productArea || \'\').toLowerCase().includes(search) ||',
+  '              (row.deploymentName || \'\').toLowerCase().includes(search);',
+  '      }',
+  '      // Phase 3i: also search in recentDates products (getRecentGoLives shape)',
+  '      if (!hit && row.recentDates) {',
+  '        for (var ri = 0; ri < row.recentDates.length && !hit; ri++) {',
+  '          var prods = row.recentDates[ri].products || [];',
+  '          for (var pi = 0; pi < prods.length && !hit; pi++) {',
+  '            hit = prods[pi].toLowerCase().includes(search);',
+  '          }',
+  '        }',
+  '      }',
+  '      return hit;',
+  '    });',
+  '  }',
+  '',
+  '  filteredGoLives = source;',
+  '  renderGoLivesTable();',
+  '}',
+  '',
+  'function searchGoLives() {',
+  '  goLivesSearch = (document.getElementById(\'golives-search\') || {value:\'\'}).value;',
+  '  applyGoLivesView();',
+  '}',
+  '',
+  'function clearGoLivesSearch() {',
+  '  goLivesSearch = \'\';',
+  '  var box = document.getElementById(\'golives-search\');',
+  '  if (box) box.value = \'\';',
+  '  applyGoLivesView();',
+  '}',
+  '',
+  'function renderGoLivesTable() {',
+  '  var tbody = document.getElementById(\'golives-tbody\');',
+  '  if (!tbody) return;',
+  '  var colspan = computeGoLivesColspan_();',
+  '  var view = currentGoLivesView;',
+  '',
+  '  if (filteredGoLives.length === 0) {',
+  '    var emptyMsg;',
+  '    if (view === \'recent\')   emptyMsg = \'No go lives in the past 60 days.\';',
+  '    else if (view === \'upcoming\') emptyMsg = \'No upcoming go lives in the next 90 days.\';',
+  '    else                     emptyMsg = \'No go lives recorded in the past 60 days or upcoming 90 days.\';',
+  '    tbody.innerHTML = \'<tr><td colspan="\' + colspan + \'" class="empty-state"><div>\' + escapeHtml(emptyMsg) + \'</div></td></tr>\';',
+  '    return;',
+  '  }',
+  '',
+  '  var showIndustry = !!UI_GT.showIndustry;',
+  '  var nowMs = Date.now();',
+  '  var todayDividerInserted = false;',
+  '  var todayLabel = formatDateLong(new Date());',
+  '',
+  '  var rowsHtml = \'\';',
+  '  filteredGoLives.forEach(function(row, index) {',
+  '    // In \'all\' view, insert Today divider at transition between past and future',
+  '    if (view === \'all\' && !todayDividerInserted) {',
+  '      // Phase 3i: use lastGoLiveDate for recent rows (getRecentGoLives shape).',
+  '      var rowDate = row._isUpcoming',
+  '        ? new Date(row.mtpDate)',
+  '        : new Date(row.lastGoLiveDate || row.goLiveDate);',
+  '      if (rowDate.getTime() >= nowMs) {',
+  '        rowsHtml += \'<tr class="today-divider"><td colspan="\' + colspan + \'">Today: \' + escapeHtml(todayLabel) + \'</td></tr>\';',
+  '        todayDividerInserted = true;',
+  '      }',
+  '    }',
+  '',
+  '    // Phase 3i: prefer lastGoLiveDate (getRecentGoLives shape) then fall back',
+  '    // to legacy goLiveDate, nextGoLiveDate, or mtpDate.',
+  '    var dateValue = row.lastGoLiveDate || row.goLiveDate || row.nextGoLiveDate || row.mtpDate || \'\';',
+  '',
+  '    // Choose the product/deployment value based on view and data shape.',
+  '    var productOrDeployment;',
+  '    if (view === \'recent\' || (view === \'all\' && !row._isUpcoming)) {',
+  '      if (row.recentDates && row.recentDates.length > 0) {',
+  '        // Phase 3i shape: flatten all products from recentDates[]',
+  '        var allProds = {};',
+  '        row.recentDates.forEach(function(rd) {',
+  '          (rd.products || []).forEach(function(p) { allProds[p] = true; });',
+  '        });',
+  '        var flatProds = Object.keys(allProds).sort();',
+  '        productOrDeployment = flatProds.length ? flatProds.join(\', \') : (row.deploymentName || \'\');',
+  '      } else {',
+  '        productOrDeployment = row.productArea || row.deploymentName || \'\';',
+  '      }',
+  '    } else if (view === \'upcoming\') {',
+  '      productOrDeployment = row.deploymentName || row.productArea || \'\';',
+  '    } else {',
+  '      productOrDeployment = row.productArea || row.deploymentName || \'\';',
+  '    }',
+  '',
+  '    var cells = [];',
+  '',
+  '    var isUpcomingRow = (view === \'upcoming\') || (view === \'all\' && row._isUpcoming);',
+  '    var isRecentRow   = (view === \'recent\')   || (view === \'all\' && !row._isUpcoming);',
+  '',
+  '    // Phase 3a: phased upcoming rows — multi-line date cell with product hierarchy',
+  '    // Phase 3a-css: stable class hooks express date/product hierarchy clearly',
+  '    if (isUpcomingRow && row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {',
+  '      var phasedDateHtml = row.upcomingDates.map(function(ud) {',
+  '        var ds = ud.date ? formatDate(ud.date) : \'\u2014\';',
+  '        var ps = (ud.products && ud.products.length) ? ud.products.join(\', \') : \'\';',
+  '        return \'<div class="golives-date-entry">\' +',
+  '          \'<span class="golives-date-label">\' + escapeHtml(ds) + \'</span>\' +',
+  '          (ps ? \'<span class="golives-product-list">\' + escapeHtml(ps) + \'</span>\' : \'\') +',
+  '          \'</div>\';',
+  '      }).join(\'\');',
+  '      cells.push(\'<td class="golives-date-cell">\' + phasedDateHtml + \'</td>\');',
+  '      cells.push(\'<td><strong>\' + escapeHtml(row.accountName) + \'</strong></td>\');',
+  '      if (showIndustry) cells.push(\'<td>\' + escapeHtml(row.industry || \'\') + \'</td>\');',
+  '      cells.push(\'<td>\' + escapeHtml(productOrDeployment) + \' <span class="phased-pill">Phased</span></td>\');',
+  '',
+  '    // Phase 3i: phased recent rows — multi-line date cell (same CSS pattern)',
+  '    } else if (isRecentRow && row.recentDates && row.recentDates.length > 1) {',
+  '      var recentPhasedHtml = row.recentDates.map(function(rd) {',
+  '        var ds = rd.date ? formatDate(rd.date) : \'\u2014\';',
+  '        var ps = (rd.products && rd.products.length) ? rd.products.join(\', \') : \'\';',
+  '        return \'<div class="golives-date-entry">\' +',
+  '          \'<span class="golives-date-label">\' + escapeHtml(ds) + \'</span>\' +',
+  '          (ps ? \'<span class="golives-product-list">\' + escapeHtml(ps) + \'</span>\' : \'\') +',
+  '          \'</div>\';',
+  '      }).join(\'\');',
+  '      cells.push(\'<td class="golives-date-cell">\' + recentPhasedHtml + \'</td>\');',
+  '      cells.push(\'<td><strong>\' + escapeHtml(row.accountName) + \'</strong></td>\');',
+  '      if (showIndustry) cells.push(\'<td>\' + escapeHtml(row.industry || \'\') + \'</td>\');',
+  '      cells.push(\'<td>\' + escapeHtml(productOrDeployment) + \'</td>\');',
+  '',
+  '    } else {',
+  '      // Single-date row (upcoming or recent)',
+  '      cells.push(\'<td><strong>\' + (dateValue ? formatDate(dateValue) : \'-\') + \'</strong></td>\');',
+  '      cells.push(\'<td><strong>\' + escapeHtml(row.accountName) + \'</strong></td>\');',
+  '      if (showIndustry) cells.push(\'<td>\' + escapeHtml(row.industry || \'\') + \'</td>\');',
+  '      cells.push(\'<td>\' + escapeHtml(productOrDeployment) + \'</td>\');',
+  '    }',
+  '',
+  '    cells.push(\'<td>\' + escapeHtml(row.partner) + \'</td>\');',
+  '    cells.push(\'<td><button class="action-btn" onclick="openGoLivesModal(\' + index + \')">Edit</button></td>\');',
+  '    rowsHtml += \'<tr>\' + cells.join(\'\') + \'</tr>\';',
+  '  });',
+  '',
+  '  // If view is \'all\' and we never crossed today, insert the divider at end',
+  '  if (view === \'all\' && !todayDividerInserted) {',
+  '    rowsHtml += \'<tr class="today-divider"><td colspan="\' + colspan + \'">Today: \' + escapeHtml(todayLabel) + \'</td></tr>\';',
+  '  }',
+  '',
+  '  tbody.innerHTML = rowsHtml;',
+  '}',
+  '// ============================================================',
+  '// EDIT MODAL',
+  '// ============================================================',
+  '',
+  'function openEditModal(rowIndex) {',
+  '  var row = allDeploymentsData.find(function(d) { return d.rowIndex === rowIndex; });',
+  '  if (!row) return;',
+  '  document.getElementById(\'edit-row-index\').value = rowIndex;',
+  '  document.getElementById(\'edit-account\').value = row.accountName;',
+  '  document.getElementById(\'edit-deployment\').value = row.deploymentName;',
+  '  var emEl = document.getElementById(\'edit-em\');',
+  '  if (emEl) emEl.value = row.wdEngManager || \'\';',
+  '  document.getElementById(\'edit-health\').value = \'\';',
+  '  document.getElementById(\'edit-stage\').value = \'\';',
+  '  document.getElementById(\'edit-mtp\').value = row.mtpDate ? formatDateForInput(row.mtpDate) : \'\';',
+  '  document.getElementById(\'edit-update\').value = row.currentUpdate || \'\';',
+  '  document.getElementById(\'edit-exclude-report\').checked = row.excludeFromReport || false;',
+  '  document.getElementById(\'edit-delivery-director\').value = row.deliveryDirector || \'\';',
+  '  document.getElementById(\'edit-notes\').value = row.ddNotes || \'\';',
+  '  // Phase 2: default classification radio to Monthly on every open.',
+  '  setRadioGroupValue(\'edit-classification\', \'Monthly\');',
+  '  document.getElementById(\'edit-modal\').classList.add(\'active\');',
+  '}',
+  '',
+  'function closeEditModal() {',
+  '  document.getElementById(\'edit-modal\').classList.remove(\'active\');',
+  '  // Phase 3d: clear the reason field so it doesn\'t bleed into the next open',
+  '  var reasonEl = document.getElementById(\'edit-override-reason\');',
+  '  if (reasonEl) reasonEl.value = \'\';',
+  '}',
+  '',
+  'function openMetaModal(index) {',
+  '  var row = filteredDeployments[index];',
+  '  if (!row) return;',
+  '  document.getElementById(\'meta-account\').value = row.accountName || \'\';',
+  '  document.getElementById(\'meta-deployment\').value = row.deploymentName || \'\';',
+  '  document.getElementById(\'meta-delivery-director\').value = row.deliveryDirector || \'\';',
+  '  var metaEm = document.getElementById(\'meta-em\');',
+  '  if (metaEm) metaEm.value = row.wdEngManager || \'\';',
+  '  document.getElementById(\'meta-dd-notes\').value = row.ddNotes || \'\';',
+  '  document.getElementById(\'meta-username\').value = row.reviewUsername || \'\';',
+  '  document.getElementById(\'meta-timestamp\').value = row.reviewTimestamp ? formatDateTime(row.reviewTimestamp) : \'\';',
+  '  document.getElementById(\'meta-modal\').classList.add(\'active\');',
+  '}',
+  '',
+  'function closeMetaModal() {',
+  '  document.getElementById(\'meta-modal\').classList.remove(\'active\');',
+  '}',
+  '',
+  'function saveDeployment() {',
+  '  var rowIndex = parseInt(document.getElementById(\'edit-row-index\').value, 10);',
+  '  var row = allDeploymentsData.find(function(d) { return d.rowIndex === rowIndex; });',
+  '  if (!row) return;',
+  '',
+  '  var metaData = {',
+  '    deliveryDirector: document.getElementById(\'edit-delivery-director\').value,',
+  '    ddNotes:          document.getElementById(\'edit-notes\').value',
+  '  };',
+  '  var overrideData = {',
+  '    overrideHealth:        document.getElementById(\'edit-health\').value,',
+  '    overrideMtpDate:       document.getElementById(\'edit-mtp\').value,',
+  '    overrideStage:         document.getElementById(\'edit-stage\').value,',
+  '    overrideAccount:       \'\',',
+  '    overrideDeployment:    \'\',',
+  '    overrideCurrentUpdate: document.getElementById(\'edit-update\').value,',
+  '    excludeFromReport:     document.getElementById(\'edit-exclude-report\').checked,',
+  '    classification:        getRadioGroupValue(\'edit-classification\') || \'Monthly\'',
+  '  };',
+  '  // Phase 3d: capture optional override reason (stored in OverrideAudit.Notes)',
+  '  var overrideReason = (document.getElementById(\'edit-override-reason\') || {value: \'\'}).value || \'\';',
+  '',
+  '  document.getElementById(\'save-btn-text\').classList.add(\'hidden\');',
+  '  document.getElementById(\'save-spinner\').classList.remove(\'hidden\');',
+  '',
+  '  google.script.run',
+  '    .withSuccessHandler(function() {',
+  '      showToast(\'Deployment overrides/meta updated for report\', \'success\');',
+  '      closeEditModal();',
+  '      loadDeploymentsData();',
+  '      document.getElementById(\'save-btn-text\').classList.remove(\'hidden\');',
+  '      document.getElementById(\'save-spinner\').classList.add(\'hidden\');',
+  '    })',
+  '    .withFailureHandler(function(error) {',
+  '      showToast(\'Error saving: \' + error, \'error\');',
+  '      document.getElementById(\'save-btn-text\').classList.remove(\'hidden\');',
+  '      document.getElementById(\'save-spinner\').classList.add(\'hidden\');',
+  '    })',
+  '    .updateDeploymentWithMetaAndOverride(rowIndex, row.deploymentId, metaData, overrideData, overrideReason);',
+  '}',
+  '',
+  '// ============================================================',
+  '// GO LIVES MODAL (Phase 2 — unified for past + future)',
+  '// ============================================================',
+  '',
+  'function openGoLivesModal(index) {',
+  '  var row = filteredGoLives[index];',
+  '  if (!row) return;',
+  '  currentGoLivesIndex = index;',
+  '',
+  '  // Decide labels based on whether the row is past or future.',
+  '  var rowDate = row.goLiveDate || row.mtpDate || \'\';',
+  '  var rowDateObj = rowDate ? new Date(rowDate) : null;',
+  '  var isFuture = rowDateObj && !isNaN(rowDateObj.getTime()) && rowDateObj.getTime() >= Date.now();',
+  '',
+  '  var dateLabel = document.getElementById(\'golives-date-label\');',
+  '  if (dateLabel) dateLabel.textContent = isFuture ? \'Override MTP Date\' : \'Override Go Live Date\';',
+  '',
+  '  var productLabel = document.getElementById(\'golives-product-label\');',
+  '  if (productLabel) productLabel.textContent = isFuture ? \'Deployment Name (source)\' : \'Product Areas (source, combined)\';',
+  '',
+  '  document.getElementById(\'golives-account\').value = row.accountName || \'\';',
+  '  document.getElementById(\'golives-date\').value = rowDate ? formatDateForInput(rowDate) : \'\';',
+  '  document.getElementById(\'golives-product\').value = (isFuture ? row.deploymentName : row.productArea) || \'\';',
+  '  document.getElementById(\'golives-partner\').value = row.partner || \'\';',
+  '  document.getElementById(\'golives-exclude-report\').checked = row.excludeFromReport || false;',
+  '  setRadioGroupValue(\'golives-classification\', \'Monthly\');',
+  '',
+  '  document.getElementById(\'golives-modal\').classList.add(\'active\');',
+  '}',
+  '',
+  'function closeGoLivesModal() {',
+  '  document.getElementById(\'golives-modal\').classList.remove(\'active\');',
+  '  currentGoLivesIndex = null;',
+  '  // Phase 3d: clear the reason field so it doesn\'t bleed into the next open',
+  '  var reasonEl = document.getElementById(\'golives-override-reason\');',
+  '  if (reasonEl) reasonEl.value = \'\';',
+  '}',
+  '',
+  'function saveGoLives() {',
+  '  if (currentGoLivesIndex === null) return;',
+  '  var row = filteredGoLives[currentGoLivesIndex];',
+  '  if (!row) return;',
+  '',
+  '  var overrideData = {',
+  '    overrideDate:      document.getElementById(\'golives-date\').value,',
+  '    overridePartner:   document.getElementById(\'golives-partner\').value,',
+  '    excludeFromReport: document.getElementById(\'golives-exclude-report\').checked,',
+  '    classification:    getRadioGroupValue(\'golives-classification\') || \'Monthly\'',
+  '  };',
+  '  // Phase 3d: capture optional override reason',
+  '  var overrideReason = (document.getElementById(\'golives-override-reason\') || {value: \'\'}).value || \'\';',
+  '',
+  '  document.getElementById(\'golives-save-text\').classList.add(\'hidden\');',
+  '  document.getElementById(\'golives-spinner\').classList.remove(\'hidden\');',
+  '',
+  '  google.script.run',
+  '    .withSuccessHandler(function() {',
+  '      showToast(\'Go Lives overrides updated for \' + row.accountName, \'success\');',
+  '      closeGoLivesModal();',
+  '      loadGoLivesData_both();',
+  '      document.getElementById(\'golives-save-text\').classList.remove(\'hidden\');',
+  '      document.getElementById(\'golives-spinner\').classList.add(\'hidden\');',
+  '    })',
+  '    .withFailureHandler(function(error) {',
+  '      showToast(\'Error saving Go Lives override: \' + error, \'error\');',
+  '      document.getElementById(\'golives-save-text\').classList.remove(\'hidden\');',
+  '      document.getElementById(\'golives-spinner\').classList.add(\'hidden\');',
+  '    })',
+  '    .updateGoLivesOverride(row.accountName, overrideData, overrideReason);',
+  '}',
+  '',
+  '// ============================================================',
+  '// MANAGE OVERRIDES — ACTIVE OVERRIDES TABLE RENDER',
+  '// ============================================================',
+  '',
+  'function onOverridesFilterChange() {',
+  '  overridesFilters.type = document.getElementById(\'overrides-type-filter\').value;',
+  '  overridesFilters.classification = document.getElementById(\'overrides-classification-filter\').value;',
+  '  renderActiveOverridesTable();',
+  '}',
+  '',
+  'function renderActiveOverridesTable() {',
+  '  var tbody = document.getElementById(\'active-overrides-tbody\');',
+  '  if (!tbody) return;',
+  '  var filtered = activeOverridesData.filter(function(row) {',
+  '    if (overridesFilters.type !== \'all\' && row.type !== overridesFilters.type) return false;',
+  '    if (overridesFilters.classification !== \'all\' && row.classification !== overridesFilters.classification) return false;',
+  '    return true;',
+  '  });',
+  '',
+  '  if (filtered.length === 0) {',
+  '    tbody.innerHTML = \'<tr><td colspan="7" class="empty-state"><div>No active overrides match these filters</div></td></tr>\';',
+  '    return;',
+  '  }',
+  '',
+  '  tbody.innerHTML = filtered.map(function(row) {',
+  '    var typePillClass = row.type === \'deployment\' ? \'deploy\' : \'golives\';',
+  '    var typePillLabel = row.type === \'deployment\' ? \'Deploy\' : \'Go Lives\';',
+  '    var fieldList = (row.fieldsSet || []).join(\', \');',
+  '    var currentVal = formatOverrideValueSummary_(row);',
+  '    var setAtRelative = row.setAt ? formatRelativeTime(row.setAt) : \'\';',
+  '    var classPillClass = (row.classification || \'Monthly\').toLowerCase();',
+  '',
+  '    return \'<tr>\' +',
+  '      \'<td><span class="type-pill \' + typePillClass + \'">\' + typePillLabel + \'</span></td>\' +',
+  '      \'<td><strong>\' + escapeHtml(row.accountName || \'\') + \'</strong></td>\' +',
+  '      \'<td>\' + escapeHtml(fieldList) + \'</td>\' +',
+  '      \'<td>\' + escapeHtml(currentVal) + \'</td>\' +',
+  '      \'<td>\' + escapeHtml(row.setBy || \'\') + \'</td>\' +',
+  '      \'<td title="\' + escapeAttr(row.setAt || \'\') + \'">\' + escapeHtml(setAtRelative) + \'</td>\' +',
+  '      \'<td>\' +',
+  '      \'  <span class="classification-pill \' + classPillClass +',
+  '        \'" onclick="cycleClassification(\\\'\' + escapeJs(row.type) + \'\\\', \\\'\' + escapeJs(row.deploymentId) + \'\\\', \\\'\' + escapeJs(row.classification || \'Monthly\') + \'\\\')">\' +',
+  '        escapeHtml(row.classification || \'Monthly\') +',
+  '      \'  </span>\' +',
+  '      \'</td>\' +',
+  '      \'</tr>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  'function formatOverrideValueSummary_(row) {',
+  '  // Compact summary of which overrides are set, suitable for a single cell.',
+  '  var cv = row.currentValues || {};',
+  '  var parts = [];',
+  '  if (cv.health)            parts.push(\'Health=\' + cv.health);',
+  '  if (cv.mtpDate)           parts.push(\'MTP=\' + formatDate(cv.mtpDate));',
+  '  if (cv.stage)             parts.push(\'Stage=\' + cv.stage);',
+  '  if (cv.account)           parts.push(\'Account=\' + cv.account);',
+  '  if (cv.deployment)        parts.push(\'Deployment=\' + cv.deployment);',
+  '  if (cv.currentUpdate)     parts.push(\'Update=set\');',
+  '  if (cv.excludeFromReport) parts.push(\'Excluded\');',
+  '  if (cv.goLiveDate)        parts.push(\'Date=\' + formatDate(cv.goLiveDate));',
+  '  if (cv.partner)           parts.push(\'Partner=\' + cv.partner);',
+  '  return parts.join(\' · \');',
+  '}',
+  '',
+  'function cycleClassification(type, idOrAccount, currentValue) {',
+  '  var next = (currentValue === \'Monthly\') ? \'Structural\' : \'Monthly\';',
+  '  google.script.run',
+  '    .withSuccessHandler(function() {',
+  '      showToast(\'Classification updated to \' + next, \'success\');',
+  '      loadActiveOverrides();',
+  '      loadAuditLog();',
+  '    })',
+  '    .withFailureHandler(function(err) {',
+  '      showToast(\'Error updating classification: \' + err, \'error\');',
+  '    })',
+  '    .setOverrideClassificationForUI(type, idOrAccount, next);',
+  '}',
+  '',
+  '// ============================================================',
+  '// MANAGE OVERRIDES — AUDIT LOG RENDER',
+  '// ============================================================',
+  '',
+  'function renderAuditLog() {',
+  '  var tbody = document.getElementById(\'audit-trail-tbody\');',
+  '  if (!tbody) return;',
+  '',
+  '  if (auditLogData.length === 0) {',
+  '    tbody.innerHTML = \'<tr><td colspan="7" class="empty-state"><div>No audit events in this window</div></td></tr>\';',
+  '    return;',
+  '  }',
+  '',
+  '  tbody.innerHTML = auditLogData.map(function(row, index) {',
+  '    var actionClass = (row.action || \'\').toLowerCase();',
+  '    var typePillClass = row.overrideType === \'deployment\' ? \'deploy\' : \'golives\';',
+  '    var typePillLabel = row.overrideType === \'deployment\' ? \'Deploy\' : \'Go Lives\';',
+  '    var whenRelative = row.timestamp ? formatRelativeTime(row.timestamp) : \'\';',
+  '    // Phase 3d: show truncated reason in the table; full reason visible in audit detail modal',
+  '    var reasonText = row.notes || \'\';',
+  '    var reasonDisplay = reasonText.length > 60 ? reasonText.substring(0, 60) + \'\u2026\' : reasonText;',
+  '',
+  '    return \'<tr style="cursor:pointer;" onclick="openAuditDetailModal(\' + index + \')">\' +',
+  '      \'<td class="audit-mono" title="\' + escapeAttr(row.timestamp || \'\') + \'">\' + escapeHtml(whenRelative) + \'</td>\' +',
+  '      \'<td class="audit-mono">\' + escapeHtml(row.user || \'\') + \'</td>\' +',
+  '      \'<td><span class="audit-action-pill \' + actionClass + \'">\' + escapeHtml(row.action || \'\') + \'</span></td>\' +',
+  '      \'<td>\' + escapeHtml(row.accountName || \'\') + \'</td>\' +',
+  '      \'<td><span class="type-pill \' + typePillClass + \'">\' + typePillLabel + \'</span></td>\' +',
+  '      \'<td>\' + escapeHtml(row.fieldsAffected || \'\') + \'</td>\' +',
+  '      \'<td style="color:var(--color-text-muted); font-style:italic;">\' + escapeHtml(reasonDisplay) + \'</td>\' +',
+  '      \'</tr>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  '// ============================================================',
+  '// MANAGE OVERRIDES — BULK CLEAR FLOW',
+  '// ============================================================',
+  '',
+  'function confirmBulkClearMonthly() {',
+  '  var now = new Date();',
+  '  var monthLabel = now.toLocaleString(\'en-US\', { month: \'long\' }) + \' \' + now.getFullYear();',
+  '',
+  '  // Compute the count of monthly overrides for this month',
+  '  var ym = now.getFullYear() + \'-\' + String(now.getMonth() + 1).padStart(2, \'0\');',
+  '  var toClear = activeOverridesData.filter(function(row) {',
+  '    if (row.classification !== \'Monthly\') return false;',
+  '    if (!row.setAt) return false;',
+  '    var d = new Date(row.setAt);',
+  '    if (isNaN(d.getTime())) return false;',
+  '    var rowYm = d.getFullYear() + \'-\' + String(d.getMonth() + 1).padStart(2, \'0\');',
+  '    return rowYm === ym;',
+  '  });',
+  '',
+  '  var deploymentCount = toClear.filter(function(r) { return r.type === \'deployment\'; }).length;',
+  '  var golivesCount    = toClear.filter(function(r) { return r.type === \'golives\'; }).length;',
+  '',
+  '  if (toClear.length === 0) {',
+  '    showToast(\'No monthly overrides for \' + monthLabel + \' to clear.\', \'success\');',
+  '    return;',
+  '  }',
+  '',
+  '  var bodyHtml =',
+  '    \'<p>This will clear <strong>\' + toClear.length + \' overrides</strong> set during \' + escapeHtml(monthLabel) + \':</p>\' +',
+  '    \'<ul class="modal-list">\' +',
+  '    \'  <li>\' + deploymentCount + \' deployment overrides</li>\' +',
+  '    \'  <li>\' + golivesCount + \' go lives overrides</li>\' +',
+  '    \'</ul>\' +',
+  '    \'<p>Structural overrides will not be affected.</p>\' +',
+  '    \'<p style="color: var(--color-text-muted); font-size: 13px;">This action is logged in the audit trail and cannot be undone.</p>\';',
+  '',
+  '  showConfirmModal({',
+  '    title: \'Clear monthly overrides?\',',
+  '    bodyHtml: bodyHtml,',
+  '    confirmText: \'Clear \' + toClear.length + \' overrides\',',
+  '    onConfirm: function() {',
+  '      executeBulkClearMonthly_();',
+  '    }',
+  '  });',
+  '}',
+  '',
+  'function executeBulkClearMonthly_() {',
+  '  var spinner = document.getElementById(\'confirm-modal-spinner\');',
+  '  var btnText = document.getElementById(\'confirm-modal-confirm-text\');',
+  '  if (spinner) spinner.classList.remove(\'hidden\');',
+  '  if (btnText) btnText.classList.add(\'hidden\');',
+  '',
+  '  google.script.run',
+  '    .withSuccessHandler(function(result) {',
+  '      if (spinner) spinner.classList.add(\'hidden\');',
+  '      if (btnText) btnText.classList.remove(\'hidden\');',
+  '      closeConfirmModal();',
+  '      showToast(\'Cleared \' + (result.cleared || 0) + \' overrides\', \'success\');',
+  '      refreshOverridesTab();',
+  '      loadDeploymentsData();',
+  '      loadGoLivesData_both();',
+  '    })',
+  '    .withFailureHandler(function(err) {',
+  '      if (spinner) spinner.classList.add(\'hidden\');',
+  '      if (btnText) btnText.classList.remove(\'hidden\');',
+  '      showToast(\'Bulk clear failed: \' + err, \'error\');',
+  '    })',
+  '    .bulkClearMonthlyOverridesForUI();',
+  '}',
+  '',
+  'function confirmBulkClearAll() {',
+  '  if (activeOverridesData.length === 0) {',
+  '    showToast(\'No overrides to clear.\', \'success\');',
+  '    return;',
+  '  }',
+  '',
+  '  var deploymentCount = activeOverridesData.filter(function(r) { return r.type === \'deployment\'; }).length;',
+  '  var golivesCount    = activeOverridesData.filter(function(r) { return r.type === \'golives\'; }).length;',
+  '',
+  '  var bodyHtml =',
+  '    \'<p style="color: var(--color-status-red-fg); font-weight: 600;">⚠️ This will clear ALL \' + activeOverridesData.length + \' active overrides.</p>\' +',
+  '    \'<ul class="modal-list">\' +',
+  '    \'  <li>\' + deploymentCount + \' deployment overrides</li>\' +',
+  '    \'  <li>\' + golivesCount + \' go lives overrides</li>\' +',
+  '    \'</ul>\' +',
+  '    \'<p>This includes <strong>structural overrides</strong> that normally persist across months.</p>\' +',
+  '    \'<p style="color: var(--color-text-muted); font-size: 13px;">This action is logged in the audit trail and cannot be undone.</p>\';',
+  '',
+  '  showConfirmModal({',
+  '    title: \'Clear ALL overrides?\',',
+  '    bodyHtml: bodyHtml,',
+  '    confirmText: \'Clear all \' + activeOverridesData.length + \' overrides\',',
+  '    destructiveStrong: true,',
+  '    onConfirm: function() {',
+  '      executeBulkClearAll_();',
+  '    }',
+  '  });',
+  '}',
+  '',
+  'function executeBulkClearAll_() {',
+  '  var spinner = document.getElementById(\'confirm-modal-spinner\');',
+  '  var btnText = document.getElementById(\'confirm-modal-confirm-text\');',
+  '  if (spinner) spinner.classList.remove(\'hidden\');',
+  '  if (btnText) btnText.classList.add(\'hidden\');',
+  '',
+  '  google.script.run',
+  '    .withSuccessHandler(function(result) {',
+  '      if (spinner) spinner.classList.add(\'hidden\');',
+  '      if (btnText) btnText.classList.remove(\'hidden\');',
+  '      closeConfirmModal();',
+  '      showToast(\'Cleared \' + (result.cleared || 0) + \' overrides\', \'success\');',
+  '      refreshOverridesTab();',
+  '      loadDeploymentsData();',
+  '      loadGoLivesData_both();',
+  '    })',
+  '    .withFailureHandler(function(err) {',
+  '      if (spinner) spinner.classList.add(\'hidden\');',
+  '      if (btnText) btnText.classList.remove(\'hidden\');',
+  '      showToast(\'Bulk clear failed: \' + err, \'error\');',
+  '    })',
+  '    .bulkClearAllOverridesForUI();',
+  '}',
+  '',
+  '// ============================================================',
+  '// CONFIRMATION MODAL',
+  '// ============================================================',
+  '',
+  'function showConfirmModal(opts) {',
+  '  var titleEl = document.getElementById(\'confirm-modal-title\');',
+  '  var bodyEl  = document.getElementById(\'confirm-modal-body\');',
+  '  var btn     = document.getElementById(\'confirm-modal-confirm-btn\');',
+  '  var btnText = document.getElementById(\'confirm-modal-confirm-text\');',
+  '  var overlay = document.getElementById(\'confirm-modal\');',
+  '',
+  '  if (titleEl)  titleEl.textContent = opts.title || \'Confirm\';',
+  '  if (bodyEl)   bodyEl.innerHTML = opts.bodyHtml || \'\';',
+  '  if (btnText)  btnText.textContent = opts.confirmText || \'Confirm\';',
+  '  if (btn) {',
+  '    btn.className = \'btn \' + (opts.destructiveStrong ? \'btn-destructive-strong\' : \'btn-destructive\');',
+  '  }',
+  '  confirmModalCallback = opts.onConfirm || null;',
+  '  if (overlay) overlay.classList.add(\'active\');',
+  '}',
+  '',
+  'function closeConfirmModal() {',
+  '  var overlay = document.getElementById(\'confirm-modal\');',
+  '  if (overlay) overlay.classList.remove(\'active\');',
+  '  confirmModalCallback = null;',
+  '}',
+  '',
+  'function confirmModalConfirm() {',
+  '  if (typeof confirmModalCallback === \'function\') {',
+  '    confirmModalCallback();',
+  '  } else {',
+  '    closeConfirmModal();',
+  '  }',
+  '}',
+  '',
+  '// ============================================================',
+  '// AUDIT DETAIL MODAL',
+  '// ============================================================',
+  '',
+  'function openAuditDetailModal(index) {',
+  '  var row = auditLogData[index];',
+  '  if (!row) return;',
+  '  document.getElementById(\'audit-detail-when\').value = row.timestamp ? formatDateTime(row.timestamp) : \'\';',
+  '  document.getElementById(\'audit-detail-who\').value = row.user || \'\';',
+  '  document.getElementById(\'audit-detail-action\').value = row.action || \'\';',
+  '  document.getElementById(\'audit-detail-type\').value = row.overrideType || \'\';',
+  '  document.getElementById(\'audit-detail-account\').value = row.accountName || \'\';',
+  '  document.getElementById(\'audit-detail-deployment-id\').value = row.deploymentId || \'\';',
+  '  document.getElementById(\'audit-detail-fields\').value = row.fieldsAffected || \'\';',
+  '  document.getElementById(\'audit-detail-before\').value = prettyJson_(row.oldValueSnapshot);',
+  '  document.getElementById(\'audit-detail-after\').value  = prettyJson_(row.newValueSnapshot);',
+  '  // Phase 3d: override reason from OverrideAudit column J',
+  '  var notesEl = document.getElementById(\'audit-detail-notes\');',
+  '  if (notesEl) notesEl.value = row.notes || \'\';',
+  '  document.getElementById(\'audit-detail-modal\').classList.add(\'active\');',
+  '}',
+  '',
+  'function closeAuditDetailModal() {',
+  '  document.getElementById(\'audit-detail-modal\').classList.remove(\'active\');',
+  '}',
+  '',
+  'function openAuditForDeployment(deploymentId) {',
+  '  // Switch to overrides tab, then load and filter the audit log to this deployment.',
+  '  switchTab(\'overrides\');',
+  '  // Wait a tick for the tab to load',
+  '  setTimeout(function() {',
+  '    auditTrailWindowDays = 0;  // show all history',
+  '    google.script.run',
+  '      .withSuccessHandler(function(rows) {',
+  '        var filtered = (rows || []).filter(function(r) {',
+  '          return r.deploymentId === deploymentId || r.accountName === deploymentId;',
+  '        });',
+  '        if (filtered.length === 0) {',
+  '          showToast(\'No audit history found for this deployment.\', \'success\');',
+  '          return;',
+  '        }',
+  '        auditLogData = filtered;',
+  '        renderAuditLog();',
+  '        var label = document.getElementById(\'audit-trail-window-label\');',
+  '        if (label) label.textContent = \'(filtered to this deployment)\';',
+  '      })',
+  '      .withFailureHandler(function(err) {',
+  '        showToast(\'Error loading deployment audit: \' + err, \'error\');',
+  '      })',
+  '      .getOverrideAuditLogForUI({ sinceDays: 0, limit: 500 });',
+  '  }, 150);',
+  '}',
+  '',
+  'function prettyJson_(jsonStr) {',
+  '  if (!jsonStr) return \'\';',
+  '  try {',
+  '    var parsed = JSON.parse(jsonStr);',
+  '    return JSON.stringify(parsed, null, 2);',
+  '  } catch (e) {',
+  '    return jsonStr;',
+  '  }',
+  '}',
+  '',
+  '// ============================================================',
+  '// UTILITIES',
+  '// ============================================================',
+  '',
+  'function showLoading(tbodyId, colspan) {',
+  '  var el = document.getElementById(tbodyId);',
+  '  if (!el) return;',
+  '  el.innerHTML = \'<tr><td colspan="\' + colspan + \'" style="text-align:center;padding:2rem;">Loading...</td></tr>\';',
+  '}',
+  '',
+  'function showToast(message, type) {',
+  '  type = type || \'success\';',
+  '  var toast = document.createElement(\'div\');',
+  '  toast.className = \'toast \' + type;',
+  '  var icon = (type === \'success\') ? \'\\u2713\' : \'\\u2717\';',
+  '  toast.innerHTML = \'<span>\' + icon + \'</span><span>\' + escapeHtml(message) + \'</span>\';',
+  '  document.body.appendChild(toast);',
+  '  setTimeout(function() { toast.remove(); }, 3000);',
+  '}',
+  '',
+  'function escapeHtml(text) {',
+  '  if (text === null || text === undefined) return \'\';',
+  '  var div = document.createElement(\'div\');',
+  '  div.textContent = String(text);',
+  '  return div.innerHTML;',
+  '}',
+  '',
+  'function escapeAttr(text) {',
+  '  if (text === null || text === undefined) return \'\';',
+  '  return String(text).replace(/"/g, \'&quot;\').replace(/</g, \'&lt;\').replace(/>/g, \'&gt;\');',
+  '}',
+  '',
+  'function escapeJs(text) {',
+  '  // For embedding in inline onclick="foo(\'<value>\')" attributes — only need to',
+  '  // escape single quotes and backslashes.',
+  '  if (text === null || text === undefined) return \'\';',
+  '  return String(text).replace(/\\\\/g, \'\\\\\\\\\').replace(/\'/g, "\\\\\'");',
+  '}',
+  '',
+  'function formatDate(dateString) {',
+  '  if (!dateString) return \'\';',
+  '  var date = new Date(dateString);',
+  '  if (isNaN(date.getTime())) return dateString;',
+  '  return date.toLocaleDateString(\'en-US\', { year: \'numeric\', month: \'short\', day: \'numeric\' });',
+  '}',
+  '',
+  'function formatDateLong(dateString) {',
+  '  if (!dateString) return \'\';',
+  '  var date = (dateString instanceof Date) ? dateString : new Date(dateString);',
+  '  if (isNaN(date.getTime())) return String(dateString);',
+  '  return date.toLocaleDateString(\'en-US\', { year: \'numeric\', month: \'long\', day: \'numeric\' });',
+  '}',
+  '',
+  'function formatDateForInput(dateString) {',
+  '  if (!dateString) return \'\';',
+  '  var date = new Date(dateString);',
+  '  if (isNaN(date.getTime())) return \'\';',
+  '  return date.toISOString().split(\'T\')[0];',
+  '}',
+  '',
+  'function formatDateTime(dateString) {',
+  '  if (!dateString) return \'\';',
+  '  var date = new Date(dateString);',
+  '  if (isNaN(date.getTime())) return dateString;',
+  '  return date.toLocaleString(\'en-US\', { year: \'numeric\', month: \'short\', day: \'numeric\', hour: \'2-digit\', minute: \'2-digit\' });',
+  '}',
+  '',
+  'function formatRelativeTime(dateString) {',
+  '  if (!dateString) return \'\';',
+  '  var date = new Date(dateString);',
+  '  if (isNaN(date.getTime())) return dateString;',
+  '  var diffMs = Date.now() - date.getTime();',
+  '  var diffSec = Math.floor(diffMs / 1000);',
+  '  var diffMin = Math.floor(diffSec / 60);',
+  '  var diffHr  = Math.floor(diffMin / 60);',
+  '  var diffDay = Math.floor(diffHr / 24);',
+  '  if (diffSec < 60)  return \'just now\';',
+  '  if (diffMin < 60)  return diffMin + \' min ago\';',
+  '  if (diffHr  < 24)  return diffHr + \' hr ago\';',
+  '  if (diffDay < 7)   return diffDay + \' day\' + (diffDay === 1 ? \'\' : \'s\') + \' ago\';',
+  '  return date.toLocaleDateString(\'en-US\', { month: \'short\', day: \'numeric\' });',
+  '}',
+  '',
+  'function setRadioGroupValue(name, value) {',
+  '  document.querySelectorAll(\'input[name="\' + name + \'"]\').forEach(function(el) {',
+  '    el.checked = (el.value === value);',
+  '  });',
+  '}',
+  '',
+  'function getRadioGroupValue(name) {',
+  '  var els = document.querySelectorAll(\'input[name="\' + name + \'"]\');',
+  '  for (var i = 0; i < els.length; i++) {',
+  '    if (els[i].checked) return els[i].value;',
+  '  }',
+  '  return null;',
+  '}',
+  '',
+  '// ============================================================',
+  '// PORTFOLIO HEALTH (Phase 1 — unchanged)',
+  '// ============================================================',
+  '',
+  'var portfolioData = null;',
+  'var PH_INDUSTRY_COLORS = [\'#0F4C81\', \'#0891B2\', \'#A855F7\', \'#F97316\', \'#16A34A\'];',
+  '',
+  'var _origSwitchTab = switchTab;',
+  'switchTab = function(tabName) {',
+  '  _origSwitchTab(tabName);',
+  '  if (tabName === \'portfolio\' && !portfolioData) {',
+  '    loadPortfolioHealth();',
+  '  }',
+  '};',
+  '',
+  'function loadPortfolioHealth() {',
+  '  document.getElementById(\'ph-loading\').classList.remove(\'hidden\');',
+  '  document.getElementById(\'ph-content\').classList.add(\'hidden\');',
+  '  google.script.run',
+  '    .withSuccessHandler(function(data) {',
+  '      portfolioData = data;',
+  '      renderPortfolioHealth(data);',
+  '      document.getElementById(\'ph-loading\').classList.add(\'hidden\');',
+  '      document.getElementById(\'ph-content\').classList.remove(\'hidden\');',
+  '    })',
+  '    .withFailureHandler(function(err) {',
+  '      document.getElementById(\'ph-loading\').innerHTML =',
+  '        \'<p style="color:#c62828;">Error loading Portfolio Health: \' + escapeHtml(err.toString()) + \'</p>\';',
+  '      showToast(\'Error loading Portfolio Health: \' + err, \'error\');',
+  '    })',
+  '    .getPortfolioHealthData();',
+  '}',
+  '',
+  'function renderPortfolioHealth(d) {',
+  '  document.getElementById(\'ph-title\').textContent = d.title || \'Portfolio Health\';',
+  '  document.getElementById(\'ph-subtitle\').textContent = (d.appId ? d.appId + \' \\u00B7 \' : \'\') + \'Executive Snapshot\';',
+  '  document.getElementById(\'ph-month\').textContent = d.monthLabel || \'\';',
+  '  document.getElementById(\'ph-generated\').textContent = \'Generated \' + (d.generatedLabel || \'\');',
+  '',
+  '  document.getElementById(\'ph-kpi-total\').textContent  = d.totals.total;',
+  '  document.getElementById(\'ph-kpi-green\').textContent  = d.totals.green;',
+  '  document.getElementById(\'ph-kpi-yellow\').textContent = d.totals.yellow;',
+  '  document.getElementById(\'ph-kpi-red\').textContent    = d.totals.red;',
+  '  document.getElementById(\'ph-kpi-green-pct\').textContent  = formatPct(d.totals.greenPct);',
+  '  document.getElementById(\'ph-kpi-yellow-pct\').textContent = formatPct(d.totals.yellowPct);',
+  '  document.getElementById(\'ph-kpi-red-pct\').textContent    = formatPct(d.totals.redPct);',
+  '',
+  '  // Phase 3a: Phased Go-Lives KPI tile',
+  '  var phasedEl = document.getElementById(\'ph-kpi-phased\');',
+  '  if (phasedEl) {',
+  '    phasedEl.textContent = (d.phasedDeployments !== undefined && d.phasedDeployments !== null)',
+  '      ? d.phasedDeployments',
+  '      : \'\\u2013\';',
+  '  }',
+  '',
+  '  var hist = d.history || null;',
+  '  renderPhTrendAndSpark(\'total\',  hist, \'#0F4C81\', \'neutral\');',
+  '  renderPhTrendAndSpark(\'green\',  hist, \'#10b981\', \'upGood\');',
+  '  renderPhTrendAndSpark(\'yellow\', hist, \'#f59e0b\', \'upBad\');',
+  '  renderPhTrendAndSpark(\'red\',    hist, \'#ef4444\', \'upBad\');',
+  '',
+  '  renderPhList(\'ph-red-list\',    \'ph-red-count\',    d.redProjects,    \'red\',    \'No Red projects\');',
+  '  renderPhList(\'ph-yellow-list\', \'ph-yellow-count\', d.yellowProjects, \'yellow\', \'No Yellow projects\');',
+  '  document.getElementById(\'ph-golives-title\').textContent =',
+  '    \'WD Prime Go Lives \\u2014 Last \' + (d.windowDays || 60) + \' Days\';',
+  '  renderPhList(\'ph-golives-list\', \'ph-golives-count\', d.recentGoLives.accounts, \'blue\', \'No WD Prime Go Lives in window\');',
+  '',
+  '  renderPhStacked(d.totals);',
+  '',
+  '  document.getElementById(\'ph-workday-legend\').textContent = d.workdayLabel || \'Workday\';',
+  '  document.getElementById(\'ph-other-legend\').textContent   = d.otherLabel || \'Partners/Other\';',
+  '  renderPhPartnerTable(d.partnerSplit, d.workdayLabel, d.otherLabel);',
+  '  renderPhIndustryTable(d.industrySplit);',
+  '}',
+  '',
+  'function renderPhList(listId, countId, items, dotClass, emptyText) {',
+  '  var list = document.getElementById(listId);',
+  '  var count = document.getElementById(countId);',
+  '  count.textContent = items.length;',
+  '  if (!items || items.length === 0) {',
+  '    list.innerHTML = \'<div class="ph-empty">\' + escapeHtml(emptyText) + \'</div>\';',
+  '    return;',
+  '  }',
+  '  list.innerHTML = items.map(function(it) {',
+  '    return \'<div class="ph-list-item">\' +',
+  '      \'<span class="ph-dot \' + dotClass + \'"></span>\' +',
+  '      \'<span>\' + escapeHtml(it.accountName) + \'</span>\' +',
+  '      \'</div>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  'function renderPhStacked(totals) {',
+  '  var el = document.getElementById(\'ph-stacked\');',
+  '  if (!totals.total) {',
+  '    el.innerHTML = \'<div style="flex:1; display:flex; align-items:center; justify-content:center; color:#94a3b8; background:#eef2f7;">No data</div>\';',
+  '    return;',
+  '  }',
+  '  function seg(count, color) {',
+  '    if (!count) return \'\';',
+  '    var pct = (count / totals.total) * 100;',
+  '    return \'<div style="width:\' + pct.toFixed(2) + \'%; background:\' + color + \';">\' + count + \'</div>\';',
+  '  }',
+  '  el.innerHTML = seg(totals.green, \'#10b981\') + seg(totals.yellow, \'#f59e0b\') + seg(totals.red, \'#ef4444\');',
+  '}',
+  '',
+  'function renderPhPartnerTable(split, workdayLabel, otherLabel) {',
+  '  var tbl = document.getElementById(\'ph-partner-table\');',
+  '  var wlbl = workdayLabel || \'Workday\';',
+  '  var olbl = otherLabel   || \'Partners/Other\';',
+  '  var rows = split.rows.map(function(r) {',
+  '    return phSplitRow(r.health, [',
+  '      { name: wlbl, count: r.workdayCount, pct: r.workdayPct, color: \'#0f4c81\' },',
+  '      { name: olbl, count: r.otherCount,   pct: r.otherPct,   color: \'#64748b\' }',
+  '    ]);',
+  '  });',
+  '  var t = split.totals;',
+  '  rows.push(phSplitTotalsRow([',
+  '    { name: wlbl, count: t.workdayCount, pct: t.workdayPct, color: \'#0f4c81\' },',
+  '    { name: olbl, count: t.otherCount,   pct: t.otherPct,   color: \'#64748b\' }',
+  '  ], t.total));',
+  '  tbl.innerHTML = rows.join(\'\');',
+  '}',
+  '',
+  'function renderPhIndustryTable(split) {',
+  '  var tbl = document.getElementById(\'ph-industry-table\');',
+  '  var legend = document.getElementById(\'ph-industry-legend\');',
+  '  legend.innerHTML = split.bucketLabels.map(function(label, i) {',
+  '    return \'<span><span class="ph-legend-swatch" style="background:\' +',
+  '      PH_INDUSTRY_COLORS[i % PH_INDUSTRY_COLORS.length] + \';"></span>\' +',
+  '      escapeHtml(label) + \'</span>\';',
+  '  }).join(\'\');',
+  '  var rows = split.rows.map(function(r) {',
+  '    var bars = r.buckets.map(function(b, i) {',
+  '      return { name: b.label, count: b.count, pct: b.pct, color: PH_INDUSTRY_COLORS[i % PH_INDUSTRY_COLORS.length] };',
+  '    });',
+  '    return phSplitRow(r.health, bars);',
+  '  });',
+  '  var totalsBars = split.totals.buckets.map(function(b, i) {',
+  '    return { name: b.label, count: b.count, pct: b.pct, color: PH_INDUSTRY_COLORS[i % PH_INDUSTRY_COLORS.length] };',
+  '  });',
+  '  rows.push(phSplitTotalsRow(totalsBars, split.totals.total));',
+  '  tbl.innerHTML = rows.join(\'\');',
+  '}',
+  '',
+  'function phSplitRow(health, bars) {',
+  '  var tag = \'<span class="ph-health-tag \' + health.toLowerCase() + \'">\' + health + \'</span>\';',
+  '  var barsHtml = bars.map(function(b) {',
+  '    var pct = Math.round((b.pct || 0) * 1000) / 10;',
+  '    return \'<div class="ph-bar-row">\' +',
+  '      \'<span class="ph-bar-name">\' + escapeHtml(b.name) + \'</span>\' +',
+  '      \'<div class="ph-bar-track">\' +',
+  '      \'<div class="ph-bar-fill" style="width:\' + pct + \'%; background:\' + b.color + \';"></div>\' +',
+  '      \'</div>\' +',
+  '      \'<span class="ph-bar-value">\' + formatPct(b.pct) + \' \\u00B7 \' + b.count + \'</span>\' +',
+  '      \'</div>\';',
+  '  }).join(\'\');',
+  '  return \'<tr>\' +',
+  '    \'<td class="ph-split-label">\' + tag + \'</td>\' +',
+  '    \'<td class="ph-split-bars">\' + barsHtml + \'</td>\' +',
+  '    \'</tr>\';',
+  '}',
+  '',
+  'function phSplitTotalsRow(bars, grandTotal) {',
+  '  var barsHtml = bars.map(function(b) {',
+  '    var pct = Math.round((b.pct || 0) * 1000) / 10;',
+  '    return \'<div class="ph-bar-row">\' +',
+  '      \'<span class="ph-bar-name">\' + escapeHtml(b.name) + \'</span>\' +',
+  '      \'<div class="ph-bar-track">\' +',
+  '      \'<div class="ph-bar-fill" style="width:\' + pct + \'%; background:\' + b.color + \';"></div>\' +',
+  '      \'</div>\' +',
+  '      \'<span class="ph-bar-value">\' + formatPct(b.pct) + \' \\u00B7 \' + b.count + \'</span>\' +',
+  '      \'</div>\';',
+  '  }).join(\'\');',
+  '  return \'<tr class="ph-split-totals">\' +',
+  '    \'<td class="ph-split-label">Totals</td>\' +',
+  '    \'<td class="ph-split-bars">\' + barsHtml + \'</td>\' +',
+  '    \'</tr>\';',
+  '}',
+  '',
+  'function formatPct(p) {',
+  '  if (p === null || p === undefined || isNaN(p)) return \'0.0%\';',
+  '  return (p * 100).toFixed(1) + \'%\';',
+  '}',
+  '',
+  'function renderPhTrendAndSpark(key, hist, color, direction) {',
+  '  var trendEl = document.getElementById(\'ph-trend-\' + key);',
+  '  var sparkEl = document.getElementById(\'ph-spark-\' + key);',
+  '  if (!trendEl || !sparkEl) return;',
+  '  if (!hist || !hist.trend || !hist.trend[key]) {',
+  '    trendEl.className = \'ph-trend flat\';',
+  '    trendEl.innerHTML = \'<span class="ph-arrow">\\u2013</span> 0\';',
+  '    sparkEl.innerHTML = \'\';',
+  '    return;',
+  '  }',
+  '  var t = hist.trend[key];',
+  '  var series = (hist.series && hist.series[key]) ? hist.series[key] : [];',
+  '  var arrow, klass;',
+  '  if (t.previous === null || t.previous === undefined || t.delta === 0) {',
+  '    arrow = \'\\u2013\';',
+  '    klass = \'flat\';',
+  '  } else if (t.delta > 0) {',
+  '    arrow = \'\\u25B2\';',
+  '    klass = (direction === \'upGood\') ? \'good\' : (direction === \'upBad\') ? \'bad\' : \'flat\';',
+  '  } else {',
+  '    arrow = \'\\u25BC\';',
+  '    klass = (direction === \'upGood\') ? \'bad\' : (direction === \'upBad\') ? \'good\' : \'flat\';',
+  '  }',
+  '  var sign = t.delta > 0 ? \'+\' : (t.delta < 0 ? \'\\u2212\' : \'\');',
+  '  var absDelta = Math.abs(t.delta);',
+  '  trendEl.className = \'ph-trend \' + klass;',
+  '  trendEl.innerHTML = \'<span class="ph-arrow">\' + arrow + \'</span> \' + sign + absDelta;',
+  '  renderPhSparkline(sparkEl, series, hist.months || [], color);',
+  '}',
+  '',
+  'function renderPhSparkline(svg, series, months, color) {',
+  '  svg.innerHTML = \'\';',
+  '  if (!series || series.length === 0) return;',
+  '  var W = 100;',
+  '  var H = 28;',
+  '  var padX = 2;',
+  '  var padY = 4;',
+  '  var n = series.length;',
+  '  var min = Math.min.apply(null, series);',
+  '  var max = Math.max.apply(null, series);',
+  '  var range = (max - min) || 1;',
+  '  function xAt(i) { if (n === 1) return W / 2; return padX + (i * (W - 2 * padX)) / (n - 1); }',
+  '  function yAt(v) { return padY + (H - 2 * padY) * (1 - (v - min) / range); }',
+  '  svg.setAttribute(\'viewBox\', \'0 0 \' + W + \' \' + H);',
+  '  var linePts = series.map(function(v, i) { return xAt(i) + \',\' + yAt(v); });',
+  '  var linePath = \'M \' + linePts.join(\' L \');',
+  '  var areaPath = linePath + \' L \' + xAt(n - 1) + \',\' + (H - padY) + \' L \' + xAt(0) + \',\' + (H - padY) + \' Z\';',
+  '  var ns = \'http://www.w3.org/2000/svg\';',
+  '  var area = document.createElementNS(ns, \'path\');',
+  '  area.setAttribute(\'class\', \'ph-spark-area\');',
+  '  area.setAttribute(\'d\', areaPath);',
+  '  area.setAttribute(\'fill\', color);',
+  '  svg.appendChild(area);',
+  '  var line = document.createElementNS(ns, \'path\');',
+  '  line.setAttribute(\'class\', \'ph-spark-line\');',
+  '  line.setAttribute(\'d\', linePath);',
+  '  line.setAttribute(\'stroke\', color);',
+  '  svg.appendChild(line);',
+  '  var dot = document.createElementNS(ns, \'circle\');',
+  '  dot.setAttribute(\'class\', \'ph-spark-dot\');',
+  '  dot.setAttribute(\'cx\', xAt(n - 1));',
+  '  dot.setAttribute(\'cy\', yAt(series[n - 1]));',
+  '  dot.setAttribute(\'r\', 2.2);',
+  '  dot.setAttribute(\'fill\', color);',
+  '  svg.appendChild(dot);',
+  '  var monthsArr = (months && months.length === n) ? months : series.map(function(_, i) { return \'Pt \' + (i + 1); });',
+  '  var title = document.createElementNS(ns, \'title\');',
+  '  title.textContent = monthsArr.map(function(m, i) { return m + \': \' + series[i]; }).join(\'\\\\n\');',
+  '  svg.appendChild(title);',
+  '}',
+  '',
+  'function downloadPortfolioHealthPng() {',
+  '  if (!portfolioData) {',
+  '    showToast(\'Portfolio Health is still loading\\u2026\', \'error\');',
+  '    return;',
+  '  }',
+  '  var node = document.getElementById(\'ph-canvas\');',
+  '  var spinner = document.getElementById(\'ph-spinner\');',
+  '  spinner.classList.remove(\'hidden\');',
+  '  html2canvas(node, {',
+  '    backgroundColor: \'#ffffff\',',
+  '    scale: 2,',
+  '    useCORS: true,',
+  '    ignoreElements: function(el) { return el.classList && el.classList.contains(\'no-export\'); }',
+  '  }).then(function(canvas) {',
+  '    var ym = portfolioDataMonthSuffix();',
+  '    var filename = (portfolioData.appId || \'Portfolio\') + \'_PortfolioHealth_\' + ym + \'.png\';',
+  '    canvas.toBlob(function(blob) {',
+  '      var link = document.createElement(\'a\');',
+  '      link.href = URL.createObjectURL(blob);',
+  '      link.download = filename;',
+  '      document.body.appendChild(link);',
+  '      link.click();',
+  '      document.body.removeChild(link);',
+  '      URL.revokeObjectURL(link.href);',
+  '      spinner.classList.add(\'hidden\');',
+  '      showToast(\'Portfolio Health PNG downloaded\', \'success\');',
+  '    }, \'image/png\');',
+  '  }).catch(function(err) {',
+  '    spinner.classList.add(\'hidden\');',
+  '    showToast(\'Error generating PNG: \' + err, \'error\');',
+  '  });',
+  '}',
+  '',
+  'function portfolioDataMonthSuffix() {',
+  '  if (!portfolioData || !portfolioData.generatedAt) return \'snapshot\';',
+  '  var d = new Date(portfolioData.generatedAt);',
+  '  if (isNaN(d.getTime())) return \'snapshot\';',
+  '  var m = String(d.getMonth() + 1).padStart(2, \'0\');',
+  '  return d.getFullYear() + \'-\' + m;',
+  '}',
+  '',
+  '// ============================================================',
+  '// PHASE 3g — TRENDS TAB (SLG only)',
+  '// ============================================================',
+  '',
+  '// Per-metric cache (reset on each loadTrendsTab call)',
+  'var _trendsCache = {};',
+  'var _trendsLoadCount = 0;',
+  '',
+  '/**',
+  ' * Entry-point — called on tab switch or manual Refresh.',
+  ' * Fires all seven server calls in parallel, then hands results to renderers.',
+  ' */',
+  'function loadTrendsTab() {',
+  '  var trendsTab = document.getElementById(\'trends-tab\');',
+  '  if (!trendsTab) return;',
+  '',
+  '  _trendsCache = {};',
+  '  var vmo = getViewModeOpts_();',
+  '',
+  '  var loadInd = document.getElementById(\'trends-loading-indicator\');',
+  '  var asOf    = document.getElementById(\'trends-as-of\');',
+  '  if (loadInd) loadInd.classList.remove(\'hidden\');',
+  '  if (asOf)    asOf.textContent = \'\';',
+  '',
+  '  _trendsLoadCount = 7;',
+  '',
+  '  function onDone() {',
+  '    _trendsLoadCount--;',
+  '    if (_trendsLoadCount <= 0) {',
+  '      if (loadInd) loadInd.classList.add(\'hidden\');',
+  '      if (asOf) asOf.textContent = \'As of \' + _fmtNow_();',
+  '    }',
+  '  }',
+  '',
+  '  function callTrends(fnName, arg, renderFn) {',
+  '    var runner = google.script.run',
+  '      .withSuccessHandler(function(data) {',
+  '        try { renderFn(data); } catch(e) { console.error(\'[Trends] render error in \' + fnName, e); }',
+  '        onDone();',
+  '      })',
+  '      .withFailureHandler(function(err) {',
+  '        console.error(\'[Trends] server error in \' + fnName, err);',
+  '        onDone();',
+  '      });',
+  '    if (arg !== null) {',
+  '      runner[fnName](arg);',
+  '    } else {',
+  '      runner[fnName]();',
+  '    }',
+  '  }',
+  '',
+  '  callTrends(\'getTrendsTimeInRedData\',               vmo,  _trends_renderTimeInRed);',
+  '  callTrends(\'getTrendsHealthTrajectoryData\',         null, _trends_renderHealthTrajectory);',
+  '  callTrends(\'getTrendsHealthByPartnerData\',          vmo,  _trends_renderHealthByPartner);',
+  '  callTrends(\'getTrendsHealthByDeliveryDirectorData\', vmo,  _trends_renderHealthByDD);',
+  '  callTrends(\'getTrendsTimeInStageData\',              vmo,  _trends_renderTimeInStage);',
+  '  callTrends(\'getTrendsTimeToGoLiveData\',             vmo,  _trends_renderTimeToGoLive);',
+  '  callTrends(\'getTrendsGoLiveOutcomeData\',            vmo,  _trends_renderGoLiveOutcomes);',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// TIER 1: Time in Red',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_renderTimeInRed(data) {',
+  '  if (!data) return;',
+  '  var strip = document.getElementById(\'trends-red-kpi-strip\');',
+  '  var sub   = document.getElementById(\'trends-red-subtitle\');',
+  '  if (!strip) return;',
+  '',
+  '  var cur     = data.currentRedCount    || 0;',
+  '  var avgDays = data.avgDaysInRed       != null ? Math.round(data.avgDaysInRed) : \'\\u2014\';',
+  '  var longest = data.longestCurrentDays != null ? data.longestCurrentDays : \'\\u2014\';',
+  '  var resolved = data.resolvedCount     || 0;',
+  '  var avgRes  = data.avgResolutionDays  != null ? Math.round(data.avgResolutionDays) : \'\\u2014\';',
+  '',
+  '  if (sub) sub.textContent = (data.windowMonths || 12) + \'-month window\';',
+  '',
+  '  strip.innerHTML = [',
+  '    _trends_kpiCard(\'Currently Red\',    cur,     \'deployments\',          \'accent-red clickable\', \'Click to see list\', \'onclick="openTrendsRedDrilldown()"\'),',
+  '    _trends_kpiCard(\'Avg Days in Red\',  avgDays, \'days (active)\',         \'accent-red\', \'\'),',
+  '    _trends_kpiCard(\'Longest Current\',  longest, \'days in red\',           \'accent-red\', \'\'),',
+  '    _trends_kpiCard(\'Resolved (window)\',resolved,\'became green/yellow\',   \'accent-green\', \'\'),',
+  '    _trends_kpiCard(\'Avg Resolution\',   avgRes,  \'days to resolve\',       \'accent-green\', \'\')',
+  '  ].join(\'\');',
+  '',
+  '  var tbody = document.getElementById(\'trends-red-drilldown-tbody\');',
+  '  if (tbody && Array.isArray(data.currentRedList)) {',
+  '    tbody.innerHTML = data.currentRedList.map(function(r) {',
+  '      return \'<tr>\' +',
+  '        \'<td>\' + escapeHtml(r.accountName    || \'\') + \'</td>\' +',
+  '        \'<td>\' + escapeHtml(r.deploymentName || \'\') + \'</td>\' +',
+  '        \'<td>\' + escapeHtml(r.partner        || \'\') + \'</td>\' +',
+  '        \'<td class="num\' + (r.daysInRed > 30 ? \' outlier\' : \'\') + \'">\' + r.daysInRed + \'</td>\' +',
+  '        \'<td>\' + escapeHtml(r.deliveryDirector || \'\') + \'</td>\' +',
+  '        \'</tr>\';',
+  '    }).join(\'\');',
+  '  }',
+  '}',
+  '',
+  'function openTrendsRedDrilldown() {',
+  '  var dd = document.getElementById(\'trends-red-drilldown\');',
+  '  if (dd) dd.classList.toggle(\'hidden\');',
+  '}',
+  '',
+  'function closeTrendsDrilldown(id) {',
+  '  var el = document.getElementById(id);',
+  '  if (el) el.classList.add(\'hidden\');',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// TIER 2a: Health Trajectory',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_renderHealthTrajectory(data) {',
+  '  if (!data || !Array.isArray(data.months)) return;',
+  '  var tbody = document.getElementById(\'trends-trajectory-tbody\');',
+  '  if (!tbody) return;',
+  '',
+  '  tbody.innerHTML = data.months.map(function(m) {',
+  '    var total = m.total  || 0;',
+  '    var g     = m.green  || 0;',
+  '    var y     = m.yellow || 0;',
+  '    var r     = m.red    || 0;',
+  '    var gPct  = total ? Math.round(g / total * 100) : 0;',
+  '    var yPct  = total ? Math.round(y / total * 100) : 0;',
+  '    var rPct  = total ? 100 - gPct - yPct : 0;',
+  '',
+  '    var bar = \'<div class="trends-inline-bar">\' +',
+  '      \'<div class="trends-bar-seg seg-green"  style="width:\' + gPct + \'%"></div>\' +',
+  '      \'<div class="trends-bar-seg seg-yellow" style="width:\' + yPct + \'%"></div>\' +',
+  '      \'<div class="trends-bar-seg seg-red"    style="width:\' + rPct + \'%"></div>\' +',
+  '    \'</div>\';',
+  '',
+  '    return \'<tr>\' +',
+  '      \'<td>\' + escapeHtml(m.monthLabel || m.month || \'\') + \'</td>\' +',
+  '      \'<td class="num">\' + total + \'</td>\' +',
+  '      \'<td class="num" style="color:var(--color-status-green-fg);">\'  + g + \'</td>\' +',
+  '      \'<td class="num" style="color:var(--color-status-yellow-fg);">\' + y + \'</td>\' +',
+  '      \'<td class="num" style="color:var(--color-status-red-fg);">\'    + r + \'</td>\' +',
+  '      \'<td>\' + bar + \'</td>\' +',
+  '    \'</tr>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// TIER 2b: Health by Partner',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_renderHealthByPartner(data) {',
+  '  if (!data || !Array.isArray(data.partners)) return;',
+  '  var container = document.getElementById(\'trends-partner-bars\');',
+  '  var sub       = document.getElementById(\'trends-partner-subtitle\');',
+  '  if (!container) return;',
+  '',
+  '  if (sub) sub.textContent =',
+  '    (data.viewMode === \'my\' ? \'My portfolio\' : \'Team-wide\') +',
+  '    \' · \' + (data.windowMonths || 12) + \' months\';',
+  '',
+  '  container.innerHTML = data.partners.map(function(p) {',
+  '    var total = p.total || 1;',
+  '    var gPct  = Math.round((p.green  || 0) / total * 100);',
+  '    var yPct  = Math.round((p.yellow || 0) / total * 100);',
+  '    var rPct  = 100 - gPct - yPct;',
+  '',
+  '    return \'<div class="trends-bar-row">\' +',
+  '      \'<div class="trends-bar-label" title="\' + escapeHtml(p.partner || \'\') + \'">\' +',
+  '        escapeHtml(p.partner || \'\') + \'</div>\' +',
+  '      \'<div class="trends-bar-track">\' +',
+  '        \'<div class="trends-bar-seg seg-green"  style="width:\' + gPct + \'%"></div>\' +',
+  '        \'<div class="trends-bar-seg seg-yellow" style="width:\' + yPct + \'%"></div>\' +',
+  '        \'<div class="trends-bar-seg seg-red"    style="width:\' + rPct + \'%"></div>\' +',
+  '      \'</div>\' +',
+  '      \'<div class="trends-bar-total">\' + total + \'</div>\' +',
+  '    \'</div>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// TIER 3: Health by Delivery Director',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_renderHealthByDD(data) {',
+  '  if (!data || !Array.isArray(data.directors)) return;',
+  '  var tbody = document.getElementById(\'trends-dd-tbody\');',
+  '  var sub   = document.getElementById(\'trends-dd-subtitle\');',
+  '  if (!tbody) return;',
+  '',
+  '  if (sub) sub.textContent =',
+  '    (data.viewMode === \'my\' ? \'My portfolio\' : \'Team-wide\') +',
+  '    \' · current snapshot\';',
+  '',
+  '  tbody.innerHTML = data.directors.map(function(d) {',
+  '    var total = d.total || 1;',
+  '    var gPct  = Math.round((d.green  || 0) / total * 100);',
+  '    var yPct  = Math.round((d.yellow || 0) / total * 100);',
+  '    var rPct  = 100 - gPct - yPct;',
+  '',
+  '    var bar = \'<div class="trends-inline-bar">\' +',
+  '      \'<div class="trends-bar-seg seg-green"  style="width:\' + gPct + \'%"></div>\' +',
+  '      \'<div class="trends-bar-seg seg-yellow" style="width:\' + yPct + \'%"></div>\' +',
+  '      \'<div class="trends-bar-seg seg-red"    style="width:\' + rPct + \'%"></div>\' +',
+  '    \'</div>\';',
+  '',
+  '    var avgRed = d.avgDaysInRed != null ? Math.round(d.avgDaysInRed) : \'\\u2014\';',
+  '    return \'<tr>\' +',
+  '      \'<td>\' + escapeHtml(d.deliveryDirector || d.dd || \'\') + \'</td>\' +',
+  '      \'<td class="num">\' + (d.total  || 0) + \'</td>\' +',
+  '      \'<td class="num" style="color:var(--color-status-green-fg);">\'  + (d.green  || 0) + \'</td>\' +',
+  '      \'<td class="num" style="color:var(--color-status-yellow-fg);">\' + (d.yellow || 0) + \'</td>\' +',
+  '      \'<td class="num" style="color:var(--color-status-red-fg);">\'    + (d.red    || 0) + \'</td>\' +',
+  '      \'<td>\' + bar + \'</td>\' +',
+  '      \'<td class="num">\' + avgRed + \'</td>\' +',
+  '    \'</tr>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// TIER 4a: Time in Stage',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_renderTimeInStage(data) {',
+  '  if (!data || !Array.isArray(data.stages)) return;',
+  '  var tbody = document.getElementById(\'trends-stage-tbody\');',
+  '  var sub   = document.getElementById(\'trends-stage-subtitle\');',
+  '  if (!tbody) return;',
+  '',
+  '  if (sub) sub.textContent =',
+  '    (data.windowMonths || 12) + \'-month benchmark · \' +',
+  '    (data.viewMode === \'my\' ? \'My portfolio\' : \'Team-wide\');',
+  '',
+  '  tbody.innerHTML = data.stages.map(function(s) {',
+  '    var outliers = Array.isArray(s.outliers) ? s.outliers : [];',
+  '    var outlierCount = outliers.length || (s.outlierCount || 0);',
+  '    var outlierCell = outlierCount > 0',
+  '      ? \'<td class="num outlier" style="cursor:pointer;" onclick="_trends_openStageOutliers(\\'\' +',
+  '          s.stage.replace(/\'/g, "\\\'") + \'\\', this)">\' + outlierCount + \'</td>\'',
+  '      : \'<td class="num">0</td>\';',
+  '',
+  '    return \'<tr data-stage-outliers=\\'\' + JSON.stringify(outliers) + \'\\'>\' +',
+  '      \'<td>\' + escapeHtml(s.stage || \'\') + \'</td>\' +',
+  '      \'<td class="num">\' + (s.count || 0) + \'</td>\' +',
+  '      \'<td class="num">\' + (s.avgDays    != null ? Math.round(s.avgDays)    : \'\\u2014\') + \'</td>\' +',
+  '      \'<td class="num">\' + (s.medianDays != null ? Math.round(s.medianDays) : \'\\u2014\') + \'</td>\' +',
+  '      \'<td class="num">\' + (s.p90Days    != null ? Math.round(s.p90Days)    : \'\\u2014\') + \'</td>\' +',
+  '      outlierCell +',
+  '    \'</tr>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  'function _trends_openStageOutliers(stageName, cellEl) {',
+  '  var row      = cellEl.closest(\'tr\');',
+  '  var outliers = [];',
+  '  try { outliers = JSON.parse(row.dataset.stageOutliers || \'[]\'); } catch(e) {}',
+  '',
+  '  var title = document.getElementById(\'trends-stage-drilldown-title\');',
+  '  var tbody = document.getElementById(\'trends-stage-drilldown-tbody\');',
+  '  var dd    = document.getElementById(\'trends-stage-drilldown\');',
+  '  if (!tbody || !dd) return;',
+  '',
+  '  if (title) title.textContent = stageName + \' \\u2014 Outliers\';',
+  '  tbody.innerHTML = outliers.map(function(o) {',
+  '    var vsAvg = o.vsAvg != null',
+  '      ? (o.vsAvg > 0 ? \'+\' + Math.round(o.vsAvg) : Math.round(o.vsAvg))',
+  '      : \'\\u2014\';',
+  '    return \'<tr>\' +',
+  '      \'<td>\' + escapeHtml(o.accountName    || \'\') + \'</td>\' +',
+  '      \'<td>\' + escapeHtml(o.deploymentName || \'\') + \'</td>\' +',
+  '      \'<td class="num outlier">\' + (o.daysInStage || 0) + \'</td>\' +',
+  '      \'<td class="num outlier">\' + vsAvg + \'</td>\' +',
+  '    \'</tr>\';',
+  '  }).join(\'\');',
+  '',
+  '  dd.classList.remove(\'hidden\');',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// TIER 4b: Time to Go-Live',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_renderTimeToGoLive(data) {',
+  '  if (!data) return;',
+  '  var kpiStrip = document.getElementById(\'trends-ttgl-kpi-strip\');',
+  '  var tbody    = document.getElementById(\'trends-ttgl-tbody\');',
+  '  var sub      = document.getElementById(\'trends-ttgl-subtitle\');',
+  '  if (!kpiStrip) return;',
+  '',
+  '  if (sub) sub.textContent =',
+  '    \'Benchmark from \' + (data.benchmarkWindowMonths || 12) + \' months of completions\';',
+  '',
+  '  var bm = data.benchmark || {};',
+  '  kpiStrip.innerHTML = [',
+  '    _trends_kpiCard(\'Avg (complete)\',',
+  '      bm.avgDays != null ? Math.round(bm.avgDays) : \'\\u2014\', \'days baseline→go-live\', \'accent-blue\', \'\'),',
+  '    _trends_kpiCard(\'Median\',',
+  '      bm.medianDays != null ? Math.round(bm.medianDays) : \'\\u2014\', \'days\', \'accent-blue\', \'\'),',
+  '    _trends_kpiCard(\'P90\',',
+  '      bm.p90Days != null ? Math.round(bm.p90Days) : \'\\u2014\', \'days (90th pct)\', \'accent-blue\', \'\')',
+  '  ].join(\'\');',
+  '',
+  '  if (!tbody) return;',
+  '  var inFlight = Array.isArray(data.inFlight) ? data.inFlight : [];',
+  '  tbody.innerHTML = inFlight.map(function(d) {',
+  '    var vsMedian = d.vsMedianDays != null',
+  '      ? (d.vsMedianDays > 0',
+  '          ? \'<span class="trends-slip-pos">+\' + Math.round(d.vsMedianDays) + \'d</span>\'',
+  '          : \'<span class="trends-slip-neg">\'  + Math.round(d.vsMedianDays) + \'d</span>\')',
+  '      : \'\\u2014\';',
+  '',
+  '    return \'<tr>\' +',
+  '      \'<td>\' + escapeHtml(d.accountName    || \'\') + \'</td>\' +',
+  '      \'<td>\' + escapeHtml(d.deploymentName || \'\') + \'</td>\' +',
+  '      \'<td class="num\' + (d.overdue ? \' overdue\' : \'\') + \'">\' + (d.daysActive || 0) + \'</td>\' +',
+  '      \'<td class="num">\' + vsMedian + \'</td>\' +',
+  '      \'<td>\' + escapeHtml(d.mtpDate || \'\') + \'</td>\' +',
+  '    \'</tr>\';',
+  '  }).join(\'\');',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// TIER 5: Go-Live Outcome Patterns',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_renderGoLiveOutcomes(data) {',
+  '  if (!data) return;',
+  '  var strip            = document.getElementById(\'trends-outcomes-kpi-strip\');',
+  '  var mtpBars          = document.getElementById(\'trends-mtp-bars\');',
+  '  var approachTbody    = document.getElementById(\'trends-approach-tbody\');',
+  '  var partnerTbody     = document.getElementById(\'trends-outcomes-partner-tbody\');',
+  '  var completionsTbody = document.getElementById(\'trends-completions-tbody\');',
+  '  var sub              = document.getElementById(\'trends-outcomes-subtitle\');',
+  '',
+  '  if (sub) sub.textContent = (data.windowMonths || 12) + \'-month window\';',
+  '',
+  '  // KPI strip',
+  '  if (strip) {',
+  '    var onTimePct = data.onTimePct != null ? Math.round(data.onTimePct) + \'%\' : \'\\u2014\';',
+  '    strip.innerHTML = [',
+  '      _trends_kpiCard(\'Completed\',    data.totalCompleted || 0,                            \'in window\',              \'accent-blue\',   \'\'),',
+  '      _trends_kpiCard(\'On-Time\',      onTimePct,                                           \'shipped on or before MTP\',\'accent-green\', \'\'),',
+  '      _trends_kpiCard(\'Avg Slip\',     data.avgSlipDays    != null ? Math.round(data.avgSlipDays)    + \'d\' : \'\\u2014\', \'when late\', \'accent-yellow\', \'\'),',
+  '      _trends_kpiCard(\'Median Slip\',  data.medianSlipDays != null ? Math.round(data.medianSlipDays) + \'d\' : \'\\u2014\', \'when late\', \'accent-yellow\', \'\')',
+  '    ].join(\'\');',
+  '  }',
+  '',
+  '  // MTP movement buckets',
+  '  if (mtpBars && Array.isArray(data.movementBuckets)) {',
+  '    var maxCount = Math.max.apply(null,',
+  '      data.movementBuckets.map(function(b) { return b.count || 0; }).concat([1]));',
+  '    mtpBars.innerHTML = data.movementBuckets.map(function(b) {',
+  '      var widthPct = Math.round((b.count || 0) / maxCount * 100);',
+  '      var cls = \'bucket-\' + (b.bucketKey || \'ontime\');',
+  '      return \'<div class="trends-mtp-bucket">\' +',
+  '        \'<div class="trends-mtp-bucket-label">\'  + escapeHtml(b.label || \'\') + \'</div>\' +',
+  '        \'<div class="trends-mtp-bucket-bar">\' +',
+  '          \'<div class="trends-mtp-bucket-fill \' + cls + \'" style="width:\' + widthPct + \'%"></div>\' +',
+  '        \'</div>\' +',
+  '        \'<div class="trends-mtp-bucket-count">\' + (b.count || 0) + \'</div>\' +',
+  '        \'<div class="trends-mtp-bucket-pct">\'  + (b.pct != null ? Math.round(b.pct) + \'%\' : \'\') + \'</div>\' +',
+  '      \'</div>\';',
+  '    }).join(\'\');',
+  '  }',
+  '',
+  '  // By-approach',
+  '  if (approachTbody && Array.isArray(data.byApproach)) {',
+  '    approachTbody.innerHTML = data.byApproach.map(function(a) {',
+  '      return \'<tr>\' +',
+  '        \'<td>\' + escapeHtml(a.approach || \'\') + \'</td>\' +',
+  '        \'<td class="num">\' + (a.count || 0) + \'</td>\' +',
+  '        \'<td class="num">\' + (a.onTimePct   != null ? Math.round(a.onTimePct)   + \'%\' : \'\\u2014\') + \'</td>\' +',
+  '        \'<td class="num">\' + (a.avgSlipDays != null ? Math.round(a.avgSlipDays) + \'d\' : \'\\u2014\') + \'</td>\' +',
+  '      \'</tr>\';',
+  '    }).join(\'\');',
+  '  }',
+  '',
+  '  // By-partner',
+  '  if (partnerTbody && Array.isArray(data.byPartner)) {',
+  '    partnerTbody.innerHTML = data.byPartner.map(function(p) {',
+  '      return \'<tr>\' +',
+  '        \'<td>\' + escapeHtml(p.partner || \'\') + \'</td>\' +',
+  '        \'<td class="num">\' + (p.count || 0) + \'</td>\' +',
+  '        \'<td class="num">\' + (p.onTimePct   != null ? Math.round(p.onTimePct)   + \'%\' : \'\\u2014\') + \'</td>\' +',
+  '        \'<td class="num">\' + (p.avgSlipDays != null ? Math.round(p.avgSlipDays) + \'d\' : \'\\u2014\') + \'</td>\' +',
+  '      \'</tr>\';',
+  '    }).join(\'\');',
+  '  }',
+  '',
+  '  // Recent completions',
+  '  if (completionsTbody && Array.isArray(data.recentCompletions)) {',
+  '    completionsTbody.innerHTML = data.recentCompletions.map(function(c) {',
+  '      var slip = c.slipDays != null ? c.slipDays : null;',
+  '      var slipCell = slip === null',
+  '        ? \'<td>\\u2014</td>\'',
+  '        : (slip > 0',
+  '          ? \'<td class="num trends-slip-pos">+\' + slip + \'d</td>\'',
+  '          : \'<td class="num trends-slip-neg">\'  + slip + \'d</td>\');',
+  '      return \'<tr>\' +',
+  '        \'<td>\' + escapeHtml(c.accountName || \'\') + \'</td>\' +',
+  '        \'<td>\' + escapeHtml(c.goLiveDate  || \'\') + \'</td>\' +',
+  '        slipCell +',
+  '        \'<td>\' + escapeHtml(c.partner     || \'\') + \'</td>\' +',
+  '      \'</tr>\';',
+  '    }).join(\'\');',
+  '  }',
+  '}',
+  '',
+  '// ----------------------------------------------------------------',
+  '// SHARED TRENDS HELPERS',
+  '// ----------------------------------------------------------------',
+  '',
+  'function _trends_kpiCard(label, value, sub, accentClass, title, extraAttrs) {',
+  '  return \'<div class="trends-kpi-card \' + accentClass + \'"\' +',
+  '    (title      ? \' title="\'    + escapeHtml(title) + \'"\' : \'\') +',
+  '    (extraAttrs ? \' \' + extraAttrs : \'\') +',
+  '    \'>\' +',
+  '    \'<div class="trends-kpi-label">\'  + escapeHtml(label)       + \'</div>\' +',
+  '    \'<div class="trends-kpi-value">\'  + escapeHtml(String(value)) + \'</div>\' +',
+  '    (sub ? \'<div class="trends-kpi-sub">\' + escapeHtml(sub) + \'</div>\' : \'\') +',
+  '  \'</div>\';',
+  '}',
+  '',
+  'function _fmtNow_() {',
+  '  var d = new Date();',
+  '  return d.toLocaleDateString(\'en-US\', {',
+  '    month: \'short\', day: \'numeric\', year: \'numeric\',',
+  '    hour: \'2-digit\', minute: \'2-digit\'',
+  '  });',
+  '}',
+  ].join('\n');
 
   return _CoreUI_Js_CACHE;
 }

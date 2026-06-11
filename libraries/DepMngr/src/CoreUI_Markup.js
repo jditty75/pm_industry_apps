@@ -59,6 +59,8 @@ function _CoreUI_Markup_getAppShell(cfg) {
 
   if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(ui));
   if (tabIds.indexOf('golives')     !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(ui));
+  if (tabIds.indexOf('mgmPgl')      !== -1 && ui.mgmPglTab && ui.mgmPglTab.enabled)
+    parts.push(_CoreUI_Markup_buildMgmPglTab_(ui));
   if (tabIds.indexOf('execsummary') !== -1) parts.push(_CoreUI_Markup_buildExecSummaryTab_(ui));
   if (tabIds.indexOf('report')      !== -1) parts.push(_CoreUI_Markup_buildReportTab_(ui, cfg));
   if (tabIds.indexOf('portfolio')   !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(ui));
@@ -282,6 +284,114 @@ function _CoreUI_Markup_buildGoLivesTab_(ui) {
     '    </div>',
     '  </div>',
     '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// TAB: MGM / PGL (feature/mgm-pgl)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the MGM / PGL tab markup.
+ * Two sections:
+ *   1. Upcoming survey rows table (MGM + PGL within 30-day window).
+ *   2. Exceptions table — Active deployments missing required target dates.
+ *
+ * @param {Object} ui  cfg.ui
+ * @return {string}
+ */
+function _CoreUI_Markup_buildMgmPglTab_(ui) {
+  return [
+    '<div id="mgmPgl-tab" class="tab-content">',
+
+    '  <!-- Info banner -->',
+    '  <div class="info-banner">',
+    '    \uD83D\uDCCB MGM / PGL &mdash; upcoming Mid-Deployment and Post-Go-Live surveys for Active deployments.',
+    '    Toggle between <strong>My Portfolio</strong> and <strong>All</strong> using the control in the header.',
+    '  </div>',
+
+    '  <!-- Toolbar: refresh + loading indicator + as-of caption -->',
+    '  <div class="trends-toolbar no-export">',
+    '    <button class="btn btn-secondary" onclick="loadMgmPglTab()">&#x1F504; Refresh</button>',
+    '    <span id="mgmpgl-loading-indicator" class="trends-loading hidden">',
+    '      <span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span>',
+    '      Loading&hellip;',
+    '    </span>',
+    '    <span id="mgmpgl-as-of" style="margin-left:auto;font-size:12px;color:var(--color-text-muted);"></span>',
+    '  </div>',
+
+    '  <!-- Filter bar: survey type + search -->',
+    '  <div class="control-bar">',
+    '    <div class="control-row">',
+    '      <!-- Survey type segmented control -->',
+    '      <div class="seg-control" role="group" aria-label="Survey type filter">',
+    '        <button class="seg-control-btn active" data-mgmpgl-type="all"',
+    '                onclick="setMgmPglFilterType(\'all\')">All</button>',
+    '        <button class="seg-control-btn" data-mgmpgl-type="MGM"',
+    '                onclick="setMgmPglFilterType(\'MGM\')">MGM</button>',
+    '        <button class="seg-control-btn" data-mgmpgl-type="PGL"',
+    '                onclick="setMgmPglFilterType(\'PGL\')">PGL</button>',
+    '      </div>',
+    '      <!-- Text search -->',
+    '      <div class="search-box">',
+    '        <span class="search-icon">&#x1F50D;</span>',
+    '        <input type="text" id="mgmpgl-search"',
+    '               placeholder="Search by account or deployment&hellip;"',
+    '               onkeyup="searchMgmPgl()">',
+    '      </div>',
+    '      <button class="btn btn-secondary" onclick="clearMgmPglSearch()">Clear</button>',
+    '    </div>',
+    '  </div>',
+
+    '  <!-- ================================================================ -->',
+    '  <!-- SECTION 1: Upcoming Survey Rows                                  -->',
+    '  <!-- ================================================================ -->',
+    '  <div class="table-container">',
+    '    <div class="table-wrapper">',
+    '      <table id="mgmpgl-table">',
+    '        <thead><tr>',
+    '          <th>Scheduled Date</th>',
+    '          <th>Days Until</th>',
+    '          <th>Survey</th>',
+    '          <th>Status</th>',
+    '          <th>Account</th>',
+    '          <th>Deployment</th>',
+    '          <th>Product / Phase</th>',
+    '          <th>Contacts</th>',
+    '        </tr></thead>',
+    '        <tbody id="mgmpgl-tbody"></tbody>',
+    '      </table>',
+    '    </div>',
+    '  </div>',
+
+    '  <!-- ================================================================ -->',
+    '  <!-- SECTION 2: Exceptions — Missing Target Dates                     -->',
+    '  <!-- ================================================================ -->',
+    '  <div class="trends-section" id="mgmpgl-exceptions-section" style="margin-top:var(--space-5);">',
+    '    <div class="trends-section-header">',
+    '      <span class="trends-section-title">Exceptions &mdash; Missing Target Dates</span>',
+    '      <span class="trends-section-sub" id="mgmpgl-exceptions-sub"></span>',
+    '    </div>',
+    '    <p style="font-size:13px;color:var(--color-text-muted);margin:0 0 var(--space-3) 0;">',
+    '      Active deployments that are missing dates needed to schedule surveys.',
+    '      These records should be updated in Salesforce.',
+    '    </p>',
+    '    <div class="table-wrapper">',
+    '      <table id="mgmpgl-exceptions-table">',
+    '        <thead><tr>',
+    '          <th>Account</th>',
+    '          <th>Deployment</th>',
+    '          <th>Missing</th>',
+    '          <th>Type</th>',
+    '          <th>Start Date</th>',
+    '          <th>Delivery Director</th>',
+    '        </tr></thead>',
+    '        <tbody id="mgmpgl-exceptions-tbody"></tbody>',
+    '      </table>',
+    '    </div>',
+    '  </div>',
+
+    '</div>' // #mgmPgl-tab
   ].join('\n');
 }
 

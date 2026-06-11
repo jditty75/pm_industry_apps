@@ -27,6 +27,7 @@ var CoreReport = (function () {
    * @return {string} full <!DOCTYPE html> string
    */
   function buildInlineHtml(config) {
+    CoreAnalytics.update(config);
     var cfg = CoreConfig.withDefaults(config);
     var bodyContent = buildReportSections_(cfg, false);
     return wrapHtmlShellInline_(cfg, bodyContent);
@@ -39,6 +40,7 @@ var CoreReport = (function () {
    * @return {string} full <!DOCTYPE html> string
    */
   function buildOutlookHtml(config) {
+    CoreAnalytics.update(config);
     var cfg = CoreConfig.withDefaults(config);
     var bodyContent = buildReportSectionsForOutlook_(cfg);
     return wrapHtmlShellOutlook_(cfg, bodyContent);
@@ -912,10 +914,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<th style="' + TH_STYLE + '">MTP Date</th>'
     );
 
-    // Extra column (Delivery Director / Deployment Executive / EM) is already
-    // handled differently in SLG/HENP/HC web reports; for HTML export we
-    // keep a single "Delivery Director/EM" column name agnostic:
-    theadParts.push('<th style="' + TH_STYLE + '">Owner</th>');
+    theadParts.push('<th style="' + TH_STYLE + '">' + (cfg.report.redYellowOwnerLabel || 'Owner') + '</th>');
     theadParts.push('<th style="' + TH_STYLE + '">Current Update</th>');
 
     var theadHtml = theadParts.join('');
@@ -1016,7 +1015,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<th style="' + TH_STYLE + '">Deployment Name</th>',
       '<th style="' + TH_STYLE + '">Partner</th>',
       '<th style="' + TH_STYLE + '">MTP Date</th>',
-      '<th style="' + TH_STYLE + '">Owner</th>'
+      '<th style="' + TH_STYLE + '">' + (cfg.report.redYellowOwnerLabel || 'Owner') + '</th>'
     );
 
     var theadHtml = theadParts.join('');
@@ -1262,15 +1261,17 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
         var dateCellHtml;
         if (row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {
-          // Multi-line: each entry is "Date: Product1, Product2"
+          // Multi-date phased: each date gets its own block element for Outlook compatibility
           var lines = row.upcomingDates.map(function (ud) {
             var dateLabel = fmtDate(ud.date);
             var productLabel = (ud.products && ud.products.length)
               ? ': ' + ud.products.join(', ')
               : '';
-            return CoreUtils.escapeHtml(dateLabel + productLabel);
+            return '<div style="padding:2px 0;">' +
+                   CoreUtils.escapeHtml(dateLabel + productLabel) +
+                   '</div>';
           });
-          dateCellHtml = td(lines.join('<br>'));
+          dateCellHtml = td(lines.join(''));
         } else {
           // Single date (non-phased or fallback)
           var singleDate = row.nextGoLiveDate || row.mtpDate || '';

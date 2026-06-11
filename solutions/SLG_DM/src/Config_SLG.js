@@ -94,6 +94,7 @@ var APP_CONFIG = {
     redYellowPartnerFilter: null,
     includeIndustryRedYellow: false,
     includeIndustryGoLives:   false,
+    redYellowOwnerLabel: 'Delivery Director',
 
     portfolioHealth: {
       title: 'Portfolio Health',

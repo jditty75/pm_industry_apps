@@ -251,6 +251,7 @@ var CoreConfig = (function () {
     if (cfg.report.redYellowPartnerFilter === undefined)   cfg.report.redYellowPartnerFilter = null;
     if (cfg.report.includeIndustryRedYellow === undefined) cfg.report.includeIndustryRedYellow = false;
     if (cfg.report.includeIndustryGoLives === undefined)   cfg.report.includeIndustryGoLives = false;
+    if (cfg.report.redYellowOwnerLabel === undefined)      cfg.report.redYellowOwnerLabel = 'Owner';
 
     // Phase 3b: disclaimer text shown below code-computed breakdown tables when
     // data is incomplete. Apps may override these strings in their APP_CONFIG.

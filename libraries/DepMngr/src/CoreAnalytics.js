@@ -654,8 +654,7 @@ var CoreAnalytics = (function () {
     if (Math.abs(delta) < 0.000001) {
       return { arrow: '\u25CF', label: '0.0%', polarity: 'flat' };
     }
-    var sign = delta > 0 ? '+' : '-';
-    var label = sign + (Math.abs(delta) * 100).toFixed(1) + '%';
+    var label = (Math.abs(delta) * 100).toFixed(1) + '%';
     var arrow, polarity;
     if (status === 'Green') {
       arrow    = delta > 0 ? '\u25B2' : '\u25BC';
@@ -931,7 +930,7 @@ var CoreAnalytics = (function () {
 
     Logger.log('_validatePhase3b: EXPECTED diffs vs. Dashboard sheet:' +
       ' arrow polarity (Phase 3b correction),' +
-      ' label format (relative % not absolute count),' +
+      ' label format = magnitude-only (e.g. "12.1%", no +/- sign; arrow encodes direction),' +
       ' approach source column (DEPLOYMENT_PHASE alias fix).');
     Logger.log('_validatePhase3b: === End ===');
   }

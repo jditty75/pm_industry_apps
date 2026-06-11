@@ -11,6 +11,9 @@
  *   Phase 3a (v11): salesforce block added; SFDC_DeploymentProductFunctions
  *                   sheet registered; isPhased / upcomingDates enrichment
  *                   flows through CoreData → UI.
+ *   Phase 3i:       SFDC_Deployments unified sheet registered; salesforce block
+ *                   gains statusValues and recentWindowDays; getRecentGoLives()
+ *                   supersedes legacy getGoLives() for the Recent Go Lives view.
  *
  * NOTE:
  *   - Assumes the Core library is added as "CoreLib" in Project → Libraries.
@@ -39,7 +42,9 @@ var APP_CONFIG = {
     appUsers:              'AppUsers',
     ddAssignment:          'DD Assignment',
     // Phase 3a: Salesforce deployment product-function detail
-    sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions'
+    sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions',
+    // Phase 3i: unified deployment source (Active + Complete deployments)
+    deployments: 'SFDC_Deployments'
   },
 
   namedRanges: {
@@ -111,10 +116,17 @@ var APP_CONFIG = {
 
   // ---------------------------------------------------------------------------
   // Salesforce enrichment (Phase 3a). Consumed by CoreLib.CoreSalesforce.
-  // upcomingWindowDays: how far ahead to look for product go-live dates.
+  // Phase 3i: adds statusValues and recentWindowDays.
   // ---------------------------------------------------------------------------
   salesforce: {
-    upcomingWindowDays: 90
+    upcomingWindowDays: 90,
+    // Phase 3i: window for recent go-lives (days back from today)
+    recentWindowDays: 60,
+    // Phase 3i: Overall_Status__c values used to split Active vs Complete rows
+    statusValues: {
+      active:   'Active',
+      complete: 'Complete'
+    }
   },
 
   // ---------------------------------------------------------------------------

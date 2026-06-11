@@ -390,6 +390,7 @@ function loadGoLivesData_both() {
     }
   }
 
+  // Phase 3i: call getRecentGoLivesData (SOQL-backed) instead of the legacy getGoLivesData.
   google.script.run
     .withSuccessHandler(function(data) { allGoLivesRecent = data || []; maybeRender(); })
     .withFailureHandler(function(error) {
@@ -397,7 +398,7 @@ function loadGoLivesData_both() {
       allGoLivesRecent = [];
       maybeRender();
     })
-    .getGoLivesData(getViewModeOpts_());
+    .getRecentGoLivesData(getViewModeOpts_());
 
   google.script.run
     .withSuccessHandler(function(data) { allGoLivesUpcoming = data || []; maybeRender(); })
@@ -1113,8 +1114,9 @@ function applyGoLivesView() {
     // so we can insert the Today divider in the right spot.
     var recent   = (allGoLivesRecent   || []).map(function(r) { return Object.assign({}, r, { _isUpcoming: false }); });
     var upcoming = (allGoLivesUpcoming || []).map(function(r) { return Object.assign({}, r, { _isUpcoming: true,  _dateForSort: r.mtpDate }); });
-    // Recent rows have goLiveDate; Upcoming rows have mtpDate. Normalize for sorting.
-    recent.forEach(function(r) { r._dateForSort = r.goLiveDate; });
+    // Phase 3i: recent rows use lastGoLiveDate (getRecentGoLives shape);
+    // fall back to goLiveDate for rows from the legacy path.
+    recent.forEach(function(r) { r._dateForSort = r.lastGoLiveDate || r.goLiveDate; });
     source = recent.concat(upcoming);
     source.sort(function(a, b) { return new Date(a._dateForSort) - new Date(b._dateForSort); });
   }
@@ -1127,9 +1129,18 @@ function applyGoLivesView() {
         hit = (row.industry || '').toLowerCase().includes(search);
       }
       if (!hit) {
-        // Also check product area or deployment name depending on what's populated
+        // Check productArea (legacy shape) or deploymentName
         hit = (row.productArea || '').toLowerCase().includes(search) ||
               (row.deploymentName || '').toLowerCase().includes(search);
+      }
+      // Phase 3i: also search in recentDates products (getRecentGoLives shape)
+      if (!hit && row.recentDates) {
+        for (var ri = 0; ri < row.recentDates.length && !hit; ri++) {
+          var prods = row.recentDates[ri].products || [];
+          for (var pi = 0; pi < prods.length && !hit; pi++) {
+            hit = prods[pi].toLowerCase().includes(search);
+          }
+        }
       }
       return hit;
     });
@@ -1175,19 +1186,34 @@ function renderGoLivesTable() {
   filteredGoLives.forEach(function(row, index) {
     // In 'all' view, insert Today divider at transition between past and future
     if (view === 'all' && !todayDividerInserted) {
-      var rowDate = row._isUpcoming ? new Date(row.mtpDate) : new Date(row.goLiveDate);
+      // Phase 3i: use lastGoLiveDate for recent rows (getRecentGoLives shape).
+      var rowDate = row._isUpcoming
+        ? new Date(row.mtpDate)
+        : new Date(row.lastGoLiveDate || row.goLiveDate);
       if (rowDate.getTime() >= nowMs) {
         rowsHtml += '<tr class="today-divider"><td colspan="' + colspan + '">Today: ' + escapeHtml(todayLabel) + '</td></tr>';
         todayDividerInserted = true;
       }
     }
 
-    // Choose the date field — prefer goLiveDate (Recent) over mtpDate (Upcoming)
-    var dateValue = row.goLiveDate || row.nextGoLiveDate || row.mtpDate || '';
-    // Choose the product/deployment value based on view (or what's populated in All)
+    // Phase 3i: prefer lastGoLiveDate (getRecentGoLives shape) then fall back
+    // to legacy goLiveDate, nextGoLiveDate, or mtpDate.
+    var dateValue = row.lastGoLiveDate || row.goLiveDate || row.nextGoLiveDate || row.mtpDate || '';
+
+    // Choose the product/deployment value based on view and data shape.
     var productOrDeployment;
-    if (view === 'recent') {
-      productOrDeployment = row.productArea || row.deploymentName || '';
+    if (view === 'recent' || (view === 'all' && !row._isUpcoming)) {
+      if (row.recentDates && row.recentDates.length > 0) {
+        // Phase 3i shape: flatten all products from recentDates[]
+        var allProds = {};
+        row.recentDates.forEach(function(rd) {
+          (rd.products || []).forEach(function(p) { allProds[p] = true; });
+        });
+        var flatProds = Object.keys(allProds).sort();
+        productOrDeployment = flatProds.length ? flatProds.join(', ') : (row.deploymentName || '');
+      } else {
+        productOrDeployment = row.productArea || row.deploymentName || '';
+      }
     } else if (view === 'upcoming') {
       productOrDeployment = row.deploymentName || row.productArea || '';
     } else {
@@ -1196,9 +1222,11 @@ function renderGoLivesTable() {
 
     var cells = [];
 
-    // Phase 3a: phased upcoming rows show multi-line date cell
-    // Phase 3a-css: stable class hooks express date/product hierarchy clearly
     var isUpcomingRow = (view === 'upcoming') || (view === 'all' && row._isUpcoming);
+    var isRecentRow   = (view === 'recent')   || (view === 'all' && !row._isUpcoming);
+
+    // Phase 3a: phased upcoming rows — multi-line date cell with product hierarchy
+    // Phase 3a-css: stable class hooks express date/product hierarchy clearly
     if (isUpcomingRow && row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {
       var phasedDateHtml = row.upcomingDates.map(function(ud) {
         var ds = ud.date ? formatDate(ud.date) : '\u2014';
@@ -1209,11 +1237,27 @@ function renderGoLivesTable() {
           '</div>';
       }).join('');
       cells.push('<td class="golives-date-cell">' + phasedDateHtml + '</td>');
-      // Product/deployment cell: show name + Phased pill
       cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
       if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
       cells.push('<td>' + escapeHtml(productOrDeployment) + ' <span class="phased-pill">Phased</span></td>');
+
+    // Phase 3i: phased recent rows — multi-line date cell (same CSS pattern)
+    } else if (isRecentRow && row.recentDates && row.recentDates.length > 1) {
+      var recentPhasedHtml = row.recentDates.map(function(rd) {
+        var ds = rd.date ? formatDate(rd.date) : '\u2014';
+        var ps = (rd.products && rd.products.length) ? rd.products.join(', ') : '';
+        return '<div class="golives-date-entry">' +
+          '<span class="golives-date-label">' + escapeHtml(ds) + '</span>' +
+          (ps ? '<span class="golives-product-list">' + escapeHtml(ps) + '</span>' : '') +
+          '</div>';
+      }).join('');
+      cells.push('<td class="golives-date-cell">' + recentPhasedHtml + '</td>');
+      cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
+      if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
+      cells.push('<td>' + escapeHtml(productOrDeployment) + '</td>');
+
     } else {
+      // Single-date row (upcoming or recent)
       cells.push('<td><strong>' + (dateValue ? formatDate(dateValue) : '-') + '</strong></td>');
       cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
       if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');

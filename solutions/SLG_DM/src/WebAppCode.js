@@ -98,7 +98,21 @@ function getAllDeploymentsForUI(viewModeOpts) {
 }
 
 /**
- * Phase 1 endpoint, extended in Phase 2 to forward viewModeOpts.
+ * Phase 3i: New endpoint — returns Recent Go Lives from SFDC_Deployments
+ * (Complete deployments) via CoreData.getRecentGoLives().
+ * Supersedes the legacy getGoLivesData() for the Recent view in the WebApp.
+ *
+ * @param {Object=} viewModeOpts  { viewMode: 'my'|'all', ddDisplayName: string }
+ */
+function getRecentGoLivesData(viewModeOpts) {
+  return CoreLib.CoreData.getRecentGoLives(APP_CONFIG, viewModeOpts || {});
+}
+
+/**
+ * DEPRECATED in Phase 3i. Previously returned data from the legacy 'Go Lives'
+ * sheet (now frozen). Kept for backward compatibility; the client JS now calls
+ * getRecentGoLivesData() instead. Will be removed after the Go Lives sheet is
+ * manually deleted by Jeff.
  *
  * @param {Object=} viewModeOpts
  */

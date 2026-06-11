@@ -72,14 +72,15 @@ var CorePortfolioHealth = (function () {
     var yellowProjects = buildAccountList_(allEffective, 'Yellow');
 
     // ---- WD Prime Go Lives (last N days, effective view) --------------------
+    // Phase 3i: use getRecentGoLives() (SOQL-backed, Complete deployments) instead
+    // of the deprecated getGoLives() which read from the frozen legacy Go Lives sheet.
     var workdayPartner = ph.workdayPartner || 'Workday Professional Services';
-    var goLives = (CoreData.getGoLives(cfg) || [])
-      .filter(function (r) { return !r.excludeFromReport; })
+    var goLives = (CoreData.getRecentGoLives(cfg) || [])
       .filter(function (r) { return String(r.partner || '').trim() === workdayPartner; });
 
-    // Already sorted ascending by goLiveDate in CoreData.getGoLives.
+    // Sorted ascending by lastGoLiveDate in CoreData.getRecentGoLives.
     var recentGoLivesAccounts = goLives.map(function (r) {
-      return { accountName: r.accountName, goLiveDate: r.goLiveDate || '' };
+      return { accountName: r.accountName, goLiveDate: r.lastGoLiveDate || '' };
     });
 
     // ---- Partner split (Workday vs Partners/Other) per health row -----------

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CoreUI_Js.gs
  *
  * Client-side JS bundle for the WebApp UI. Defines a top-level helper
@@ -2412,11 +2412,11 @@ function _CoreUI_Js_getJsBundle() {
   '    var outliers = Array.isArray(s.outliers) ? s.outliers : [];',
   '    var outlierCount = outliers.length || (s.outlierCount || 0);',
   '    var outlierCell = outlierCount > 0',
-  '      ? \'<td class="num outlier" style="cursor:pointer;" onclick="_trends_openStageOutliers(\\'\' +',
-  '          s.stage.replace(/\'/g, "\\\'") + \'\\', this)">\' + outlierCount + \'</td>\'',
+  '      ? \'<td class="num outlier" style="cursor:pointer;" onclick="_trends_openStageOutliers(\\\'\' +',
+  '          s.stage.replace(/\'/g, "\\\'") + \'\\\', this)">\' + outlierCount + \'</td>\'',
   '      : \'<td class="num">0</td>\';',
   '',
-  '    return \'<tr data-stage-outliers=\\'\' + JSON.stringify(outliers) + \'\\'>\' +',
+  '    return \'<tr data-stage-outliers=\\\'\' + JSON.stringify(outliers) + \'\\\'>\' +',
   '      \'<td>\' + escapeHtml(s.stage || \'\') + \'</td>\' +',
   '      \'<td class="num">\' + (s.count || 0) + \'</td>\' +',
   '      \'<td class="num">\' + (s.avgDays    != null ? Math.round(s.avgDays)    : \'\\u2014\') + \'</td>\' +',

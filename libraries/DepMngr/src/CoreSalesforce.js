@@ -7,16 +7,19 @@
  *
  * Pattern reference: canvas mn8ps1VU3kL9 (Salesforce two-query join in Apps Script).
  * Phase 3a design: canvas MrW75zesCehF §3a.5.
+ * Phase 3i design: canvas XFX5uNQh2KyN — Go Lives SOQL migration.
  *
  * Public surface — single function:
  *   CoreSalesforce.getDeploymentEnrichmentMap(cfg)
  *
- * Returns:
+ * Returns per deployment (Phase 3i shape):
  *   {
  *     '<deploymentId>': {
- *       isPhased: boolean,
+ *       isPhased: boolean,        // true if union of upcoming + recent dates > 1
  *       upcomingDates: [{ date: 'YYYY-MM-DD', products: ['Product A', ...] }, ...],
  *       nextGoLiveDate: 'YYYY-MM-DD' | null,
+ *       recentDates:   [{ date: 'YYYY-MM-DD', products: ['Product A', ...] }, ...],
+ *       lastGoLiveDate: 'YYYY-MM-DD' | null,
  *       productFunctionCount: number
  *     },
  *     ...
@@ -25,10 +28,12 @@
  * Degrades gracefully when the sheet is missing, empty, or has malformed headers.
  *
  * Convention: top-level object (no IIFE). No caching — each call re-reads the
- * sheet, which is sub-100ms at expected row counts (50–200 rows per app).
+ * sheet, which is sub-100ms at expected row counts (50–500 rows per app).
  *
  * Phase history:
  *   Phase 3a (v11): introduced as part of the Salesforce two-query join.
+ *   Phase 3i: extended with recentDates + lastGoLiveDate from Actual move dates;
+ *             isPhased now considers the union of all upcoming + recent dates.
  */
 
 var CoreSalesforce = {
@@ -74,15 +79,18 @@ var CoreSalesforce = {
     // -----------------------------------------------------------------------
     // Column index resolution — case-insensitive substring matching with
     // position-based fallbacks per the spec (§3 of the Cursor Handoff Spec).
+    // Phase 3i: also detect Production_Move_Date_Actual__c (col E, index 4).
     // -----------------------------------------------------------------------
     var colProductArea    = CoreSalesforce._findCol_(headerRow, ['product_area'], 1);
     var colDateTarget     = CoreSalesforce._findCol_(headerRow, ['production_move_date_target', 'move_date_target'], 3);
+    var colDateActual     = CoreSalesforce._findCol_(headerRow, ['production_move_date_actual', 'move_date_actual'], 4);
     var colDeploymentFk   = CoreSalesforce._findDeploymentFkCol_(headerRow, 5);
 
     // These columns are read but less critical; missing them doesn't abort.
     var missingCols = [];
     if (colProductArea    < 0) missingCols.push('Product_Area__c');
     if (colDateTarget     < 0) missingCols.push('Production_Move_Date_Target__c');
+    if (colDateActual     < 0) missingCols.push('Production_Move_Date_Actual__c (non-fatal)');
     if (colDeploymentFk   < 0) missingCols.push('Deployment__c (FK)');
 
     if (missingCols.length > 0) {
@@ -97,12 +105,19 @@ var CoreSalesforce = {
       return {};
     }
 
-    var tz = Session.getScriptTimeZone();
+    var tz  = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
 
     // -----------------------------------------------------------------------
     // Build the enrichment map: group rows by deploymentId, then by date.
+    // Phase 3i intermediate structure:
+    //   { deploymentId: {
+    //       upcoming: { dateKey: { productName: true } },  // Target >= today
+    //       recent:   { dateKey: { productName: true } }   // Actual < today
+    //   } }
     // -----------------------------------------------------------------------
-    // Intermediate: { deploymentId: { dateKey: Set<productName> } }
     var byDeployment = {};
     var rowCount = 0;
     var orphanCount = 0;
@@ -116,55 +131,91 @@ var CoreSalesforce = {
         continue;
       }
 
-      var rawDate = (colDateTarget >= 0) ? row[colDateTarget] : null;
-      var dateKey = CoreSalesforce._normalizeDate_(rawDate, tz);
-      if (!dateKey) continue;  // Skip rows with no valid target date.
-
       var productArea = (colProductArea >= 0)
         ? String(row[colProductArea] || '').trim()
         : '';
 
       if (!byDeployment[deploymentId]) {
-        byDeployment[deploymentId] = {};
-      }
-      if (!byDeployment[deploymentId][dateKey]) {
-        byDeployment[deploymentId][dateKey] = {};
-      }
-      if (productArea) {
-        byDeployment[deploymentId][dateKey][productArea] = true;
+        byDeployment[deploymentId] = { upcoming: {}, recent: {} };
       }
 
-      rowCount++;
+      var addedToAnyBucket = false;
+
+      // --- Upcoming bucket: Production_Move_Date_Target__c >= today ---
+      if (colDateTarget >= 0) {
+        var rawTarget = row[colDateTarget];
+        var targetKey = CoreSalesforce._normalizeDate_(rawTarget, tz);
+        if (targetKey && targetKey >= todayKey) {
+          if (!byDeployment[deploymentId].upcoming[targetKey]) {
+            byDeployment[deploymentId].upcoming[targetKey] = {};
+          }
+          if (productArea) {
+            byDeployment[deploymentId].upcoming[targetKey][productArea] = true;
+          }
+          addedToAnyBucket = true;
+        }
+      }
+
+      // --- Recent bucket: Production_Move_Date_Actual__c < today ---
+      if (colDateActual >= 0) {
+        var rawActual = row[colDateActual];
+        var actualKey = CoreSalesforce._normalizeDate_(rawActual, tz);
+        if (actualKey && actualKey < todayKey) {
+          if (!byDeployment[deploymentId].recent[actualKey]) {
+            byDeployment[deploymentId].recent[actualKey] = {};
+          }
+          if (productArea) {
+            byDeployment[deploymentId].recent[actualKey][productArea] = true;
+          }
+          addedToAnyBucket = true;
+        }
+      }
+
+      if (addedToAnyBucket) rowCount++;
     }
 
     // -----------------------------------------------------------------------
     // Convert the intermediate structure to the final map.
+    // Phase 3i: isPhased considers the UNION of all upcoming + recent dates.
     // -----------------------------------------------------------------------
     var enrichmentMap = {};
     var deploymentCount = 0;
     var phasedCount = 0;
 
     Object.keys(byDeployment).forEach(function (deploymentId) {
-      var dateMap = byDeployment[deploymentId];
-      var dates = Object.keys(dateMap).sort();  // chronological (YYYY-MM-DD sorts correctly)
+      var buckets = byDeployment[deploymentId];
 
-      var upcomingDates = dates.map(function (dateKey) {
-        var products = Object.keys(dateMap[dateKey]).sort();
-        return { date: dateKey, products: products };
+      // --- Upcoming dates (sorted ascending) ---
+      var upcomingKeys = Object.keys(buckets.upcoming).sort();
+      var upcomingDates = upcomingKeys.map(function (dateKey) {
+        return { date: dateKey, products: Object.keys(buckets.upcoming[dateKey]).sort() };
       });
+      var nextGoLiveDate = upcomingKeys.length > 0 ? upcomingKeys[0] : null;
 
-      var isPhased = (dates.length > 1);
-      var nextGoLiveDate = dates.length > 0 ? dates[0] : null;
+      // --- Recent dates (sorted ascending; lastGoLiveDate = last) ---
+      var recentKeys = Object.keys(buckets.recent).sort();
+      var recentDates = recentKeys.map(function (dateKey) {
+        return { date: dateKey, products: Object.keys(buckets.recent[dateKey]).sort() };
+      });
+      var lastGoLiveDate = recentKeys.length > 0 ? recentKeys[recentKeys.length - 1] : null;
 
+      // --- isPhased: union of all distinct dates across both buckets ---
+      var allDistinctDates = {};
+      upcomingKeys.forEach(function (k) { allDistinctDates[k] = true; });
+      recentKeys.forEach(function (k)   { allDistinctDates[k] = true; });
+      var isPhased = (Object.keys(allDistinctDates).length > 1);
+
+      // --- productFunctionCount (approximate: product-name count per date across both buckets) ---
       var totalCount = 0;
-      dates.forEach(function (d) {
-        totalCount += Object.keys(dateMap[d]).length || 1;
-      });
+      upcomingKeys.forEach(function (d) { totalCount += Object.keys(buckets.upcoming[d]).length || 1; });
+      recentKeys.forEach(function (d)   { totalCount += Object.keys(buckets.recent[d]).length || 1; });
 
       enrichmentMap[deploymentId] = {
         isPhased:             isPhased,
         upcomingDates:        upcomingDates,
         nextGoLiveDate:       nextGoLiveDate,
+        recentDates:          recentDates,
+        lastGoLiveDate:       lastGoLiveDate,
         productFunctionCount: totalCount
       };
 
@@ -174,7 +225,7 @@ var CoreSalesforce = {
 
     Logger.log('CoreSalesforce.getDeploymentEnrichmentMap: read ' + rowCount +
                ' rows, ' + deploymentCount + ' deployments, ' + phasedCount +
-               ' phased, ' + orphanCount + ' orphaned/skipped rows.');
+               ' phased (upcoming+recent), ' + orphanCount + ' orphaned/skipped rows.');
 
     return enrichmentMap;
   },

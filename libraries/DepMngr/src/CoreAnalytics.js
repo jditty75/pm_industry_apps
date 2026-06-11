@@ -600,6 +600,342 @@ var CoreAnalytics = (function () {
     Logger.log(summaryName + ' rebuilt with %s data rows.', summaryRows.length - 1);
   }
 
+  // --- PHASE 3b: CODE-SIDE BREAKDOWNS ----------------------------------------
+
+  /**
+   * Reads the HealthReportSnapshots sheet and returns a map keyed by 'yyyy-MM'.
+   * Each value is a sub-map { Green:{count,pct}, Red:{count,pct}, Yellow:{count,pct}, Total:{count,pct} }.
+   * @private
+   */
+  function readHealthSnapshots_(cfg) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(cfg.sheets.healthReportSnapshots);
+    if (!sheet) return {};
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return {};
+    var tz = Session.getScriptTimeZone();
+    var values = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+    var byMonth = {};
+    values.forEach(function (row) {
+      var dt = row[0];
+      if (!dt) return;
+      var dtObj = (dt instanceof Date) ? dt : new Date(dt);
+      if (isNaN(dtObj.getTime())) return;
+      var status = String(row[1] || '').trim();
+      if (!status) return;
+      var ym = Utilities.formatDate(dtObj, tz, 'yyyy-MM');
+      if (!byMonth[ym]) byMonth[ym] = {};
+      byMonth[ym][status] = { count: Number(row[2] || 0), pct: Number(row[3] || 0) };
+    });
+    return byMonth;
+  }
+
+  /**
+   * Formats a 'yyyy-MM' key as 'Mon yyyy' (e.g. 'Jun 2026').
+   * @private
+   */
+  function formatMonthLabel_(ym) {
+    if (!ym) return '';
+    var parts = ym.split('-');
+    if (parts.length !== 2) return ym;
+    var month = parseInt(parts[1], 10) - 1;
+    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return (MONTHS[month] || '') + ' ' + parts[0];
+  }
+
+  /**
+   * Computes a trend indicator for a given status and relative-change delta.
+   * Interpretation A (health-direction quality):
+   *   Green  → up = good (▲), down = bad (▼)
+   *   Red/Yellow → up = bad (▼), down = good (▲)
+   * @private
+   */
+  function buildTrend_(status, delta) {
+    if (Math.abs(delta) < 0.000001) {
+      return { arrow: '\u25CF', label: '0.0%', polarity: 'flat' };
+    }
+    var sign = delta > 0 ? '+' : '-';
+    var label = sign + (Math.abs(delta) * 100).toFixed(1) + '%';
+    var arrow, polarity;
+    if (status === 'Green') {
+      arrow    = delta > 0 ? '\u25B2' : '\u25BC';
+      polarity = delta > 0 ? 'good'   : 'bad';
+    } else {
+      // Red / Yellow: share going up is a bad health signal
+      arrow    = delta > 0 ? '\u25BC' : '\u25B2';
+      polarity = delta > 0 ? 'bad'    : 'good';
+    }
+    return { arrow: arrow, label: label, polarity: polarity };
+  }
+
+  /**
+   * Phase 3b: returns Health Breakdown (Green/Red/Yellow) computed from
+   * effective deployments and historical snapshots, replacing Dashboard reads.
+   *
+   * Return shape:
+   *   {
+   *     rows: [{ status, color, currentCount, currentPct, momTrend, ytdTrend }],
+   *     asOfMonth: 'yyyy-MM',
+   *     baselineMonth: 'yyyy-MM',
+   *     baselineMonthLabel: 'Mon yyyy',
+   *     dataIntegrity: { expectedTotal, reconciledTotal, blankCount, showDisclaimer }
+   *   }
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function getHealthBreakdown(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    var currentYM   = Utilities.formatDate(now, tz, 'yyyy-MM');
+    var currentYear = Utilities.formatDate(now, tz, 'yyyy');
+
+    // Current counts from effective deployments
+    var allEffective = CoreData.getAllEffectiveDeployments(cfg);
+    var expectedTotal = allEffective.length;
+    var counts = { Green: 0, Red: 0, Yellow: 0 };
+    allEffective.forEach(function (row) {
+      var h = String(row.health || '').trim();
+      if (counts[h] !== undefined) counts[h]++;
+    });
+    var reconciledTotal = counts.Green + counts.Red + counts.Yellow;
+    var denom = reconciledTotal;
+    var currentPcts = {
+      Green:  denom > 0 ? counts.Green  / denom : 0,
+      Red:    denom > 0 ? counts.Red    / denom : 0,
+      Yellow: denom > 0 ? counts.Yellow / denom : 0
+    };
+
+    // Historical snapshots for MoM / YTD trend
+    var snapData     = readHealthSnapshots_(cfg);
+    var sortedMonths = Object.keys(snapData).sort();
+
+    // Previous month key (the snapshot month immediately before currentYM)
+    var prevYM = null;
+    var currentIdx = sortedMonths.indexOf(currentYM);
+    if (currentIdx > 0) {
+      prevYM = sortedMonths[currentIdx - 1];
+    } else if (currentIdx === -1 && sortedMonths.length > 0) {
+      prevYM = sortedMonths[sortedMonths.length - 1];
+    }
+
+    // YTD: snapshot months within the current calendar year
+    var ytdMonths = sortedMonths.filter(function (ym) {
+      return ym.substring(0, 4) === currentYear;
+    });
+    var baselineMonth = ytdMonths.length > 0 ? ytdMonths[0] : null;
+
+    var STATUS_ORDER = ['Green', 'Red', 'Yellow'];
+    var COLORS = { Green: '#4CAF50', Red: '#F44336', Yellow: '#FBBC04' };
+
+    var rows = STATUS_ORDER.map(function (status) {
+      var currentPct = currentPcts[status];
+
+      // MoM trend
+      var momTrend;
+      var prevSnap = prevYM && snapData[prevYM] && snapData[prevYM][status];
+      if (!prevSnap || prevSnap.pct === 0) {
+        momTrend = { arrow: '\u25CF', label: '0.0%', polarity: 'flat' };
+      } else {
+        momTrend = buildTrend_(status, (currentPct - prevSnap.pct) / prevSnap.pct);
+      }
+
+      // YTD trend
+      var ytdTrend;
+      if (ytdMonths.length < 2) {
+        ytdTrend = { arrow: '\u25CF', label: '0.0%', polarity: 'flat' };
+      } else {
+        var firstSnap = snapData[ytdMonths[0]] && snapData[ytdMonths[0]][status];
+        var lastSnap  = snapData[ytdMonths[ytdMonths.length - 1]] && snapData[ytdMonths[ytdMonths.length - 1]][status];
+        var firstPct  = firstSnap ? firstSnap.pct : 0;
+        var lastPct   = lastSnap  ? lastSnap.pct  : 0;
+        ytdTrend = (firstPct === 0)
+          ? { arrow: '\u25CF', label: '0.0%', polarity: 'flat' }
+          : buildTrend_(status, (lastPct - firstPct) / firstPct);
+      }
+
+      return {
+        status:       status,
+        color:        COLORS[status],
+        currentCount: counts[status],
+        currentPct:   currentPct,
+        momTrend:     momTrend,
+        ytdTrend:     ytdTrend
+      };
+    });
+
+    return {
+      rows:               rows,
+      asOfMonth:          currentYM,
+      baselineMonth:      baselineMonth || currentYM,
+      baselineMonthLabel: formatMonthLabel_(baselineMonth || currentYM),
+      dataIntegrity: {
+        expectedTotal:   expectedTotal,
+        reconciledTotal: reconciledTotal,
+        blankCount:      expectedTotal - reconciledTotal,
+        showDisclaimer:  (expectedTotal - reconciledTotal) > 0
+      }
+    };
+  }
+
+  /**
+   * Phase 3b: returns Partner Breakdown grouped by the partner field
+   * (Deployment_Partner_Name__c) from effective deployments.
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function getPartnerBreakdown(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var rows = CoreData.getAllEffectiveDeployments(cfg);
+    var totalDeployments = rows.length;
+
+    var partnerCounts = {};
+    var unassignedCount = 0;
+    rows.forEach(function (row) {
+      var partner = String(row.partner || '').trim();
+      if (!partner) {
+        unassignedCount++;
+      } else {
+        partnerCounts[partner] = (partnerCounts[partner] || 0) + 1;
+      }
+    });
+
+    var resultRows = Object.keys(partnerCounts).map(function (p) {
+      return {
+        partner: p,
+        count:   partnerCounts[p],
+        pct:     totalDeployments > 0 ? partnerCounts[p] / totalDeployments : 0
+      };
+    }).sort(function (a, b) { return b.count - a.count; });
+
+    if (unassignedCount > 0) {
+      resultRows.push({
+        partner: '(Unassigned)',
+        count:   unassignedCount,
+        pct:     totalDeployments > 0 ? unassignedCount / totalDeployments : 0
+      });
+    }
+
+    return {
+      rows:             resultRows,
+      totalDeployments: totalDeployments,
+      dataIntegrity: {
+        unassignedCount: unassignedCount,
+        showDisclaimer:  unassignedCount > 0
+      }
+    };
+  }
+
+  /**
+   * Phase 3b: returns Services Approach Breakdown grouped by the
+   * servicesApproach field (SERVICES_APPROACH or DEPLOYMENT_PHASE column)
+   * from effective deployments.
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function getApproachBreakdown(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var rows = CoreData.getAllEffectiveDeployments(cfg);
+    var totalDeployments = rows.length;
+
+    var approachCounts = {};
+    var unassignedCount = 0;
+    rows.forEach(function (row) {
+      var approach = String(row.servicesApproach || '').trim();
+      if (!approach) {
+        unassignedCount++;
+      } else {
+        approachCounts[approach] = (approachCounts[approach] || 0) + 1;
+      }
+    });
+
+    var resultRows = Object.keys(approachCounts).map(function (a) {
+      return {
+        approach: a,
+        count:    approachCounts[a],
+        pct:      totalDeployments > 0 ? approachCounts[a] / totalDeployments : 0
+      };
+    }).sort(function (a, b) { return b.count - a.count; });
+
+    if (unassignedCount > 0) {
+      resultRows.push({
+        approach: '(Unassigned)',
+        count:    unassignedCount,
+        pct:      totalDeployments > 0 ? unassignedCount / totalDeployments : 0
+      });
+    }
+
+    return {
+      rows:             resultRows,
+      totalDeployments: totalDeployments,
+      dataIntegrity: {
+        unassignedCount: unassignedCount,
+        showDisclaimer:  unassignedCount > 0
+      }
+    };
+  }
+
+  /**
+   * Phase 3b: diagnostic cross-check — logs code-computed breakdown values.
+   * Run via Apps Script editor to verify Phase 3b migration output.
+   *
+   * @param {AppConfig} config
+   */
+  function _validatePhase3b(config) {
+    Logger.log('_validatePhase3b: === Phase 3b Validation ===');
+    try {
+      var h = getHealthBreakdown(config);
+      Logger.log('_validatePhase3b: Health — asOfMonth=' + h.asOfMonth +
+        ', baseline=' + h.baselineMonth + ' (' + h.baselineMonthLabel + ')');
+      h.rows.forEach(function (row) {
+        Logger.log('_validatePhase3b:   ' + row.status +
+          ': count=' + row.currentCount +
+          ', pct=' + (row.currentPct * 100).toFixed(2) + '%' +
+          ', MoM=' + row.momTrend.arrow + ' ' + row.momTrend.label +
+          ' (' + row.momTrend.polarity + ')' +
+          ', YTD=' + row.ytdTrend.arrow + ' ' + row.ytdTrend.label +
+          ' (' + row.ytdTrend.polarity + ')');
+      });
+      var di = h.dataIntegrity;
+      Logger.log('_validatePhase3b: Health DataIntegrity — expected=' + di.expectedTotal +
+        ', reconciled=' + di.reconciledTotal + ', blank=' + di.blankCount +
+        ', showDisclaimer=' + di.showDisclaimer);
+    } catch (err) {
+      Logger.log('_validatePhase3b: getHealthBreakdown failed: ' + err);
+    }
+
+    try {
+      var p = getPartnerBreakdown(config);
+      Logger.log('_validatePhase3b: Partner — totalDeployments=' + p.totalDeployments);
+      p.rows.forEach(function (row) {
+        Logger.log('_validatePhase3b:   ' + row.partner + ': count=' + row.count +
+          ', pct=' + (row.pct * 100).toFixed(2) + '%');
+      });
+    } catch (err) {
+      Logger.log('_validatePhase3b: getPartnerBreakdown failed: ' + err);
+    }
+
+    try {
+      var a = getApproachBreakdown(config);
+      Logger.log('_validatePhase3b: Approach — totalDeployments=' + a.totalDeployments);
+      a.rows.forEach(function (row) {
+        Logger.log('_validatePhase3b:   ' + row.approach + ': count=' + row.count +
+          ', pct=' + (row.pct * 100).toFixed(2) + '%');
+      });
+    } catch (err) {
+      Logger.log('_validatePhase3b: getApproachBreakdown failed: ' + err);
+    }
+
+    Logger.log('_validatePhase3b: EXPECTED diffs vs. Dashboard sheet:' +
+      ' arrow polarity (Phase 3b correction),' +
+      ' label format (relative % not absolute count),' +
+      ' approach source column (DEPLOYMENT_PHASE alias fix).');
+    Logger.log('_validatePhase3b: === End ===');
+  }
+
   // --- EXPORTS ---------------------------------------------------------------
 
   return {
@@ -607,6 +943,12 @@ var CoreAnalytics = (function () {
     update:                    update,
     updateSnapshotsFromActive: updateSnapshotsFromActive,
     populateDashboardFromSnapshots: populateDashboardFromSnapshots,
+
+    // Phase 3b: Code-side breakdown functions
+    getHealthBreakdown:   getHealthBreakdown,
+    getPartnerBreakdown:  getPartnerBreakdown,
+    getApproachBreakdown: getApproachBreakdown,
+    _validatePhase3b:     _validatePhase3b,
 
     // optional ChangeLog utilities
     initDeploymentHealthSnapshot:            initDeploymentHealthSnapshot,

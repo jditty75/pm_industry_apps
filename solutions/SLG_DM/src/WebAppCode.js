@@ -135,6 +135,15 @@ function getHtmlReportPreview() {
   return CoreLib.CoreReport.buildInlineHtmlWithAnalytics(APP_CONFIG);
 }
 
+/**
+ * Phase 3c: builds the Outlook-optimized report HTML and runs analytics first.
+ * Paired with getHtmlReportPreview() for the Report tab view toggle.
+ */
+function getHtmlReportPreviewOutlook() {
+  CoreLib.CoreAnalytics.update(APP_CONFIG);
+  return CoreLib.CoreReport.buildOutlookHtml(APP_CONFIG);
+}
+
 // ============================================================================
 // PHASE 1 — PORTFOLIO HEALTH (unchanged)
 // ============================================================================
@@ -148,20 +157,21 @@ function getPortfolioHealthData() {
 // ============================================================================
 
 /**
- * Combined meta + overrides update for a deployment. Phase 2: CoreData now
- * writes an OverrideAudit row server-side. No client signature change.
+ * Combined meta + overrides update for a deployment. Phase 2: CoreData writes
+ * an OverrideAudit row. Phase 3d: accepts optional notes (override reason).
  */
-function updateDeploymentWithMetaAndOverride(rowIndex, deploymentId, metaData, overrideData) {
+function updateDeploymentWithMetaAndOverride(rowIndex, deploymentId, metaData, overrideData, notes) {
   return CoreLib.CoreData.updateDeploymentWithMetaAndOverride(
-    APP_CONFIG, deploymentId, metaData, overrideData
+    APP_CONFIG, deploymentId, metaData, overrideData, notes
   );
 }
 
 /**
  * Go Lives overrides update. Phase 2: CoreData writes audit row.
+ * Phase 3d: accepts optional notes (override reason).
  */
-function updateGoLivesOverride(accountName, overrideData) {
-  return CoreLib.CoreData.updateGoLivesOverride(APP_CONFIG, accountName, overrideData);
+function updateGoLivesOverride(accountName, overrideData, notes) {
+  return CoreLib.CoreData.updateGoLivesOverride(APP_CONFIG, accountName, overrideData, notes);
 }
 
 // ============================================================================
@@ -185,6 +195,17 @@ function getAllActiveOverridesForUI(viewModeOpts) {
  */
 function getOverrideAuditLogForUI(opts) {
   return CoreLib.CoreData.getOverrideAuditLog(APP_CONFIG, opts);
+}
+
+/**
+ * Phase 3f: returns the last N audit entries for a specific deployment.
+ * Used by the expanded row detail inline audit summary. Visible to all roles.
+ *
+ * @param {string} deploymentId  Salesforce deployment ID or accountName
+ * @param {number=} limit        Max rows to return (default 3)
+ */
+function getDeploymentAuditSummaryForUI(deploymentId, limit) {
+  return CoreLib.CoreData.getDeploymentAuditSummary(APP_CONFIG, deploymentId, limit);
 }
 
 /**

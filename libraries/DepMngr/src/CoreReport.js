@@ -391,6 +391,13 @@ var CoreReport = (function () {
 function buildHtmlTableAsBars_(config, tableCfg, range) {
   var cfg = CoreConfig.withDefaults(config);
   var namedRange = tableCfg.namedRange || '';
+
+  // Phase 3b: route the three migrated tables to code-computed breakdowns.
+  // The range arg is not accessed for these named ranges.
+  if (namedRange === 'HealthTotal')   return _renderHealthBreakdownFromCode_(cfg, tableCfg);
+  if (namedRange === 'PartnerTotal')  return _renderPartnerBreakdownFromCode_(cfg, tableCfg);
+  if (namedRange === 'ApproachTotal') return _renderApproachBreakdownFromCode_(cfg, tableCfg);
+
   var barCfg = (cfg.report.barConfig || {})[namedRange] || { columns: [] };
   var barCols = barCfg.columns || [];
 
@@ -668,6 +675,203 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '</table>';
 
     return outerHtml;
+  }
+
+  // --- PHASE 3b: CODE-COMPUTED BREAKDOWN RENDERERS ----------------------------
+
+  /**
+   * Renders a trend indicator cell for Health breakdown.
+   * @private
+   */
+  function _renderTrendCell_(trend) {
+    var color = trend.polarity === 'good' ? '#4CAF50'
+              : trend.polarity === 'bad'  ? '#F44336'
+              : '#999999';
+    return '<span style="color:' + color + '; font-weight:bold; white-space:nowrap;">' +
+      CoreUtils.escapeHtml(trend.arrow + ' ' + trend.label) + '</span>';
+  }
+
+  /**
+   * Renders a plain HTML disclaimer paragraph.
+   * @private
+   */
+  function _renderDisclaimerParagraph_(text) {
+    if (!text) return '';
+    return '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666; ' +
+      'margin-top:6px; font-style:italic;">' +
+      CoreUtils.escapeHtml(text) + '</p>';
+  }
+
+  /**
+   * Phase 3b: renders the Health Breakdown table from CoreAnalytics code.
+   * Columns: Health Indicator | Count (bar) | Total % | MoM Trend | YTD Trend
+   * @private
+   */
+  function _renderHealthBreakdownFromCode_(cfg, tableCfg) {
+    var result;
+    try {
+      result = CoreAnalytics.getHealthBreakdown(cfg);
+    } catch (err) {
+      Logger.log('CoreReport._renderHealthBreakdownFromCode_: failed: ' + err);
+      return '<p style="font-size:11px; color:#cc0000; font-family:Arial,sans-serif;">' +
+        '\u26A0 Health Breakdown unavailable: ' + CoreUtils.escapeHtml(String(err)) + '</p>';
+    }
+
+    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; ' +
+      'font-size:11px; font-family:Arial,sans-serif;';
+    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; ' +
+      'padding:6px 8px; text-align:left; white-space:nowrap; font-size:11px;';
+    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px;';
+
+    var namedRange = tableCfg.namedRange || 'HealthTotal';
+    var barCfg = (cfg.report.barConfig || {})[namedRange] || {};
+
+    var maxCount = 0;
+    result.rows.forEach(function (row) {
+      if (row.currentCount > maxCount) maxCount = row.currentCount;
+    });
+
+    var theadHtml =
+      '<th style="' + TH_STYLE + '">Health Indicator</th>' +
+      '<th style="' + TH_STYLE + '">Count</th>' +
+      '<th style="' + TH_STYLE + '">Total %</th>' +
+      '<th style="' + TH_STYLE + '">MoM Trend</th>' +
+      '<th style="' + TH_STYLE + '">YTD Trend</th>';
+
+    var tbodyHtml = result.rows.map(function (row, ri) {
+      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
+      var barPct = maxCount > 0 ? (row.currentCount / maxCount) * 100 : 0;
+      var barHtml = renderBarFromPctWithStyle_(barPct, barCfg, row.color, row.currentCount);
+      var pctStr = (row.currentPct * 100).toFixed(2) + '%';
+      return '<tr>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + '; color:' +
+          CoreUtils.escapeHtml(row.color) + '; font-weight:bold;">' +
+          CoreUtils.escapeHtml(row.status) + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + barHtml + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+          CoreUtils.escapeHtml(pctStr) + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+          _renderTrendCell_(row.momTrend) + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+          _renderTrendCell_(row.ytdTrend) + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var html = '<table style="' + TABLE_STYLE + '">' +
+      '<thead><tr>' + theadHtml + '</tr></thead>' +
+      '<tbody>' + tbodyHtml + '</tbody>' +
+      '</table>';
+
+    if (result.dataIntegrity.showDisclaimer) {
+      html += _renderDisclaimerParagraph_(cfg.report.disclaimers.healthBreakdown);
+    }
+    return html;
+  }
+
+  /**
+   * Phase 3b: renders the Partner Breakdown table from CoreAnalytics code.
+   * Columns: Priming Partner | Count | Percentage (bar)
+   * @private
+   */
+  function _renderPartnerBreakdownFromCode_(cfg, tableCfg) {
+    var result;
+    try {
+      result = CoreAnalytics.getPartnerBreakdown(cfg);
+    } catch (err) {
+      Logger.log('CoreReport._renderPartnerBreakdownFromCode_: failed: ' + err);
+      return '<p style="font-size:11px; color:#cc0000; font-family:Arial,sans-serif;">' +
+        '\u26A0 Partner Breakdown unavailable: ' + CoreUtils.escapeHtml(String(err)) + '</p>';
+    }
+
+    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; ' +
+      'font-size:11px; font-family:Arial,sans-serif;';
+    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; ' +
+      'padding:6px 8px; text-align:left; white-space:nowrap; font-size:11px;';
+    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px;';
+
+    var namedRange = tableCfg.namedRange || 'PartnerTotal';
+    var barCfg = (cfg.report.barConfig || {})[namedRange] || {};
+
+    var theadHtml =
+      '<th style="' + TH_STYLE + '">Priming Partner</th>' +
+      '<th style="' + TH_STYLE + '">Count</th>' +
+      '<th style="' + TH_STYLE + '">Percentage of the Total</th>';
+
+    var tbodyHtml = result.rows.map(function (row, ri) {
+      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
+      var barHtml = renderBarFromPctWithStyle_(row.pct * 100, barCfg, null,
+        (row.pct * 100).toFixed(1) + '%');
+      return '<tr>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+          CoreUtils.escapeHtml(row.partner) + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+          CoreUtils.escapeHtml(String(row.count)) + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + barHtml + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var html = '<table style="' + TABLE_STYLE + '">' +
+      '<thead><tr>' + theadHtml + '</tr></thead>' +
+      '<tbody>' + tbodyHtml + '</tbody>' +
+      '</table>';
+
+    if (result.dataIntegrity.showDisclaimer) {
+      html += _renderDisclaimerParagraph_(cfg.report.disclaimers.partnerBreakdown);
+    }
+    return html;
+  }
+
+  /**
+   * Phase 3b: renders the Services Approach Breakdown table from CoreAnalytics code.
+   * Columns: Services Approach | Count | Percentage (bar)
+   * @private
+   */
+  function _renderApproachBreakdownFromCode_(cfg, tableCfg) {
+    var result;
+    try {
+      result = CoreAnalytics.getApproachBreakdown(cfg);
+    } catch (err) {
+      Logger.log('CoreReport._renderApproachBreakdownFromCode_: failed: ' + err);
+      return '<p style="font-size:11px; color:#cc0000; font-family:Arial,sans-serif;">' +
+        '\u26A0 Approach Breakdown unavailable: ' + CoreUtils.escapeHtml(String(err)) + '</p>';
+    }
+
+    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; ' +
+      'font-size:11px; font-family:Arial,sans-serif;';
+    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; ' +
+      'padding:6px 8px; text-align:left; white-space:nowrap; font-size:11px;';
+    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px;';
+
+    var namedRange = tableCfg.namedRange || 'ApproachTotal';
+    var barCfg = (cfg.report.barConfig || {})[namedRange] || {};
+
+    var theadHtml =
+      '<th style="' + TH_STYLE + '">Services Approach</th>' +
+      '<th style="' + TH_STYLE + '">Count</th>' +
+      '<th style="' + TH_STYLE + '">Percentage of the Total</th>';
+
+    var tbodyHtml = result.rows.map(function (row, ri) {
+      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
+      var barHtml = renderBarFromPctWithStyle_(row.pct * 100, barCfg, null,
+        (row.pct * 100).toFixed(1) + '%');
+      return '<tr>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+          CoreUtils.escapeHtml(row.approach) + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+          CoreUtils.escapeHtml(String(row.count)) + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + barHtml + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var html = '<table style="' + TABLE_STYLE + '">' +
+      '<thead><tr>' + theadHtml + '</tr></thead>' +
+      '<tbody>' + tbodyHtml + '</tbody>' +
+      '</table>';
+
+    if (result.dataIntegrity.showDisclaimer) {
+      html += _renderDisclaimerParagraph_(cfg.report.disclaimers.approachBreakdown);
+    }
+    return html;
   }
 
   // --- SPECIAL TABLES: RED/YELLOW, GO LIVES, FUTURE GO LIVES -----------------

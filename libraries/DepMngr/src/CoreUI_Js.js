@@ -90,6 +90,9 @@ var currentGoLivesIndex = null;
 var execSummaryIsSaving = false;
 var confirmModalCallback = null;       // function called when confirm modal "Confirm" clicked
 
+// Phase 3c: Monthly Report Preview view format toggle
+var reportViewMode = 'outlook';        // 'outlook' | 'inline' — Outlook is the default
+
 // ============================================================
 // BOOT
 // ============================================================
@@ -462,7 +465,7 @@ function loadActiveOverrides() {
 function loadAuditLog() {
   var tbody = document.getElementById('audit-trail-tbody');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;">Loading…</td></tr>';
   google.script.run
     .withSuccessHandler(function(data) {
       auditLogData = data || [];
@@ -536,6 +539,19 @@ function saveExecSummaryToServer() {
 // REPORT PREVIEW (Phase 1 — unchanged)
 // ============================================================
 
+// Phase 3c: switches the report view format and re-renders.
+function switchReportView(mode) {
+  reportViewMode = mode;
+  document.querySelectorAll('[data-report-view]').forEach(function(btn) {
+    if (btn.getAttribute('data-report-view') === mode) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+  loadReportPreview();
+}
+
 function loadReportPreview() {
   var container = document.getElementById('report-preview-container');
   container.innerHTML =
@@ -544,18 +560,30 @@ function loadReportPreview() {
     '  <p>Generating monthly report preview...</p>' +
     '  <p style="font-size: 0.875rem; margin-top: 0.5rem;">This may take a few moments</p>' +
     '</div>';
-  google.script.run
-    .withSuccessHandler(function(htmlContent) { renderReportPreview(htmlContent); })
-    .withFailureHandler(function(error) {
-      container.innerHTML =
-        '<div style="text-align: center; padding: 4rem 2rem; color: var(--color-status-red-fg);">' +
-        '  <p style="font-size: 1.2rem; margin-bottom: 0.5rem;">\u274C Error Loading Report</p>' +
-        '  <p style="font-size: 0.875rem;">' + escapeHtml(error.toString()) + '</p>' +
-        '  <button class="btn btn-primary" onclick="loadReportPreview()" style="margin-top: 1rem;">Try Again</button>' +
-        '</div>';
-      showToast('Error loading report: ' + error, 'error');
-    })
-    .getHtmlReportPreview();
+
+  var onSuccess = function(htmlContent) { renderReportPreview(htmlContent); };
+  var onFailure = function(error) {
+    container.innerHTML =
+      '<div style="text-align: center; padding: 4rem 2rem; color: var(--color-status-red-fg);">' +
+      '  <p style="font-size: 1.2rem; margin-bottom: 0.5rem;">\u274C Error Loading Report</p>' +
+      '  <p style="font-size: 0.875rem;">' + escapeHtml(error.toString()) + '</p>' +
+      '  <button class="btn btn-primary" onclick="loadReportPreview()" style="margin-top: 1rem;">Try Again</button>' +
+      '</div>';
+    showToast('Error loading report: ' + error, 'error');
+  };
+
+  // Phase 3c: dispatch to the server function matching the selected view format.
+  if (reportViewMode === 'inline') {
+    google.script.run
+      .withSuccessHandler(onSuccess)
+      .withFailureHandler(onFailure)
+      .getHtmlReportPreview();
+  } else {
+    google.script.run
+      .withSuccessHandler(onSuccess)
+      .withFailureHandler(onFailure)
+      .getHtmlReportPreviewOutlook();
+  }
 }
 
 function renderReportPreview(htmlContent) {
@@ -936,6 +964,11 @@ function renderDeploymentsTable() {
   });
 
   tbody.innerHTML = rowsHtml;
+
+  // Phase 3f: load inline audit summary for the expanded row after DOM is ready
+  if (expandedRowId) {
+    loadDeploymentAuditSummary_(expandedRowId);
+  }
 }
 
 function renderExpandedRowDetail_(row, colspan) {
@@ -991,11 +1024,16 @@ function renderExpandedRowDetail_(row, colspan) {
       '</div>';
   }
 
-  // Actions inside the expanded row
+  // Phase 3f: inline "Recent Activity" audit summary — visible to all roles.
+  // The container is populated asynchronously after the row's DOM is ready.
+  html += '<div class="detail-full-width" id="audit-summary-' + escapeAttr(row.deploymentId) + '">' +
+    '<span class="detail-label">Recent Activity</span>' +
+    '<div class="detail-value" style="font-size:12px; color:var(--color-text-muted);">Loading\u2026</div>' +
+    '</div>';
+
+  // Actions inside the expanded row (Phase 3f: View Audit is now visible to all roles)
   var actions = '<button class="btn btn-secondary" onclick="event.stopPropagation(); openEditModal(' + row.rowIndex + ')">Edit</button>';
-  if (currentUser && currentUser.isAdmin) {
-    actions += ' <button class="btn btn-secondary" onclick="event.stopPropagation(); openAuditForDeployment(\\'' + escapeJs(row.deploymentId) + '\\')">View Audit</button>';
-  }
+  actions += ' <button class="btn btn-secondary" onclick="event.stopPropagation(); openAuditForDeployment(\\'' + escapeJs(row.deploymentId) + '\\')">View Audit</button>';
   html += '<div class="detail-actions">' + actions + '</div>';
 
   html += '</div>';
@@ -1010,6 +1048,49 @@ function toggleRowExpand(deploymentId, rowIndex) {
     expandedRowId = deploymentId;
   }
   renderDeploymentsTable();
+}
+
+// Phase 3f: loads the last 3 audit entries for a deployment and populates
+// the inline "Recent Activity" container in the expanded row detail.
+function loadDeploymentAuditSummary_(deploymentId) {
+  google.script.run
+    .withSuccessHandler(function(rows) {
+      var container = document.getElementById('audit-summary-' + deploymentId);
+      if (!container) return;
+      var valueEl = container.querySelector('.detail-value');
+      if (!valueEl) return;
+
+      if (!rows || rows.length === 0) {
+        valueEl.innerHTML = '<em style="color:var(--color-text-subtle);">No audit history found.</em>';
+        return;
+      }
+
+      var html = rows.map(function(r) {
+        var when = r.timestamp ? formatRelativeTime(r.timestamp) : '?';
+        var action = r.action || '';
+        var who = r.user || '';
+        var whoShort = who.indexOf('@') >= 0 ? who.split('@')[0] : who;
+        return '<div style="margin-bottom:4px; line-height:1.4;">' +
+          '<span style="font-size:11px; color:var(--color-text-subtle);">' + escapeHtml(when) + '</span>' +
+          ' <span class="audit-action-pill ' + escapeHtml(action.toLowerCase()) + '">' +
+            escapeHtml(action) + '</span>' +
+          ' <span>' + escapeHtml(whoShort) + '</span>' +
+          (r.notes ? ' <span style="font-style:italic; color:var(--color-text-muted);">\u2014 ' +
+            escapeHtml(r.notes.length > 50 ? r.notes.substring(0, 50) + '\u2026' : r.notes) +
+            '</span>' : '') +
+          '</div>';
+      }).join('');
+
+      valueEl.innerHTML = html;
+    })
+    .withFailureHandler(function() {
+      var container = document.getElementById('audit-summary-' + deploymentId);
+      if (!container) return;
+      var valueEl = container.querySelector('.detail-value');
+      if (valueEl) valueEl.innerHTML =
+        '<em style="color:var(--color-text-subtle);">Unable to load activity.</em>';
+    })
+    .getDeploymentAuditSummaryForUI(deploymentId, 3);
 }
 
 // ============================================================
@@ -1116,14 +1197,18 @@ function renderGoLivesTable() {
     var cells = [];
 
     // Phase 3a: phased upcoming rows show multi-line date cell
+    // Phase 3a-css: stable class hooks express date/product hierarchy clearly
     var isUpcomingRow = (view === 'upcoming') || (view === 'all' && row._isUpcoming);
     if (isUpcomingRow && row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {
       var phasedDateHtml = row.upcomingDates.map(function(ud) {
-        var ds = ud.date ? formatDate(ud.date) : '—';
-        var ps = (ud.products && ud.products.length) ? ': ' + ud.products.join(', ') : '';
-        return '<div><strong>' + escapeHtml(ds) + '</strong>' + escapeHtml(ps) + '</div>';
+        var ds = ud.date ? formatDate(ud.date) : '\u2014';
+        var ps = (ud.products && ud.products.length) ? ud.products.join(', ') : '';
+        return '<div class="golives-date-entry">' +
+          '<span class="golives-date-label">' + escapeHtml(ds) + '</span>' +
+          (ps ? '<span class="golives-product-list">' + escapeHtml(ps) + '</span>' : '') +
+          '</div>';
       }).join('');
-      cells.push('<td style="vertical-align:top;">' + phasedDateHtml + '</td>');
+      cells.push('<td class="golives-date-cell">' + phasedDateHtml + '</td>');
       // Product/deployment cell: show name + Phased pill
       cells.push('<td><strong>' + escapeHtml(row.accountName) + '</strong></td>');
       if (showIndustry) cells.push('<td>' + escapeHtml(row.industry || '') + '</td>');
@@ -1173,6 +1258,9 @@ function openEditModal(rowIndex) {
 
 function closeEditModal() {
   document.getElementById('edit-modal').classList.remove('active');
+  // Phase 3d: clear the reason field so it doesn't bleed into the next open
+  var reasonEl = document.getElementById('edit-override-reason');
+  if (reasonEl) reasonEl.value = '';
 }
 
 function openMetaModal(index) {
@@ -1212,6 +1300,8 @@ function saveDeployment() {
     excludeFromReport:     document.getElementById('edit-exclude-report').checked,
     classification:        getRadioGroupValue('edit-classification') || 'Monthly'
   };
+  // Phase 3d: capture optional override reason (stored in OverrideAudit.Notes)
+  var overrideReason = (document.getElementById('edit-override-reason') || {value: ''}).value || '';
 
   document.getElementById('save-btn-text').classList.add('hidden');
   document.getElementById('save-spinner').classList.remove('hidden');
@@ -1229,7 +1319,7 @@ function saveDeployment() {
       document.getElementById('save-btn-text').classList.remove('hidden');
       document.getElementById('save-spinner').classList.add('hidden');
     })
-    .updateDeploymentWithMetaAndOverride(rowIndex, row.deploymentId, metaData, overrideData);
+    .updateDeploymentWithMetaAndOverride(rowIndex, row.deploymentId, metaData, overrideData, overrideReason);
 }
 
 // ============================================================
@@ -1265,6 +1355,9 @@ function openGoLivesModal(index) {
 function closeGoLivesModal() {
   document.getElementById('golives-modal').classList.remove('active');
   currentGoLivesIndex = null;
+  // Phase 3d: clear the reason field so it doesn't bleed into the next open
+  var reasonEl = document.getElementById('golives-override-reason');
+  if (reasonEl) reasonEl.value = '';
 }
 
 function saveGoLives() {
@@ -1278,6 +1371,8 @@ function saveGoLives() {
     excludeFromReport: document.getElementById('golives-exclude-report').checked,
     classification:    getRadioGroupValue('golives-classification') || 'Monthly'
   };
+  // Phase 3d: capture optional override reason
+  var overrideReason = (document.getElementById('golives-override-reason') || {value: ''}).value || '';
 
   document.getElementById('golives-save-text').classList.add('hidden');
   document.getElementById('golives-spinner').classList.remove('hidden');
@@ -1295,7 +1390,7 @@ function saveGoLives() {
       document.getElementById('golives-save-text').classList.remove('hidden');
       document.getElementById('golives-spinner').classList.add('hidden');
     })
-    .updateGoLivesOverride(row.accountName, overrideData);
+    .updateGoLivesOverride(row.accountName, overrideData, overrideReason);
 }
 
 // ============================================================
@@ -1386,7 +1481,7 @@ function renderAuditLog() {
   if (!tbody) return;
 
   if (auditLogData.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div>No audit events in this window</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div>No audit events in this window</div></td></tr>';
     return;
   }
 
@@ -1395,6 +1490,9 @@ function renderAuditLog() {
     var typePillClass = row.overrideType === 'deployment' ? 'deploy' : 'golives';
     var typePillLabel = row.overrideType === 'deployment' ? 'Deploy' : 'Go Lives';
     var whenRelative = row.timestamp ? formatRelativeTime(row.timestamp) : '';
+    // Phase 3d: show truncated reason in the table; full reason visible in audit detail modal
+    var reasonText = row.notes || '';
+    var reasonDisplay = reasonText.length > 60 ? reasonText.substring(0, 60) + '\u2026' : reasonText;
 
     return '<tr style="cursor:pointer;" onclick="openAuditDetailModal(' + index + ')">' +
       '<td class="audit-mono" title="' + escapeAttr(row.timestamp || '') + '">' + escapeHtml(whenRelative) + '</td>' +
@@ -1403,6 +1501,7 @@ function renderAuditLog() {
       '<td>' + escapeHtml(row.accountName || '') + '</td>' +
       '<td><span class="type-pill ' + typePillClass + '">' + typePillLabel + '</span></td>' +
       '<td>' + escapeHtml(row.fieldsAffected || '') + '</td>' +
+      '<td style="color:var(--color-text-muted); font-style:italic;">' + escapeHtml(reasonDisplay) + '</td>' +
       '</tr>';
   }).join('');
 }
@@ -1581,6 +1680,9 @@ function openAuditDetailModal(index) {
   document.getElementById('audit-detail-fields').value = row.fieldsAffected || '';
   document.getElementById('audit-detail-before').value = prettyJson_(row.oldValueSnapshot);
   document.getElementById('audit-detail-after').value  = prettyJson_(row.newValueSnapshot);
+  // Phase 3d: override reason from OverrideAudit column J
+  var notesEl = document.getElementById('audit-detail-notes');
+  if (notesEl) notesEl.value = row.notes || '';
   document.getElementById('audit-detail-modal').classList.add('active');
 }
 

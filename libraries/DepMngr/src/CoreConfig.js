@@ -252,6 +252,18 @@ var CoreConfig = (function () {
     if (cfg.report.includeIndustryRedYellow === undefined) cfg.report.includeIndustryRedYellow = false;
     if (cfg.report.includeIndustryGoLives === undefined)   cfg.report.includeIndustryGoLives = false;
 
+    // Phase 3b: disclaimer text shown below code-computed breakdown tables when
+    // data is incomplete. Apps may override these strings in their APP_CONFIG.
+    cfg.report.disclaimers = cfg.report.disclaimers || {};
+    var _defaultDisclaimer = 'Counts reflect available data. Deployments that are onboarding ' +
+      'or have incomplete data may impact totals.';
+    if (!cfg.report.disclaimers.healthBreakdown)
+      cfg.report.disclaimers.healthBreakdown  = _defaultDisclaimer;
+    if (!cfg.report.disclaimers.partnerBreakdown)
+      cfg.report.disclaimers.partnerBreakdown = _defaultDisclaimer;
+    if (!cfg.report.disclaimers.approachBreakdown)
+      cfg.report.disclaimers.approachBreakdown = _defaultDisclaimer;
+
     cfg.report.portfolioHealth = cfg.report.portfolioHealth || {};
     if (!cfg.report.portfolioHealth.title)
       cfg.report.portfolioHealth.title = 'Portfolio Health';

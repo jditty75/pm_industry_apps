@@ -195,6 +195,10 @@ var CoreData = (function () {
     var dataRange = sheet.getRange(2, 1, lastRow - 1, usedCols);
     var values = dataRange.getValues();
 
+    // Phase 3b: honour DEPLOYMENT_PHASE as a fallback when SERVICES_APPROACH is
+    // not defined in the app's column config (e.g. SLG uses DEPLOYMENT_PHASE).
+    var approachColNum = cols.SERVICES_APPROACH || cols.DEPLOYMENT_PHASE;
+
     var raw = values.map(function (row, index) {
       var deploymentId = String(row[cols.DEPLOYMENT_ID - 1] || '').trim();
       var meta = metaMap[deploymentId] || {};
@@ -203,7 +207,7 @@ var CoreData = (function () {
         deploymentId:     deploymentId,
         accountName:      String(row[cols.ACCOUNT_NAME - 1] || ''),
         deploymentName:   String(row[cols.DEPLOYMENT_NAME - 1] || ''),
-        servicesApproach: String(row[cols.SERVICES_APPROACH - 1] || ''),
+        servicesApproach: approachColNum ? String(row[approachColNum - 1] || '') : '',
         industry:         String(row[cols.INDUSTRY - 1] || ''),
         subRegion:        String(row[cols.SUB_REGION - 1] || ''),
         partner:          String(row[cols.PARTNER - 1] || ''),
@@ -723,8 +727,9 @@ var CoreData = (function () {
   /**
    * Update or insert a deployment override in DeploymentOverrides.
    * Phase 2: writes an OverrideAudit row capturing before/after state.
+   * Phase 3d: accepts optional notes (override reason) forwarded to the audit row.
    */
-  function updateDeploymentOverride(config, deploymentId, overrideData) {
+  function updateDeploymentOverride(config, deploymentId, overrideData, notes) {
     var cfg = CoreConfig.withDefaults(config);
     if (!deploymentId) throw new Error('deploymentId required');
 
@@ -783,23 +788,29 @@ var CoreData = (function () {
       accountName:      accountName,
       fieldsAffected:   changed,
       oldValueSnapshot: JSON.stringify(before),
-      newValueSnapshot: JSON.stringify(after)
+      newValueSnapshot: JSON.stringify(after),
+      notes:            String(notes || '')   // Phase 3d
     });
 
     return { success: true };
   }
 
-  function updateDeploymentWithMetaAndOverride(config, deploymentId, metaData, overrideData) {
+  /**
+   * Phase 3d: accepts an optional notes (override reason) string and threads
+   * it through to writeAuditRow_.
+   */
+  function updateDeploymentWithMetaAndOverride(config, deploymentId, metaData, overrideData, notes) {
     updateDeploymentMeta(config, deploymentId, metaData);
-    updateDeploymentOverride(config, deploymentId, overrideData);
+    updateDeploymentOverride(config, deploymentId, overrideData, notes);
     return { success: true };
   }
 
   /**
    * Update or insert a Go Lives override row (keyed by AccountName).
    * Phase 2: writes audit row.
+   * Phase 3d: accepts optional notes (override reason) forwarded to the audit row.
    */
-  function updateGoLivesOverride(config, accountName, overrideData) {
+  function updateGoLivesOverride(config, accountName, overrideData, notes) {
     var cfg = CoreConfig.withDefaults(config);
     if (!accountName) throw new Error('accountName required');
 
@@ -850,7 +861,8 @@ var CoreData = (function () {
       accountName:      accountName,
       fieldsAffected:   changed,
       oldValueSnapshot: JSON.stringify(before),
-      newValueSnapshot: JSON.stringify(after)
+      newValueSnapshot: JSON.stringify(after),
+      notes:            String(notes || '')   // Phase 3d
     });
 
     return { success: true };
@@ -1264,6 +1276,35 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
+  // PHASE 3f: INLINE AUDIT SUMMARY
+  // ===========================================================================
+
+  /**
+   * Returns the last N audit events for a specific deployment ID.
+   * Used by the expanded row detail to show an inline "Recent Activity" summary.
+   * Visible to all roles (no PM gate).
+   *
+   * @param {AppConfig} config
+   * @param {string}    deploymentId  Salesforce deployment ID or accountName
+   * @param {number=}   limit         Max rows to return. Default 3.
+   * @return {Array<Object>}
+   */
+  function getDeploymentAuditSummary(config, deploymentId, limit) {
+    var cfg     = CoreConfig.withDefaults(config);
+    var maxRows = (typeof limit === 'number' && limit > 0) ? limit : 3;
+    var targetId = String(deploymentId || '').trim();
+    if (!targetId) return [];
+
+    var allAudit = getOverrideAuditLog(cfg, { sinceDays: 0, limit: 0 });
+    var filtered = allAudit.filter(function (row) {
+      return row.deploymentId === targetId || row.accountName === targetId;
+    });
+
+    // getOverrideAuditLog already returns newest-first
+    return filtered.slice(0, maxRows);
+  }
+
+  // ===========================================================================
   // EXPORTS
   // ===========================================================================
 
@@ -1284,6 +1325,9 @@ var CoreData = (function () {
     getOverrideAuditLog:         getOverrideAuditLog,
     setOverrideClassification:   setOverrideClassification,
     bulkClearMonthlyOverrides:   bulkClearMonthlyOverrides,
-    bulkClearAllOverrides:       bulkClearAllOverrides
+    bulkClearAllOverrides:       bulkClearAllOverrides,
+
+    // Phase 3f addition
+    getDeploymentAuditSummary:   getDeploymentAuditSummary
   };
 })();

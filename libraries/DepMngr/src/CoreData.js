@@ -881,23 +881,29 @@ var CoreData = (function () {
   /**
    * Returns recent go-live rows for the configured window (default 60 days).
    *
-   * Data source: SFDC_Deployments (Complete deployments only) joined with the
-   * CoreSalesforce enrichment map (recentDates from Actual move dates on
-   * SFDC_DeploymentProductFunctions).
+   * Phase 3i patch: inclusion is driven by date-level window filtering on
+   * Production_Move_Date_Actual__c, NOT by parent deployment status. Both Active
+   * and Complete deployments are considered — a phased Active deployment that had
+   * a wave go live within the last 60 days must appear in the Recent view.
    *
-   * Fallback: if a Complete deployment has no product-function data, uses
-   * First_Move_to_Production_Date_Actual__c from SFDC_Deployments directly.
+   * Data source: ALL rows from SFDC_Deployments (Active + Complete) joined with
+   * the CoreSalesforce enrichment map (recentDates from Actual move dates on
+   * SFDC_DeploymentProductFunctions). `status` is retained on each row for
+   * display purposes but is NOT used as a filter.
    *
-   * GoLivesOverrides are NOT applied — Complete deployments are considered
-   * canonical Salesforce data. The Edit button in the WebApp remains for
-   * UI continuity but no longer affects what is displayed.
+   * Window logic (per date, not per deployment):
+   *   1. Fetch all past Actual dates for this deployment from enrichment.recentDates.
+   *   2. Filter to dates in [today - recentWindowDays, today] → filteredRecentDates.
+   *   3. If filteredRecentDates is empty, try the deployment-level fallback
+   *      (First_Move_to_Production_Date_Actual__c); include only if also in window.
+   *   4. Skip deployments with no in-window dates.
+   *   5. lastGoLiveDate = max date in filteredRecentDates (never all-time last).
    *
    * Output row shape:
    *   {
-   *     deploymentId, accountName, deploymentName, partner, industry,
-   *     status: 'Complete',
-   *     recentDates: [{ date: 'YYYY-MM-DD', products: [...] }, ...],
-   *     lastGoLiveDate: 'YYYY-MM-DD'
+   *     deploymentId, accountName, deploymentName, partner, industry, status,
+   *     recentDates: [{ date: 'YYYY-MM-DD', products: [...] }, ...],  // window-only
+   *     lastGoLiveDate: 'YYYY-MM-DD'                                   // max in window
    *   }
    *
    * @param {AppConfig} config
@@ -906,8 +912,6 @@ var CoreData = (function () {
    */
   function getRecentGoLives(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
-    var completeStatus = statusValues.complete || 'Complete';
 
     // Recent window: default 60 days (matches ui.goLivesTab.recentWindowDays).
     var recentWindowDays = (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
@@ -917,12 +921,13 @@ var CoreData = (function () {
     var now = new Date();
     now.setHours(0, 0, 0, 0);
     var tz = Session.getScriptTimeZone();
-    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
-
-    var windowStart = new Date(now.getTime() - recentWindowDays * 24 * 60 * 60 * 1000);
+    var todayKey      = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var windowStart   = new Date(now.getTime() - recentWindowDays * 24 * 60 * 60 * 1000);
     var windowStartKey = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
 
-    // Read all rows from SFDC_Deployments; filter to Complete.
+    // Read ALL rows from SFDC_Deployments — Active and Complete.
+    // Status filtering is intentionally absent: a phased Active deployment whose
+    // most recent wave already went live belongs in the Recent view.
     var sfdcRows = [];
     try {
       sfdcRows = readSfdcDeploymentsRaw_(cfg);
@@ -932,17 +937,12 @@ var CoreData = (function () {
       return [];
     }
 
-    var completeRows = sfdcRows.filter(function (r) {
-      return r.status === completeStatus;
-    });
-
-    if (completeRows.length === 0) {
-      Logger.log('CoreData.getRecentGoLives: no Complete deployments found in ' +
-                 (cfg.sheets.deployments || 'SFDC_Deployments') + '.');
+    if (sfdcRows.length === 0) {
+      Logger.log('CoreData.getRecentGoLives: SFDC_Deployments returned no rows.');
       return [];
     }
 
-    // Get CoreSalesforce enrichment map (includes recentDates from Actual dates).
+    // Get CoreSalesforce enrichment map (recentDates = Actual dates < today).
     var enrichmentMap = {};
     try {
       enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
@@ -952,26 +952,32 @@ var CoreData = (function () {
     }
 
     var results = [];
-    completeRows.forEach(function (dep) {
-      var enrichment = enrichmentMap[dep.deploymentId];
+    sfdcRows.forEach(function (dep) {
+      var enrichment   = enrichmentMap[dep.deploymentId];
+      var allRecentDates = enrichment ? (enrichment.recentDates || []) : [];
 
-      var recentDates   = enrichment ? (enrichment.recentDates   || []) : [];
-      var lastGoLiveDate = enrichment ? (enrichment.lastGoLiveDate || null) : null;
+      // --- Date-level window filter ---
+      // Keep only Actual dates that fall within [windowStartKey, todayKey].
+      var filteredRecentDates = allRecentDates.filter(function (rd) {
+        return rd.date >= windowStartKey && rd.date <= todayKey;
+      });
 
-      // Fallback: if no product-function data, use First_Move_to_Production_Date_Actual__c.
-      if (!lastGoLiveDate && dep.firstMtpDateActual) {
-        var fallbackDate = dep.firstMtpDateActual;
-        if (fallbackDate < todayKey) {
-          recentDates   = [{ date: fallbackDate, products: [] }];
-          lastGoLiveDate = fallbackDate;
+      // Fallback: if no product-function Actual dates landed in the window, try
+      // the deployment-level First_Move_to_Production_Date_Actual__c field.
+      if (filteredRecentDates.length === 0 && dep.firstMtpDateActual) {
+        var fb = dep.firstMtpDateActual;
+        if (fb >= windowStartKey && fb <= todayKey) {
+          filteredRecentDates = [{ date: fb, products: [] }];
         }
       }
 
-      // Skip deployments with no usable recent date.
-      if (!lastGoLiveDate) return;
+      // Skip deployments with no in-window dates.
+      if (filteredRecentDates.length === 0) return;
 
-      // Apply the recent-window filter.
-      if (lastGoLiveDate < windowStartKey) return;
+      // lastGoLiveDate = max in-window date (not the all-time last Actual date).
+      var lastGoLiveDate = filteredRecentDates.reduce(function (max, rd) {
+        return rd.date > max ? rd.date : max;
+      }, '');
 
       results.push({
         deploymentId:   dep.deploymentId,
@@ -979,13 +985,13 @@ var CoreData = (function () {
         deploymentName: dep.deploymentName,
         partner:        dep.partner,
         industry:       dep.industry,
-        status:         dep.status,
-        recentDates:    recentDates,
+        status:         dep.status,          // retained for display; not used as filter
+        recentDates:    filteredRecentDates, // only in-window dates
         lastGoLiveDate: lastGoLiveDate
       });
     });
 
-    // Sort ascending by lastGoLiveDate (oldest go-live at the top).
+    // Sort ascending by lastGoLiveDate (oldest in-window go-live at the top).
     results.sort(function (a, b) {
       if (a.lastGoLiveDate < b.lastGoLiveDate) return -1;
       if (a.lastGoLiveDate > b.lastGoLiveDate) return  1;
@@ -993,7 +999,8 @@ var CoreData = (function () {
     });
 
     Logger.log('CoreData.getRecentGoLives: ' + results.length +
-               ' complete deployments in window (last ' + recentWindowDays + ' days).');
+               ' deployments with in-window go-live dates (last ' +
+               recentWindowDays + ' days, Active + Complete).');
 
     return applyViewModeFilter_(cfg, results, viewModeOpts);
   }

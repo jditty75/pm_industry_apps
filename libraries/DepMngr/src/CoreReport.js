@@ -1109,9 +1109,23 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     );
   }
 
+  /**
+   * Phase 3i: Renders the Recent Go Lives table using CoreData.getRecentGoLives()
+   * (SFDC_Deployments + product-function Actual dates). Supersedes the legacy
+   * CoreReportHelpers.getEffectiveRecentGoLivesForExport_ path that read from
+   * the frozen 'Go Lives' sheet.
+   *
+   * Date column rendering:
+   *   - Single date (recentDates.length === 1): "Jul 15, 2026 — HCM, Payroll"
+   *   - Multiple dates (recentDates.length > 1): one <div> per date (phased pattern)
+   *
+   * Column structure unchanged: Go Live Date | Account Name | [Industry] | Product Areas | Partner
+   */
   function buildRecentGoLivesHtmlTableFromEffectiveData_(config, tableCfg) {
     var cfg  = CoreConfig.withDefaults(config);
-    var rows = CoreReportHelpers.getEffectiveRecentGoLivesForExport_(cfg);
+
+    // Phase 3i: use SOQL-backed getRecentGoLives instead of legacy getGoLives.
+    var rows = CoreData.getRecentGoLives(cfg) || [];
     if (!rows || !rows.length) {
       return '<p style="font-size:11px; font-family:Arial,sans-serif;">(No recent go lives in report)</p>';
     }
@@ -1125,6 +1139,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var TD_STYLE =
       'border:1px solid #dddddd; padding:5px 8px; ' +
       'text-align:left; font-size:11px;';
+    var TD_VALIGN_STYLE = TD_STYLE + ' vertical-align:top;';
 
     var includeIndustry = !!cfg.report.includeIndustryGoLives;
 
@@ -1142,6 +1157,20 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
     var theadHtml = theadParts.join('');
 
+    /**
+     * Format a YYYY-MM-DD date string as "Jul 15, 2026".
+     * @param {string} dateStr
+     * @return {string}
+     */
+    function formatRecentDate_(dateStr) {
+      if (!dateStr) return '';
+      var d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric'
+      });
+    }
+
     var tbodyHtml = rows
       .map(function (row, ri) {
         var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
@@ -1153,30 +1182,60 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
             '</td>'
           );
         }
-
-        var dateStr = '';
-        if (row.goLiveDate) {
-          var d = new Date(row.goLiveDate);
-          if (!isNaN(d.getTime())) {
-            dateStr = d.toLocaleDateString('en-US', {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric'
-            });
-          } else {
-            dateStr = row.goLiveDate;
-          }
+        function tdRaw(html) {
+          return (
+            '<td style="' + TD_VALIGN_STYLE + ' background-color:' + defaultBg + ';">' +
+            html +
+            '</td>'
+          );
         }
 
+        var recentDates  = row.recentDates  || [];
+        var lastGoLiveDate = row.lastGoLiveDate || '';
+
+        // --- Date cell ---
+        var dateCellHtml;
+        if (recentDates.length <= 1) {
+          // Single date: "Jul 15, 2026 — HCM, Payroll"
+          var dateLabel    = formatRecentDate_(lastGoLiveDate);
+          var products0    = (recentDates.length === 1 && recentDates[0].products)
+                             ? recentDates[0].products.join(', ')
+                             : '';
+          var singleLine   = products0
+                             ? CoreUtils.escapeHtml(dateLabel) + ' \u2014 ' + CoreUtils.escapeHtml(products0)
+                             : CoreUtils.escapeHtml(dateLabel);
+          dateCellHtml = singleLine;
+        } else {
+          // Multiple dates: one <div> per date (phased pattern, matching Upcoming Go Lives).
+          var divLines = recentDates.map(function (rd) {
+            var dl = formatRecentDate_(rd.date || '');
+            var pl = (rd.products && rd.products.length) ? rd.products.join(', ') : '';
+            return (
+              '<div style="margin-bottom:2px;">' +
+              '<strong style="font-weight:600;">' + CoreUtils.escapeHtml(dl) + '</strong>' +
+              (pl ? ('<span style="color:#555555;"> \u2014 ' + CoreUtils.escapeHtml(pl) + '</span>') : '') +
+              '</div>'
+            );
+          }).join('');
+          dateCellHtml = divLines;
+        }
+
+        // --- Product Areas cell: flat list of all products across all recent dates ---
+        var allProducts = {};
+        recentDates.forEach(function (rd) {
+          (rd.products || []).forEach(function (p) { allProducts[p] = true; });
+        });
+        var productAreaStr = Object.keys(allProducts).sort().join(', ');
+
         var tds = [
-          td(dateStr),
+          tdRaw(dateCellHtml),
           td(row.accountName)
         ];
         if (includeIndustry) {
           tds.push(td(row.industry || ''));
         }
         tds.push(
-          td(row.productArea),
+          td(productAreaStr),
           td(row.partner)
         );
 
@@ -1317,9 +1376,13 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
     /**
      * Shared wrapper: effective recent Go Lives rows for HTML export.
+     * Phase 3i: delegates to CoreData.getRecentGoLives() (SOQL-backed).
+     * The legacy CoreData.getGoLives() call is no longer used here.
      */
     getEffectiveRecentGoLivesForExport_: function (config) {
-      var rows = CoreData.getGoLives(config) || [];
+      // Phase 3i: getRecentGoLives() does not set excludeFromReport; the
+      // filter is harmless and preserves forward compatibility.
+      var rows = CoreData.getRecentGoLives(config) || [];
       return rows.filter(function (row) {
         return !row.excludeFromReport;
       });

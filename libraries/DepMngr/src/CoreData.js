@@ -25,6 +25,20 @@
  *     Deployments tab can show the "Phased" pill.
  *   - Both functions degrade gracefully when the SFDC_DeploymentProductFunctions
  *     sheet is absent: enrichment map returns {}, fallback path runs unchanged.
+ *
+ * Phase 3i notes:
+ *   - readSfdcDeploymentsRaw_(cfg) — new internal function that reads the unified
+ *     SFDC_Deployments sheet (Active + Complete) using header-based column
+ *     detection. Returns all rows with a `status` field from Overall_Status__c.
+ *   - getAllDeployments() — now reads from SFDC_Deployments (via the new reader)
+ *     and filters to Active-only by default. Override/meta application is
+ *     preserved for Active rows. Behavior for existing callers is unchanged.
+ *   - getRecentGoLives(cfg, viewModeOpts) — NEW public function. Reads Complete
+ *     deployments from SFDC_Deployments, merges enrichment map recentDates, and
+ *     applies the recent-window filter. Supersedes the legacy getGoLives() for
+ *     the Recent Go Lives view in both the WebApp and the monthly report.
+ *   - getGoLives(cfg) — DEPRECATED in Phase 3i. Left in place; no callers remain
+ *     after this phase. Will be removed once the legacy Go Lives sheet is deleted.
  */
 
 var CoreData = (function () {
@@ -232,6 +246,142 @@ var CoreData = (function () {
       });
   }
 
+  // ===========================================================================
+  // PHASE 3i: SFDC_DEPLOYMENTS READER (Active + Complete unified source)
+  // ===========================================================================
+
+  /**
+   * Reads the unified SFDC_Deployments sheet using header-based column detection.
+   * Returns ALL rows (Active + Complete) with a `status` field. The caller
+   * is responsible for filtering to the desired status.
+   *
+   * Column detection uses case-insensitive keyword matching, mirroring the
+   * pattern from CoreSalesforce. Columns whose headers are not recognized
+   * are silently skipped; only critical fields (Id, status) log a warning.
+   *
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @return {Array<Object>}  Raw deployment rows; may be empty if sheet missing.
+   * @private
+   */
+  function readSfdcDeploymentsRaw_(cfg) {
+    var sheetName = cfg.sheets.deployments || 'SFDC_Deployments';
+    var ss = getSpreadsheet_();
+    var sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) {
+      Logger.log('CoreData.readSfdcDeploymentsRaw_: sheet "' + sheetName + '" not found.');
+      return [];
+    }
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return [];
+
+    var lastCol  = sheet.getLastColumn();
+    var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    var headers   = allValues[0].map(function (h) { return String(h || '').trim(); });
+    var lowerH    = headers.map(function (h) { return h.toLowerCase(); });
+
+    // -----------------------------------------------------------------------
+    // Column index detection — keyword-based, case-insensitive.
+    // For each field, we try multiple keyword patterns in priority order.
+    // -----------------------------------------------------------------------
+    function detect_(keywords, positionalFallback) {
+      for (var ki = 0; ki < keywords.length; ki++) {
+        var kw = keywords[ki].toLowerCase();
+        for (var i = 0; i < lowerH.length; i++) {
+          if (lowerH[i].indexOf(kw) !== -1) return i;
+        }
+      }
+      if (positionalFallback >= 0 && positionalFallback < headers.length) return positionalFallback;
+      return -1;
+    }
+
+    // Distinguish the bare 'id' column (deploymentId) from all others.
+    var colId = -1;
+    for (var i = 0; i < lowerH.length; i++) {
+      if (lowerH[i] === 'id') { colId = i; break; }
+    }
+    // Fall back: find last column whose lower header is exactly 'id' or ends with '.id'
+    if (colId < 0) {
+      for (var i = lowerH.length - 1; i >= 0; i--) {
+        if (lowerH[i] === 'id' || lowerH[i].match(/\.id$/)) { colId = i; break; }
+      }
+    }
+
+    var colAccountName    = detect_(['customer__r.name', 'customername'],          0);
+    var colIndustry       = detect_(['customer__r.industry', "customer__r.industry"], 1);
+    var colSubRegion      = detect_(['ps_sub_region', 'sub_region'],               2);
+    var colDepName        = detect_(['name'],                                       5); // 'Name' alone (deployment name)
+    var colPhase          = detect_(['deployment_phase'],                           6);
+    var colPartner        = detect_(['partner_name', 'deployment_partner'],         7);
+    var colStage          = detect_(['deployment_stage'],                           8);
+    var colHealth         = detect_(['overall_health'],                             9);
+    var colMtpDate        = detect_(['current_mtp_date'],                          10);
+    var colDam            = detect_(['delivery_assurance_manager', 'dam_full_name'], 11);
+    var colWdEm           = detect_(['engagement_manager'],                        12);
+    var colCurrentUpdate  = detect_(['deployment_summary'],                        13);
+    var colStatus         = detect_(['overall_status'],                            -1); // Phase 3i — new
+    var colFirstMtpActual = detect_(['first_move_to_production_date_actual', 'first_move_actual'], -1); // Phase 3i — new
+
+    // colDepName may have matched 'customer__r.name' — disambiguate: look for
+    // a header that is exactly (case-insensitively) 'name' with no dots.
+    var colDepNameExact = -1;
+    for (var i = 0; i < lowerH.length; i++) {
+      if (lowerH[i] === 'name') { colDepNameExact = i; break; }
+    }
+    if (colDepNameExact >= 0) colDepName = colDepNameExact;
+
+    if (colStatus < 0) {
+      Logger.log('CoreData.readSfdcDeploymentsRaw_: WARNING — Overall_Status__c column not ' +
+                 'found in "' + sheetName + '". Status-based filtering will not work.');
+    }
+    if (colId < 0) {
+      Logger.log('CoreData.readSfdcDeploymentsRaw_: WARNING — Id column not found in "' +
+                 sheetName + '". deploymentId will be empty for all rows.');
+    }
+
+    var tz = Session.getScriptTimeZone();
+
+    var rows = [];
+    for (var r = 1; r < allValues.length; r++) {
+      var row = allValues[r];
+
+      function cellStr_(col) { return col >= 0 ? String(row[col] || '').trim() : ''; }
+      function cellDate_(col) {
+        if (col < 0) return '';
+        var raw = row[col];
+        if (!raw) return '';
+        var d = (raw instanceof Date) ? raw : new Date(raw);
+        if (isNaN(d.getTime())) return '';
+        return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+      }
+
+      var deploymentId = cellStr_(colId);
+      if (!deploymentId) continue; // skip rows with no SF Id
+
+      rows.push({
+        deploymentId:       deploymentId,
+        accountName:        cellStr_(colAccountName),
+        deploymentName:     cellStr_(colDepName),
+        servicesApproach:   cellStr_(colPhase),
+        industry:           cellStr_(colIndustry),
+        subRegion:          cellStr_(colSubRegion),
+        partner:            cellStr_(colPartner),
+        stage:              cellStr_(colStage),
+        health:             cellStr_(colHealth),
+        mtpDate:            cellDate_(colMtpDate),
+        dam:                cellStr_(colDam),
+        wdEngManager:       cellStr_(colWdEm),
+        currentUpdate:      cellStr_(colCurrentUpdate),
+        status:             cellStr_(colStatus),
+        firstMtpDateActual: cellDate_(colFirstMtpActual)
+      });
+    }
+
+    Logger.log('CoreData.readSfdcDeploymentsRaw_: read ' + rows.length +
+               ' rows from "' + sheetName + '".');
+    return rows;
+  }
+
   /**
    * Apply viewMode personalization filtering to a row set.
    * @private
@@ -372,10 +522,56 @@ var CoreData = (function () {
    *
    * Phase 3a: Injects `isPhased` on each row using CoreSalesforce enrichment.
    * Rows not found in the enrichment map get isPhased = false.
+   *
+   * Phase 3i: Now reads from SFDC_Deployments (cfg.sheets.deployments) instead
+   * of ActiveDeployments, while preserving Active-only default behavior and
+   * full override/meta application. Falls back to ActiveDeployments if the
+   * new sheet is unavailable, so Phase 2 callers continue to work unchanged.
    */
   function getAllDeployments(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var allEffective = getAllEffectiveDeployments_(cfg);
+    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
+    var activeStatus = statusValues.active || 'Active';
+
+    // Phase 3i: prefer SFDC_Deployments; fall back to the legacy ActiveDeployments
+    // reader if the new sheet is not yet available.
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getAllDeployments: readSfdcDeploymentsRaw_ failed — ' +
+                 'falling back to ActiveDeployments. Error: ' + err);
+    }
+
+    var allEffective;
+    if (sfdcRows.length > 0) {
+      // Filter to Active-only (preserve backward-compat default).
+      var activeRaw = sfdcRows.filter(function (r) {
+        // Rows without a status field (e.g. column not found) are treated as Active.
+        return !r.status || r.status === activeStatus;
+      });
+
+      // Apply meta + overrides to each Active row.
+      var metaMap      = getDeploymentsMetaMap_(cfg);
+      var overridesMap = getDeploymentOverridesMap_(cfg);
+
+      allEffective = activeRaw.map(function (r, index) {
+        var meta = metaMap[r.deploymentId] || {};
+        var base = Object.assign({}, r, {
+          rowIndex:         index + 2, // approximate; used for edit modal key
+          deliveryDirector: meta.deliveryDirector || '',
+          ddNotes:          meta.ddNotes || '',
+          metaUsername:     meta.username || '',
+          metaTimestamp:    meta.timestamp || ''
+        });
+        return buildEffectiveDeploymentRow_(base, overridesMap);
+      }).filter(function (r) {
+        return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
+      });
+    } else {
+      // Fallback: use the existing ActiveDeployments reader.
+      allEffective = getAllEffectiveDeployments_(cfg);
+    }
 
     // Phase 3a: enrich with isPhased. Degrade gracefully when sheet is absent.
     var enrichmentMap = {};
@@ -389,7 +585,9 @@ var CoreData = (function () {
     var sorted = allEffective.map(function (row) {
       var enrichment = enrichmentMap[row.deploymentId];
       return Object.assign({}, row, {
-        isPhased: enrichment ? !!enrichment.isPhased : false
+        isPhased:       enrichment ? !!enrichment.isPhased : false,
+        upcomingDates:  enrichment ? (enrichment.upcomingDates || []) : [],
+        nextGoLiveDate: enrichment ? (enrichment.nextGoLiveDate || null) : null
       });
     }).sort(function (a, b) {
       var rank = { 'Red': 0, 'Yellow': 1, 'Green': 2 };
@@ -406,6 +604,10 @@ var CoreData = (function () {
   // PUBLIC: GO LIVES
   // ===========================================================================
 
+  // DEPRECATED in Phase 3i. Reads from the legacy 'Go Lives' sheet which is no
+  // longer being updated by the Salesforce Connector. Use getRecentGoLives()
+  // for all new callers. This function is kept in place until the Go Lives sheet
+  // is manually deleted by Jeff (post-validation per Phase 3i acceptance criteria).
   function getGoLives(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
@@ -668,6 +870,130 @@ var CoreData = (function () {
     Logger.log('CoreData.getUpcomingGoLives: ' + results.length + ' upcoming rows ' +
                '(pass1=' + Object.keys(seenDeploymentIds).length + ', ' +
                'pass2=' + (results.length - Object.keys(seenDeploymentIds).length) + ').');
+
+    return applyViewModeFilter_(cfg, results, viewModeOpts);
+  }
+
+  // ===========================================================================
+  // PHASE 3i: RECENT GO LIVES (SOQL-based, supersedes legacy getGoLives)
+  // ===========================================================================
+
+  /**
+   * Returns recent go-live rows for the configured window (default 60 days).
+   *
+   * Data source: SFDC_Deployments (Complete deployments only) joined with the
+   * CoreSalesforce enrichment map (recentDates from Actual move dates on
+   * SFDC_DeploymentProductFunctions).
+   *
+   * Fallback: if a Complete deployment has no product-function data, uses
+   * First_Move_to_Production_Date_Actual__c from SFDC_Deployments directly.
+   *
+   * GoLivesOverrides are NOT applied — Complete deployments are considered
+   * canonical Salesforce data. The Edit button in the WebApp remains for
+   * UI continuity but no longer affects what is displayed.
+   *
+   * Output row shape:
+   *   {
+   *     deploymentId, accountName, deploymentName, partner, industry,
+   *     status: 'Complete',
+   *     recentDates: [{ date: 'YYYY-MM-DD', products: [...] }, ...],
+   *     lastGoLiveDate: 'YYYY-MM-DD'
+   *   }
+   *
+   * @param {AppConfig} config
+   * @param {Object=}   viewModeOpts  Phase 2 viewMode options (same shape as getUpcomingGoLives).
+   * @return {Array<Object>}
+   */
+  function getRecentGoLives(config, viewModeOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
+    var completeStatus = statusValues.complete || 'Complete';
+
+    // Recent window: default 60 days (matches ui.goLivesTab.recentWindowDays).
+    var recentWindowDays = (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
+                           (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) ||
+                           60;
+
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var tz = Session.getScriptTimeZone();
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+
+    var windowStart = new Date(now.getTime() - recentWindowDays * 24 * 60 * 60 * 1000);
+    var windowStartKey = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
+
+    // Read all rows from SFDC_Deployments; filter to Complete.
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getRecentGoLives: readSfdcDeploymentsRaw_ failed — ' +
+                 'returning empty. Error: ' + err);
+      return [];
+    }
+
+    var completeRows = sfdcRows.filter(function (r) {
+      return r.status === completeStatus;
+    });
+
+    if (completeRows.length === 0) {
+      Logger.log('CoreData.getRecentGoLives: no Complete deployments found in ' +
+                 (cfg.sheets.deployments || 'SFDC_Deployments') + '.');
+      return [];
+    }
+
+    // Get CoreSalesforce enrichment map (includes recentDates from Actual dates).
+    var enrichmentMap = {};
+    try {
+      enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getRecentGoLives: CoreSalesforce enrichment failed — ' +
+                 'will use deployment-level fallback dates only. Error: ' + err);
+    }
+
+    var results = [];
+    completeRows.forEach(function (dep) {
+      var enrichment = enrichmentMap[dep.deploymentId];
+
+      var recentDates   = enrichment ? (enrichment.recentDates   || []) : [];
+      var lastGoLiveDate = enrichment ? (enrichment.lastGoLiveDate || null) : null;
+
+      // Fallback: if no product-function data, use First_Move_to_Production_Date_Actual__c.
+      if (!lastGoLiveDate && dep.firstMtpDateActual) {
+        var fallbackDate = dep.firstMtpDateActual;
+        if (fallbackDate < todayKey) {
+          recentDates   = [{ date: fallbackDate, products: [] }];
+          lastGoLiveDate = fallbackDate;
+        }
+      }
+
+      // Skip deployments with no usable recent date.
+      if (!lastGoLiveDate) return;
+
+      // Apply the recent-window filter.
+      if (lastGoLiveDate < windowStartKey) return;
+
+      results.push({
+        deploymentId:   dep.deploymentId,
+        accountName:    dep.accountName,
+        deploymentName: dep.deploymentName,
+        partner:        dep.partner,
+        industry:       dep.industry,
+        status:         dep.status,
+        recentDates:    recentDates,
+        lastGoLiveDate: lastGoLiveDate
+      });
+    });
+
+    // Sort ascending by lastGoLiveDate (oldest go-live at the top).
+    results.sort(function (a, b) {
+      if (a.lastGoLiveDate < b.lastGoLiveDate) return -1;
+      if (a.lastGoLiveDate > b.lastGoLiveDate) return  1;
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
+
+    Logger.log('CoreData.getRecentGoLives: ' + results.length +
+               ' complete deployments in window (last ' + recentWindowDays + ' days).');
 
     return applyViewModeFilter_(cfg, results, viewModeOpts);
   }
@@ -1328,6 +1654,9 @@ var CoreData = (function () {
     bulkClearAllOverrides:       bulkClearAllOverrides,
 
     // Phase 3f addition
-    getDeploymentAuditSummary:   getDeploymentAuditSummary
+    getDeploymentAuditSummary:   getDeploymentAuditSummary,
+
+    // Phase 3i additions
+    getRecentGoLives:            getRecentGoLives
   };
 })();

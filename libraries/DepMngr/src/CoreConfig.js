@@ -14,6 +14,8 @@
  *                  cfg.ui.personalization and cfg.ui.deploymentsTable.
  *   Phase 3a (v11): adds cfg.sheets.sfdcDeploymentProductFunctions and
  *                   cfg.salesforce block (upcomingWindowDays).
+ *   Phase 3i:       adds cfg.sheets.deployments (SFDC_Deployments unified source),
+ *                   cfg.salesforce.recentWindowDays, cfg.salesforce.statusValues.
  */
 
 /**
@@ -32,11 +34,14 @@
  * @property {string} appUsers                          Phase 2: "AppUsers"
  * @property {string} ddAssignment                      Phase 2: "DD Assignment"
  * @property {string} sfdcDeploymentProductFunctions    Phase 3a: "SFDC_DeploymentProductFunctions"
+ * @property {string} deployments                       Phase 3i: "SFDC_Deployments" (Active + Complete)
  */
 
 /**
- * @typedef {Object} SalesforceConfig  (Phase 3a)
+ * @typedef {Object} SalesforceConfig  (Phase 3a, extended in Phase 3i)
  * @property {number} upcomingWindowDays  Days ahead to consider for upcoming go-live dates.
+ * @property {number} recentWindowDays    Phase 3i: Days back to consider for recent go-live dates.
+ * @property {{ active: string, complete: string }} statusValues  Phase 3i: Overall_Status__c values.
  */
 
 // (Other typedefs unchanged from Phase 1 — kept inline below for completeness.)
@@ -212,13 +217,25 @@ var CoreConfig = (function () {
     // Phase 3a
     if (!cfg.sheets.sfdcDeploymentProductFunctions)
       cfg.sheets.sfdcDeploymentProductFunctions = 'SFDC_DeploymentProductFunctions';
+    // Phase 3i: unified deployment source (Active + Complete)
+    if (!cfg.sheets.deployments)
+      cfg.sheets.deployments = 'SFDC_Deployments';
 
     // -------------------------------------------------------------------------
-    // Salesforce (Phase 3a)
+    // Salesforce (Phase 3a, extended Phase 3i)
     // -------------------------------------------------------------------------
     cfg.salesforce = cfg.salesforce || {};
     if (cfg.salesforce.upcomingWindowDays === undefined || cfg.salesforce.upcomingWindowDays === null)
       cfg.salesforce.upcomingWindowDays = 90;
+    // Phase 3i additions
+    if (cfg.salesforce.recentWindowDays === undefined || cfg.salesforce.recentWindowDays === null)
+      cfg.salesforce.recentWindowDays = 60;
+    if (!cfg.salesforce.statusValues || typeof cfg.salesforce.statusValues !== 'object') {
+      cfg.salesforce.statusValues = { active: 'Active', complete: 'Complete' };
+    } else {
+      if (!cfg.salesforce.statusValues.active)   cfg.salesforce.statusValues.active   = 'Active';
+      if (!cfg.salesforce.statusValues.complete) cfg.salesforce.statusValues.complete = 'Complete';
+    }
 
     // -------------------------------------------------------------------------
     // Named ranges

@@ -139,14 +139,21 @@ var APP_CONFIG = {
 
     // Phase 2 canonical tab structure. Note: 'upcoming' tab removed (merged
     // into 'golives'); 'overrides' tab added at end.
+    // MGM/PGL tab added (feature/mgm-pgl).
     tabs: [
       { id: 'deployments', label: 'Deployments' },
       { id: 'golives',     label: 'Go Lives' },
+      { id: 'mgmPgl',      label: 'MGM / PGL' },
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
       { id: 'overrides',   label: 'Manage Overrides' }
     ],
+
+    // MGM / PGL tab configuration (feature/mgm-pgl).
+    mgmPglTab: {
+      enabled: true
+    },
 
     deploymentsTable: {
       showIndustry: false,
@@ -193,7 +200,7 @@ var APP_CONFIG = {
     personalization: {
       enabled: true,
       defaultViewMode: 'myPortfolio',
-      affectsTabs: ['deployments', 'golives', 'overrides'],
+      affectsTabs: ['deployments', 'golives', 'mgmPgl', 'overrides'],
       welcomeMessageEnabled: true,
       showFullPortfolioIndicator: true
     }

@@ -1394,7 +1394,7 @@ function api_getRefreshLog() {
 
 function api_getPipelineRefreshLog() {
   try {
-    const sh = SpreadsheetApp.getActive().getSheetByName('Auto Refresh Execution Log');
+    const sh = SpreadsheetApp.getActive().getSheetByName(SF_PIPELINE_REFRESH_LOG);
     if (!sh) return [];
     const values = sh.getDataRange().getValues();
     if (!values || values.length < 2) return [];

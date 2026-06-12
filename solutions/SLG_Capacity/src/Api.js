@@ -1010,6 +1010,22 @@ function api_getReportingSummary(params) {
 // ------------------------------------------------------------
 
 function api_getReference() {
+  // Per-user 60-second cache wrapper. api_getReference is hit on every
+  // page load and reads 5 sheets. Caching the response cuts dashboard
+  // load time. Cache is per-user so different users see their own
+  // resolved identity in the response. Cache invalidates automatically
+  // via TTL; for forced refresh, call api_flushCaches.
+  const cache = CacheService.getUserCache();
+  const cacheKey = 'api_getReference_v1';
+  try {
+    const hit = cache.get(cacheKey);
+    if (hit) {
+      return JSON.parse(hit);
+    }
+  } catch (e) {
+    // Fall through to fresh computation on any cache read error.
+  }
+
   const alloc = readTable_(ALLOC_NORM);
   const excluded = readExclusions_ ? readExclusions_() : new Set();
   const resIndex = _resourceIndex_(alloc);
@@ -1107,7 +1123,7 @@ function api_getReference() {
   // Priority 4: resource_type options for the Assign drawer's Role dropdown.
   const resourceTypeOptions = _readResourceTypeOptions_();
 
-  return {
+  const response = {
     user: userResolution.email,
     matchedManager: userResolution.matchedManager,
     recognized: !!userResolution.recognized,
@@ -1121,8 +1137,24 @@ function api_getReference() {
     subteams: Object.keys(subteams).sort(),
     icp: icp,
     roles: roles,
-    planningWindowMonths: planningWindowMonths
+    planningWindowMonths: planningWindowMonths,
+    defaultTeamFilter: (function () {
+      try {
+        const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+        return String(settings['default_team_filter'] || '').trim();
+      } catch (e) {
+        return '';
+      }
+    })()
   };
+
+  try {
+    cache.put(cacheKey, JSON.stringify(response), 60);
+  } catch (e) {
+    // Payload may exceed 100KB. Skip caching; correctness preserved.
+  }
+
+  return response;
 }
 
 // ------------------------------------------------------------

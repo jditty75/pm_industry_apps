@@ -193,6 +193,11 @@ function invalidateAllCaches_() {
   try {
     CacheService.getScriptCache().removeAll(keys.map(k => 'tbl:' + k));
   } catch (e) { /* ignore */ }
+
+  // Clear per-user API caches (Phase 3).
+  try {
+    CacheService.getUserCache().remove('api_getReference_v1');
+  } catch (e) { /* ignore */ }
 }
 
 // ============================================================

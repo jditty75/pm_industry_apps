@@ -130,6 +130,21 @@ function getUpcomingGoLivesData(viewModeOpts) {
 }
 
 // ============================================================================
+// MGM / PGL — UPCOMING SURVEYS
+// ============================================================================
+
+/**
+ * Returns upcoming MGM and PGL surveys (next 30 days) for Active deployments,
+ * respecting viewMode (My Portfolio / All).
+ *
+ * @param {Object=} viewModeOpts  { viewMode:'my'|'all', ddDisplayName:string }
+ * @return {{ windowDays:number, today:string, rows:Array, exceptions:Array }}
+ */
+function getUpcomingSurveysData(viewModeOpts) {
+  return CoreLib.CoreData.getUpcomingSurveys(APP_CONFIG, viewModeOpts || {});
+}
+
+// ============================================================================
 // PHASE 1 — EXECUTIVE SUMMARY (unchanged)
 // ============================================================================
 

@@ -35,6 +35,7 @@
  * @property {string} ddAssignment                      Phase 2: "DD Assignment"
  * @property {string} sfdcDeploymentProductFunctions    Phase 3a: "SFDC_DeploymentProductFunctions"
  * @property {string} deployments                       Phase 3i: "SFDC_Deployments" (Active + Complete)
+ * @property {string} deploymentContacts                MGM/PGL patch: "SFDC_DeploymentContacts"
  */
 
 /**
@@ -220,6 +221,9 @@ var CoreConfig = (function () {
     // Phase 3i: unified deployment source (Active + Complete)
     if (!cfg.sheets.deployments)
       cfg.sheets.deployments = 'SFDC_Deployments';
+    // MGM/PGL patch: contacts sheet
+    if (!cfg.sheets.deploymentContacts)
+      cfg.sheets.deploymentContacts = 'SFDC_DeploymentContacts';
 
     // -------------------------------------------------------------------------
     // Salesforce (Phase 3a, extended Phase 3i)

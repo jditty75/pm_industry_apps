@@ -24,6 +24,11 @@ const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager own
 const CFG_WORKER_ROLE_OVERRIDES = 'Config_Worker_Role_Overrides'; // per-worker ICP role override (applied at ingest time)
 
 const REFRESH_LOG       = 'Normalization_Log';
+// Salesforce connector-owned pipeline refresh log.
+// The Salesforce add-on inside Google Sheets manages this tab name and
+// will rename it back if changed externally. Update this constant only
+// if the Salesforce connector itself changes its naming convention.
+const SF_PIPELINE_REFRESH_LOG = 'Auto Refresh Execution Log 1';
 
 // --- Table headers ---
 

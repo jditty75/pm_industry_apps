@@ -557,7 +557,16 @@
     sel.innerHTML = `<option value="">All teams</option>` + opts;
     sel.value = State.filters.teamLabel || '';
 
+    // Phase 6: default to ref.defaultTeamFilter on first load only.
+    // Reads once; subsequent manual changes are preserved via userTouched.
+    if (State.ref && State.ref.defaultTeamFilter &&
+        !sel.dataset.userTouched && !State.filters.teamLabel) {
+      sel.value = State.ref.defaultTeamFilter;
+      State.filters.teamLabel = State.ref.defaultTeamFilter;
+    }
+
     sel.addEventListener('change', () => {
+      sel.dataset.userTouched = '1';
       const val = sel.value;
       State.filters.teamLabel = val || null;
       onAppliedFiltersChanged_();

@@ -193,7 +193,6 @@ function applyIngestFilters_(values) {
       const rules  = groups[gName];
 
       let includeHit    = null; // null = no include rules; true/false = OR over includes
-      let groupExcluded = false;
 
       for (let i = 0; i < rules.length; i++) {
         const rule   = rules[i];
@@ -219,17 +218,20 @@ function applyIngestFilters_(values) {
         }
 
         if (rule.mode === 'include') {
-          // OR across includes within this group
+          // OR-semantics across include rules within a group: any include
+          // hit means the include constraint passes. We still must finish
+          // checking remaining rules in case one is an exclude.
           includeHit = (includeHit === null) ? hit : (includeHit || hit);
         } else if (rule.mode === 'exclude') {
+          // Exclude rules short-circuit the entire group: any exclude
+          // hit means the group fails immediately. No need to evaluate
+          // remaining rules in this group.
           if (hit) {
-            groupExcluded = true;
-            break;
+            return false;
           }
         }
       }
 
-      if (groupExcluded) return false;
       // If group has include rules (includeHit !== null), at least one must hit
       if (includeHit === false) return false;
       // If no include rules in this group (includeHit === null), the group passes by default

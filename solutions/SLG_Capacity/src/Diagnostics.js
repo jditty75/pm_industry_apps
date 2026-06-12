@@ -863,3 +863,16 @@ function debugPhilDessaignePostNormalize() {
     Logger.log('Phil resource_type (first row): ' + phil[0].resource_type);
   }
 }
+
+function _test_phase4_chunked_cache() {
+  api_flushCaches();
+  const t0 = new Date().getTime();
+  const r1 = api_getDashboard({ viewMode: 'Committed', groupBy: 'Function', workerScope: 'SLG' });
+  const t1 = new Date().getTime();
+  const r2 = api_getDashboard({ viewMode: 'Committed', groupBy: 'Function', workerScope: 'SLG' });
+  const t2 = new Date().getTime();
+  Logger.log('Cold call: ' + (t1 - t0) + 'ms');
+  Logger.log('Warm call: ' + (t2 - t1) + 'ms');
+  Logger.log('Both returned data: ' + (!!r1 && !!r2));
+  Logger.log('Same kpi headcount: ' + (r1.kpis.headcount === r2.kpis.headcount));
+}

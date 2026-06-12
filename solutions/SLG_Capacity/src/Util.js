@@ -147,32 +147,87 @@ function logRefresh_(source, rowsIn, rowsOut, monthsDetected) {
 
 const _memCache = {};
 
+// Per-key cache size limit in CacheService is 100KB; we use 95KB to be safe.
+const _CACHE_CHUNK_BYTES = 95000;
+
+/**
+ * Read a table with two-tier caching: in-memory (per execution) +
+ * CacheService (6h). Large payloads are transparently split across
+ * multiple cache keys: 'tbl:<name>:meta' holds the chunk count,
+ * 'tbl:<name>:0', 'tbl:<name>:1', ... hold the payload chunks.
+ *
+ * On read, the meta key tells us how many chunks to fetch; missing
+ * any chunk falls through to a fresh sheet read.
+ */
 function cachedRead_(name, ttlSeconds) {
   if (_memCache[name]) return _memCache[name];
   const cache = CacheService.getScriptCache();
-  const hit = cache.get('tbl:' + name);
-  if (hit) {
+  const ttl = ttlSeconds || 21600;
+
+  // Try chunked read.
+  const meta = cache.get('tbl:' + name + ':meta');
+  if (meta) {
     try {
-      const parsed = JSON.parse(hit);
-      _memCache[name] = parsed;
-      return parsed;
+      const chunkCount = Number(meta);
+      if (chunkCount > 0) {
+        const keys = [];
+        for (let i = 0; i < chunkCount; i++) {
+          keys.push('tbl:' + name + ':' + i);
+        }
+        const all = cache.getAll(keys);
+        let combined = '';
+        let ok = true;
+        for (let i = 0; i < chunkCount; i++) {
+          const part = all['tbl:' + name + ':' + i];
+          if (part === null || part === undefined) { ok = false; break; }
+          combined += part;
+        }
+        if (ok) {
+          const parsed = JSON.parse(combined);
+          _memCache[name] = parsed;
+          return parsed;
+        }
+      }
     } catch (e) { /* fall through to fresh read */ }
   }
+
+  // Fresh read.
   const rows = readTable_(name);
   _memCache[name] = rows;
+
+  // Write chunked cache.
   try {
     const payload = JSON.stringify(rows);
-    // CacheService has a 100KB per-key limit; only cache if it fits
-    if (payload.length < 95000) {
-      cache.put('tbl:' + name, payload, ttlSeconds || 21600);
+    const chunkCount = Math.ceil(payload.length / _CACHE_CHUNK_BYTES);
+    if (chunkCount > 0 && chunkCount <= 50) {
+      // Hard cap at 50 chunks (~4.75MB) to avoid runaway.
+      const writes = {};
+      for (let i = 0; i < chunkCount; i++) {
+        const start = i * _CACHE_CHUNK_BYTES;
+        writes['tbl:' + name + ':' + i] = payload.slice(start, start + _CACHE_CHUNK_BYTES);
+      }
+      writes['tbl:' + name + ':meta'] = String(chunkCount);
+      cache.putAll(writes, ttl);
     }
   } catch (e) { /* ignore write failures */ }
+
   return rows;
 }
 
 function invalidateCache_(name) {
   delete _memCache[name];
-  try { CacheService.getScriptCache().remove('tbl:' + name); } catch (e) {}
+  try {
+    const cache = CacheService.getScriptCache();
+    const meta = cache.get('tbl:' + name + ':meta');
+    const keys = ['tbl:' + name, 'tbl:' + name + ':meta'];
+    if (meta) {
+      const chunkCount = Number(meta);
+      for (let i = 0; i < chunkCount; i++) {
+        keys.push('tbl:' + name + ':' + i);
+      }
+    }
+    cache.removeAll(keys);
+  } catch (e) {}
 }
 
 function invalidateAllCaches_() {
@@ -190,9 +245,7 @@ function invalidateAllCaches_() {
     'Config_Resource_Type', 'Config_ResourceType_Map',
     'Config_Ingest_Filters'
   ];
-  try {
-    CacheService.getScriptCache().removeAll(keys.map(k => 'tbl:' + k));
-  } catch (e) { /* ignore */ }
+  keys.forEach(function (k) { invalidateCache_(k); });
 
   // Clear per-user API caches (Phase 3).
   try {

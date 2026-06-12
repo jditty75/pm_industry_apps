@@ -17,6 +17,28 @@
 
 
 // ============================================================
+// Admin guard — all _dbg_ functions call this first.
+// ============================================================
+
+/**
+ * Throws if the calling user is not the spreadsheet owner.
+ * Diagnostics are restricted to admins (the script owner) to prevent
+ * accidental invocation via google.script.run.
+ */
+function _dbg_requireAdmin_() {
+  try {
+    const owner = SpreadsheetApp.getActive().getOwner();
+    const ownerEmail = owner ? owner.getEmail() : '';
+    const userEmail = Session.getActiveUser().getEmail();
+    if (!ownerEmail || !userEmail || ownerEmail !== userEmail) {
+      throw new Error('Diagnostics restricted to spreadsheet owner.');
+    }
+  } catch (e) {
+    throw new Error('Diagnostics access denied: ' + e.message);
+  }
+}
+
+// ============================================================
 // 1. CONFIG & DATA HYGIENE
 // ============================================================
 
@@ -24,7 +46,8 @@
  * Dump the full Config_Resource_Type map (resource_type → team_label).
  * Run when you want to verify the mapping is being read correctly.
  */
-function debugConfigResourceType() {
+function _dbg_debugConfigResourceType() {
+  _dbg_requireAdmin_();
   const m = readConfigResourceType_();
   Logger.log('Config_Resource_Type entries: ' + Object.keys(m).length);
   Logger.log(JSON.stringify(m, null, 2));
@@ -35,7 +58,8 @@ function debugConfigResourceType() {
  * show the top role_category | resource_type signatures that are
  * missing from Config_Resource_Type. Use to drive sheet edits.
  */
-function debugWhyUnclassified() {
+function _dbg_debugWhyUnclassified() {
+  _dbg_requireAdmin_();
   const rtMap = readConfigResourceType_();
   Logger.log('Config_Resource_Type key count: ' + Object.keys(rtMap).length);
   const rows = readTable_(ALLOC_NORM);
@@ -74,7 +98,8 @@ function debugWhyUnclassified() {
  * Output: per-worker line with name, ICP_role (if any), worker_class,
  * manager_org, and total hours in the current planning window.
  */
-function debugUnclassifiedSlgWorkers() {
+function _dbg_debugUnclassifiedSlgWorkers() {
+  _dbg_requireAdmin_();
   const windowMonths = (typeof readPlanningWindowMonths_ === 'function')
     ? readPlanningWindowMonths_()
     : 6;
@@ -230,7 +255,8 @@ function debugUnclassifiedSlgWorkers() {
  * Run from the Apps Script editor function dropdown after each PSA
  * upload to surface new candidates as the org evolves.
  */
-function debugSlgWorkerTeamMismatches() {
+function _dbg_debugSlgWorkerTeamMismatches() {
+  _dbg_requireAdmin_();
   Logger.log('--- debugSlgWorkerTeamMismatches ---');
 
   const rows = readTable_(ALLOC_NORM);
@@ -430,7 +456,8 @@ function debugSlgWorkerTeamMismatches() {
  * you can see how much External work is being attributed via
  * practice ownership under any given filter combination.
  */
-function debugReportingSummaryReconciliation() {
+function _dbg_debugReportingSummaryReconciliation() {
+  _dbg_requireAdmin_();
   const r = api_getReportingSummary({
     workerScope: 'All',
     viewMode:    'Committed'
@@ -455,7 +482,8 @@ function debugReportingSummaryReconciliation() {
  * Config_Roles, Config_Settings.planning_window_months, or any
  * other input that should affect the KPI.
  */
-function sanityCheckHeadcountByTeam() {
+function _dbg_sanityCheckHeadcountByTeam() {
+  _dbg_requireAdmin_();
   const d = api_getDashboard({
     viewMode:          'Committed',
     groupBy:           'Function',
@@ -483,7 +511,8 @@ function sanityCheckHeadcountByTeam() {
  * place that should respect it: Engine, Api, and api_getReference.
  * Useful after changing Config_Settings.planning_window_months.
  */
-function sanityCheckPlanningWindow() {
+function _dbg_sanityCheckPlanningWindow() {
+  _dbg_requireAdmin_();
   Logger.log('readPlanningWindowMonths_(): ' + readPlanningWindowMonths_());
 
   const ref = api_getReference();
@@ -524,7 +553,8 @@ function sanityCheckPlanningWindow() {
  * shows up on the Headcount Gap card to see exactly which workers and
  * months are driving it.
  */
-function debugRoleHeadcount(roleKey, paramsOverride) {
+function _dbg_debugRoleHeadcount(roleKey, paramsOverride) {
+  _dbg_requireAdmin_();
   roleKey = roleKey || 'EM';
   const params = Object.assign({
     viewMode:          'Committed',
@@ -718,14 +748,16 @@ function debugRoleHeadcount(roleKey, paramsOverride) {
   Logger.log('  Suggested heads (avg):  ' + Math.ceil(Math.max(0, avgUsed - avgCap)));
 }
 
-function debugSlgManagersWithEmail() {
+function _dbg_debugSlgManagersWithEmail() {
+  _dbg_requireAdmin_();
   const rows = readConfigSlgManagers_();
   Logger.log('count: ' + rows.length);
   rows.slice(0, 5).forEach(r => Logger.log(JSON.stringify(r)));
   Logger.log('rows with email: ' + rows.filter(r => r.email).length);
 }
 
-function debugUserResolutionAs(emailOverride) {
+function _dbg_debugUserResolutionAs(emailOverride) {
+  _dbg_requireAdmin_();
   // Mimic _resolveLoggedInUser_ but with an injected email so we don't
   // have to fake Session.getActiveUser().
   var emailLc = String(emailOverride || '').trim().toLowerCase();
@@ -739,12 +771,14 @@ function debugUserResolutionAs(emailOverride) {
   Logger.log('no manager match for ' + emailLc);
 }
 
-function debugUserResolution() {
+function _dbg_debugUserResolution() {
+  _dbg_requireAdmin_();
   const r = _resolveLoggedInUser_();
   Logger.log(JSON.stringify(r, null, 2));
 }
 
-function debugTeamResolveForBucket() {
+function _dbg_debugTeamResolveForBucket() {
+  _dbg_requireAdmin_();
   var rtTeamMap = _readResourceTypeTeamMap_();
   Logger.log('rtTeamMap keys: ' + Object.keys(rtTeamMap).length);
   Logger.log('rtTeamMap sample: ' + JSON.stringify(rtTeamMap).slice(0, 400));
@@ -768,7 +802,8 @@ function debugTeamResolveForBucket() {
   });
 }
 
-function debugP4AssignmentEnrichment() {
+function _dbg_debugP4AssignmentEnrichment() {
+  _dbg_requireAdmin_();
   // Simulate what saveAssignment_ would do for the enrichment portion only.
   // Does NOT call appendRow_ or updateRow_ — read-only.
   function dryEnrich_(resourceType) {
@@ -803,7 +838,8 @@ function debugP4AssignmentEnrichment() {
   });
 }
 
-function debugFunctionalKeyPresence() {
+function _dbg_debugFunctionalKeyPresence() {
+  _dbg_requireAdmin_();
   var rtMap = readConfigResourceType_();
   var optsList = _readResourceTypeOptions_();
 
@@ -829,7 +865,8 @@ function debugFunctionalKeyPresence() {
   });
 }
 
-function debugListScenarios() {
+function _dbg_debugListScenarios() {
+  _dbg_requireAdmin_();
   try {
     const result = api_listScenarios();
     Logger.log('type: ' + typeof result);
@@ -840,19 +877,22 @@ function debugListScenarios() {
   }
 }
 
-function debugCfgWorkerRoleOverridesConstant() {
+function _dbg_debugCfgWorkerRoleOverridesConstant() {
+  _dbg_requireAdmin_();
   Logger.log('CFG_WORKER_ROLE_OVERRIDES = "' + CFG_WORKER_ROLE_OVERRIDES + '"');
   Logger.log('Sheet exists: ' +
     (SpreadsheetApp.getActive().getSheetByName(CFG_WORKER_ROLE_OVERRIDES) !== null));
 }
 
-function debugWorkerRoleOverridesReader() {
+function _dbg_debugWorkerRoleOverridesReader() {
+  _dbg_requireAdmin_();
   var overrides = readWorkerRoleOverrides_();
   Logger.log('Override count: ' + Object.keys(overrides).length);
   Logger.log('Overrides: ' + JSON.stringify(overrides));
 }
 
-function debugPhilDessaignePostNormalize() {
+function _dbg_debugPhilDessaignePostNormalize() {
+  _dbg_requireAdmin_();
   var alloc = readTable_(ALLOC_NORM);
   var phil = alloc.filter(function (r) { return r.resource_name === 'Phil Dessaigne'; });
   Logger.log('Phil row count in Allocations: ' + phil.length);
@@ -864,7 +904,123 @@ function debugPhilDessaignePostNormalize() {
   }
 }
 
+function _dbg_debugCompareResourceDetailPaths() {
+  _dbg_requireAdmin_();
+  api_flushCaches();
+
+  const resource = 'Banjo Simbahan';
+  const viewMode = 'Scenario';
+  const scenarioId = '7e65c3d2-29f8-4103-b9af-843c8bc7f16f';
+
+  Logger.log('=== Path A: api_getResourceDetail ===');
+  const detailA = api_getResourceDetail({
+    resource: resource,
+    viewMode: viewMode,
+    scenarioId: scenarioId
+  });
+  detailA.forEach(m => {
+    Logger.log('  ' + m.monthKey + ': billable=' + m.billable + ', scenario=' + m.scenario);
+  });
+
+  Logger.log('=== Path B: computeResourceDetail (direct) ===');
+  const detailB = computeResourceDetail({
+    resource: resource,
+    viewMode: viewMode,
+    scenarioId: scenarioId
+  });
+  detailB.forEach(m => {
+    Logger.log('  ' + m.monthKey + ': billable=' + m.billable + ', scenario=' + m.scenario);
+  });
+
+  Logger.log('=== Comparison ===');
+  Logger.log('Path A months: ' + detailA.length);
+  Logger.log('Path B months: ' + detailB.length);
+  for (let i = 0; i < Math.max(detailA.length, detailB.length); i++) {
+    const a = detailA[i] || {};
+    const b = detailB[i] || {};
+    Logger.log(
+      '  [' + i + '] ' +
+      'A: ' + a.monthKey + ' s=' + a.scenario + ' | ' +
+      'B: ' + b.monthKey + ' s=' + b.scenario +
+      (a.scenario !== b.scenario ? ' ← MISMATCH' : '')
+    );
+  }
+}
+
+function _dbg_debugApiGetReferenceP3() {
+  _dbg_requireAdmin_();
+  var ref = api_getReference();
+
+  var resources = ref.resources || [];
+  var teamCounts = {};
+  resources.forEach(function (r) {
+    var t = r.resolvedTeam || '(missing)';
+    teamCounts[t] = (teamCounts[t] || 0) + 1;
+  });
+  Logger.log('resource count: ' + resources.length);
+  Logger.log('resolvedTeam distribution: ' + JSON.stringify(teamCounts));
+
+  Logger.log('sample resources:');
+  resources.slice(0, 5).forEach(function (r) {
+    Logger.log('  ' + r.name + ' | wc=' + r.worker_class +
+               ' | mgr=' + r.manager_org + ' | icp=' + r.icp +
+               ' | team=' + r.resolvedTeam);
+  });
+
+  var aidan = resources.find(function (r) { return r.name === 'Aidan Votaw'; });
+  if (aidan) {
+    Logger.log('Aidan Votaw: wc=' + aidan.worker_class +
+               ' | icp=' + aidan.icp +
+               ' | team=' + aidan.resolvedTeam);
+  } else {
+    Logger.log('Aidan Votaw not found in resources list');
+  }
+
+  var md = ref.managerDescendants || {};
+  var mdKeys = Object.keys(md);
+  Logger.log('managerDescendants key count: ' + mdKeys.length);
+  mdKeys.slice(0, 5).forEach(function (k) {
+    Logger.log('  "' + k + '" -> ' + JSON.stringify(md[k]));
+  });
+}
+
+function _dbg_debugSlgVsExternalClassification() {
+  _dbg_requireAdmin_();
+  var ref = api_getReference();
+  var resources = ref.resources || [];
+  var slgResources = resources.filter(function (r) {
+    return r.worker_class === 'SLG_Real' || r.worker_class === 'SLG_Generic';
+  });
+  Logger.log('SLG resource count: ' + slgResources.length);
+
+  var roleTeamLabels = readRoleTeamLabels_();
+  var rtMap = readConfigResourceType_();
+
+  var divergences = 0;
+  slgResources.forEach(function (r) {
+    var slgPath = roleTeamLabels[r.icp || ''] || 'Unclassified';
+    var externalPath = _classifyTeam_({
+      role_category: r.role_category || '',
+      job_profile: r.job_profile || '',
+      project_role: '',
+      resource_type: r.resource_type || ''
+    }, rtMap);
+    if (slgPath !== externalPath) {
+      divergences++;
+      if (divergences <= 10) {
+        Logger.log('  ' + r.name + ' | icp=' + r.icp +
+                   ' | rt=' + r.resource_type +
+                   ' | SLG path=' + slgPath +
+                   ' | External path=' + externalPath +
+                   ' | actual resolvedTeam=' + r.resolvedTeam);
+      }
+    }
+  });
+  Logger.log('Total divergences: ' + divergences);
+}
+
 function _test_phase4_chunked_cache() {
+  _dbg_requireAdmin_();
   api_flushCaches();
   const t0 = new Date().getTime();
   const r1 = api_getDashboard({ viewMode: 'Committed', groupBy: 'Function', workerScope: 'SLG' });

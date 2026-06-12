@@ -1984,270 +1984,283 @@ var CoreData = (function () {
    * @return {{ windowDays:number, today:string, startDate:string, endDate:string, rows:Array, exceptions:Array }}
    */
   function getUpcomingSurveys(config, viewModeOpts) {
-    var cfg = CoreConfig.withDefaults(config);
-    var tz  = Session.getScriptTimeZone();
-    var now = new Date();
-    now.setHours(0, 0, 0, 0);
-    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  var cfg = CoreConfig.withDefaults(config);
+  var tz  = Session.getScriptTimeZone();
+  var now = new Date();
+  now.setHours(0, 0, 0, 0);
+  var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
 
-    // -----------------------------------------------------------------------
-    // TIME WINDOW
-    // -----------------------------------------------------------------------
-    var windowKey   = (viewModeOpts && viewModeOpts.window) || 'next30';
-    var winResolved = resolveMgmPglWindow_(windowKey);
-    var windowStartKey = winResolved.startDate;
-    var windowEndKey   = winResolved.endDate;
-    var windowDays     = winResolved.windowDays;
+  // -----------------------------------------------------------------------
+  // TIME WINDOW
+  // -----------------------------------------------------------------------
+  var windowKey   = (viewModeOpts && viewModeOpts.window) || 'next30';
+  var winResolved = resolveMgmPglWindow_(windowKey);
+  var windowStartKey = winResolved.startDate;
+  var windowEndKey   = winResolved.endDate;
+  var windowDays     = winResolved.windowDays;
 
-    // -----------------------------------------------------------------------
-    // TIME HELPERS
-    // -----------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // TIME HELPERS
+  // -----------------------------------------------------------------------
 
-    /** Whole days between two 'YYYY-MM-DD' strings (non-negative). */
-    function daysBetween_(d1, d2) {
-      var t1 = new Date(d1).getTime();
-      var t2 = new Date(d2).getTime();
-      return Math.max(0, Math.round(Math.abs(t2 - t1) / 86400000));
+  /** Whole days between two 'YYYY-MM-DD' strings (non-negative). */
+  function daysBetween_(d1, d2) {
+    var t1 = new Date(d1).getTime();
+    var t2 = new Date(d2).getTime();
+    return Math.max(0, Math.round(Math.abs(t2 - t1) / 86400000));
+  }
+
+  /** Add n calendar months to 'YYYY-MM-DD'. Returns 'YYYY-MM-DD' or null. */
+  function addMonths_(dateStr, n) {
+    if (!dateStr) return null;
+    var d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    var result = new Date(d);
+    result.setMonth(result.getMonth() + n);
+    return Utilities.formatDate(result, tz, 'yyyy-MM-dd');
+  }
+
+  /** Add n whole days to 'YYYY-MM-DD'. Returns 'YYYY-MM-DD'. */
+  function addDays_(dateStr, n) {
+    var d = new Date(dateStr);
+    return Utilities.formatDate(new Date(d.getTime() + n * 86400000), tz, 'yyyy-MM-dd');
+  }
+
+  /** True if dateStr falls in [windowStart, windowEnd]. */
+  function inWindow_(dateStr) {
+    return dateStr >= windowStartKey && dateStr <= windowEndKey;
+  }
+
+  /** Days from today to dateStr (>=0). */
+  function daysUntil_(dateStr) {
+    return Math.max(0, Math.round((new Date(dateStr).getTime() - now.getTime()) / 86400000));
+  }
+
+  // -----------------------------------------------------------------------
+  // DATA LOAD
+  // -----------------------------------------------------------------------
+
+  // Active deployments (already viewMode-filtered).
+  var activeDeployments = getAllDeployments(config, viewModeOpts);
+
+  // Build lookup: deploymentId -> raw SFDC row (for deploymentStart + firstMtpDateActual).
+  var startDateMap      = {};
+  var firstMtpActualMap = {};
+  try {
+    var rawRows = readSfdcDeploymentsRaw_(cfg);
+    rawRows.forEach(function (r) {
+      if (r.deploymentStart)    startDateMap[r.deploymentId]      = r.deploymentStart;
+      if (r.firstMtpDateActual) firstMtpActualMap[r.deploymentId] = r.firstMtpDateActual;
+    });
+  } catch (e) {
+    Logger.log('CoreData.getUpcomingSurveys: readSfdcDeploymentsRaw_ failed: ' + e);
+  }
+
+  // Product-function rows grouped by deploymentId.
+  var productsByDeployment = {};
+  try {
+    var pfRows = readSfdcProductFunctionsRaw_(cfg);
+    pfRows.forEach(function (pf) {
+      if (!pf.deploymentFk) return;
+      if (!productsByDeployment[pf.deploymentFk]) {
+        productsByDeployment[pf.deploymentFk] = [];
+      }
+      productsByDeployment[pf.deploymentFk].push(pf);
+    });
+  } catch (e) {
+    Logger.log('CoreData.getUpcomingSurveys: readSfdcProductFunctionsRaw_ failed: ' + e);
+  }
+
+  // Contacts map (gracefully empty if sheet missing).
+  var contactsMap = {};
+  try {
+    contactsMap = getDeploymentContactsMap_(cfg);
+  } catch (e) {
+    Logger.log('CoreData.getUpcomingSurveys: getDeploymentContactsMap_ failed: ' + e);
+  }
+
+  // -----------------------------------------------------------------------
+  // SURVEY CALCULATION
+  // -----------------------------------------------------------------------
+
+  var surveyRows    = [];
+  var exceptionRows = [];
+  var exceptionSeen = {};
+
+  activeDeployments.forEach(function (dep) {
+    var depId           = dep.deploymentId;
+    var depStart        = startDateMap[depId]      || '';
+    var depTargetEnd    = dep.mtpDate              || '';
+    var depActualGoLive = firstMtpActualMap[depId] || '';
+    var products        = productsByDeployment[depId] || [];
+    var contacts        = contactsMap[depId] || null;
+
+    // -------------------------------------------------------------------
+    // NEW FILTER: Only include deployments where Deployment_Partner_Name__c
+    //            is 'Workday Professional Services'.
+    //
+    // NOTE: This assumes CoreData.getAllDeployments mapped
+    //       Deployment_Partner_Name__c to dep.partner.
+    //       If it's mapped under a different property (e.g. dep.deploymentPartnerName),
+    //       replace dep.partner accordingly.
+    // -------------------------------------------------------------------
+    if (dep.partner !== 'Workday Professional Services') {
+      return;
     }
 
-    /** Add n calendar months to 'YYYY-MM-DD'. Returns 'YYYY-MM-DD' or null. */
-    function addMonths_(dateStr, n) {
-      if (!dateStr) return null;
-      var d = new Date(dateStr);
-      if (isNaN(d.getTime())) return null;
-      var result = new Date(d);
-      result.setMonth(result.getMonth() + n);
-      return Utilities.formatDate(result, tz, 'yyyy-MM-dd');
-    }
-
-    /** Add n whole days to 'YYYY-MM-DD'. Returns 'YYYY-MM-DD'. */
-    function addDays_(dateStr, n) {
-      var d = new Date(dateStr);
-      return Utilities.formatDate(new Date(d.getTime() + n * 86400000), tz, 'yyyy-MM-dd');
-    }
-
-    /** True if dateStr falls in [windowStart, windowEnd]. */
-    function inWindow_(dateStr) {
-      return dateStr >= windowStartKey && dateStr <= windowEndKey;
-    }
-
-    /** Days from today to dateStr (>=0). */
-    function daysUntil_(dateStr) {
-      return Math.max(0, Math.round((new Date(dateStr).getTime() - now.getTime()) / 86400000));
-    }
-
-    // -----------------------------------------------------------------------
-    // DATA LOAD
-    // -----------------------------------------------------------------------
-
-    // Active deployments (already viewMode-filtered).
-    var activeDeployments = getAllDeployments(config, viewModeOpts);
-
-    // Build lookup: deploymentId -> raw SFDC row (for deploymentStart + firstMtpDateActual).
-    var startDateMap      = {};
-    var firstMtpActualMap = {};
-    try {
-      var rawRows = readSfdcDeploymentsRaw_(cfg);
-      rawRows.forEach(function (r) {
-        if (r.deploymentStart)    startDateMap[r.deploymentId]      = r.deploymentStart;
-        if (r.firstMtpDateActual) firstMtpActualMap[r.deploymentId] = r.firstMtpDateActual;
+    /** Push a survey row. */
+    function pushSurvey_(surveyType, status, scheduledDate, productLabel) {
+      surveyRows.push({
+        surveyType:               surveyType,
+        status:                   status,
+        deploymentId:             depId,
+        accountName:              dep.accountName,
+        deploymentName:           dep.deploymentName,
+        productLabel:             productLabel,
+        scheduledDate:            scheduledDate,
+        daysUntil:                daysUntil_(scheduledDate),
+        deploymentStartDate:      depStart     || null,
+        deploymentTargetEndDate:  depTargetEnd || null,
+        projectManagerContacts:   contacts ? contacts.projectManagers    : [],
+        execSponsorContacts:      contacts ? contacts.execSponsors       : [],
+        wdSponsor:                contacts ? contacts.wdSponsor          : null,
+        engagementManagers:       contacts ? contacts.engagementManagers : []
       });
-    } catch (e) {
-      Logger.log('CoreData.getUpcomingSurveys: readSfdcDeploymentsRaw_ failed: ' + e);
     }
 
-    // Product-function rows grouped by deploymentId.
-    var productsByDeployment = {};
-    try {
-      var pfRows = readSfdcProductFunctionsRaw_(cfg);
-      pfRows.forEach(function (pf) {
-        if (!pf.deploymentFk) return;
-        if (!productsByDeployment[pf.deploymentFk]) {
-          productsByDeployment[pf.deploymentFk] = [];
+    /** Push an exception row (at most once per deployment). */
+    function pushException_(missingType, hasProducts) {
+      if (exceptionSeen[depId]) return;
+      exceptionSeen[depId] = true;
+      exceptionRows.push({
+        deploymentId:        depId,
+        accountName:         dep.accountName,
+        deploymentName:      dep.deploymentName,
+        deploymentStartDate: depStart || null,
+        missingType:         missingType,
+        hasProducts:         hasProducts,
+        deliveryDirector:    dep.deliveryDirector || null
+      });
+    }
+
+    if (products.length > 0) {
+      // ---- PHASED: group by go-live date ----
+
+      // Build MGM buckets: { targetGoLiveDate: [ pfRows ] }
+      var mgmBuckets = {};
+      var anyMissingTarget = false;
+
+      products.forEach(function (pf) {
+        var pfTarget = pf.targetGoLive || '';
+        if (pfTarget) {
+          if (!mgmBuckets[pfTarget]) mgmBuckets[pfTarget] = [];
+          mgmBuckets[pfTarget].push(pf);
+        } else {
+          anyMissingTarget = true;
         }
-        productsByDeployment[pf.deploymentFk].push(pf);
       });
-    } catch (e) {
-      Logger.log('CoreData.getUpcomingSurveys: readSfdcProductFunctionsRaw_ failed: ' + e);
-    }
 
-    // Contacts map (gracefully empty if sheet missing).
-    var contactsMap = {};
-    try {
-      contactsMap = getDeploymentContactsMap_(cfg);
-    } catch (e) {
-      Logger.log('CoreData.getUpcomingSurveys: getDeploymentContactsMap_ failed: ' + e);
-    }
+      // Build PGL buckets: { pglDate: [ pfRows ] }
+      // Key on pglDate (= goLiveBaseDate + 2 months); track pglStatus per bucket.
+      var pglBuckets = {};  // { pglDate: { rows: [], status: 'Actual'|'Planned' } }
 
-    // -----------------------------------------------------------------------
-    // SURVEY CALCULATION
-    // -----------------------------------------------------------------------
+      products.forEach(function (pf) {
+        var pfActual = pf.actualGoLive || '';
+        var pfTarget = pf.targetGoLive || '';
+        var goLiveBase, pglStatus;
+        if (pfActual) {
+          goLiveBase = pfActual;
+          pglStatus  = 'Actual';
+        } else if (pfTarget) {
+          goLiveBase = pfTarget;
+          pglStatus  = 'Planned';
+        } else {
+          return;
+        }
+        var pglDate = addMonths_(goLiveBase, 2);
+        if (!pglDate) return;
+        if (!pglBuckets[pglDate]) {
+          pglBuckets[pglDate] = { rows: [], status: pglStatus };
+        }
+        pglBuckets[pglDate].rows.push(pf);
+        // Upgrade status to 'Actual' if any row in this bucket has an actual date.
+        if (pglStatus === 'Actual') pglBuckets[pglDate].status = 'Actual';
+      });
 
-    var surveyRows    = [];
-    var exceptionRows = [];
-    var exceptionSeen = {};
-
-    activeDeployments.forEach(function (dep) {
-      var depId           = dep.deploymentId;
-      var depStart        = startDateMap[depId]      || '';
-      var depTargetEnd    = dep.mtpDate              || '';
-      var depActualGoLive = firstMtpActualMap[depId] || '';
-      var products        = productsByDeployment[depId] || [];
-      var contacts        = contactsMap[depId] || null;
-
-      /** Push a survey row. */
-      function pushSurvey_(surveyType, status, scheduledDate, productLabel) {
-        surveyRows.push({
-          surveyType:               surveyType,
-          status:                   status,
-          deploymentId:             depId,
-          accountName:              dep.accountName,
-          deploymentName:           dep.deploymentName,
-          productLabel:             productLabel,
-          scheduledDate:            scheduledDate,
-          daysUntil:                daysUntil_(scheduledDate),
-          deploymentStartDate:      depStart     || null,
-          deploymentTargetEndDate:  depTargetEnd || null,
-          projectManagerContacts:   contacts ? contacts.projectManagers    : [],
-          execSponsorContacts:      contacts ? contacts.execSponsors       : [],
-          wdSponsor:                contacts ? contacts.wdSponsor          : null,
-          engagementManagers:       contacts ? contacts.engagementManagers : []
-        });
-      }
-
-      /** Push an exception row (at most once per deployment). */
-      function pushException_(missingType, hasProducts) {
-        if (exceptionSeen[depId]) return;
-        exceptionSeen[depId] = true;
-        exceptionRows.push({
-          deploymentId:        depId,
-          accountName:         dep.accountName,
-          deploymentName:      dep.deploymentName,
-          deploymentStartDate: depStart || null,
-          missingType:         missingType,
-          hasProducts:         hasProducts,
-          deliveryDirector:    dep.deliveryDirector || null
-        });
-      }
-
-      if (products.length > 0) {
-        // ---- PHASED: group by go-live date ----
-
-        // Build MGM buckets: { targetGoLiveDate: [ pfRows ] }
-        var mgmBuckets = {};
-        var anyMissingTarget = false;
-
-        products.forEach(function (pf) {
-          var pfTarget = pf.targetGoLive || '';
-          if (pfTarget) {
-            if (!mgmBuckets[pfTarget]) mgmBuckets[pfTarget] = [];
-            mgmBuckets[pfTarget].push(pf);
-          } else {
-            anyMissingTarget = true;
-          }
-        });
-
-        // Build PGL buckets: { pglDate: [ pfRows ] }
-        // Key on pglDate (= goLiveBaseDate + 2 months); track pglStatus per bucket.
-        var pglBuckets       = {};  // { pglDate: { rows: [], status: 'Actual'|'Planned' } }
-
-        products.forEach(function (pf) {
-          var pfActual = pf.actualGoLive || '';
-          var pfTarget = pf.targetGoLive || '';
-          var goLiveBase, pglStatus;
-          if (pfActual) {
-            goLiveBase = pfActual;
-            pglStatus  = 'Actual';
-          } else if (pfTarget) {
-            goLiveBase = pfTarget;
-            pglStatus  = 'Planned';
-          } else {
-            return;
-          }
-          var pglDate = addMonths_(goLiveBase, 2);
-          if (!pglDate) return;
-          if (!pglBuckets[pglDate]) {
-            pglBuckets[pglDate] = { rows: [], status: pglStatus };
-          }
-          pglBuckets[pglDate].rows.push(pf);
-          // Upgrade status to 'Actual' if any row in this bucket has an actual date.
-          if (pglStatus === 'Actual') pglBuckets[pglDate].status = 'Actual';
-        });
-
-        // Emit one MGM event per distinct targetGoLiveDate bucket.
-        Object.keys(mgmBuckets).forEach(function (pfTarget) {
-          if (depStart && pfTarget > depStart) {
-            var dur     = daysBetween_(depStart, pfTarget);
-            var mgmDate = addDays_(depStart, Math.round(dur / 3));
-            if (inWindow_(mgmDate)) {
-              var label = buildProductPhaseLabel_(mgmBuckets[pfTarget]);
-              pushSurvey_('MGM', 'Planned', mgmDate, label || '(Unknown)');
-            }
-          }
-        });
-
-        // Emit one PGL event per distinct pglDate bucket.
-        Object.keys(pglBuckets).forEach(function (pglDate) {
-          if (inWindow_(pglDate)) {
-            var bucket = pglBuckets[pglDate];
-            var label  = buildProductPhaseLabel_(bucket.rows);
-            pushSurvey_('PGL', bucket.status, pglDate, label || '(Unknown)');
-          }
-        });
-
-        if (anyMissingTarget) pushException_('ProductTargets', true);
-
-      } else {
-        // ---- BIG-BANG: deployment-level MGM + PGL ----
-
-        // --- Deployment-level MGM ---
-        if (depStart && depTargetEnd && depTargetEnd > depStart) {
-          var dur     = daysBetween_(depStart, depTargetEnd);
+      // Emit one MGM event per distinct targetGoLiveDate bucket.
+      Object.keys(mgmBuckets).forEach(function (pfTarget) {
+        if (depStart && pfTarget > depStart) {
+          var dur     = daysBetween_(depStart, pfTarget);
           var mgmDate = addDays_(depStart, Math.round(dur / 3));
           if (inWindow_(mgmDate)) {
-            pushSurvey_('MGM', 'Planned', mgmDate, '(Overall Deployment)');
+            var label = buildProductPhaseLabel_(mgmBuckets[pfTarget]);
+            pushSurvey_('MGM', 'Planned', mgmDate, label || '(Unknown)');
           }
-        } else if (depStart && !depTargetEnd) {
-          pushException_('DeploymentTargetEnd', false);
         }
+      });
 
-        // --- Deployment-level PGL ---
-        var pglDate   = null;
-        var pglStatus = null;
-        if (depActualGoLive) {
-          pglDate   = addMonths_(depActualGoLive, 2);
-          pglStatus = 'Actual';
-        } else if (depTargetEnd) {
-          pglDate   = addMonths_(depTargetEnd, 2);
-          pglStatus = 'Planned';
+      // Emit one PGL event per distinct pglDate bucket.
+      Object.keys(pglBuckets).forEach(function (pglDate) {
+        if (inWindow_(pglDate)) {
+          var bucket = pglBuckets[pglDate];
+          var label  = buildProductPhaseLabel_(bucket.rows);
+          pushSurvey_('PGL', bucket.status, pglDate, label || '(Unknown)');
         }
-        if (pglDate && inWindow_(pglDate)) {
-          pushSurvey_('PGL', pglStatus, pglDate, '(Overall Deployment)');
+      });
+
+      if (anyMissingTarget) pushException_('ProductTargets', true);
+
+    } else {
+      // ---- BIG-BANG: deployment-level MGM + PGL ----
+
+      // --- Deployment-level MGM ---
+      if (depStart && depTargetEnd && depTargetEnd > depStart) {
+        var dur     = daysBetween_(depStart, depTargetEnd);
+        var mgmDate = addDays_(depStart, Math.round(dur / 3));
+        if (inWindow_(mgmDate)) {
+          pushSurvey_('MGM', 'Planned', mgmDate, '(Overall Deployment)');
         }
+      } else if (depStart && !depTargetEnd) {
+        pushException_('DeploymentTargetEnd', false);
       }
-    });
 
-    // Sort survey rows by scheduledDate ascending, then accountName.
-    surveyRows.sort(function (a, b) {
-      if (a.scheduledDate < b.scheduledDate) return -1;
-      if (a.scheduledDate > b.scheduledDate) return  1;
-      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
-    });
+      // --- Deployment-level PGL ---
+      var pglDate   = null;
+      var pglStatus = null;
+      if (depActualGoLive) {
+        pglDate   = addMonths_(depActualGoLive, 2);
+        pglStatus = 'Actual';
+      } else if (depTargetEnd) {
+        pglDate   = addMonths_(depTargetEnd, 2);
+        pglStatus = 'Planned';
+      }
+      if (pglDate && inWindow_(pglDate)) {
+        pushSurvey_('PGL', pglStatus, pglDate, '(Overall Deployment)');
+      }
+    }
+  });
 
-    Logger.log('CoreData.getUpcomingSurveys: ' + surveyRows.length + ' survey rows, ' +
-               exceptionRows.length + ' exceptions. Window: ' + windowStartKey +
-               ' to ' + windowEndKey + ' (' + windowKey + ').');
+  // Sort survey rows by scheduledDate ascending, then accountName.
+  surveyRows.sort(function (a, b) {
+    if (a.scheduledDate < b.scheduledDate) return -1;
+    if (a.scheduledDate > b.scheduledDate) return  1;
+    return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+  });
 
-    return {
-      windowDays: windowDays,
-      today:      todayKey,
-      startDate:  windowStartKey,
-      endDate:    windowEndKey,
-      windowKey:  windowKey,
-      rows:       surveyRows,
-      exceptions: exceptionRows
-    };
-  }
+  Logger.log('CoreData.getUpcomingSurveys: ' + surveyRows.length + ' survey rows, ' +
+             exceptionRows.length + ' exceptions. Window: ' + windowStartKey +
+             ' to ' + windowEndKey + ' (' + windowKey + ').');
+
+  return {
+    windowDays: windowDays,
+    today:      todayKey,
+    startDate:  windowStartKey,
+    endDate:    windowEndKey,
+    windowKey:  windowKey,
+    rows:       surveyRows,
+    exceptions: exceptionRows
+  };
+}
 
   // ===========================================================================
   // EXPORTS

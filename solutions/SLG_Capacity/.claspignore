@@ -1,3 +1,2 @@
-﻿**/**
-!src/**
-!src/appsscript.json
+﻿# rootDir is set to ./src in .clasp.json — clasp only pushes src/ files.
+# No additional exclusions needed.

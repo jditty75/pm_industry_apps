@@ -1705,7 +1705,6 @@ var CoreData = (function () {
 
       var productArea = colProductArea  >= 0 ? String(row[colProductArea]  || '').trim() : '';
       var funcArea    = colFunctionArea >= 0 ? String(row[colFunctionArea] || '').trim() : '';
-      var productLabel = productArea || funcArea || '';
 
       function cellDate_(col) {
         if (col < 0) return '';
@@ -1718,7 +1717,8 @@ var CoreData = (function () {
 
       rows.push({
         deploymentFk: fk,
-        productArea:  productLabel,
+        productArea:  productArea,
+        funcArea:     funcArea,
         targetGoLive: cellDate_(colTargetGoLive),
         actualGoLive: cellDate_(colActualGoLive)
       });
@@ -1730,34 +1730,274 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
+  // MGM / PGL: DEPLOYMENT CONTACTS READER
+  // ===========================================================================
+
+  /**
+   * Reads SFDC_DeploymentContacts and returns a map keyed by Deployment__c (FK).
+   *
+   * Map shape per deployment:
+   *   {
+   *     projectManagers:    [ { name, email, role } ],
+   *     execSponsors:       [ { name, email, role } ],
+   *     wdSponsor:          { name, email, role } | null,
+   *     engagementManagers: [ { name, email, role } ]
+   *   }
+   *
+   * Gracefully returns an empty map when the sheet is missing or empty.
+   *
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @return {Object}  Map keyed by deploymentId.
+   * @private
+   */
+  function getDeploymentContactsMap_(cfg) {
+    var sheetName = cfg.sheets.deploymentContacts || 'SFDC_DeploymentContacts';
+    var ss = getSpreadsheet_();
+    var sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) {
+      Logger.log('CoreData.getDeploymentContactsMap_: sheet "' + sheetName + '" not found — returning empty contacts map.');
+      return {};
+    }
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return {};
+
+    var lastCol   = sheet.getLastColumn();
+    var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    var headers   = allValues[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
+
+    function findCol_(keywords) {
+      for (var k = 0; k < keywords.length; k++) {
+        var kw = keywords[k].toLowerCase();
+        for (var i = 0; i < headers.length; i++) {
+          if (headers[i].indexOf(kw) !== -1) return i;
+        }
+      }
+      return -1;
+    }
+
+    var colDepFk   = findCol_(['deployment__c', 'deployment_c', 'deployment__r.id']);
+    // FK column: prefer one that has "deployment" without a dot (not a traversal).
+    if (colDepFk < 0) {
+      for (var i = 0; i < headers.length; i++) {
+        if (headers[i].indexOf('deployment') !== -1 && headers[i].indexOf('.') === -1) {
+          colDepFk = i; break;
+        }
+      }
+    }
+    var colName    = findCol_(['contact__r.name', 'contact_name', 'name']);
+    var colEmail   = findCol_(['contact__r.email', 'email']);
+    var colRole    = findCol_(['contact_role__c', 'contact_role', 'role']);
+
+    if (colDepFk < 0) {
+      Logger.log('CoreData.getDeploymentContactsMap_: Deployment FK column not found in "' + sheetName + '".');
+      return {};
+    }
+
+    var map = {};
+    for (var r = 1; r < allValues.length; r++) {
+      var row = allValues[r];
+      var depId = colDepFk >= 0 ? String(row[colDepFk] || '').trim() : '';
+      if (!depId) continue;
+
+      var name  = colName  >= 0 ? String(row[colName]  || '').trim() : '';
+      var email = colEmail >= 0 ? String(row[colEmail] || '').trim() : '';
+      var role  = colRole  >= 0 ? String(row[colRole]  || '').trim() : '';
+
+      if (!name && !email) continue;
+
+      if (!map[depId]) {
+        map[depId] = {
+          projectManagers:    [],
+          execSponsors:       [],
+          wdSponsor:          null,
+          engagementManagers: []
+        };
+      }
+
+      var contact = { name: name, email: email, role: role };
+
+      if (role === 'Project Manager [Customer]') {
+        map[depId].projectManagers.push(contact);
+      } else if (role === 'Executive Sponsor') {
+        map[depId].execSponsors.push(contact);
+      } else if (role === 'Deployment Sponsor') {
+        if (!map[depId].wdSponsor) map[depId].wdSponsor = contact;
+      } else if (role === 'Engagement Manager [Primary]') {
+        map[depId].engagementManagers.push(contact);
+      }
+      // Other roles are ignored per spec.
+    }
+
+    Logger.log('CoreData.getDeploymentContactsMap_: loaded contacts for ' +
+               Object.keys(map).length + ' deployments from "' + sheetName + '".');
+    return map;
+  }
+
+  // ===========================================================================
+  // MGM / PGL: TIME WINDOW RESOLVER
+  // ===========================================================================
+
+  /**
+   * Resolves a named time-window key into absolute { startDate, endDate, windowDays }.
+   *
+   * Window keys:
+   *   'next30'      [today, today + 30 days]
+   *   'thisMonth'   [max(today, 1st of month), last day of month]
+   *   'nextMonth'   [1st of next month, last day of next month]
+   *   'thisQuarter' [max(today, 1st of quarter), last day of quarter]
+   *   'nextQuarter' [1st of next quarter, last day of next quarter]
+   *
+   * Quarters are calendar quarters (Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec).
+   *
+   * @param {string} windowKey
+   * @return {{ startDate: string, endDate: string, windowDays: number }}
+   * @private
+   */
+  function resolveMgmPglWindow_(windowKey) {
+    var tz  = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    function fmt_(d) { return Utilities.formatDate(d, tz, 'yyyy-MM-dd'); }
+
+    function lastDayOfMonth_(y, m) {
+      // m is 0-based JS month. Day 0 of (m+1) = last day of m.
+      return new Date(y, m + 1, 0);
+    }
+
+    function quarterBounds_(y, q) {
+      // q = 0,1,2,3 (0-based quarter index)
+      var startMonth = q * 3;          // 0, 3, 6, 9
+      var endMonth   = startMonth + 2; // 2, 5, 8, 11
+      var first = new Date(y, startMonth, 1);
+      var last  = lastDayOfMonth_(y, endMonth);
+      return { first: first, last: last };
+    }
+
+    var key = windowKey || 'next30';
+    var startDate, endDate;
+
+    if (key === 'thisMonth') {
+      var fm = new Date(now.getFullYear(), now.getMonth(), 1);
+      var lm = lastDayOfMonth_(now.getFullYear(), now.getMonth());
+      startDate = fmt_(now > fm ? now : fm);
+      endDate   = fmt_(lm);
+
+    } else if (key === 'nextMonth') {
+      var nm = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      var lnm = lastDayOfMonth_(nm.getFullYear(), nm.getMonth());
+      startDate = fmt_(nm);
+      endDate   = fmt_(lnm);
+
+    } else if (key === 'thisQuarter') {
+      var q = Math.floor(now.getMonth() / 3);
+      var bounds = quarterBounds_(now.getFullYear(), q);
+      startDate = fmt_(now > bounds.first ? now : bounds.first);
+      endDate   = fmt_(bounds.last);
+
+    } else if (key === 'nextQuarter') {
+      var cq = Math.floor(now.getMonth() / 3);
+      var nqIdx = cq + 1;
+      var nqYear = now.getFullYear();
+      if (nqIdx > 3) { nqIdx = 0; nqYear++; }
+      var nqBounds = quarterBounds_(nqYear, nqIdx);
+      startDate = fmt_(nqBounds.first);
+      endDate   = fmt_(nqBounds.last);
+
+    } else {
+      // Default: 'next30'
+      var end30 = new Date(now.getTime() + 30 * 86400000);
+      startDate = fmt_(now);
+      endDate   = fmt_(end30);
+    }
+
+    var ms = new Date(startDate).getTime();
+    var me = new Date(endDate).getTime();
+    var windowDays = Math.round(Math.max(0, me - ms) / 86400000);
+
+    return { startDate: startDate, endDate: endDate, windowDays: windowDays };
+  }
+
+  // ===========================================================================
+  // MGM / PGL: PRODUCT / PHASE LABEL BUILDER
+  // ===========================================================================
+
+  /**
+   * Aggregates product-function rows into a human-readable label.
+   *
+   * Format: "HCM (Absence, Benefits, Core HR); Payroll (US Payroll); ..."
+   *   - Product Areas sorted alphabetically.
+   *   - Functions sorted alphabetically within each area.
+   *   - If productArea is blank, the funcArea is used directly.
+   *
+   * @param {Array<{productArea:string, funcArea:string}>} pfRows
+   * @return {string}
+   * @private
+   */
+  function buildProductPhaseLabel_(pfRows) {
+    if (!pfRows || pfRows.length === 0) return '';
+
+    // Group functions by product area.
+    var areaMap = {};  // { areaName: { funcName: true } }
+    pfRows.forEach(function (pf) {
+      var area = pf.productArea || pf.funcArea || '';
+      var func = (pf.productArea && pf.funcArea) ? pf.funcArea : '';
+      if (!area) return;
+      if (!areaMap[area]) areaMap[area] = {};
+      if (func) areaMap[area][func] = true;
+    });
+
+    var areas = Object.keys(areaMap).sort();
+    var parts = areas.map(function (area) {
+      var funcs = Object.keys(areaMap[area]).sort();
+      if (funcs.length === 0) return area;
+      return area + ' (' + funcs.join(', ') + ')';
+    });
+
+    return parts.join('; ');
+  }
+
+  // ===========================================================================
   // MGM / PGL: UPCOMING SURVEYS
   // ===========================================================================
 
   /**
-   * Returns upcoming MGM and PGL survey events within the next windowDays days
+   * Returns upcoming MGM and PGL survey events within a configurable time window
    * for all Active deployments, respecting viewMode.
    *
-   * MGM (Mid-Deployment Survey): scheduled at 1/3 of the deployment duration,
-   *   anchored to Deployment_Start_Date__c.
+   * MGM (Mid-Deployment Survey): scheduled at 1/3 of the deployment duration
+   *   from Deployment_Start_Date__c to the product target go-live date.
    * PGL (Post-Go-Live Survey): scheduled 2 months after the go-live date
    *   (Actual preferred, then Target).
    *
-   * Contacts fields (v1): placeholders only. Jeff will provide SFDC field
-   * mappings in a later phase.
+   * Grouping (phased deployments): one survey event per (deployment × go-live date)
+   *   rather than one per product-function row.
    *
    * @param {AppConfig} config
-   * @param {Object=}   viewModeOpts  { viewMode:'my'|'all', ddDisplayName:string }
-   * @return {{ windowDays:number, today:string, rows:Array, exceptions:Array }}
+   * @param {Object=}   viewModeOpts
+   *   {
+   *     viewMode:      'my' | 'all',
+   *     ddDisplayName: string,
+   *     window:        'next30' | 'thisMonth' | 'nextMonth' | 'thisQuarter' | 'nextQuarter'
+   *   }
+   * @return {{ windowDays:number, today:string, startDate:string, endDate:string, rows:Array, exceptions:Array }}
    */
   function getUpcomingSurveys(config, viewModeOpts) {
-    var cfg        = CoreConfig.withDefaults(config);
-    var windowDays = 30;
-    var tz         = Session.getScriptTimeZone();
-    var now        = new Date();
+    var cfg = CoreConfig.withDefaults(config);
+    var tz  = Session.getScriptTimeZone();
+    var now = new Date();
     now.setHours(0, 0, 0, 0);
-    var todayKey      = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
-    var windowEndDate = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
-    var windowEndKey  = Utilities.formatDate(windowEndDate, tz, 'yyyy-MM-dd');
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+
+    // -----------------------------------------------------------------------
+    // TIME WINDOW
+    // -----------------------------------------------------------------------
+    var windowKey   = (viewModeOpts && viewModeOpts.window) || 'next30';
+    var winResolved = resolveMgmPglWindow_(windowKey);
+    var windowStartKey = winResolved.startDate;
+    var windowEndKey   = winResolved.endDate;
+    var windowDays     = winResolved.windowDays;
 
     // -----------------------------------------------------------------------
     // TIME HELPERS
@@ -1786,9 +2026,9 @@ var CoreData = (function () {
       return Utilities.formatDate(new Date(d.getTime() + n * 86400000), tz, 'yyyy-MM-dd');
     }
 
-    /** True if dateStr falls in [today, today+windowDays]. */
+    /** True if dateStr falls in [windowStart, windowEnd]. */
     function inWindow_(dateStr) {
-      return dateStr >= todayKey && dateStr <= windowEndKey;
+      return dateStr >= windowStartKey && dateStr <= windowEndKey;
     }
 
     /** Days from today to dateStr (>=0). */
@@ -1803,9 +2043,8 @@ var CoreData = (function () {
     // Active deployments (already viewMode-filtered).
     var activeDeployments = getAllDeployments(config, viewModeOpts);
 
-    // Build lookup: deploymentId -> raw SFDC row (for deploymentStart +
-    // firstMtpDateActual, which getAllDeployments does not surface).
-    var startDateMap     = {};
+    // Build lookup: deploymentId -> raw SFDC row (for deploymentStart + firstMtpDateActual).
+    var startDateMap      = {};
     var firstMtpActualMap = {};
     try {
       var rawRows = readSfdcDeploymentsRaw_(cfg);
@@ -1832,6 +2071,14 @@ var CoreData = (function () {
       Logger.log('CoreData.getUpcomingSurveys: readSfdcProductFunctionsRaw_ failed: ' + e);
     }
 
+    // Contacts map (gracefully empty if sheet missing).
+    var contactsMap = {};
+    try {
+      contactsMap = getDeploymentContactsMap_(cfg);
+    } catch (e) {
+      Logger.log('CoreData.getUpcomingSurveys: getDeploymentContactsMap_ failed: ' + e);
+    }
+
     // -----------------------------------------------------------------------
     // SURVEY CALCULATION
     // -----------------------------------------------------------------------
@@ -1846,6 +2093,7 @@ var CoreData = (function () {
       var depTargetEnd    = dep.mtpDate              || '';
       var depActualGoLive = firstMtpActualMap[depId] || '';
       var products        = productsByDeployment[depId] || [];
+      var contacts        = contactsMap[depId] || null;
 
       /** Push a survey row. */
       function pushSurvey_(surveyType, status, scheduledDate, productLabel) {
@@ -1858,11 +2106,12 @@ var CoreData = (function () {
           productLabel:             productLabel,
           scheduledDate:            scheduledDate,
           daysUntil:                daysUntil_(scheduledDate),
-          deploymentStartDate:      depStart      || null,
-          deploymentTargetEndDate:  depTargetEnd  || null,
-          projectManagerContacts:   [],
-          execSponsorContacts:      [],
-          wdSponsor:                null
+          deploymentStartDate:      depStart     || null,
+          deploymentTargetEndDate:  depTargetEnd || null,
+          projectManagerContacts:   contacts ? contacts.projectManagers    : [],
+          execSponsorContacts:      contacts ? contacts.execSponsors       : [],
+          wdSponsor:                contacts ? contacts.wdSponsor          : null,
+          engagementManagers:       contacts ? contacts.engagementManagers : []
         });
       }
 
@@ -1882,35 +2131,67 @@ var CoreData = (function () {
       }
 
       if (products.length > 0) {
-        // ---- PHASED: per-product MGM + PGL ----
+        // ---- PHASED: group by go-live date ----
+
+        // Build MGM buckets: { targetGoLiveDate: [ pfRows ] }
+        var mgmBuckets = {};
         var anyMissingTarget = false;
 
         products.forEach(function (pf) {
-          var label       = pf.productArea || '(Unknown Product)';
-          var pfTarget    = pf.targetGoLive || '';
-          var pfActual    = pf.actualGoLive || '';
-
-          // --- Per-product MGM ---
-          if (depStart && pfTarget && pfTarget > depStart) {
-            var dur     = daysBetween_(depStart, pfTarget);
-            var mgmDate = addDays_(depStart, Math.round(dur / 3));
-            if (inWindow_(mgmDate)) pushSurvey_('MGM', 'Planned', mgmDate, label);
-          } else if (depStart && !pfTarget) {
+          var pfTarget = pf.targetGoLive || '';
+          if (pfTarget) {
+            if (!mgmBuckets[pfTarget]) mgmBuckets[pfTarget] = [];
+            mgmBuckets[pfTarget].push(pf);
+          } else {
             anyMissingTarget = true;
           }
+        });
 
-          // --- Per-product PGL ---
-          var pglDate   = null;
-          var pglStatus = null;
+        // Build PGL buckets: { pglDate: [ pfRows ] }
+        // Key on pglDate (= goLiveBaseDate + 2 months); track pglStatus per bucket.
+        var pglBuckets       = {};  // { pglDate: { rows: [], status: 'Actual'|'Planned' } }
+
+        products.forEach(function (pf) {
+          var pfActual = pf.actualGoLive || '';
+          var pfTarget = pf.targetGoLive || '';
+          var goLiveBase, pglStatus;
           if (pfActual) {
-            pglDate   = addMonths_(pfActual,  2);
-            pglStatus = 'Actual';
+            goLiveBase = pfActual;
+            pglStatus  = 'Actual';
           } else if (pfTarget) {
-            pglDate   = addMonths_(pfTarget,  2);
-            pglStatus = 'Planned';
+            goLiveBase = pfTarget;
+            pglStatus  = 'Planned';
+          } else {
+            return;
           }
-          if (pglDate && inWindow_(pglDate)) {
-            pushSurvey_('PGL', pglStatus, pglDate, label);
+          var pglDate = addMonths_(goLiveBase, 2);
+          if (!pglDate) return;
+          if (!pglBuckets[pglDate]) {
+            pglBuckets[pglDate] = { rows: [], status: pglStatus };
+          }
+          pglBuckets[pglDate].rows.push(pf);
+          // Upgrade status to 'Actual' if any row in this bucket has an actual date.
+          if (pglStatus === 'Actual') pglBuckets[pglDate].status = 'Actual';
+        });
+
+        // Emit one MGM event per distinct targetGoLiveDate bucket.
+        Object.keys(mgmBuckets).forEach(function (pfTarget) {
+          if (depStart && pfTarget > depStart) {
+            var dur     = daysBetween_(depStart, pfTarget);
+            var mgmDate = addDays_(depStart, Math.round(dur / 3));
+            if (inWindow_(mgmDate)) {
+              var label = buildProductPhaseLabel_(mgmBuckets[pfTarget]);
+              pushSurvey_('MGM', 'Planned', mgmDate, label || '(Unknown)');
+            }
+          }
+        });
+
+        // Emit one PGL event per distinct pglDate bucket.
+        Object.keys(pglBuckets).forEach(function (pglDate) {
+          if (inWindow_(pglDate)) {
+            var bucket = pglBuckets[pglDate];
+            var label  = buildProductPhaseLabel_(bucket.rows);
+            pushSurvey_('PGL', bucket.status, pglDate, label || '(Unknown)');
           }
         });
 
@@ -1954,12 +2235,15 @@ var CoreData = (function () {
     });
 
     Logger.log('CoreData.getUpcomingSurveys: ' + surveyRows.length + ' survey rows, ' +
-               exceptionRows.length + ' exceptions. Window: ' + todayKey +
-               ' to ' + windowEndKey + '.');
+               exceptionRows.length + ' exceptions. Window: ' + windowStartKey +
+               ' to ' + windowEndKey + ' (' + windowKey + ').');
 
     return {
       windowDays: windowDays,
       today:      todayKey,
+      startDate:  windowStartKey,
+      endDate:    windowEndKey,
+      windowKey:  windowKey,
       rows:       surveyRows,
       exceptions: exceptionRows
     };
@@ -1995,6 +2279,7 @@ var CoreData = (function () {
     getRecentGoLives:            getRecentGoLives,
 
     // MGM / PGL additions
-    getUpcomingSurveys:          getUpcomingSurveys
+    getUpcomingSurveys:          getUpcomingSurveys,
+    _resolveMgmPglWindow:        resolveMgmPglWindow_
   };
 })();

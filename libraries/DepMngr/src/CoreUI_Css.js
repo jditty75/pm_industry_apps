@@ -1326,6 +1326,43 @@ function _CoreUI_Css_getStylesheet() {
     '@media (max-width: 900px) {',
     '  .ph-grid { grid-template-columns: 1fr; }',
     '  .ph-kpis { grid-template-columns: repeat(2, 1fr); }',
+    '}',
+
+    // =========================================================================
+    // MGM / PGL — SCHEDULE PILL, DEPLOYMENT CELL
+    // =========================================================================
+    '.schedule-cell {',
+    '  display: flex; align-items: center; gap: 4px; white-space: nowrap;',
+    '}',
+    '.schedule-date {',
+    '  font-size: 13px; color: var(--color-text);',
+    '}',
+    '.survey-pill {',
+    '  display: inline-block;',
+    '  margin-left: 4px;',
+    '  padding: 2px 6px;',
+    '  border-radius: 999px;',
+    '  font-size: 10px;',
+    '  font-weight: 600;',
+    '  line-height: 1.4;',
+    '  vertical-align: middle;',
+    '  cursor: default;',
+    '}',
+    '.survey-pill-mgm-planned,',
+    '.survey-pill-pgl-planned {',
+    '  background: var(--color-surface-alt);',
+    '  color: var(--color-text-muted);',
+    '  border: 1px solid var(--color-border);',
+    '}',
+    '.survey-pill-pgl-actual {',
+    '  background: var(--color-status-green-bg);',
+    '  color: var(--color-status-green-fg);',
+    '  border: 1px solid var(--color-status-green);',
+    '}',
+    '.deployment-cell {',
+    '  max-width: 220px;',
+    '  white-space: normal;',
+    '  word-wrap: break-word;',
     '}'
 
   ].join('\n');

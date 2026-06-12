@@ -44,7 +44,9 @@ var APP_CONFIG = {
     // Phase 3a: Salesforce deployment product-function detail
     sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions',
     // Phase 3i: unified deployment source (Active + Complete deployments)
-    deployments: 'SFDC_Deployments'
+    deployments: 'SFDC_Deployments',
+    // MGM/PGL patch: contacts from SFDC
+    deploymentContacts: 'SFDC_DeploymentContacts'
   },
 
   namedRanges: {

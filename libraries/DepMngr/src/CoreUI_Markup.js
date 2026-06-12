@@ -306,7 +306,7 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
 
     '  <!-- Info banner -->',
     '  <div class="info-banner">',
-    '    \uD83D\uDCCB MGM / PGL &mdash; upcoming Mid-Deployment and Post-Go-Live surveys for Active deployments.',
+    '    \uD83D\uDCCB MDS / PGL &mdash; upcoming Mid-Deployment and Post-Go-Live surveys for Active deployments.',
     '    Toggle between <strong>My Portfolio</strong> and <strong>All</strong> using the control in the header.',
     '  </div>',
 
@@ -346,7 +346,7 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
     '        <button class="seg-control-btn active" data-mgmpgl-type="all"',
     '                onclick="setMgmPglFilterType(\'all\')">All</button>',
     '        <button class="seg-control-btn" data-mgmpgl-type="MGM"',
-    '                onclick="setMgmPglFilterType(\'MGM\')">MGM</button>',
+    '                onclick="setMgmPglFilterType(\'MGM\')">MDS</button>',
     '        <button class="seg-control-btn" data-mgmpgl-type="PGL"',
     '                onclick="setMgmPglFilterType(\'PGL\')">PGL</button>',
     '      </div>',
@@ -372,7 +372,6 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
     '          <th>In</th>',
     '          <th>Account</th>',
     '          <th>Deployment</th>',
-    '          <th>Product / Phase</th>',
     '          <th>Start</th>',
     '          <th>Target End</th>',
     '          <th>Contacts</th>',

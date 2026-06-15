@@ -1029,7 +1029,10 @@ function computeResourceDetail(params) {
       });
     });
 
-    // Drop 6: apply capacity adjustments as a reduction series
+    // Drop 6: apply capacity adjustments as a reduction series.
+    // Committed always included. Modeled included in Scenario viewMode when
+    // the adjustment's scenario matches (or the adjustment has no scenario,
+    // meaning it is globally applicable to all scenario views).
     let adjRows = [];
     try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET).filter(a => a.resource_name === resource); } catch (e) { adjRows = []; }
     adjRows.forEach(adj => {
@@ -1037,7 +1040,7 @@ function computeResourceDetail(params) {
       const isModeled   = (adj.status === 'Modeled');
       const include = isCommitted ||
         (viewMode === 'Scenario' && isModeled &&
-         (!params.scenarioId || adj.scenario_id === params.scenarioId));
+         (!adj.scenario_id || adj.scenario_id === params.scenarioId));
       if (!include) return;
       expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
         const k = monthKey_(m.period_start);

@@ -447,8 +447,9 @@
       renderTeamsSelect();        // Manager dropdown
 
       $('#openFiltersBtn').addEventListener('click', openFiltersDrawer_);
-      $('#refreshBtn').addEventListener('click', () => {
+      $('#refreshBtn').addEventListener('click', async () => {
         State.dashboardCache = null;
+        await refreshReferenceData_();
         reloadCurrentView_();
       });
 
@@ -547,6 +548,27 @@
     }
   }
 }
+
+  /**
+   * Re-fetch api_getReference and update State.ref, then re-render all
+   * dropdowns that source from reference data (manager filter, team label
+   * filter). Called by the global Refresh button so new generic workers,
+   * exclusion changes, etc. surface without a full page reload.
+   *
+   * Does NOT re-attach event listeners — renderTeamsSelect and
+   * renderTeamLabelSelect both use .onchange = ... (not addEventListener)
+   * so they are safe to call on every refresh.
+   */
+  async function refreshReferenceData_() {
+    try {
+      State.ref = await call('api_getReference');
+      renderTeamLabelSelect();
+      renderTeamsSelect();
+      if (State.currentView === 'explorer') renderResourceList();
+    } catch (e) {
+      // Swallow — reloadCurrentView_ still runs with the previous State.ref.
+    }
+  }
 </script>
 
 <script>
@@ -566,11 +588,12 @@
     sel.innerHTML = `<option value="">All managers</option>` + managerOptions;
     sel.value = State.filters.managers.length ? State.filters.managers[0] : '';
 
-    sel.addEventListener('change', () => {
+    // Use onchange (not addEventListener) so re-renders don't stack listeners.
+    sel.onchange = () => {
       const val = sel.value;
       State.filters.managers = val ? [val] : [];
       onAppliedFiltersChanged_();
-    });
+    };
   }
 
   // ============================================================
@@ -597,12 +620,13 @@
       State.filters.teamLabel = State.ref.defaultTeamFilter;
     }
 
-    sel.addEventListener('change', () => {
+    // Use onchange (not addEventListener) so re-renders don't stack listeners.
+    sel.onchange = () => {
       sel.dataset.userTouched = '1';
       const val = sel.value;
       State.filters.teamLabel = val || null;
       onAppliedFiltersChanged_();
-    });
+    };
   }
 </script>
 
@@ -2248,20 +2272,23 @@
 
     const ctx = $('#resourceChart').getContext('2d');
     if (State.charts.resource) State.charts.resource.destroy();
-    // Reductions rendered as negative values on a separate dataset (below x-axis)
+    // Reductions rendered as negative values so bars extend below the x-axis.
     const hasReductions = months.some(m => (m.reduction || 0) > 0);
     const datasets = [
-      { label: 'Billable',    data: months.map(m => m.billable),   backgroundColor: cssVar_('--ballpoint') },
-      { label: 'Internal',    data: months.map(m => m.internal),   backgroundColor: cssVar_('--water-cooler') },
-      { label: 'Education',   data: months.map(m => m.education),  backgroundColor: cssVar_('--tack') },
-      { label: 'PTO/Holiday', data: months.map(m => m.pto),        backgroundColor: cssVar_('--pencil') },
-      { label: 'Scenario',    data: months.map(m => m.scenario),   backgroundColor: cssVar_('--happy-hour') }
+      { label: 'Billable',    data: months.map(m => m.billable),   backgroundColor: cssVar_('--ballpoint'),     stack: 'a' },
+      { label: 'Internal',    data: months.map(m => m.internal),   backgroundColor: cssVar_('--water-cooler'),  stack: 'a' },
+      { label: 'Education',   data: months.map(m => m.education),  backgroundColor: cssVar_('--tack'),          stack: 'a' },
+      { label: 'PTO/Holiday', data: months.map(m => m.pto),        backgroundColor: cssVar_('--pencil'),        stack: 'a' },
+      { label: 'Scenario',    data: months.map(m => m.scenario),   backgroundColor: cssVar_('--happy-hour'),    stack: 'a' }
     ];
     if (hasReductions) {
+      // Negate so bars extend below zero. Uses a separate stack so they
+      // don't combine with the positive stacked bars.
       datasets.push({
         label: 'Reductions',
-        data: months.map(m => -Math.abs(m.reduction || 0)),
-        backgroundColor: '#e74c3c99'
+        data: months.map(m => -(m.reduction || 0)),
+        backgroundColor: cssVar_('--thumbtack'),
+        stack: 'b'
       });
     }
     State.charts.resource = new Chart(ctx, {
@@ -2270,7 +2297,10 @@
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { position: 'bottom' } },
-        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true } }
+        scales: {
+          x: { stacked: true, grid: { display: false } },
+          y: { stacked: true, beginAtZero: false }
+        }
       }
     });
   }

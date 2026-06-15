@@ -1453,6 +1453,9 @@ function api_saveGenericResources(payload) {
   writeTable_(CFG_GENERIC, GENERIC_HEADERS, rows);
   if (typeof invalidateCache_ === 'function') invalidateCache_(CFG_GENERIC);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  // Bust the per-user api_getReference cache so the Capacity Explorer
+  // resource list reflects new generic workers immediately on next load.
+  try { CacheService.getUserCache().remove('api_getReference_v1'); } catch (e) {}
   return { ok: true, count: rows.length };
 }
 
@@ -1559,6 +1562,10 @@ function api_saveExclusions(payload) {
   if (typeof invalidateCache_ === 'function') {
     invalidateCache_('Config_Worker_Exclusions');
   }
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  // Bust per-user api_getReference cache so excluded workers disappear
+  // from Capacity Explorer immediately on next reference fetch.
+  try { CacheService.getUserCache().remove('api_getReference_v1'); } catch (e) {}
   return { ok: true, count: rows.length };
 }
 

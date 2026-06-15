@@ -729,6 +729,8 @@ function normalizeStaff() {
   writeTable_(ALLOC_NORM, ALLOC_HEADERS, out);
   logRefresh_('staff', values.length, out.length, months.length);
   invalidateCache_(ALLOC_NORM);
+  // Drop 5: invalidate enriched-data caches that depend on ALLOC_NORM.
+  try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e) {}
 
   return {
     rowsIn: values.length,
@@ -832,6 +834,8 @@ function normalizeOpportunities() {
   writeTable_(OPPS_NORM, OPP_HEADERS, out);
   logRefresh_('opps', values.length, out.length, 0);
   invalidateCache_(OPPS_NORM);
+  // Drop 5: invalidate enriched-data caches that depend on source data.
+  try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e) {}
 
   return { rowsIn: values.length, rowsOut: out.length };
 }

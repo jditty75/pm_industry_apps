@@ -285,6 +285,10 @@ function expandAssignmentToMonthly_(a, calendar) {
   }));
 }
 
+/**
+ * Legacy wrapper. Retained for backward compatibility.
+ * All callers inside this file now use resolveTeamLabel_ (EnrichedData.gs).
+ */
 function _normalizedTeam_(resourceType) {
   const rt = String(resourceType || '').toUpperCase().trim();
   if (rt === 'FUNCTIONAL') return 'Functional Consulting';
@@ -365,8 +369,11 @@ function _groupKey_(bucket, groupBy) {
     case 'Role':
       return bucket.job_profile || 'Unclassified';
     case 'Team':
+      // Drop 5: use the resolved team_label stamped on every bucket by
+      // computeUtilization via the unified resolveTeamLabel_ (EnrichedData.gs).
+      // Falls back to the legacy chain for callers that don't stamp it.
       return (
-        _normalizedTeam_(bucket.resource_type) ||
+        bucket.team_label ||
         bucket.subteam ||
         bucket.teamType ||
         bucket.manager_org ||
@@ -459,41 +466,27 @@ function _readResourceTypeTeamMap_() {
 }
 
 /**
- * Resolve a bucket's leadership-facing team for the Team filter.
- *
- * SLG workers (SLG_Real / SLG_Generic):
- *   icp_role -> Config_Roles.team_label. Falls through to 'Unclassified'
- *   if the role isn't mapped.
- *
- * External workers (External_NonSLG / External_Contractor):
- *   role_category -> job_profile -> project_role -> resource_type, looked
- *   up case-insensitively against Config_Resource_Type.team_label.
- *   Falls through to 'Unclassified' if no key matches.
- *
- * Mirrors the lookup chain used by Api.gs _classifyTeam_ for External rows
- * and by computeUtilization's Headcount Gap aggregator for SLG rows.
- * Duplicated rather than shared to keep the blast radius small.
+ * Legacy resolver. Retained as a thin wrapper around resolveTeamLabel_
+ * (EnrichedData.gs) for backward compatibility.
+ * computeUtilization now calls resolveTeamLabel_ directly via ctx.
  */
 function _resolveTeamForBucket_(bucket, roleTeamLabels, rtTeamMap) {
+  if (typeof resolveTeamLabel_ === 'function') {
+    var ctx = resolveTeamLabel_.buildCtx_(roleTeamLabels, rtTeamMap);
+    return resolveTeamLabel_(bucket, ctx);
+  }
+  // Fallback if EnrichedData.gs not yet available.
   var wc = String((bucket && bucket.worker_class) || '');
   if (wc === 'SLG_Real' || wc === 'SLG_Generic') {
-    var icp = bucket.icp || '';
-    return roleTeamLabels[icp] || 'Unclassified';
+    return (roleTeamLabels || {})[bucket.icp || ''] || 'Unclassified';
   }
-
   function tryKey(v) {
     if (!v) return '';
     var k = String(v).trim().toLowerCase();
-    if (!k) return '';
-    return rtTeamMap[k] || '';
+    return (rtTeamMap || {})[k] || '';
   }
-  return (
-    tryKey(bucket.role_category) ||
-    tryKey(bucket.job_profile) ||
-    tryKey(bucket.project_role) ||
-    tryKey(bucket.resource_type) ||
-    'Unclassified'
-  );
+  return tryKey(bucket.role_category) || tryKey(bucket.job_profile) ||
+    tryKey(bucket.project_role) || tryKey(bucket.resource_type) || 'Unclassified';
 }
 
 function computeUtilization(params) {
@@ -544,10 +537,14 @@ function computeUtilization(params) {
         managerDescendants
       );
 
-  const allocRaw = cachedRead_(ALLOC_NORM);
-  const assignsRaw = cachedRead_(ASSIGNMENTS);
+  // Drop 5: use shared cached getters to avoid redundant reads across endpoints.
+  const allocRaw = (typeof getEnrichedAllocations_ === 'function')
+    ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+  const assignsRaw = (typeof getEnrichedAssignments_ === 'function')
+    ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
   const excluded = readExclusions_();
-  const resIndex = _resourceIndex_(allocRaw);
+  const resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : _resourceIndex_(allocRaw);
 
   function inScope(workerName) {
     const info = resIndex[workerName] || {};
@@ -571,11 +568,27 @@ function computeUtilization(params) {
   const calendar = readCalendar_();
   const roleCap = readRoleCapacity_();
 
+  // Drop 5: build unified resolver ctx once per request.
+  const _resolverCtx_ = (typeof resolveTeamLabel_ === 'function')
+    ? resolveTeamLabel_.buildCtx_(roleTeamLabels, rtTeamMap)
+    : null;
+
   const buckets = {};
   function bucket(resourceName, period) {
     const k = resourceName + '|' + monthKey_(period);
     if (!buckets[k]) {
       const info = resIndex[resourceName] || {};
+      // Resolve team_label once per resource+period bucket via unified resolver.
+      const teamLabel = _resolverCtx_
+        ? resolveTeamLabel_({
+            worker_class:  info.worker_class  || '',
+            icp_role:      info.icp           || '',
+            role_category: info.role_category || '',
+            job_profile:   info.job_profile   || '',
+            project_role:  info.project_role  || '',
+            resource_type: info.resource_type || ''
+          }, _resolverCtx_)
+        : 'Unclassified';
       buckets[k] = {
         resource: resourceName,
         period: firstOfMonth_(period),
@@ -587,6 +600,7 @@ function computeUtilization(params) {
         job_profile: info.job_profile || '',
         role_category: info.role_category || '',
         project_role: info.project_role || '',
+        team_label: teamLabel,
         committed: 0, billable: 0, scenario: 0,
         timeOff: 0, education: 0, unassigned: 0
       };
@@ -649,31 +663,19 @@ function computeUtilization(params) {
     b.utilization = cap > 0 ? (usedWork / cap) : 0;
   });
 
-  // Local memoization cache for _resolveTeamForBucket_ (Drop 1).
-  // Keyed by the tuple of fields that determine the resolved team.
-  // Same inputs always produce the same output, so this is safe across
-  // both call sites in this function (team filter and headcount gap).
-  const _teamResolveCache_ = {};
-  function _resolveTeamCached_(b) {
-    const k = (b.worker_class || '') + '|' + (b.icp || '') + '|' +
-              (b.role_category || '') + '|' + (b.job_profile || '') + '|' +
-              (b.project_role || '') + '|' + (b.resource_type || '');
-    if (!_teamResolveCache_.hasOwnProperty(k)) {
-      _teamResolveCache_[k] = _resolveTeamForBucket_(b, roleTeamLabels, rtTeamMap);
-    }
-    return _teamResolveCache_[k];
-  }
-
   // 4) Apply manager filter AND Priority 2 team filter.
   //    Team filter overrides manager (effectiveManagers is null when
   //    teamLabelFilter is set, see above).
+  //    Drop 5: team_label is already stamped on every bucket via the unified
+  //    resolver ctx above, so no separate resolution step is needed here.
+  //    Drop 1 local teamCache removed — resolveTeamLabel_ memoizes internally.
   const filtered = Object.values(buckets).filter(b => {
     if (effectiveManagers) {
       const mgrNorm = normalizeManagerName_(b.manager_org || '');
       if (!effectiveManagers[mgrNorm]) return false;
     }
     if (teamLabelFilter) {
-      const bucketTeam = _resolveTeamCached_(b);
+      const bucketTeam = b.team_label || 'Unclassified';
       if (bucketTeam !== teamLabelFilter) return false;
     }
     return true;

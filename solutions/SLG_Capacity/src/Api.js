@@ -110,7 +110,17 @@ function readConfigResourceType_() {
   return {};
 }
 
+/**
+ * Legacy team classifier. Thin wrapper around resolveTeamLabel_
+ * (EnrichedData.gs) for backward compatibility. The wrapper passes rtMap
+ * so callers that pre-built it don't pay a double-read.
+ */
 function _classifyTeam_(row, rtMap) {
+  if (typeof resolveTeamLabel_ === 'function') {
+    var ctx = resolveTeamLabel_.buildCtx_(undefined, rtMap);
+    return resolveTeamLabel_(row, ctx);
+  }
+  // Fallback if EnrichedData.gs not yet loaded.
   if (!_classifyTeam_._lowerIdx || _classifyTeam_._mapRef !== rtMap) {
     var idx = {};
     Object.keys(rtMap).forEach(function (k) { idx[k.toLowerCase()] = rtMap[k]; });
@@ -118,16 +128,13 @@ function _classifyTeam_(row, rtMap) {
     _classifyTeam_._mapRef = rtMap;
   }
   var lowerIdx = _classifyTeam_._lowerIdx;
-
   function tryKey(v) {
     if (!v) return null;
     var k = String(v).trim();
     if (!k) return null;
     if (rtMap[k]) return rtMap[k];
-    var hit = lowerIdx[k.toLowerCase()];
-    return hit || null;
+    return lowerIdx[k.toLowerCase()] || null;
   }
-
   return (
     tryKey(row.role_category) ||
     tryKey(row.job_profile) ||
@@ -252,26 +259,33 @@ function _readTeamLabelOptions_() {
  * Used by Priority 3 to let Capacity Explorer client-side
  * filter the resource list by Team without server round-trips.
  */
+/**
+ * Drop 5: now a thin factory that delegates to the unified resolver.
+ * The returned function closes over a single ctx so callers pay the
+ * config-read cost once rather than once per resource.
+ */
 function _buildResourceTeamResolver_() {
+  if (typeof resolveTeamLabel_ === 'function') {
+    var ctx = resolveTeamLabel_.buildCtx_();
+    return function (resource) {
+      if (!resource) return 'Unclassified';
+      return resolveTeamLabel_(resource, ctx);
+    };
+  }
+  // Fallback if EnrichedData.gs not yet loaded.
   var rtMap = readConfigResourceType_();
   var roleTeamLabels = (typeof readRoleTeamLabels_ === 'function')
     ? readRoleTeamLabels_() : {};
-
   return function (resource) {
     if (!resource) return 'Unclassified';
     var wc = String(resource.worker_class || '');
-
-    // SLG workers: resolve via Config_Roles.team_label keyed on ICP role.
     if (wc === 'SLG_Real' || wc === 'SLG_Generic') {
-      var icp = String(resource.icp || '');
-      return roleTeamLabels[icp] || 'Unclassified';
+      return roleTeamLabels[String(resource.icp || '')] || 'Unclassified';
     }
-
-    // External workers: resolve via _classifyTeam_'s lookup chain.
     return _classifyTeam_({
       role_category: resource.role_category || '',
-      job_profile: resource.job_profile || '',
-      project_role: '',  // not on the resource index; safe to omit
+      job_profile:   resource.job_profile   || '',
+      project_role:  '',
       resource_type: resource.resource_type || ''
     }, rtMap);
   };
@@ -345,6 +359,10 @@ function _readResourceTypeOptions_() {
 function api_flushCaches() {
   if (typeof invalidateAllCaches_ === 'function') {
     invalidateAllCaches_();
+  }
+  // Drop 5: also bump the enriched-data cache version.
+  if (typeof invalidateEnrichedCaches_ === 'function') {
+    invalidateEnrichedCaches_();
   }
   return { ok: true, flushedAt: new Date().toISOString() };
 }
@@ -510,8 +528,20 @@ function api_getReportingSummary(params) {
   }
 
   // ----- Data sources -----
-  const rows = readTable_(ALLOC_NORM);
+  // Drop 5: use enriched alloc rows to avoid rebuilding per-worker enrichment
+  // in the assignments overlay below. Falls back to raw read if EnrichedData.gs
+  // not yet available.
+  const rows = (typeof getEnrichedAllocations_ === 'function')
+    ? getEnrichedAllocations_() : readTable_(ALLOC_NORM);
   const rtMap = readConfigResourceType_();
+
+  // Drop 5: build unified resolver ctx once per request.
+  const _repCtx_ = (typeof resolveTeamLabel_ === 'function')
+    ? resolveTeamLabel_.buildCtx_(
+        typeof readRoleTeamLabels_ === 'function' ? readRoleTeamLabels_() : {},
+        rtMap
+      )
+    : null;
 
   const rtRichMap = (typeof readConfigResourceTypeRich_ === 'function')
     ? readConfigResourceTypeRich_() : {};
@@ -531,8 +561,11 @@ function api_getReportingSummary(params) {
   // effectiveManagers is null and the manager-filter branch is a no-op.
   function _rowPassesManagerFilter_(row) {
     // Team filter check (Priority 2)
+    // Drop 5: use unified resolver when available; fall back to _classifyTeam_.
     if (teamLabelFilter) {
-      const rowTeam = _classifyTeam_(row, rtMap);
+      const rowTeam = (_repCtx_ && typeof resolveTeamLabel_ === 'function')
+        ? resolveTeamLabel_(row, _repCtx_)
+        : _classifyTeam_(row, rtMap);
       if (rowTeam !== teamLabelFilter) {
         return { pass: false, viaPractice: false };
       }
@@ -630,7 +663,11 @@ function api_getReportingSummary(params) {
       externalHoursByPracticeOwnership += h;
     }
 
-    const teamKey = _classifyTeam_(r, rtMap);
+    // Drop 5: use enriched team_label if present, otherwise resolve via unified resolver.
+    const teamKey = (r.team_label) ||
+      ((_repCtx_ && typeof resolveTeamLabel_ === 'function')
+        ? resolveTeamLabel_(r, _repCtx_)
+        : _classifyTeam_(r, rtMap));
     if (teamKey === 'Unclassified') {
       const sig = (r.role_category || '(blank)') + ' | ' + (r.resource_type || '(blank)');
       unmappedSamples[sig] = (unmappedSamples[sig] || 0) + h;
@@ -664,25 +701,46 @@ function api_getReportingSummary(params) {
 
   // ----- Assignments overlay -----
   if (viewMode !== 'Actual') {
+    // Drop 5: use enriched assignments when available — each assignment already
+    // carries the worker's class and enrichment, eliminating the redundant
+    // alloc-scan below. Fall back to raw read + rebuild for safety.
     let assigns = [];
-    try { assigns = readTable_(ASSIGNMENTS) || []; } catch (e) { assigns = []; }
+    const useEnrichedAssigns = typeof getEnrichedAssignments_ === 'function';
+    try {
+      assigns = useEnrichedAssigns
+        ? getEnrichedAssignments_()
+        : (readTable_(ASSIGNMENTS) || []);
+    } catch (e) { assigns = []; }
+
+    // Build per-worker enrichment from alloc rows (only needed when not using
+    // enriched assignments, e.g. during the first deploy before the cache warms).
     const workerClassByName = {};
     const workerEnrichmentByName = {};
-    rows.forEach(r => {
-      const n = r.resource_name;
-      if (n && !workerClassByName[n]) {
-        workerClassByName[n] = String(r.worker_class || '');
-        workerEnrichmentByName[n] = {
-          role_category: r.role_category || '',
-          job_profile: r.job_profile || '',
-          project_role: r.project_role || '',
-          resource_type: r.resource_type || '',
-          account_name: r.account_name || '',
-          ICP_role: r.ICP_role || '',
-          manager_org: r.manager_org || ''
-        };
-      }
-    });
+    if (!useEnrichedAssigns) {
+      rows.forEach(r => {
+        const n = r.resource_name;
+        if (n && !workerClassByName[n]) {
+          workerClassByName[n] = String(r.worker_class || '');
+          workerEnrichmentByName[n] = {
+            role_category: r.role_category || '',
+            job_profile: r.job_profile || '',
+            project_role: r.project_role || '',
+            resource_type: r.resource_type || '',
+            account_name: r.account_name || '',
+            ICP_role: r.ICP_role || '',
+            manager_org: r.manager_org || ''
+          };
+        }
+      });
+    } else {
+      // Enriched assignments carry all worker fields directly.
+      rows.forEach(r => {
+        const n = r.resource_name;
+        if (n && !workerClassByName[n]) {
+          workerClassByName[n] = String(r.worker_class || '');
+        }
+      });
+    }
     try {
       if (typeof readGenericResources_ === 'function') {
         readGenericResources_().forEach(g => {
@@ -702,18 +760,22 @@ function api_getReportingSummary(params) {
       if (!a.resource_name) return;
       if (excluded.has(a.resource_name)) return;
 
-      const wc = workerClassByName[a.resource_name] || '';
-      const enrichment = workerEnrichmentByName[a.resource_name] || {};
+      // Drop 5: enriched assignments carry all worker fields directly;
+      // fall back to the per-worker lookup maps for non-enriched path.
+      const wc = a.worker_class || workerClassByName[a.resource_name] || '';
+      const enrichment = useEnrichedAssigns ? a : (workerEnrichmentByName[a.resource_name] || {});
 
       const fakeRow = {
-        worker_class: wc,
-        manager_org: enrichment.manager_org || '',
-        role_category: enrichment.role_category || '',
-        job_profile: enrichment.job_profile || '',
-        project_role: enrichment.project_role || '',
-        resource_type: enrichment.resource_type || '',
-        account_name: a.account_name || enrichment.account_name || '',
-        ICP_role: enrichment.ICP_role || ''
+        worker_class:  wc,
+        team_label:    a.team_label || undefined,
+        icp_role:      a.icp_role   || enrichment.ICP_role || '',
+        manager_org:   a.manager_org   || enrichment.manager_org   || '',
+        role_category: a.role_category || enrichment.role_category || '',
+        job_profile:   a.job_profile   || enrichment.job_profile   || '',
+        project_role:  a.project_role  || enrichment.project_role  || '',
+        resource_type: a.resource_type || enrichment.resource_type || '',
+        account_name:  a.account_name  || enrichment.account_name  || '',
+        ICP_role:      a.icp_role      || enrichment.ICP_role       || ''
       };
 
       const mgrCheck = _rowPassesManagerFilter_(fakeRow);
@@ -748,7 +810,10 @@ function api_getReportingSummary(params) {
           externalHoursByPracticeOwnership += hrs;
         }
 
-        const teamKey = _classifyTeam_(fakeRow, rtMap);
+        const teamKey = (fakeRow.team_label) ||
+          ((_repCtx_ && typeof resolveTeamLabel_ === 'function')
+            ? resolveTeamLabel_(fakeRow, _repCtx_)
+            : _classifyTeam_(fakeRow, rtMap));
         if (teamKey === 'Unclassified') {
           const sig = (fakeRow.role_category || '(blank)') + ' | ' + (fakeRow.resource_type || '(blank)');
           unmappedSamples[sig] = (unmappedSamples[sig] || 0) + hrs;

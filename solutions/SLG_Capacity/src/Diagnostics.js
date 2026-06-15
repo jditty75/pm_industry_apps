@@ -1033,6 +1033,126 @@ function _test_phase4_chunked_cache() {
   Logger.log('Same kpi headcount: ' + (r1.kpis.headcount === r2.kpis.headcount));
 }
 
+// ============================================================
+// Drop 5 diagnostics
+// ============================================================
+
+/**
+ * Compare team labels produced by the unified resolver against (a) the legacy
+ * roleTeamLabels[icp] path, and (b) the old _classifyTeam_ chain.
+ * Run before and after Drop 5 clasp push; new divergences after deploy = bug.
+ */
+function _dbg_compareTeamResolvers() {
+  _dbg_requireAdmin_();
+  const resIdx = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : _resourceIndex_(cachedRead_(ALLOC_NORM));
+  const rtMap = readConfigResourceType_();
+  const roleTeamLabels = readRoleTeamLabels_();
+  const ctx = (typeof resolveTeamLabel_ === 'function')
+    ? resolveTeamLabel_.buildCtx_(roleTeamLabels, rtMap) : null;
+
+  let divergences = 0;
+  Object.values(resIdx).forEach(function (res) {
+    const unified = ctx
+      ? resolveTeamLabel_(res, ctx)
+      : '(resolver unavailable)';
+    const oldIcp = (res.worker_class === 'SLG_Real' || res.worker_class === 'SLG_Generic')
+      ? (roleTeamLabels[res.icp] || 'Unclassified')
+      : null;
+    const oldClassify = _classifyTeam_({
+      role_category: res.role_category || '',
+      job_profile:   res.job_profile   || '',
+      project_role:  '',
+      resource_type: res.resource_type || ''
+    }, rtMap);
+
+    const expectedSlg = oldIcp || oldClassify;
+    if (unified !== expectedSlg) {
+      divergences++;
+      Logger.log('DIVERGE: ' + res.name +
+        ' unified=' + unified +
+        ' expected=' + expectedSlg +
+        ' wc=' + res.worker_class +
+        ' icp=' + res.icp +
+        ' rt=' + res.resource_type);
+    }
+  });
+  Logger.log('_dbg_compareTeamResolvers: checked ' + Object.keys(resIdx).length +
+    ' resources, ' + divergences + ' divergences');
+}
+
+/**
+ * Log enriched-cache stats: current version, hit/miss counters, last payload size.
+ */
+function _dbg_enrichedCacheStats() {
+  _dbg_requireAdmin_();
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var version   = props.getProperty('enriched_cache_version') || '(not set)';
+    var hits      = props.getProperty('enriched_hits')            || '0';
+    var misses    = props.getProperty('enriched_misses')          || '0';
+    var payloadKb = props.getProperty('enriched_last_payload_kb') || '(unknown)';
+    var lastInv   = props.getProperty('enriched_cache_last_invalidated') || '(never)';
+    Logger.log('enriched_cache_version:       ' + version);
+    Logger.log('enriched_hits:                ' + hits);
+    Logger.log('enriched_misses:              ' + misses);
+    Logger.log('enriched_last_payload_kb:     ' + payloadKb);
+    Logger.log('enriched_cache_last_invalidated: ' + lastInv);
+  } catch (e) {
+    Logger.log('_dbg_enrichedCacheStats: ' + e.message);
+  }
+}
+
+/**
+ * Drop 5 performance test. Run after clasp push to validate warm/cold ratio.
+ * Goal: warm-call total time ≤ 30% of cold-call total time.
+ * Add output to commit message Perf notes: section.
+ */
+function _test_drop5_endpoints() {
+  _dbg_requireAdmin_();
+  Logger.log('=== _test_drop5_endpoints: starting cold calls ===');
+
+  // Flush first to ensure cold start.
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  const t0 = Date.now();
+  const coldDash = api_getDashboard({ workerScope: 'SLG', groupBy: 'Function' });
+  const t1 = Date.now();
+  const coldReport = api_getReportingSummary({ workerScope: 'All' });
+  const t2 = Date.now();
+  const coldRef = api_getReference();
+  const t3 = Date.now();
+
+  Logger.log('Cold api_getDashboard:          ' + (t1 - t0) + 'ms');
+  Logger.log('Cold api_getReportingSummary:   ' + (t2 - t1) + 'ms');
+  Logger.log('Cold api_getReference:          ' + (t3 - t2) + 'ms');
+  Logger.log('Cold total:                     ' + (t3 - t0) + 'ms');
+
+  // Warm calls (caches populated).
+  const t4 = Date.now();
+  api_getDashboard({ workerScope: 'SLG', groupBy: 'Function' });
+  const t5 = Date.now();
+  api_getReportingSummary({ workerScope: 'All' });
+  const t6 = Date.now();
+  api_getReference();
+  const t7 = Date.now();
+
+  Logger.log('Warm api_getDashboard:          ' + (t5 - t4) + 'ms');
+  Logger.log('Warm api_getReportingSummary:   ' + (t6 - t5) + 'ms');
+  Logger.log('Warm api_getReference:          ' + (t7 - t6) + 'ms');
+  Logger.log('Warm total:                     ' + (t7 - t4) + 'ms');
+
+  const coldTotal = t3 - t0;
+  const warmTotal = t7 - t4;
+  const ratio = coldTotal > 0 ? (warmTotal / coldTotal) : 1;
+  Logger.log('Warm/cold ratio:                ' + (ratio * 100).toFixed(1) + '%  (goal ≤ 30%)');
+  Logger.log('Goal met:                       ' + (ratio <= 0.30 ? 'YES' : 'NO'));
+
+  Logger.log('Sanity: cold kpis.headcount = ' + ((coldDash.kpis || {}).headcount || '(none)'));
+  Logger.log('Sanity: cold report ok = ' + !!coldReport);
+  Logger.log('Sanity: cold ref resources = ' + ((coldRef.resources || []).length));
+}
+
 function _test_phase8_ingest_filter_logic() {
   _dbg_requireAdmin_();
   // Exercises the include/exclude/group semantics with a synthetic

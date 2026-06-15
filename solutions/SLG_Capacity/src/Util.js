@@ -254,6 +254,14 @@ function invalidateAllCaches_() {
   try {
     CacheService.getUserCache().remove('api_getReference_v1');
   } catch (e) { /* ignore */ }
+
+  // Drop 5: bump enriched-data cache version so getEnrichedAllocations_,
+  // getEnrichedAssignments_, and getResourceIndex_ all rebuild on next call.
+  try {
+    if (typeof invalidateEnrichedCaches_ === 'function') {
+      invalidateEnrichedCaches_();
+    }
+  } catch (e) { /* ignore — EnrichedData.gs may not be present yet */ }
 }
 
 // ============================================================

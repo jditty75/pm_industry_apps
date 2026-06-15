@@ -649,6 +649,21 @@ function computeUtilization(params) {
     b.utilization = cap > 0 ? (usedWork / cap) : 0;
   });
 
+  // Local memoization cache for _resolveTeamForBucket_ (Drop 1).
+  // Keyed by the tuple of fields that determine the resolved team.
+  // Same inputs always produce the same output, so this is safe across
+  // both call sites in this function (team filter and headcount gap).
+  const _teamResolveCache_ = {};
+  function _resolveTeamCached_(b) {
+    const k = (b.worker_class || '') + '|' + (b.icp || '') + '|' +
+              (b.role_category || '') + '|' + (b.job_profile || '') + '|' +
+              (b.project_role || '') + '|' + (b.resource_type || '');
+    if (!_teamResolveCache_.hasOwnProperty(k)) {
+      _teamResolveCache_[k] = _resolveTeamForBucket_(b, roleTeamLabels, rtTeamMap);
+    }
+    return _teamResolveCache_[k];
+  }
+
   // 4) Apply manager filter AND Priority 2 team filter.
   //    Team filter overrides manager (effectiveManagers is null when
   //    teamLabelFilter is set, see above).
@@ -658,7 +673,7 @@ function computeUtilization(params) {
       if (!effectiveManagers[mgrNorm]) return false;
     }
     if (teamLabelFilter) {
-      const bucketTeam = _resolveTeamForBucket_(b, roleTeamLabels, rtTeamMap);
+      const bucketTeam = _resolveTeamCached_(b);
       if (bucketTeam !== teamLabelFilter) return false;
     }
     return true;

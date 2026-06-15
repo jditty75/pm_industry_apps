@@ -736,3 +736,144 @@ function normalizeStaff() {
     monthsDetected: months.length
   };
 }
+
+/**
+ * Normalize opportunities from the Pipeline tab to Opportunities_Normalized.
+ *
+ * Restored 2026-06-11 after being lost in a prior edit. Originally ran on a
+ * 30-minute time-based trigger; that trigger was orphaned when the function
+ * disappeared. The function now runs only when explicitly invoked — via
+ * api_refreshOpportunities (the Admin view's "Refresh Opportunities" button)
+ * or from the Apps Script editor.
+ *
+ * Reads from: Pipeline tab (Salesforce-fed, managed by the Salesforce connector)
+ * Writes to:  Opportunities_Normalized tab (consumed by api_listOpportunities)
+ *
+ * Note on ACV column: the Pipeline tab from Salesforce uses "ACV  Amount"
+ * with TWO spaces between "ACV" and "Amount". The previous version of this
+ * function looked up "ACV Amount" (one space) and silently returned 0 for
+ * every ACV value. This restore fixes that bug by checking the two-space
+ * variant first and falling back to the single-space variant for resilience.
+ */
+function normalizeOpportunities() {
+  const ss = SpreadsheetApp.getActive();
+  const src = ss.getSheetByName(OPPS_SHEET);
+  if (!src) throw new Error('Missing sheet: ' + OPPS_SHEET);
+
+  const values = src.getDataRange().getValues();
+  if (values.length < 2) {
+    logRefresh_('opps', 0, 0, 0);
+    invalidateCache_(OPPS_NORM);
+    return { rowsIn: 0, rowsOut: 0 };
+  }
+
+  const header = values.shift();
+  const idx = {};
+  header.forEach((h, i) => { idx[String(h).trim()] = i; });
+
+  function v(name) {
+    return idx.hasOwnProperty(name) ? idx[name] : -1;
+  }
+
+  const iId    = v('Opportunity ID');
+  const iName  = v('Opportunity Name');
+  const iAcct  = v('Account Name');
+  const iStage = v('Stage');
+  const iProb  = v('Probability (%)');
+  // ACV column from Salesforce has two spaces: "ACV  Amount".
+  // Fall back to single-space variant for resilience.
+  const iAcv   = v('ACV  Amount');
+  const iAcv2  = v('ACV Amount');
+  const iStart = v('Est Deployment Start Date');
+  const iEnd   = v('Estimated Go Live Date');
+  const iEe    = v('Deployment EE Count');
+  const iSvcs  = v('Workday Services');
+  const iSeg   = v('Account PS Sub Region');
+  const iDeal  = v('Deal Type');
+  const iAppr  = v('Deployment Approach');
+
+  const out = [];
+  for (let r = 0; r < values.length; r++) {
+    const row = values[r];
+    if (iId < 0 || !row[iId]) continue;
+
+    const stageStr = String(row[iStage] || '');
+    const stageNum = parseInt((stageStr.match(/^(\d+)/) || [])[1] || '0', 10);
+
+    let services = [];
+    if (iSvcs >= 0) {
+      try {
+        services = JSON.parse(row[iSvcs] || '[]');
+      } catch (e) {
+        services = [];
+      }
+    }
+
+    const acvRaw = iAcv >= 0 ? row[iAcv] : (iAcv2 >= 0 ? row[iAcv2] : 0);
+
+    out.push([
+      row[iId],
+      iName  >= 0 ? row[iName]  : '',
+      iAcct  >= 0 ? row[iAcct]  : '',
+      stageStr,
+      stageNum,
+      Number(iProb >= 0 ? row[iProb] : 0) || 0,
+      Number(acvRaw) || 0,
+      iStart >= 0 ? row[iStart] : '',
+      iEnd   >= 0 ? row[iEnd]   : '',
+      Number(iEe >= 0 ? row[iEe] : 0) || 0,
+      JSON.stringify(services),
+      iSeg   >= 0 ? row[iSeg]   : '',
+      iDeal  >= 0 ? row[iDeal]  : '',
+      iAppr  >= 0 ? row[iAppr]  : ''
+    ]);
+  }
+
+  writeTable_(OPPS_NORM, OPP_HEADERS, out);
+  logRefresh_('opps', values.length, out.length, 0);
+  invalidateCache_(OPPS_NORM);
+
+  return { rowsIn: values.length, rowsOut: out.length };
+}
+
+function _diagnoseAdminLoad() {
+  const apis = [
+    'api_getRefreshLog',
+    'api_getPipelineRefreshLog',
+    'api_listGenericResources',
+    'api_getExclusions',
+    'api_getReference'
+  ];
+  apis.forEach(function (name) {
+    try {
+      const fn = this[name];
+      if (typeof fn !== 'function') {
+        Logger.log(name + ': FUNCTION NOT FOUND');
+        return;
+      }
+      const result = (name === 'api_getReference') ? fn() : fn();
+      const type = Array.isArray(result) ? 'array(len=' + result.length + ')' :
+                   (result === null ? 'NULL' :
+                   (result === undefined ? 'UNDEFINED' :
+                   typeof result));
+      Logger.log(name + ': returned ' + type);
+      
+      // For arrays, inspect the first row for problematic types
+      if (Array.isArray(result) && result.length > 0) {
+        const sample = result[0];
+        Object.keys(sample).forEach(function (key) {
+          const val = sample[key];
+          const valType = val === null ? 'null' :
+                          val === undefined ? 'undefined' :
+                          val instanceof Date ? 'Date' :
+                          typeof val;
+          if (valType === 'Date' || valType === 'object') {
+            Logger.log('  field "' + key + '" = ' + valType + ' (POTENTIAL SERIALIZATION ISSUE)');
+          }
+        });
+      }
+    } catch (e) {
+      Logger.log(name + ': THREW — ' + e.message);
+    }
+  });
+}

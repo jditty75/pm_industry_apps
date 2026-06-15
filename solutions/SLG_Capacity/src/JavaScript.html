@@ -39,6 +39,7 @@
     draftFilters: Object.assign({}, FILTER_DEFAULTS),
     workerScopeChangedManually: false,  // Priority 3
     dashboard: null,
+    dashboardCache: null,
     opportunities: [],
     deployments: [],
     scenarios: [],
@@ -123,6 +124,13 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+  function debounce_(fn, wait) {
+    let timer;
+    return function(...args) {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn.apply(this, args), wait);
+    };
   }
 
   // ============================================================
@@ -435,7 +443,10 @@
       renderTeamsSelect();        // Manager dropdown
 
       $('#openFiltersBtn').addEventListener('click', openFiltersDrawer_);
-      $('#refreshBtn').addEventListener('click', () => { reloadCurrentView_(); });
+      $('#refreshBtn').addEventListener('click', () => {
+        State.dashboardCache = null;
+        reloadCurrentView_();
+      });
 
       initFiltersDrawer_();
 
@@ -456,7 +467,6 @@
       updateFilterCountBadge_();
 
       showView('dashboard');
-      await loadScenariosList();
     } catch (err) {
       toast('Init failed: ' + err.message, 'err');
       console.error(err);
@@ -493,6 +503,7 @@
   }
 
   function onAppliedFiltersChanged_() {
+    State.dashboardCache = null;
     renderChipStrip_();
     updateFilterCountBadge_();
     reloadCurrentView_();
@@ -644,7 +655,8 @@
   function clearDirtyMarks_() {
     $$('#filtersDrawer .field.dirty').forEach(f => f.classList.remove('dirty'));
   }
-  function openFiltersDrawer_() {
+  async function openFiltersDrawer_() {
+    if (!State.scenarios.length) await loadScenariosList();
     State.draftFilters = Object.assign({}, State.filters);
     syncDrawerInputsToDraft_();
     clearDirtyMarks_();
@@ -751,8 +763,8 @@
         suspendedReason: 'Manager filter suspended while Team filter is active'
       });
     }
-    if (f.includeMyManagers && !f.teamLabel) {
-      chips.push({ key: 'includeMyManagers', label: 'Manager scope', value: 'Include reports' });
+    if (f.includeMyManagers !== FILTER_DEFAULTS.includeMyManagers && !f.teamLabel) {
+      chips.push({ key: 'includeMyManagers', label: 'Manager scope', value: f.includeMyManagers ? 'Include reports' : 'Direct only' });
     }
 
     // Priority 3: compare Worker Scope against current-view default.
@@ -906,7 +918,14 @@
 
     try {
       const params = buildServerParams_({ quarter: null });
-      let d = await call('api_getDashboard', params);
+      const signature = JSON.stringify(params);
+      let d;
+      if (State.dashboardCache && State.dashboardCache.signature === signature) {
+        d = JSON.parse(JSON.stringify(State.dashboardCache.data));
+      } else {
+        d = await call('api_getDashboard', params);
+        State.dashboardCache = { signature, data: JSON.parse(JSON.stringify(d)) };
+      }
       d = applyPlanningWindow(d);
       State.dashboard = d;
 
@@ -1894,16 +1913,17 @@
       }
     });
 
+    const _debouncedRpAccountsSearch_ = debounce_((value) => {
+      renderRpAccountsModalRows_(State.rpAccountsAll || [], State.rpHoursTotal || 0, value);
+    }, 200);
+    const _debouncedRpDrillSearch_ = debounce_(() => renderRpDrillModalRows_(), 200);
+
     document.addEventListener('input', (e) => {
       if (e.target && e.target.id === 'rpAccountsModalSearch') {
-        renderRpAccountsModalRows_(
-          State.rpAccountsAll || [],
-          State.rpHoursTotal || 0,
-          e.target.value
-        );
+        _debouncedRpAccountsSearch_(e.target.value);
       }
       if (e.target && (e.target.id === 'rpTeamDrillSearch' || e.target.id === 'rpAccountDrillSearch')) {
-        renderRpDrillModalRows_();
+        _debouncedRpDrillSearch_();
       }
     });
 
@@ -2176,7 +2196,7 @@
     });
   }
 
-  $('#resourceSearch')?.addEventListener('input', renderResourceList);
+  $('#resourceSearch')?.addEventListener('input', debounce_(renderResourceList, 200));
 
   async function loadResourceDetail_(name) {
     if (!name) return;
@@ -2238,10 +2258,12 @@
       toast('Pipeline load failed: ' + err.message, 'err');
     }
   }
-  ['#segmentFilter', '#stageFilter', '#oppSearch'].forEach(sel => {
+  ['#segmentFilter', '#stageFilter'].forEach(sel => {
     const el = $(sel);
-    if (el) el.addEventListener('input', loadOpportunities);
+    if (el) el.addEventListener('change', loadOpportunities);
   });
+  const _oppSearchEl = $('#oppSearch');
+  if (_oppSearchEl) _oppSearchEl.addEventListener('input', debounce_(loadOpportunities, 200));
 
   function renderOpportunities_() {
     const body = $('#oppBody');
@@ -2273,7 +2295,7 @@
       toast('Deployments load failed: ' + err.message, 'err');
     }
   }
-  $('#deploySearch')?.addEventListener('input', renderDeployments_);
+  $('#deploySearch')?.addEventListener('input', debounce_(renderDeployments_, 200));
 
   function renderDeployments_() {
     const body = $('#deployBody');
@@ -2422,7 +2444,8 @@
   //           server-side via _resourceIndex_).
   // Both have empty-value placeholders to fail browser native required validation.
   // ============================================================
-  function openAssignDrawer_(opportunityId, source) {
+  async function openAssignDrawer_(opportunityId, source) {
+    if (!State.scenarios.length) await loadScenariosList();
     const drawer = $('#assignDrawer');
     const opp = State.opportunities.find(o => o.opportunity_id === opportunityId) ||
                 State.deployments.find(d => d.deployment_id === opportunityId);
@@ -2533,6 +2556,16 @@
     // Server's expandAssignmentToMonthly_ will use these literal values
     // instead of computing weights. Empty for non-Custom distributions.
     const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
+
+    if (distVal === 'Custom') {
+      const _customInputs = $$('.custom-month-input');
+      const _sumOfMonths = _customInputs.reduce((s, el) => s + (Number(el.value) || 0), 0);
+      const _estHours = Number($('#f_hours').value) || 0;
+      if (Math.abs(_sumOfMonths - _estHours) > 0.5) {
+        toast('Custom distribution total must equal Estimated Hours before saving.', 'err');
+        return;
+      }
+    }
 
     const payload = {
       assignment_id: $('#f_assignment_id').value || null,
@@ -2737,6 +2770,10 @@
       deltaEl.textContent = '(' + delta + ' short)';
       deltaEl.className = 'custom-months-delta mismatch';
     }
+    const _saveBtn = $('#saveModeledBtn');
+    const _commitBtn = $('#commitNowBtn');
+    if (_saveBtn) _saveBtn.disabled = delta !== 0;
+    if (_commitBtn) _commitBtn.disabled = delta !== 0;
   }
 
   /**
@@ -2767,6 +2804,10 @@
       field.hidden = false;
     } else {
       field.hidden = true;
+      const _saveBtn = $('#saveModeledBtn');
+      const _commitBtn = $('#commitNowBtn');
+      if (_saveBtn) _saveBtn.disabled = false;
+      if (_commitBtn) _commitBtn.disabled = false;
     }
   }
 

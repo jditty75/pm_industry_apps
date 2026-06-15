@@ -87,6 +87,7 @@ function writeTable_(name, headers, rows) {
   if (rows && rows.length) {
     sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }
+  invalidateCache_(name);
   return (rows || []).length;
 }
 
@@ -109,6 +110,7 @@ function appendRow_(name, rowObj, headers) {
   const sh = getOrCreateSheet_(name, headers);
   const row = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
   sh.appendRow(row);
+  invalidateCache_(name);
 }
 
 function updateRow_(name, idField, idValue, patch, headers) {
@@ -124,6 +126,7 @@ function updateRow_(name, idField, idValue, patch, headers) {
         if (patch[h] !== undefined) values[r][i] = patch[h];
       });
       sh.getRange(r + 1, 1, 1, header.length).setValues([values[r]]);
+      invalidateCache_(name);
       return true;
     }
   }

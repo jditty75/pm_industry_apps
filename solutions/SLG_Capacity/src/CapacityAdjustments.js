@@ -38,6 +38,7 @@ function saveCapacityAdjustment_(adj) {
   adj.distribution  = adj.distribution  || 'Even';
   adj.status        = adj.status        || 'Modeled';
   adj.scenario_id   = adj.scenario_id   || '';
+  adj.deployment_id = String(adj.deployment_id || '');
   adj.reason        = adj.reason        || '';
 
   if (adj.start_date) adj.start_date = new Date(adj.start_date);

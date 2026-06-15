@@ -2738,6 +2738,60 @@
    * @param {string|null} prefilledResource — worker name pre-selected from CE
    * @param {string|null} prefilledScenario — scenario pre-selected from Scenarios view
    */
+  /**
+   * Populate the #r_deployment_id dropdown for the given resource.
+   * Pre-selects existingId when editing. Handles empty-allocation disabled state
+   * and unmapped legacy deployment_ids.
+   * @param {string} resourceName
+   * @param {string} [existingId]
+   */
+  async function _populateDeploymentDropdown_(resourceName, existingId) {
+    const sel  = $('#r_deployment_id');
+    const hint = $('#r_deployment_hint');
+    if (!sel) return;
+
+    sel.disabled = false;
+    sel.innerHTML = '<option value="">— No deployment —</option>';
+    if (hint) hint.textContent = 'Limited to deployments where this worker has PSA allocations.';
+
+    if (!resourceName) return;
+
+    let options = [];
+    try { options = await call('api_getDeploymentsForWorker', resourceName); } catch (e) { options = []; }
+
+    if (!options || !options.length) {
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = '— No allocations to reduce —';
+      ph.disabled = true;
+      sel.innerHTML = '';
+      sel.appendChild(ph);
+      sel.value = '';
+      sel.disabled = true;
+      if (hint) hint.textContent = 'This worker has no PSA allocations to associate with a reduction.';
+      return;
+    }
+
+    options.forEach(function (o) {
+      const opt = document.createElement('option');
+      opt.value = o.deployment_id;
+      opt.textContent = o.label;
+      sel.appendChild(opt);
+    });
+
+    if (existingId) {
+      const found = options.some(o => o.deployment_id === existingId);
+      if (!found) {
+        // Prepend unmapped option for legacy deployment_id
+        const unmapped = document.createElement('option');
+        unmapped.value = existingId;
+        unmapped.textContent = '(unmapped: ' + existingId + ')';
+        sel.insertBefore(unmapped, sel.options[1]);
+      }
+      sel.value = existingId;
+    }
+  }
+
   async function openReductionDrawer_(adjustmentId, prefilledResource, prefilledScenario) {
     const drawer = $('#reductionDrawer');
     if (!drawer) return;
@@ -2766,6 +2820,10 @@
     const sub = $('#reductionDrawerWorkerSub');
     if (sub) sub.textContent = '';
 
+    // Reset deployment dropdown to a neutral state before async populate
+    const depSel = $('#r_deployment_id');
+    if (depSel) { depSel.innerHTML = '<option value="">— No deployment —</option>'; depSel.disabled = false; }
+
     if (adjustmentId) {
       // Edit mode: fetch the existing adjustment
       try {
@@ -2786,6 +2844,8 @@
             $('#rCustomMonthsField').hidden = false;
           }
           if (sub) sub.textContent = adj.resource_name || '';
+          // Populate deployment dropdown and pre-select saved value
+          await _populateDeploymentDropdown_(adj.resource_name || '', String(adj.deployment_id || ''));
         }
       } catch (e) {
         toast('Failed to load adjustment: ' + e.message, 'err');
@@ -2800,6 +2860,8 @@
         rSel.disabled = false;
       }
       if (prefilledScenario) sSel.value = prefilledScenario;
+      // Populate deployment dropdown for the pre-filled resource (if any)
+      if (prefilledResource) await _populateDeploymentDropdown_(prefilledResource, '');
     }
 
     drawer.hidden = false;
@@ -2948,6 +3010,8 @@
     const en  = $('#r_end').value;
     const sub = $('#reductionDrawerWorkerSub');
     if (sub) sub.textContent = res || '';
+    // Re-populate deployment dropdown for newly selected worker
+    _populateDeploymentDropdown_(res, '');
     if (res && st && en) loadResourceBaselineForDrawer_(res, st, en);
   });
 
@@ -3090,6 +3154,7 @@
       custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : '',
       reason:            reason,
       scenario_id:       scenario || '',
+      deployment_id:     ($('#r_deployment_id') && !$('#r_deployment_id').disabled) ? ($('#r_deployment_id').value || '') : '',
       status:            commitNow ? 'Committed' : 'Modeled'
     };
 
@@ -3230,9 +3295,10 @@
     const typeIcon = isAssign
       ? '<span class="type-icon assign" title="Assignment">▶</span>'
       : '<span class="type-icon reduce" title="Reduction">▼</span>';
+    const reductionSub = r.subtitle || '';
     const titleHtml = isAssign
       ? `<div>${escapeHtml_(r.title)}</div><div class="muted" style="font-size:11px;">${escapeHtml_(r.subtitle || '')}</div>`
-      : `<div>${escapeHtml_(r.title)}</div>${r.reason ? `<div class="muted" style="font-size:11px;">${escapeHtml_(r.reason)}</div>` : ''}`;
+      : `<div>${escapeHtml_(r.title)}</div>${reductionSub ? `<div class="muted" style="font-size:11px;">${escapeHtml_(reductionSub)}</div>` : (r.reason ? `<div class="muted" style="font-size:11px;">${escapeHtml_(r.reason)}</div>` : '')}`;
     const dates = r.start_date && r.end_date
       ? fmtDate(r.start_date) + ' – ' + fmtDate(r.end_date) : '—';
     const hoursHtml = isAssign

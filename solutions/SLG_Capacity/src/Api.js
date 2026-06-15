@@ -1460,6 +1460,72 @@ function api_getResourceTypeOptions() {
   return sorted;
 }
 
+/**
+ * Return deployments where the given worker has PSA allocations
+ * (Billable, Internal, or Education allocation types).
+ * Used to scope the deployment dropdown in the reduction drawer.
+ *
+ * @param {string} resourceName
+ * @return {{ deployment_id: string, label: string }[]}  sorted alphabetically by label
+ */
+function api_getDeploymentsForWorker(resourceName) {
+  if (!resourceName) return [];
+
+  // 1. Collect distinct project_names for this worker from ALLOC_NORM.
+  var allocs;
+  try { allocs = cachedRead_(ALLOC_NORM); } catch (e) { allocs = []; }
+
+  var PSA_TYPES = { Billable: true, Internal: true, Education: true };
+  var projectNames = {};
+  allocs.forEach(function (row) {
+    if (String(row.resource_name || '') !== resourceName) return;
+    if (!PSA_TYPES[String(row.allocation_type || '')]) return;
+    var pn = String(row.project_name || '').trim();
+    if (pn) projectNames[pn] = true;
+  });
+
+  // 2. Build a name-indexed map of Deployments tab rows.
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(DEPLOYMENTS_SHEET);
+  var depByName = {};
+  if (sh) {
+    var vals = sh.getDataRange().getValues();
+    if (vals.length > 1) {
+      var hdr = vals[0];
+      var hIdx = {};
+      hdr.forEach(function (h, i) { hIdx[String(h).trim()] = i; });
+      for (var ri = 1; ri < vals.length; ri++) {
+        var row = vals[ri];
+        var name = String(hIdx['Deployment Name'] >= 0 ? row[hIdx['Deployment Name']] : '').trim();
+        var account = String(hIdx['Account Name'] >= 0 ? row[hIdx['Account Name']] : '').trim();
+        var id = String(hIdx['Deployment ID'] >= 0 ? row[hIdx['Deployment ID']] : '').trim();
+        if (!name) continue;
+        depByName[name] = { deployment_id: id || name, account_name: account };
+      }
+    }
+  }
+
+  // 3. For each distinct project_name, resolve to a deployment entry.
+  var out = [];
+  Object.keys(projectNames).forEach(function (pn) {
+    var dep = depByName[pn];
+    if (dep) {
+      out.push({
+        deployment_id: dep.deployment_id || pn,
+        label: (dep.account_name ? dep.account_name + ' \u2014 ' : '') + pn
+      });
+    } else {
+      out.push({
+        deployment_id: pn,
+        label: pn + ' (no matching deployment)'
+      });
+    }
+  });
+
+  out.sort(function (a, b) { return a.label < b.label ? -1 : a.label > b.label ? 1 : 0; });
+  return out;
+}
+
 function api_listAllGenericResources() {
   try {
     let rows;
@@ -1951,6 +2017,44 @@ function api_getWorkerPlanning(resourceName, filter) {
     });
   } catch (e) {}
 
+  // Build deployment index keyed by deployment_id and by deployment_name
+  // for resolving a reduction's deployment_id to a human-readable label.
+  const depIndex = {}; // deployment_id  → { account_name, deployment_name }
+  const depByName = {}; // deployment_name → deployment_id
+  try {
+    const depSh = SpreadsheetApp.getActive().getSheetByName(DEPLOYMENTS_SHEET);
+    if (depSh) {
+      const dVals = depSh.getDataRange().getValues();
+      if (dVals.length > 1) {
+        const dHdr = dVals[0];
+        const dIdx = {};
+        dHdr.forEach(function (h, i) { dIdx[String(h).trim()] = i; });
+        for (let ri = 1; ri < dVals.length; ri++) {
+          const dr = dVals[ri];
+          const dName = String(dIdx['Deployment Name'] >= 0 ? dr[dIdx['Deployment Name']] : '').trim();
+          const dAcct = String(dIdx['Account Name']   >= 0 ? dr[dIdx['Account Name']]   : '').trim();
+          const dId   = String(dIdx['Deployment ID']  >= 0 ? dr[dIdx['Deployment ID']]  : '').trim();
+          if (!dName) continue;
+          const key = dId || dName;
+          depIndex[key]  = { account_name: dAcct, deployment_name: dName };
+          depByName[dName] = key;
+        }
+      }
+    }
+  } catch (e) {}
+
+  function _resolveDepSubtitle_(deploymentId) {
+    if (!deploymentId) return '';
+    const entry = depIndex[deploymentId];
+    if (entry) {
+      return entry.account_name
+        ? entry.account_name + ' \u2014 ' + entry.deployment_name
+        : entry.deployment_name;
+    }
+    // deployment_id might be a raw project_name (no matching deployment row)
+    return deploymentId + ' (deployment not found)';
+  }
+
   function _toIsoDate_(v) {
     if (!v) return '';
     try { return new Date(v).toISOString().slice(0,10); } catch (e) { return String(v).slice(0,10); }
@@ -1984,7 +2088,7 @@ function api_getWorkerPlanning(resourceName, filter) {
       type:          'reduction',
       id:            String(adj.adjustment_id || ''),
       title:         'Reduction',
-      subtitle:      '',
+      subtitle:      _resolveDepSubtitle_(String(adj.deployment_id || '')),
       start_date:    _toIsoDate_(adj.start_date),
       end_date:      _toIsoDate_(adj.end_date),
       hours:         Number(adj.hours_reduction) || 0,

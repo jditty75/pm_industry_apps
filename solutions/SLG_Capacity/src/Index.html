@@ -1520,6 +1520,16 @@
           </select>
         </label>
 
+        <label class="field">
+          <span>Deployment <span class="muted">(optional)</span></span>
+          <select id="r_deployment_id" class="select">
+            <option value="">— No deployment —</option>
+          </select>
+          <div class="muted" style="font-size:11px;margin-top:4px;" id="r_deployment_hint">
+            Limited to deployments where this worker has PSA allocations.
+          </div>
+        </label>
+
         <!-- Baseline context: PSA committed hours vs proposed reduction -->
         <div class="card inner" id="reductionBaselineCard" hidden>
           <div class="card-header">

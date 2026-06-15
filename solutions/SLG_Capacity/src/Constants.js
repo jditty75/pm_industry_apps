@@ -174,7 +174,7 @@ const CAPACITY_ADJUSTMENTS_SHEET = 'Capacity_Adjustments';
 const ADJUSTMENT_HEADERS = [
   'adjustment_id', 'resource_name', 'start_date', 'end_date',
   'hours_reduction', 'distribution', 'custom_monthly_json',
-  'reason', 'scenario_id', 'status',
+  'reason', 'scenario_id', 'deployment_id', 'status',
   'created_by', 'created_at', 'modified_by', 'modified_at'
 ];
 

@@ -1449,8 +1449,8 @@
     <div class="drawer-panel">
       <header class="drawer-header">
         <div>
-          <div class="muted">Workforce Modeling</div>
-          <div class="drawer-title">Reduce Worker Capacity</div>
+          <div class="muted" id="reductionDrawerContext">Workforce Modeling</div>
+          <div class="drawer-title" id="reductionDrawerTitle">Reduce Worker Capacity</div>
           <div class="muted" id="reductionDrawerWorkerSub" style="margin-top:2px;font-size:12px;"></div>
         </div>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
@@ -1520,7 +1520,7 @@
           </select>
         </label>
 
-        <label class="field">
+        <label class="field" id="r_deployment_field">
           <span>Deployment <span class="muted">(optional)</span></span>
           <select id="r_deployment_id" class="select">
             <option value="">— No deployment —</option>

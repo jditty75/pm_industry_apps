@@ -1323,7 +1323,8 @@ function api_listDeployments() {
       dam_name: String(v(row, 'Delivery Assurance Manager: Full Name') || ''),
       em_name: String(v(row, 'Workday Engagement Manager: Full Name') || ''),
       current_update: String(v(row, 'Current Deployment Update') || ''),
-      deployment_id: String(depId || '')
+      deployment_id: String(depId || ''),
+      psa_worker_count: 0
     });
   });
 
@@ -1332,6 +1333,27 @@ function api_listDeployments() {
   out.forEach(function (item) {
     applyOverridesToRecord_(item, item.deployment_id, overrideIndex, 'Deployments');
   });
+
+  // Compute psa_worker_count per deployment from ALLOC_NORM.
+  // Build depName → Set of unique resource_names for PSA work types.
+  try {
+    const PSA_TYPES = { Billable: true, Internal: true, Education: true };
+    const allocs = cachedRead_(ALLOC_NORM);
+    const depWorkers = {}; // deployment_name → Set
+    allocs.forEach(function (row) {
+      if (!PSA_TYPES[String(row.allocation_type || '')]) return;
+      const pn = String(row.project_name || '').trim();
+      if (!pn) return;
+      if (!depWorkers[pn]) depWorkers[pn] = new Set();
+      depWorkers[pn].add(String(row.resource_name || ''));
+    });
+    out.forEach(function (dep) {
+      const ws = depWorkers[dep.deployment_name];
+      dep.psa_worker_count = ws ? ws.size : 0;
+    });
+  } catch (e) {
+    Logger.log('api_listDeployments: psa_worker_count failed — ' + e);
+  }
 
   return out;
 }
@@ -1524,6 +1546,120 @@ function api_getDeploymentsForWorker(resourceName) {
 
   out.sort(function (a, b) { return a.label < b.label ? -1 : a.label > b.label ? 1 : 0; });
   return out;
+}
+
+/**
+ * Return workers who have PSA allocations on the given deployment,
+ * along with their total hours on that deployment.
+ * Used to populate the Worker dropdown in the deployment-scoped reduction drawer.
+ *
+ * @param {string} deploymentId
+ * @return {{ resource_name: string, hours_on_deployment: number }[]}  sorted by hours desc
+ */
+function api_getWorkersForDeployment(deploymentId) {
+  if (!deploymentId) return [];
+
+  // 1. Resolve deployment name from deployment_id.
+  const depRef = _resolveDeploymentRef_(deploymentId);
+  if (!depRef) return [];
+  const depName = depRef.deployment_name;
+
+  // 2. Filter ALLOC_NORM to PSA rows matching this deployment.
+  var allocs;
+  try { allocs = cachedRead_(ALLOC_NORM); } catch (e) { allocs = []; }
+
+  const PSA_TYPES = { Billable: true, Internal: true, Education: true };
+  const workerHours = {};
+  allocs.forEach(function (row) {
+    if (!PSA_TYPES[String(row.allocation_type || '')]) return;
+    if (String(row.project_name || '').trim() !== depName) return;
+    const rn = String(row.resource_name || '').trim();
+    if (!rn) return;
+    workerHours[rn] = (workerHours[rn] || 0) + (Number(row.hours) || 0);
+  });
+
+  const out = Object.keys(workerHours).map(function (name) {
+    return { resource_name: name, hours_on_deployment: Math.round(workerHours[name]) };
+  });
+  out.sort(function (a, b) { return b.hours_on_deployment - a.hours_on_deployment; });
+  return out;
+}
+
+/**
+ * Return per-month PSA baseline for a worker, split into total vs. deployment-scoped hours.
+ * Used by the reduction drawer baseline panel when a deployment is locked.
+ *
+ * @param {string} resourceName
+ * @param {string} deploymentId
+ * @return {{ monthKey: string, total_psa_hours: number, deployment_hours: number }[]}
+ */
+function api_getResourceBaselineForDeployment(resourceName, deploymentId) {
+  if (!resourceName || !deploymentId) return [];
+
+  const depRef = _resolveDeploymentRef_(deploymentId);
+  const depName = depRef ? depRef.deployment_name : null;
+
+  const PSA_TYPES = { Billable: true, Internal: true, Education: true };
+  var allocs;
+  try { allocs = cachedRead_(ALLOC_NORM); } catch (e) { allocs = []; }
+
+  const byMonth = {};
+  allocs.forEach(function (row) {
+    if (String(row.resource_name || '') !== resourceName) return;
+    if (!PSA_TYPES[String(row.allocation_type || '')]) return;
+    const k = monthKey_(row.period_start);
+    if (!k) return;
+    if (!byMonth[k]) byMonth[k] = { total: 0, dep: 0 };
+    const h = Number(row.hours) || 0;
+    byMonth[k].total += h;
+    if (depName && String(row.project_name || '').trim() === depName) {
+      byMonth[k].dep += h;
+    }
+  });
+
+  return Object.keys(byMonth).sort().map(function (k) {
+    return {
+      monthKey: k,
+      total_psa_hours: Math.round(byMonth[k].total),
+      deployment_hours: Math.round(byMonth[k].dep)
+    };
+  });
+}
+
+/**
+ * Resolve a deployment_id to its { account_name, deployment_name }, or null if not found.
+ * Reads the Deployments tab directly (no cache needed — called infrequently).
+ *
+ * @param {string} deploymentId
+ * @return {{ account_name: string, deployment_name: string }|null}
+ */
+function _resolveDeploymentRef_(deploymentId) {
+  if (!deploymentId) return null;
+  try {
+    const ss = SpreadsheetApp.getActive();
+    const sh = ss.getSheetByName(DEPLOYMENTS_SHEET);
+    if (!sh) return null;
+    const vals = sh.getDataRange().getValues();
+    if (vals.length < 2) return null;
+    const hdr = vals[0];
+    const hIdx = {};
+    hdr.forEach(function (h, i) { hIdx[String(h).trim()] = i; });
+    for (let ri = 1; ri < vals.length; ri++) {
+      const row = vals[ri];
+      const dId   = String(hIdx['Deployment ID']   >= 0 ? row[hIdx['Deployment ID']]   : '').trim();
+      const dName = String(hIdx['Deployment Name'] >= 0 ? row[hIdx['Deployment Name']] : '').trim();
+      const dAcct = String(hIdx['Account Name']    >= 0 ? row[hIdx['Account Name']]    : '').trim();
+      // Match by Deployment ID; also match by Deployment Name for cases
+      // where deployment_id was stored as the project_name directly.
+      if ((dId && dId === deploymentId) || dName === deploymentId) {
+        return { account_name: dAcct, deployment_name: dName };
+      }
+    }
+    return null;
+  } catch (e) {
+    Logger.log('_resolveDeploymentRef_: ' + e);
+    return null;
+  }
 }
 
 function api_listAllGenericResources() {
@@ -2044,15 +2180,18 @@ function api_getWorkerPlanning(resourceName, filter) {
   } catch (e) {}
 
   function _resolveDepSubtitle_(deploymentId) {
-    if (!deploymentId) return '';
+    if (!deploymentId) return { subtitle: '', orphaned: false };
     const entry = depIndex[deploymentId];
     if (entry) {
-      return entry.account_name
-        ? entry.account_name + ' \u2014 ' + entry.deployment_name
-        : entry.deployment_name;
+      return {
+        subtitle: entry.account_name
+          ? entry.account_name + ' \u2014 ' + entry.deployment_name
+          : entry.deployment_name,
+        orphaned: false
+      };
     }
-    // deployment_id might be a raw project_name (no matching deployment row)
-    return deploymentId + ' (deployment not found)';
+    // deployment_id set but not found in Deployments tab → orphaned
+    return { subtitle: '(no longer active)', orphaned: true };
   }
 
   function _toIsoDate_(v) {
@@ -2063,11 +2202,14 @@ function api_getWorkerPlanning(resourceName, filter) {
   let rows = [];
 
   assigns.forEach(function (a) {
+    const oppData = oppIndex[a.opportunity_id];
+    const assignOrphaned = !!a.opportunity_id && !oppData;
     rows.push({
       type:          'assignment',
       id:            String(a.assignment_id || ''),
-      title:         (oppIndex[a.opportunity_id] || {}).name || a.opportunity_id || '',
-      subtitle:      (oppIndex[a.opportunity_id] || {}).account || '',
+      title:         (oppData || {}).name || a.opportunity_id || '',
+      subtitle:      assignOrphaned ? '(no longer active)' : ((oppData || {}).account || ''),
+      orphaned:      assignOrphaned,
       start_date:    _toIsoDate_(a.start_date),
       end_date:      _toIsoDate_(a.end_date),
       hours:         Number(a.estimated_hours) || 0,
@@ -2084,11 +2226,13 @@ function api_getWorkerPlanning(resourceName, filter) {
   });
 
   adjs.forEach(function (adj) {
+    const depResult = _resolveDepSubtitle_(String(adj.deployment_id || ''));
     rows.push({
       type:          'reduction',
       id:            String(adj.adjustment_id || ''),
       title:         'Reduction',
-      subtitle:      _resolveDepSubtitle_(String(adj.deployment_id || '')),
+      subtitle:      depResult.subtitle,
+      orphaned:      depResult.orphaned,
       start_date:    _toIsoDate_(adj.start_date),
       end_date:      _toIsoDate_(adj.end_date),
       hours:         Number(adj.hours_reduction) || 0,

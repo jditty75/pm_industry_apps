@@ -476,10 +476,13 @@
       renderTeamsSelect();        // Manager dropdown
 
       $('#openFiltersBtn').addEventListener('click', openFiltersDrawer_);
-      $('#refreshBtn').addEventListener('click', async () => {
+      $('#refreshBtn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
         State.dashboardCache = null;
-        await refreshReferenceData_();
-        reloadCurrentView_();
+        await withLoading_(btn, async () => {
+          await refreshReferenceData_();
+          await reloadCurrentView_();
+        }, { label: 'Refreshing...' });
       });
 
       initFiltersDrawer_();
@@ -560,23 +563,22 @@
     reloadCurrentView_();
   }
 
-  function reloadCurrentView_() {
-  if (State.currentView === 'dashboard') loadDashboard();
-  else if (State.currentView === 'pipeline') loadOpportunities();
-  else if (State.currentView === 'scenarios') loadScenarios();
-  else if (State.currentView === 'reporting') loadReporting();
-  else if (State.currentView === 'admin') loadAdmin();
-  else if (State.currentView === 'explorer') {
-    renderResourceList();
-    // If a worker is currently selected, re-fetch their detail so
-    // the chart reflects current View Mode / scenarioId filters.
-    // Without this, the chart stays stale showing data loaded at
-    // last-click time even after the user switches View Mode.
-    if (State.selectedResource) {
-      loadResourceDetail_(State.selectedResource);
+  async function reloadCurrentView_() {
+    if (State.currentView === 'dashboard')    return loadDashboard();
+    if (State.currentView === 'pipeline')     return loadOpportunities();
+    if (State.currentView === 'deployments')  return loadDeployments();
+    if (State.currentView === 'scenarios')    return loadScenarios();
+    if (State.currentView === 'reporting')    return loadReporting();
+    if (State.currentView === 'admin')        return loadAdmin();
+    if (State.currentView === 'explorer') {
+      renderResourceList();
+      // If a worker is currently selected, re-fetch their detail so
+      // the chart reflects current View Mode / scenarioId filters.
+      if (State.selectedResource) {
+        await loadResourceDetail_(State.selectedResource);
+      }
     }
   }
-}
 
   /**
    * Re-fetch api_getReference and update State.ref, then re-render all
@@ -2560,7 +2562,10 @@
       d.deployment_name.toLowerCase().indexOf(q) >= 0 ||
       d.account_name.toLowerCase().indexOf(q) >= 0
     );
-    body.innerHTML = filtered.map(d => `
+    body.innerHTML = filtered.map(d => {
+      const canReduce = (d.psa_worker_count || 0) > 0;
+      const reduceDisabledAttr = canReduce ? '' : ' disabled title="No PSA allocations to reduce on this deployment."';
+      return `
       <tr>
         <td>${escapeHtml_(d.deployment_name)}</td>
         <td>${escapeHtml_(d.account_name)}</td>
@@ -2570,14 +2575,18 @@
         <td>${_renderCellWithOverride_(d, 'em_name', d.em_name)}</td>
         <td>${_renderCellWithOverride_(d, 'dam_name', d.dam_name)}</td>
         <td>
-          <button class="btn-ghost row-btn" data-dep="${d.deployment_id}">Assign</button>
+          <button class="btn-ghost row-btn" data-dep="${escapeHtml_(d.deployment_id)}">Assign</button>
+          <button class="btn-ghost row-btn" data-dep-reduce="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;"${reduceDisabledAttr}>Reduce</button>
           <button class="btn-ghost row-btn" data-edit-dep="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;">Edit</button>
         </td>
       </tr>
-    `).join('');
+    `}).join('');
 
     $$('#deployBody button[data-dep]').forEach(btn => {
       btn.addEventListener('click', () => openAssignDrawer_(btn.dataset.dep, 'deployment'));
+    });
+    $$('#deployBody button[data-dep-reduce]').forEach(btn => {
+      btn.addEventListener('click', () => openReductionDrawerForDeployment_(btn.dataset.depReduce));
     });
     $$('#deployBody button[data-edit-dep]').forEach(btn => {
       btn.addEventListener('click', () => openOverrideDrawer_('Deployments', btn.dataset.editDep));
@@ -2738,6 +2747,87 @@
    * @param {string|null} prefilledResource — worker name pre-selected from CE
    * @param {string|null} prefilledScenario — scenario pre-selected from Scenarios view
    */
+  // Tracks the deployment_id locked when the drawer is opened from the Deployments view.
+  // null = no lock (Explorer / Scenarios entry points).
+  let _reductionDrawerDepLock = null;
+
+  /**
+   * Open the reduction drawer from the Deployments view with the deployment
+   * pre-selected and locked. Populates the Worker dropdown from
+   * api_getWorkersForDeployment (with hours shown per worker).
+   * @param {string} deploymentId
+   */
+  async function openReductionDrawerForDeployment_(deploymentId) {
+    const drawer = $('#reductionDrawer');
+    if (!drawer || !deploymentId) return;
+
+    _reductionDrawerDepLock = deploymentId;
+
+    // Update drawer header
+    const dep = (State.deployments || []).find(d => d.deployment_id === deploymentId);
+    const depLabel = dep
+      ? (dep.account_name ? dep.account_name + ' \u2014 ' + dep.deployment_name : dep.deployment_name)
+      : deploymentId;
+    const titleEl = $('#reductionDrawerTitle');
+    const ctxEl   = $('#reductionDrawerContext');
+    if (titleEl) titleEl.textContent = 'Reduce Hours on Deployment';
+    if (ctxEl)   ctxEl.textContent   = depLabel;
+    const sub = $('#reductionDrawerWorkerSub');
+    if (sub) sub.textContent = '';
+
+    // Reset form fields
+    $('#r_adjustment_id').value = '';
+    $('#r_start').value = '';
+    $('#r_end').value = '';
+    $('#r_hours').value = '';
+    $('#r_reason').value = '';
+    $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
+    $('#rCustomMonthsField').hidden = true;
+
+    // Scenario select
+    const sSel = $('#r_scenario');
+    sSel.innerHTML = '<option value="">— No scenario —</option>' +
+      (State.scenarios || []).filter(s => s.status !== 'Archived')
+        .map(s => `<option value="${s.scenario_id}">${escapeHtml_(s.name)}</option>`).join('');
+
+    // Lock + hide the Deployment field; value is set directly
+    const depField = $('#r_deployment_field');
+    if (depField) depField.hidden = true;
+    const depSel = $('#r_deployment_id');
+    if (depSel) { depSel.value = deploymentId; depSel.disabled = true; }
+
+    // Fetch workers for this deployment
+    const rSel = $('#r_resource');
+    rSel.innerHTML = '<option value="">— Select worker —</option>';
+    let workers = [];
+    try { workers = await call('api_getWorkersForDeployment', deploymentId); } catch (e) { workers = []; }
+
+    if (!workers || !workers.length) {
+      const ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = '— No workers with PSA allocations —';
+      ph.disabled = true;
+      rSel.innerHTML = '';
+      rSel.appendChild(ph);
+      rSel.disabled = true;
+      const saveBtn   = $('#saveReductionModeledBtn');
+      const commitBtn = $('#commitReductionNowBtn');
+      if (saveBtn)   saveBtn.disabled = true;
+      if (commitBtn) commitBtn.disabled = true;
+    } else {
+      rSel.disabled = false;
+      workers.forEach(function (w) {
+        const opt = document.createElement('option');
+        opt.value = w.resource_name;
+        opt.textContent = w.resource_name + ' (' + w.hours_on_deployment + 'h on this deployment)';
+        rSel.appendChild(opt);
+      });
+    }
+
+    drawer.hidden = false;
+    $('#reductionBaselineCard').hidden = true;
+  }
+
   /**
    * Populate the #r_deployment_id dropdown for the given resource.
    * Pre-selects existingId when editing. Handles empty-allocation disabled state
@@ -2782,10 +2872,10 @@
     if (existingId) {
       const found = options.some(o => o.deployment_id === existingId);
       if (!found) {
-        // Prepend unmapped option for legacy deployment_id
+        // Prepend option for legacy/orphaned deployment_id
         const unmapped = document.createElement('option');
         unmapped.value = existingId;
-        unmapped.textContent = '(unmapped: ' + existingId + ')';
+        unmapped.textContent = '(no longer active: ' + existingId + ')';
         sel.insertBefore(unmapped, sel.options[1]);
       }
       sel.value = existingId;
@@ -2796,8 +2886,18 @@
     const drawer = $('#reductionDrawer');
     if (!drawer) return;
 
+    // Clear deployment lock and restore drawer header to default Explorer/Scenarios mode
+    _reductionDrawerDepLock = null;
+    const titleEl = $('#reductionDrawerTitle');
+    const ctxEl   = $('#reductionDrawerContext');
+    if (titleEl) titleEl.textContent = 'Reduce Worker Capacity';
+    if (ctxEl)   ctxEl.textContent   = 'Workforce Modeling';
+    const depField = $('#r_deployment_field');
+    if (depField) depField.hidden = false;
+
     // Populate resource select
     const rSel = $('#r_resource');
+    rSel.disabled = false;
     rSel.innerHTML = '<option value="">— Select worker —</option>' +
       (State.ref.resources || []).map(r =>
         `<option value="${escapeHtml_(r.name)}">${escapeHtml_(r.name)}</option>`
@@ -3010,59 +3110,95 @@
     const en  = $('#r_end').value;
     const sub = $('#reductionDrawerWorkerSub');
     if (sub) sub.textContent = res || '';
-    // Re-populate deployment dropdown for newly selected worker
-    _populateDeploymentDropdown_(res, '');
-    if (res && st && en) loadResourceBaselineForDrawer_(res, st, en);
+    // Re-populate deployment dropdown only in the unlocked (Explorer/Scenarios) flow
+    if (!_reductionDrawerDepLock) _populateDeploymentDropdown_(res, '');
+    // In deployment-locked mode load baseline on worker change alone (no dates needed for context)
+    if (res && (_reductionDrawerDepLock || (st && en))) {
+      loadResourceBaselineForDrawer_(res, st || null, en || null);
+    }
   });
 
   /**
    * Load baseline PSA committed hours for a worker and render the
    * baseline context panel inside the reduction drawer.
+   * When _reductionDrawerDepLock is set, shows both "Total PSA" and
+   * "On this deployment" datasets side-by-side.
    */
   async function loadResourceBaselineForDrawer_(resourceName, startDate, endDate) {
     const card = $('#reductionBaselineCard');
     if (!card) return;
     try {
-      const baseline = await call('api_getResourceBaseline', resourceName);
-      if (!baseline || !baseline.length) {
-        card.hidden = true;
-        return;
-      }
-      // Filter to months within the drawer's date range
+      const depLock = _reductionDrawerDepLock;
       const start = startDate ? startDate.slice(0,7) : null;
       const end   = endDate   ? endDate.slice(0,7)   : null;
-      const filtered = baseline.filter(b =>
-        (!start || b.monthKey >= start) && (!end || b.monthKey <= end)
-      );
-      if (!filtered.length) { card.hidden = true; return; }
-
       const hoursReduction = Number($('#r_hours').value) || 0;
-      const n = filtered.length;
-      const perMonth = n > 0 ? hoursReduction / n : 0;
 
-      const ctx = $('#reductionBaselineChart').getContext('2d');
-      if (window._reductionBaselineChartInst) window._reductionBaselineChartInst.destroy();
-      window._reductionBaselineChartInst = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: filtered.map(b => fmtMonth(b.monthKey)),
-          datasets: [
-            { label: 'PSA Committed', data: filtered.map(b => b.committed_hours), backgroundColor: cssVar_('--ballpoint') },
-            { label: 'Proposed Reduction', data: filtered.map(() => perMonth), backgroundColor: '#e74c3c88' }
-          ]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false, animation: false,
-          plugins: { legend: { position: 'bottom' } },
-          scales: { x: { stacked: false, grid: { display: false } }, y: { beginAtZero: true } }
-        }
-      });
+      if (depLock) {
+        // Deployment-locked mode: fetch two-row baseline
+        const baseline = await call('api_getResourceBaselineForDeployment', resourceName, depLock);
+        if (!baseline || !baseline.length) { card.hidden = true; return; }
+        const filtered = baseline.filter(b =>
+          (!start || b.monthKey >= start) && (!end || b.monthKey <= end)
+        );
+        if (!filtered.length && (start || end)) { card.hidden = true; return; }
+        const data = filtered.length ? filtered : baseline;
+        const ctx2 = $('#reductionBaselineChart').getContext('2d');
+        if (window._reductionBaselineChartInst) window._reductionBaselineChartInst.destroy();
+        window._reductionBaselineChartInst = new Chart(ctx2, {
+          type: 'bar',
+          data: {
+            labels: data.map(b => fmtMonth(b.monthKey)),
+            datasets: [
+              { label: 'Total PSA', data: data.map(b => b.total_psa_hours), backgroundColor: cssVar_('--ballpoint') },
+              { label: 'On this deployment', data: data.map(b => b.deployment_hours || 0), backgroundColor: cssVar_('--lunchBreak') }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: { x: { stacked: false, grid: { display: false } }, y: { beginAtZero: true } }
+          }
+        });
+        const totalDep = data.reduce((s, b) => s + (b.deployment_hours || 0), 0);
+        const noteEl = $('#reductionBaselineNote');
+        if (noteEl) noteEl.textContent = `On this deployment: ${Math.round(totalDep)}h total PSA`;
+        card.hidden = false;
+      } else {
+        // Standard mode: single "PSA Committed" row
+        const baseline = await call('api_getResourceBaseline', resourceName);
+        if (!baseline || !baseline.length) { card.hidden = true; return; }
+        const filtered = baseline.filter(b =>
+          (!start || b.monthKey >= start) && (!end || b.monthKey <= end)
+        );
+        if (!filtered.length) { card.hidden = true; return; }
 
-      const totalBaseline = filtered.reduce((s, b) => s + b.committed_hours, 0);
-      const net = totalBaseline - hoursReduction;
-      const noteEl = $('#reductionBaselineNote');
-      if (noteEl) noteEl.textContent = `Baseline: ${Math.round(totalBaseline)}h — Reduction: ${Math.round(hoursReduction)}h — Net: ${Math.round(net)}h`;
-      card.hidden = false;
+        const n = filtered.length;
+        const perMonth = n > 0 ? hoursReduction / n : 0;
+
+        const ctx = $('#reductionBaselineChart').getContext('2d');
+        if (window._reductionBaselineChartInst) window._reductionBaselineChartInst.destroy();
+        window._reductionBaselineChartInst = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: filtered.map(b => fmtMonth(b.monthKey)),
+            datasets: [
+              { label: 'PSA Committed', data: filtered.map(b => b.committed_hours), backgroundColor: cssVar_('--ballpoint') },
+              { label: 'Proposed Reduction', data: filtered.map(() => perMonth), backgroundColor: '#e74c3c88' }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: { x: { stacked: false, grid: { display: false } }, y: { beginAtZero: true } }
+          }
+        });
+
+        const totalBaseline = filtered.reduce((s, b) => s + b.committed_hours, 0);
+        const net = totalBaseline - hoursReduction;
+        const noteEl = $('#reductionBaselineNote');
+        if (noteEl) noteEl.textContent = `Baseline: ${Math.round(totalBaseline)}h — Reduction: ${Math.round(hoursReduction)}h — Net: ${Math.round(net)}h`;
+        card.hidden = false;
+      }
     } catch (e) {
       card.hidden = true;
     }
@@ -3181,10 +3317,11 @@
     }
   }
 
-  // Reduction drawer close
+  // Reduction drawer close — also clear the deployment lock
   $('#reductionDrawer')?.addEventListener('click', (e) => {
     if (e.target.dataset && e.target.dataset.close !== undefined) {
       $('#reductionDrawer').hidden = true;
+      _reductionDrawerDepLock = null;
     }
   });
 </script>
@@ -3296,9 +3433,10 @@
       ? '<span class="type-icon assign" title="Assignment">▶</span>'
       : '<span class="type-icon reduce" title="Reduction">▼</span>';
     const reductionSub = r.subtitle || '';
+    const orphanStyle = r.orphaned ? ' style="color:var(--lunchBreak,#e8a317);font-size:11px;"' : ' style="font-size:11px;"';
     const titleHtml = isAssign
-      ? `<div>${escapeHtml_(r.title)}</div><div class="muted" style="font-size:11px;">${escapeHtml_(r.subtitle || '')}</div>`
-      : `<div>${escapeHtml_(r.title)}</div>${reductionSub ? `<div class="muted" style="font-size:11px;">${escapeHtml_(reductionSub)}</div>` : (r.reason ? `<div class="muted" style="font-size:11px;">${escapeHtml_(r.reason)}</div>` : '')}`;
+      ? `<div>${escapeHtml_(r.title)}</div><div class="muted"${orphanStyle}>${escapeHtml_(r.subtitle || '')}</div>`
+      : `<div>${escapeHtml_(r.title)}</div>${reductionSub ? `<div class="muted"${orphanStyle}>${escapeHtml_(reductionSub)}</div>` : (r.reason ? `<div class="muted" style="font-size:11px;">${escapeHtml_(r.reason)}</div>` : '')}`;
     const dates = r.start_date && r.end_date
       ? fmtDate(r.start_date) + ' – ' + fmtDate(r.end_date) : '—';
     const hoursHtml = isAssign

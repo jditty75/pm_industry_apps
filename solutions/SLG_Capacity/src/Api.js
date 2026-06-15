@@ -1388,31 +1388,96 @@ function api_getRefreshLog() {
     const rows = readTable_(REFRESH_LOG) || [];
     return rows
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(0, 25);
-  } catch (e) { return []; }
+      .slice(0, 25)
+      .map(function (r) {
+        return {
+          timestamp: _toIso_(r.timestamp),
+          source: String(r.source || ''),
+          rows_in: Number(r.rows_in) || 0,
+          rows_out: Number(r.rows_out) || 0,
+          months_detected: Number(r.months_detected) || 0,
+          user: String(r.user || '')
+        };
+      });
+  } catch (e) {
+    return [];
+  }
 }
 
 function api_getPipelineRefreshLog() {
   try {
-    const sh = SpreadsheetApp.getActive().getSheetByName(SF_PIPELINE_REFRESH_LOG);
+    // Salesforce connector-managed tab. The connector owns the name
+    // 'Auto Refresh Execution Log 1' (with trailing 1) and renames it
+    // back if changed externally. Hardcoded here because Constants.gs
+    // may not be updated yet in this manual patch context.
+    const sh = SpreadsheetApp.getActive().getSheetByName('Auto Refresh Execution Log 1');
     if (!sh) return [];
     const values = sh.getDataRange().getValues();
     if (!values || values.length < 2) return [];
-    const header = values[0].map(h => String(h || '').trim());
+    const header = values[0].map(function (h) { return String(h || '').trim(); });
     const out = [];
     for (let i = 1; i < values.length; i++) {
       const row = {};
-      header.forEach((h, j) => { row[h] = values[i][j]; });
+      header.forEach(function (h, j) { row[h] = values[i][j]; });
       out.push(row);
     }
     return out
-      .sort((a, b) => new Date(b['Refresh Time']) - new Date(a['Refresh Time']))
-      .slice(0, 10);
-  } catch (e) { return []; }
+      .sort(function (a, b) {
+        return new Date(b['Refresh Time']) - new Date(a['Refresh Time']);
+      })
+      .slice(0, 10)
+      .map(function (r) {
+        // Coerce every field to a primitive. Dates become ISO strings;
+        // everything else becomes a string. This prevents google.script.run
+        // from delivering null to the client when the payload contains
+        // un-serializable Date objects.
+        const sanitized = {};
+        Object.keys(r).forEach(function (key) {
+          const v = r[key];
+          if (v === null || v === undefined) {
+            sanitized[key] = '';
+          } else if (v instanceof Date) {
+            sanitized[key] = _toIso_(v);
+          } else if (typeof v === 'number' || typeof v === 'boolean') {
+            sanitized[key] = v;
+          } else {
+            sanitized[key] = String(v);
+          }
+        });
+        return sanitized;
+      });
+  } catch (e) {
+    return [];
+  }
 }
 
 function api_checkPsaAssignment(name) {
   const alloc = readTable_(ALLOC_NORM);
   const found = alloc.some(r => r.resource_name === name);
   return { found: found };
+}
+
+/**
+ * Return metadata for all known Config_Settings keys, including current values
+ * and whether each key is using its default.
+ * Used by the Admin → Planning Config → Settings card.
+ */
+function api_listSettings() {
+  const KNOWN_SETTINGS = [
+    { key: 'planning_window_months', label: 'Planning window (months)',    description: 'Number of months shown in the planning window heatmap.', defaultValue: '6'    },
+    { key: 'hide_all_external',      label: 'Hide all external workers',   description: 'When true, External workers are excluded from all views.', defaultValue: 'false' },
+    { key: 'default_team_filter',    label: 'Default team filter',         description: 'Pre-select this team in the Team dropdown on load.',    defaultValue: ''     },
+    { key: 'recognized_non_manager_emails', label: 'Recognized non-manager emails', description: 'Comma-separated emails that are recognized but not managers (suppresses "not recognized" banner).', defaultValue: '' }
+  ];
+  const currentSettings = readSettings_();
+  return KNOWN_SETTINGS.map(function (s) {
+    const inSheet = currentSettings.hasOwnProperty(s.key);
+    return {
+      key:         s.key,
+      label:       s.label,
+      description: s.description,
+      value:       inSheet ? currentSettings[s.key] : s.defaultValue,
+      isDefault:   !inSheet
+    };
+  });
 }

@@ -626,7 +626,20 @@
 
     <!-- ============ View: Admin ============ -->
     <section class="view" data-view="admin" hidden>
-      <div class="grid-2">
+
+      <!-- Admin tab strip -->
+      <nav class="admin-tabs" role="tablist" aria-label="Admin sections">
+        <button class="admin-tab on" data-admin-tab="operations" role="tab" aria-selected="true">Operations</button>
+        <button class="admin-tab" data-admin-tab="planning" role="tab" aria-selected="false">Planning Config</button>
+        <button class="admin-tab" data-admin-tab="workforce" role="tab" aria-selected="false">Workforce</button>
+        <button class="admin-tab" data-admin-tab="overrides" role="tab" aria-selected="false">
+          Source Overrides
+          <span class="admin-tab-badge" id="adminTabBadgeOverrides" hidden>0</span>
+        </button>
+      </nav>
+
+      <!-- Operations panel -->
+      <div class="admin-panel" data-admin-panel="operations">
         <div class="card">
           <div class="card-header">
             <div class="card-title">Upload PSA</div>
@@ -644,35 +657,7 @@
 
         <div class="card">
           <div class="card-header">
-            <div class="card-title">ICP Targets</div>
-            <button class="btn-ghost" id="saveIcpBtn">Save</button>
-          </div>
-          <table class="data-table">
-            <thead>
-              <tr><th>Role</th><th class="num">Target</th><th class="num">Red threshold</th></tr>
-            </thead>
-            <tbody id="icpBody"></tbody>
-          </table>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Role Monthly Capacity</div>
-            <button class="btn-ghost" id="saveRolesBtn">Save</button>
-          </div>
-          <table class="data-table">
-            <thead><tr><th>Role</th><th class="num">Hours / month</th></tr></thead>
-            <tbody id="rolesBody"></tbody>
-          </table>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
             <div class="card-title">Normalization Log</div>
-            <div class="card-tools">
-              <button class="btn-ghost" id="flushCachesBtn" title="Reload all cached config and data sheets">↻ Flush caches</button>
-              <button class="btn-ghost" id="refreshOppsBtn">Normalize Opportunities</button>
-            </div>
           </div>
           <div class="table-wrap">
             <table class="data-table">
@@ -705,6 +690,64 @@
           </div>
         </div>
 
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Maintenance</div>
+              <div class="muted" style="font-size:12px;margin-top:2px;">Admin tools</div>
+            </div>
+          </div>
+          <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;padding:16px;">
+            <button class="btn-ghost" id="flushCachesBtn" title="Reload all cached config and data sheets">↻ Flush caches</button>
+            <button class="btn-ghost" id="refreshOppsBtn">Normalize Opportunities</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Planning Config panel -->
+      <div class="admin-panel" data-admin-panel="planning" hidden>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">ICP Targets</div>
+            <button class="btn-ghost" id="saveIcpBtn">Save</button>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr><th>Role</th><th class="num">Target</th><th class="num">Red threshold</th></tr>
+            </thead>
+            <tbody id="icpBody"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Role Monthly Capacity</div>
+            <button class="btn-ghost" id="saveRolesBtn">Save</button>
+          </div>
+          <table class="data-table">
+            <thead><tr><th>Role</th><th class="num">Hours / month</th></tr></thead>
+            <tbody id="rolesBody"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Settings</div>
+            <button class="btn-ghost" id="saveSettingsBtn">Save</button>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr><th>Setting</th><th>Value</th><th>Notes</th></tr>
+            </thead>
+            <tbody id="settingsBody">
+              <tr><td colspan="3" class="muted" style="padding:12px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Workforce panel -->
+      <div class="admin-panel" data-admin-panel="workforce" hidden>
         <div class="card">
           <div class="card-header">
             <div class="card-title">Generic Resources</div>
@@ -753,6 +796,17 @@
           </div>
         </div>
       </div>
+
+      <!-- Source Overrides panel -->
+      <div class="admin-panel" data-admin-panel="overrides" hidden>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Source Overrides</div>
+          </div>
+          <div style="padding:24px;color:var(--staple);">Override editor coming in Drop 3</div>
+        </div>
+      </div>
+
     </section>
 
   </main>

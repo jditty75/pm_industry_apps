@@ -1651,4 +1651,62 @@ td.cell-with-bar {
   background: #fff3cc;
   color: #8a5c00;
 }
+
+/* ============================================================
+   Admin tab strip (Drop 2)
+   ============================================================ */
+.admin-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding-bottom: 0;
+  border-bottom: 1px solid var(--business-card);
+  margin-bottom: 16px;
+}
+.admin-tab {
+  border: 0;
+  background: transparent;
+  color: var(--staple);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 400;
+  border-radius: 6px 6px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.admin-tab:hover {
+  background: var(--business-card);
+  color: var(--laptop);
+}
+.admin-tab.on {
+  background: #fff;
+  color: var(--after-hours);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+.admin-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--happy-hour);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+@media (max-width: 768px) {
+  .admin-tab { flex: 1 1 auto; justify-content: center; }
+}
 </style>

@@ -412,7 +412,11 @@
     if (name === 'deployments') loadDeployments();
     if (name === 'scenarios') loadScenarios();
     if (name === 'reporting') loadReporting();
-    if (name === 'admin') loadAdmin();
+    if (name === 'admin') {
+      const savedTab = localStorage.getItem(ADMIN_TAB_KEY) || 'operations';
+      activateAdminTab_(savedTab);
+      loadAdmin();
+    }
     if (window.innerWidth <= 768) $('#sidebar').classList.remove('open');
   }
   $$('.nav-item').forEach(btn => {
@@ -449,6 +453,7 @@
       });
 
       initFiltersDrawer_();
+      initAdminTabs_();
 
       $('#chipStrip').addEventListener('click', onChipStripClick_);
       $('#chipClearAll').addEventListener('click', clearAllFilters_);
@@ -2984,6 +2989,59 @@
     await call('api_refreshOpportunities');
     toast('Opportunities refreshed', 'ok');
     loadAdmin();
+  });
+
+  // ============================================================
+  // Admin tab navigation (Drop 2)
+  // ============================================================
+  const ADMIN_TAB_KEY = 'capacityPlanner.adminTab';
+
+  function initAdminTabs_() {
+    document.addEventListener('click', (e) => {
+      const tab = e.target.closest('[data-admin-tab]');
+      if (!tab) return;
+      activateAdminTab_(tab.dataset.adminTab);
+    });
+  }
+
+  function activateAdminTab_(tabName) {
+    $$('[data-admin-tab]').forEach(btn => {
+      const isActive = btn.dataset.adminTab === tabName;
+      btn.classList.toggle('on', isActive);
+      btn.setAttribute('aria-selected', String(isActive));
+    });
+    $$('[data-admin-panel]').forEach(panel => {
+      panel.hidden = panel.dataset.adminPanel !== tabName;
+    });
+    try { localStorage.setItem(ADMIN_TAB_KEY, tabName); } catch (e) {}
+    if (tabName === 'planning') loadAdminSettings_();
+  }
+
+  async function loadAdminSettings_() {
+    const body = $('#settingsBody');
+    if (!body) return;
+    try {
+      const settings = await call('api_listSettings');
+      body.innerHTML = settings.map(s => `
+        <tr>
+          <td>
+            <div style="font-weight:500">${escapeHtml_(s.label)}</div>
+            <div class="muted" style="font-size:12px">${escapeHtml_(s.description)}</div>
+          </td>
+          <td>
+            <code>${escapeHtml_(s.value)}</code>
+            ${s.isDefault ? '<span class="badge ghost" style="margin-left:6px;font-size:11px;">(default)</span>' : ''}
+          </td>
+          <td class="muted" style="font-size:12px">${escapeHtml_(s.key)}</td>
+        </tr>
+      `).join('');
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="3" class="muted" style="padding:12px">Failed to load settings: ' + escapeHtml_(err.message) + '</td></tr>';
+    }
+  }
+
+  $('#saveSettingsBtn')?.addEventListener('click', () => {
+    toast('Settings editing coming in Drop 4', 'info');
   });
 
   // PSA upload

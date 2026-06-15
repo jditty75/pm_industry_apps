@@ -1,6 +1,14 @@
 // ============================================================
 // Bootstrap.gs — one-time setup: tabs, seed config, triggers
-// Run bootstrap() once from the Apps Script editor after pasting all files.
+//
+// bootstrap() is NOT auto-run. It is a manual recovery / first-install
+// helper. Run it once from the Apps Script editor after a fresh install
+// or to repair missing tabs after a structural change.
+//
+// The override sheets (Overrides, Overrides_Audit, Overrides_Audit_Archive,
+// Config_Overridable_Fields) are also created on first write via
+// getOrCreateSheet_ calls inside writeTable_/appendRow_, so the override
+// system works even if bootstrap() is never explicitly run.
 // ============================================================
 
 function bootstrap() {
@@ -18,6 +26,17 @@ function bootstrap() {
   getOrCreateSheet_(CFG_CAL,      CAL_HEADERS);
   getOrCreateSheet_(CFG_ALIAS,    ALIAS_HEADERS);
   getOrCreateSheet_(REFRESH_LOG,  REFRESH_HEADERS);
+
+  // Drop 3: Source Overrides tabs
+  getOrCreateSheet_(OVERRIDES_SHEET,              OVERRIDE_HEADERS);
+  getOrCreateSheet_(OVERRIDES_AUDIT_SHEET,        OVERRIDE_AUDIT_HEADERS);
+  getOrCreateSheet_(OVERRIDES_AUDIT_ARCHIVE_SHEET, OVERRIDE_AUDIT_HEADERS);
+  getOrCreateSheet_(CFG_OVERRIDABLE_FIELDS,       OVERRIDABLE_FIELDS_HEADERS);
+
+  // Seed Config_Overridable_Fields if empty
+  if (readTable_(CFG_OVERRIDABLE_FIELDS).length === 0) {
+    writeTable_(CFG_OVERRIDABLE_FIELDS, OVERRIDABLE_FIELDS_HEADERS, DEFAULT_OVERRIDABLE_FIELDS);
+  }
 
   // Seed ICP if empty
   if (readTable_(CFG_ICP).length === 0) {

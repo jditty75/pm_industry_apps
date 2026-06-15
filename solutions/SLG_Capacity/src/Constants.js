@@ -170,6 +170,50 @@ const ASSIGN_STATUSES = ['Modeled','Committed','Archived'];
 // Group-by modes for the dashboard heatmap
 const GROUP_BY_MODES = ['Function','Role','Team','Individual'];
 
+// --- Drop 3: Source Overrides schema ---
+
+const OVERRIDES_SHEET             = 'Overrides';
+const OVERRIDES_AUDIT_SHEET       = 'Overrides_Audit';
+const OVERRIDES_AUDIT_ARCHIVE_SHEET = 'Overrides_Audit_Archive';
+const CFG_OVERRIDABLE_FIELDS      = 'Config_Overridable_Fields';
+
+const OVERRIDE_HEADERS = [
+  'override_id', 'source', 'record_id', 'field', 'original_value',
+  'override_value', 'reason', 'expires_at', 'status',
+  'created_by', 'created_at', 'modified_by', 'modified_at'
+];
+
+const OVERRIDE_AUDIT_HEADERS = [
+  'audit_id', 'timestamp', 'actor', 'action', 'override_id', 'source',
+  'record_id', 'field', 'before_json', 'after_json', 'notes'
+];
+
+// Overrides_Audit_Archive uses the same headers as Overrides_Audit.
+
+const OVERRIDABLE_FIELDS_HEADERS = [
+  'source', 'field', 'label', 'data_type', 'validator_hint', 'active', 'notes'
+];
+
+// Seed data: fields users can override per source.
+const DEFAULT_OVERRIDABLE_FIELDS = [
+  ['Pipeline',     'acv',                 'ACV',                 'currency', '', 'Yes', ''],
+  ['Pipeline',     'probability',         'Probability',         'percent',  '', 'Yes', ''],
+  ['Pipeline',     'expected_start',      'Expected Start',      'date',     '', 'Yes', ''],
+  ['Pipeline',     'expected_end',        'Expected End',        'date',     '', 'Yes', ''],
+  ['Pipeline',     'ee_count',            'EE Count',            'number',   '', 'Yes', ''],
+  ['Pipeline',     'stage',               'Stage',               'text',     '', 'Yes', ''],
+  ['Pipeline',     'segment',             'Segment',             'text',     '', 'Yes', ''],
+  ['Pipeline',     'deal_type',           'Deal Type',           'text',     '', 'Yes', ''],
+  ['Pipeline',     'deployment_approach', 'Deployment Approach', 'text',     '', 'Yes', ''],
+  ['Deployments',  'deployment_stage',    'Deployment Stage',    'text',     '', 'Yes', ''],
+  ['Deployments',  'deployment_health',   'Deployment Health',   'text',     '', 'Yes', ''],
+  ['Deployments',  'current_mtp_date',    'Current MTP Date',    'date',     '', 'Yes', ''],
+  ['Deployments',  'em_name',             'EM Name',             'text',     '', 'Yes', ''],
+  ['Deployments',  'dam_name',            'DAM Name',            'text',     '', 'Yes', ''],
+  ['Deployments',  'ps_locations',        'PS Locations',        'text',     '', 'Yes', ''],
+  ['Deployments',  'current_update',      'Current Update',      'text',     '', 'Yes', '']
+];
+
 // --- Workday brand palette (exposed to client via api_getReference) ---
 const WORKDAY_PALETTE = {
   // Core

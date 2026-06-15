@@ -1183,22 +1183,33 @@ function api_listOpportunities(filter) {
     if (pd !== 0) return pd;
     return new Date(a.expected_start || 0) - new Date(b.expected_start || 0);
   });
-    return rows.map(r => ({
-    opportunity_id: String(r.opportunity_id || ''),
-    opportunity_name: String(r.opportunity_name || ''),
-    account: String(r.account || ''),
-    stage: String(r.stage || ''),
-    stage_num: Number(r.stage_num) || 0,
-    probability: Number(r.probability) || 0,
-    acv: Number(r.acv) || 0,
-    expected_start: _toIso_(r.expected_start),
-    expected_end: _toIso_(r.expected_end),
-    ee_count: Number(r.ee_count) || 0,
-    services: String(r.services || ''),
-    segment: String(r.segment || ''),
-    deal_type: String(r.deal_type || ''),
-    deployment_approach: String(r.deployment_approach || '')
-  }));
+
+  // Filtering above happens against source (pre-override) values.
+  // Display values below are post-override. Users filter on canonical
+  // Salesforce data but see corrected display values.
+  const pipelineOverrides = readActiveOverrides_('Pipeline');
+  const overrideIndex = buildOverrideIndex_(pipelineOverrides);
+
+  return rows.map(r => {
+    const out = {
+      opportunity_id: String(r.opportunity_id || ''),
+      opportunity_name: String(r.opportunity_name || ''),
+      account: String(r.account || ''),
+      stage: String(r.stage || ''),
+      stage_num: Number(r.stage_num) || 0,
+      probability: Number(r.probability) || 0,
+      acv: Number(r.acv) || 0,
+      expected_start: _toIso_(r.expected_start),
+      expected_end: _toIso_(r.expected_end),
+      ee_count: Number(r.ee_count) || 0,
+      services: String(r.services || ''),
+      segment: String(r.segment || ''),
+      deal_type: String(r.deal_type || ''),
+      deployment_approach: String(r.deployment_approach || '')
+    };
+    applyOverridesToRecord_(out, out.opportunity_id, overrideIndex, 'Pipeline');
+    return out;
+  });
 }
 
 function api_listDeployments() {
@@ -1243,6 +1254,13 @@ function api_listDeployments() {
       deployment_id: String(depId || '')
     });
   });
+
+  const deploymentOverrides = readActiveOverrides_('Deployments');
+  const overrideIndex = buildOverrideIndex_(deploymentOverrides);
+  out.forEach(function (item) {
+    applyOverridesToRecord_(item, item.deployment_id, overrideIndex, 'Deployments');
+  });
+
   return out;
 }
 
@@ -1455,6 +1473,76 @@ function api_checkPsaAssignment(name) {
   const alloc = readTable_(ALLOC_NORM);
   const found = alloc.some(r => r.resource_name === name);
   return { found: found };
+}
+
+// ============================================================
+// Drop 3: Source Overrides API endpoints
+// ============================================================
+
+function _sanitizeOverrideForWire_(o) {
+  if (!o) return null;
+  return {
+    override_id:    String(o.override_id    || ''),
+    source:         String(o.source         || ''),
+    record_id:      String(o.record_id      || ''),
+    field:          String(o.field          || ''),
+    original_value: String(o.original_value || ''),
+    override_value: String(o.override_value || ''),
+    reason:         String(o.reason         || ''),
+    expires_at:     _toIso_(o.expires_at),
+    status:         String(o.status         || ''),
+    created_by:     String(o.created_by     || ''),
+    created_at:     _toIso_(o.created_at),
+    modified_by:    String(o.modified_by    || ''),
+    modified_at:    _toIso_(o.modified_at)
+  };
+}
+
+function _sanitizeOverrideAuditForWire_(a) {
+  if (!a) return null;
+  return {
+    audit_id:    String(a.audit_id    || ''),
+    timestamp:   _toIso_(a.timestamp),
+    actor:       String(a.actor       || ''),
+    action:      String(a.action      || ''),
+    override_id: String(a.override_id || ''),
+    source:      String(a.source      || ''),
+    record_id:   String(a.record_id   || ''),
+    field:       String(a.field       || ''),
+    before_json: a.before_json != null ? String(a.before_json) : null,
+    after_json:  a.after_json  != null ? String(a.after_json)  : null,
+    notes:       String(a.notes       || '')
+  };
+}
+
+function api_listOverrides(filter) {
+  return listOverrides_(filter).map(_sanitizeOverrideForWire_);
+}
+
+function api_saveOverride(o) {
+  const saved = saveOverride_(o);
+  return _sanitizeOverrideForWire_(saved);
+}
+
+function api_deleteOverride(override_id, reason) {
+  return deleteOverride_(override_id, reason);
+}
+
+function api_listOverridableFields() {
+  return readOverridableFields_();
+}
+
+function api_getOverrideAudit(filter) {
+  const rows = listOverrideAudit_(filter || {});
+  return rows.slice(0, 200).map(_sanitizeOverrideAuditForWire_);
+}
+
+function api_runOverrideHygiene() {
+  return { expired: 0, stale: [], ranAt: new Date().toISOString() };
+}
+
+function api_bulkDeleteOverrides(ids, reason) {
+  return bulkDeleteOverrides_(ids, reason);
 }
 
 /**

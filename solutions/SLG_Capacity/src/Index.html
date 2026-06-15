@@ -1165,6 +1165,45 @@
     </div>
   </div>
 
+  <!-- ============ Override Drawer (Drop 3) ============ -->
+  <aside class="drawer" id="overrideDrawer" hidden>
+    <div class="drawer-backdrop" data-close></div>
+    <div class="drawer-panel">
+      <header class="drawer-header">
+        <div>
+          <div class="muted" id="overrideDrawerSource">Pipeline</div>
+          <div class="drawer-title" id="overrideDrawerTitle">Edit overrides</div>
+          <div class="muted" id="overrideDrawerRecordId" style="margin-top:2px;font-size:12px;"></div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <form class="drawer-form" id="overrideForm">
+        <input type="hidden" id="o_source">
+        <input type="hidden" id="o_record_id">
+
+        <div class="muted" style="font-size:12px;padding:0 0 12px;">
+          Set values to override the source. Leave a field blank to clear an existing override on that field.
+        </div>
+
+        <div id="overrideFieldsContainer"></div>
+
+        <label class="field">
+          <span>Reason <span style="color:var(--thumbtack);">*</span></span>
+          <textarea id="o_reason" class="input" rows="2" placeholder="Required — explain why this override is needed" style="resize:vertical;"></textarea>
+        </label>
+
+        <label class="field">
+          <span>Expires <span class="muted">(blank = persistent)</span></span>
+          <input type="date" id="o_expires" class="input">
+        </label>
+      </form>
+      <footer class="drawer-actions">
+        <button type="button" class="btn-ghost" data-close>Cancel</button>
+        <button type="button" class="btn-primary" id="saveOverrideBtn">Save overrides</button>
+      </footer>
+    </div>
+  </aside>
+
   <!-- ============ Toasts ============ -->
   <div class="toast-stack" id="toastStack"></div>
 </div>

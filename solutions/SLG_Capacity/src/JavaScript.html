@@ -2270,25 +2270,48 @@
   const _oppSearchEl = $('#oppSearch');
   if (_oppSearchEl) _oppSearchEl.addEventListener('input', debounce_(loadOpportunities, 200));
 
+  function _renderCellWithOverride_(row, fieldName, displayValue) {
+    if (!row._overrides) return escapeHtml_(String(displayValue == null ? '—' : displayValue));
+    const ov = row._overrides.find(function (o) { return o.field === fieldName; });
+    if (!ov) return escapeHtml_(String(displayValue == null ? '—' : displayValue));
+    const tooltipParts = [
+      'Original: ' + ov.original_value,
+      'Reason: ' + ov.reason,
+      'By: ' + ov.created_by
+    ];
+    if (ov.expires_at) tooltipParts.push('Expires: ' + ov.expires_at.slice(0, 10));
+    const title = tooltipParts.join('\n');
+    return '<span class="override-badge" title="' + escapeHtml_(title) + '">' +
+      escapeHtml_(String(displayValue == null ? '—' : displayValue)) +
+      '<span class="override-dot" aria-label="overridden"></span>' +
+      '</span>';
+  }
+
   function renderOpportunities_() {
     const body = $('#oppBody');
     body.innerHTML = State.opportunities.map(o => `
       <tr>
         <td>${escapeHtml_(o.opportunity_name)}</td>
         <td>${escapeHtml_(o.account)}</td>
-        <td>${escapeHtml_(o.segment || '—')}</td>
-        <td>${escapeHtml_(o.stage)}</td>
-        <td class="num">${fmtPct(o.probability / 100)}</td>
-        <td class="num">${fmtMoney(o.acv)}</td>
-        <td>${fmtDate(o.expected_start)}</td>
-        <td>${fmtDate(o.expected_end)}</td>
-        <td class="num">${o.ee_count || '—'}</td>
-        <td><button class="btn-ghost row-btn" data-opp="${o.opportunity_id}">Assign</button></td>
+        <td>${_renderCellWithOverride_(o, 'segment', o.segment || '—')}</td>
+        <td>${_renderCellWithOverride_(o, 'stage', o.stage)}</td>
+        <td class="num">${_renderCellWithOverride_(o, 'probability', fmtPct(o.probability / 100))}</td>
+        <td class="num">${_renderCellWithOverride_(o, 'acv', fmtMoney(o.acv))}</td>
+        <td>${_renderCellWithOverride_(o, 'expected_start', fmtDate(o.expected_start))}</td>
+        <td>${_renderCellWithOverride_(o, 'expected_end', fmtDate(o.expected_end))}</td>
+        <td class="num">${_renderCellWithOverride_(o, 'ee_count', o.ee_count || '—')}</td>
+        <td>
+          <button class="btn-ghost row-btn" data-opp="${o.opportunity_id}">Assign</button>
+          <button class="btn-ghost row-btn" data-edit-opp="${escapeHtml_(o.opportunity_id)}" style="margin-left:4px;">Edit</button>
+        </td>
       </tr>
     `).join('');
 
     $$('#oppBody button[data-opp]').forEach(btn => {
       btn.addEventListener('click', () => openAssignDrawer_(btn.dataset.opp));
+    });
+    $$('#oppBody button[data-edit-opp]').forEach(btn => {
+      btn.addEventListener('click', () => openOverrideDrawer_('Pipeline', btn.dataset.editOpp));
     });
   }
 
@@ -2313,17 +2336,23 @@
       <tr>
         <td>${escapeHtml_(d.deployment_name)}</td>
         <td>${escapeHtml_(d.account_name)}</td>
-        <td>${escapeHtml_(d.deployment_stage)}</td>
-        <td>${escapeHtml_(d.deployment_health)}</td>
-        <td>${fmtDate(d.current_mtp_date)}</td>
-        <td>${escapeHtml_(d.em_name)}</td>
-        <td>${escapeHtml_(d.dam_name)}</td>
-        <td><button class="btn-ghost row-btn" data-dep="${d.deployment_id}">Assign</button></td>
+        <td>${_renderCellWithOverride_(d, 'deployment_stage', d.deployment_stage)}</td>
+        <td>${_renderCellWithOverride_(d, 'deployment_health', d.deployment_health)}</td>
+        <td>${_renderCellWithOverride_(d, 'current_mtp_date', fmtDate(d.current_mtp_date))}</td>
+        <td>${_renderCellWithOverride_(d, 'em_name', d.em_name)}</td>
+        <td>${_renderCellWithOverride_(d, 'dam_name', d.dam_name)}</td>
+        <td>
+          <button class="btn-ghost row-btn" data-dep="${d.deployment_id}">Assign</button>
+          <button class="btn-ghost row-btn" data-edit-dep="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;">Edit</button>
+        </td>
       </tr>
     `).join('');
 
     $$('#deployBody button[data-dep]').forEach(btn => {
       btn.addEventListener('click', () => openAssignDrawer_(btn.dataset.dep, 'deployment'));
+    });
+    $$('#deployBody button[data-edit-dep]').forEach(btn => {
+      btn.addEventListener('click', () => openOverrideDrawer_('Deployments', btn.dataset.editDep));
     });
   }
 
@@ -3080,4 +3109,205 @@
     };
     reader.readAsDataURL(file);
   }
+</script>
+
+<script>
+  // ============================================================
+  // Override Drawer (Drop 3)
+  // ============================================================
+  let _overridableFieldsCache_ = null;
+
+  async function loadOverridableFields_() {
+    if (!_overridableFieldsCache_) {
+      _overridableFieldsCache_ = await call('api_listOverridableFields');
+    }
+    return _overridableFieldsCache_;
+  }
+
+  async function openOverrideDrawer_(source, recordId) {
+    const drawer = $('#overrideDrawer');
+    if (!drawer) return;
+
+    $('#overrideDrawerSource').textContent = source;
+    $('#overrideDrawerTitle').textContent =
+      'Edit ' + (source === 'Pipeline' ? 'opportunity' : 'deployment') + ' overrides';
+    $('#overrideDrawerRecordId').textContent = String(recordId || '');
+    $('#o_source').value = source;
+    $('#o_record_id').value = recordId;
+    $('#o_reason').value = '';
+    $('#o_expires').value = '';
+
+    try {
+      const [fields, existingOverrides] = await Promise.all([
+        loadOverridableFields_(),
+        call('api_listOverrides', { source: source, record_id: recordId, status: 'Active' })
+      ]);
+      renderOverrideFields_(fields, existingOverrides, source, recordId);
+    } catch (err) {
+      $('#overrideFieldsContainer').innerHTML =
+        '<div class="muted" style="padding:8px 0;">Failed to load field definitions: ' +
+        escapeHtml_(err.message) + '</div>';
+    }
+
+    drawer.hidden = false;
+  }
+
+  function renderOverrideFields_(fields, currentOverrides, source, recordId) {
+    const container = $('#overrideFieldsContainer');
+    if (!container) return;
+
+    const sourceFields = (fields || []).filter(function (f) { return f.source === source; });
+    const overrideByField = {};
+    (currentOverrides || []).forEach(function (o) { overrideByField[o.field] = o; });
+
+    const sourceRecords = source === 'Pipeline' ? State.opportunities : State.deployments;
+    const sourceRecord = sourceRecords.find(function (r) {
+      return (r.opportunity_id || r.deployment_id) === recordId;
+    }) || {};
+
+    if (!sourceFields.length) {
+      container.innerHTML = '<div class="muted" style="padding:8px 0;">No overridable fields configured for ' + escapeHtml_(source) + '.</div>';
+      return;
+    }
+
+    container.innerHTML = sourceFields.map(function (f) {
+      const existing = overrideByField[f.field];
+      const sourceValue = sourceRecord[f.field] != null ? String(sourceRecord[f.field]) : '';
+      const currentValue = existing ? String(existing.override_value || '') : '';
+
+      let inputHtml;
+      switch (f.data_type) {
+        case 'date':
+          inputHtml = '<input type="date" class="input override-field-input" data-field="' +
+            escapeHtml_(f.field) + '" value="' + escapeHtml_(currentValue) + '">';
+          break;
+        case 'number':
+        case 'currency':
+        case 'percent':
+          inputHtml = '<input type="number" step="any" class="input override-field-input" data-field="' +
+            escapeHtml_(f.field) + '" placeholder="' + escapeHtml_(sourceValue) + '" value="' +
+            escapeHtml_(currentValue) + '">';
+          break;
+        default:
+          inputHtml = '<input type="text" class="input override-field-input" data-field="' +
+            escapeHtml_(f.field) + '" placeholder="' + escapeHtml_(sourceValue) + '" value="' +
+            escapeHtml_(currentValue) + '">';
+      }
+
+      const isOverridden = !!existing;
+      const overriddenBadge = isOverridden
+        ? '<span class="badge amber" style="font-size:10px;padding:1px 5px;margin-left:4px;">overridden</span>'
+        : '';
+      const metaHtml = isOverridden
+        ? '<div class="override-field-meta">Original: ' + escapeHtml_(String(existing.original_value || '')) +
+          ' · By ' + escapeHtml_(existing.created_by || '') +
+          ' · ' + (existing.created_at ? existing.created_at.slice(0, 10) : '') + '</div>'
+        : '';
+
+      const rowAttrs = [
+        'class="override-field-row"',
+        'data-field="' + escapeHtml_(f.field) + '"',
+        existing ? 'data-override-id="' + escapeHtml_(String(existing.override_id || '')) + '"' : '',
+        existing ? 'data-modified-at="' + escapeHtml_(String(existing.modified_at || '')) + '"' : ''
+      ].filter(Boolean).join(' ');
+
+      return '<div ' + rowAttrs + '>' +
+        '<div class="override-field-label">' + escapeHtml_(f.label) + overriddenBadge + '</div>' +
+        inputHtml +
+        metaHtml +
+        '</div>';
+    }).join('');
+  }
+
+  async function submitOverrideForm_(e) {
+    if (e) e.preventDefault();
+    const source = $('#o_source').value;
+    const recordId = $('#o_record_id').value;
+    const reason = ($('#o_reason').value || '').trim();
+    const expires = ($('#o_expires').value || '').trim();
+
+    if (!reason) {
+      toast('Reason is required.', 'err');
+      return;
+    }
+
+    const sourceRecords = source === 'Pipeline' ? State.opportunities : State.deployments;
+    const sourceRecord = sourceRecords.find(function (r) {
+      return (r.opportunity_id || r.deployment_id) === recordId;
+    }) || {};
+
+    const rows = $$('#overrideFieldsContainer .override-field-row');
+    const ops = [];
+
+    rows.forEach(function (rowEl) {
+      const fld = rowEl.dataset.field;
+      const input = rowEl.querySelector('.override-field-input');
+      if (!input) return;
+      const inputVal = input.value.trim();
+      const overrideId = rowEl.dataset.overrideId || '';
+      const modifiedAt = rowEl.dataset.modifiedAt || '';
+
+      const sourceVal = sourceRecord[fld] != null ? String(sourceRecord[fld]) : '';
+
+      if (inputVal === '' && overrideId) {
+        ops.push({ type: 'delete', override_id: overrideId });
+      } else if (inputVal !== '' && inputVal !== sourceVal) {
+        ops.push({
+          type: 'save',
+          payload: {
+            override_id:    overrideId || undefined,
+            source:         source,
+            record_id:      recordId,
+            field:          fld,
+            original_value: sourceVal,
+            override_value: inputVal,
+            reason:         reason,
+            expires_at:     expires || '',
+            modified_at:    modifiedAt || undefined
+          }
+        });
+      }
+    });
+
+    if (!ops.length) {
+      toast('No changes to save.', 'info');
+      return;
+    }
+
+    const saveBtn = $('#saveOverrideBtn');
+    if (saveBtn) saveBtn.disabled = true;
+
+    try {
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        if (op.type === 'delete') {
+          await call('api_deleteOverride', op.override_id, reason);
+        } else {
+          await call('api_saveOverride', op.payload);
+        }
+      }
+      toast('Overrides saved', 'ok');
+      _overridableFieldsCache_ = null;
+      $('#overrideDrawer').hidden = true;
+      reloadCurrentView_();
+    } catch (err) {
+      toast('Save failed: ' + err.message, 'err');
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const overrideDrawer = $('#overrideDrawer');
+    if (!overrideDrawer) return;
+
+    overrideDrawer.addEventListener('click', function (e) {
+      if (e.target.dataset && e.target.dataset.close !== undefined) {
+        overrideDrawer.hidden = true;
+      }
+    });
+
+    $('#saveOverrideBtn')?.addEventListener('click', submitOverrideForm_);
+    $('#overrideForm')?.addEventListener('submit', submitOverrideForm_);
+  });
 </script>

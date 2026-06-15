@@ -1709,4 +1709,42 @@ td.cell-with-bar {
 @media (max-width: 768px) {
   .admin-tab { flex: 1 1 auto; justify-content: center; }
 }
+
+/* ============================================================
+   Source overrides (Drop 3)
+   ============================================================ */
+.override-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.override-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--happy-hour);
+  flex-shrink: 0;
+}
+.override-field-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--business-card);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.override-field-row:last-child {
+  border-bottom: none;
+}
+.override-field-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  font-size: 13px;
+}
+.override-field-meta {
+  font-size: 11px;
+  color: var(--staple);
+}
 </style>

@@ -1799,4 +1799,70 @@ td.cell-with-bar {
   font-size: 11px;
   color: var(--staple);
 }
+
+/* ============================================================
+   Drop 6: Generic Resources editable table
+   ============================================================ */
+
+/* Borderless-until-focus inputs that fit inside table cells */
+.table-input {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+  color: inherit;
+  min-width: 60px;
+}
+.table-input:focus {
+  outline: none;
+  border-color: var(--ballpoint);
+  background: #fff;
+}
+.table-input.select {
+  appearance: auto;
+  -webkit-appearance: auto;
+}
+
+/* Newly added rows get a subtle blue tint until the next save */
+.generic-new-row td {
+  background: #f0f7ff;
+}
+
+/* Per-row delete button */
+.generic-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--staple);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.generic-delete-btn:hover {
+  color: var(--thumbtack);
+}
+.generic-delete-confirm {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  white-space: nowrap;
+}
+.generic-delete-confirm button {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--desk);
+  cursor: pointer;
+  background: #fff;
+}
+.generic-delete-confirm button.confirm-yes {
+  border-color: var(--thumbtack);
+  color: var(--thumbtack);
+}
 </style>

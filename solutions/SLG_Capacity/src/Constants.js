@@ -167,6 +167,23 @@ const ALLOC_TYPES   = ['Billable','Internal','Education','PTO_Holiday','Unassign
 const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded','Custom'];
 const ASSIGN_STATUSES = ['Modeled','Committed','Archived'];
 
+// --- Drop 6: Capacity Adjustments schema ---
+
+const CAPACITY_ADJUSTMENTS_SHEET = 'Capacity_Adjustments';
+
+const ADJUSTMENT_HEADERS = [
+  'adjustment_id', 'resource_name', 'start_date', 'end_date',
+  'hours_reduction', 'distribution', 'custom_monthly_json',
+  'reason', 'scenario_id', 'status',
+  'created_by', 'created_at', 'modified_by', 'modified_at'
+];
+
+// Generic Resources table headers (used by api_saveGenericResources / writeTable_).
+const GENERIC_HEADERS = [
+  'name', 'resource_type', 'project_role', 'manager_org', 'team', 'practice',
+  'start_date', 'end_date', 'capacity_hours', 'status', 'notes'
+];
+
 // Group-by modes for the dashboard heatmap
 const GROUP_BY_MODES = ['Function','Role','Team','Individual'];
 

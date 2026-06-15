@@ -602,7 +602,8 @@ function computeUtilization(params) {
         project_role: info.project_role || '',
         team_label: teamLabel,
         committed: 0, billable: 0, scenario: 0,
-        timeOff: 0, education: 0, unassigned: 0
+        timeOff: 0, education: 0, unassigned: 0,
+        reduction: 0
       };
     }
     return buckets[k];
@@ -647,6 +648,33 @@ function computeUtilization(params) {
           b.committed += m.hours;
         } else if (isScenario) {
           b.scenario += m.hours;
+        }
+      });
+    });
+  }
+
+  // 2.5) Capacity adjustments (worker-scoped reductions — Drop 6)
+  if (viewMode !== 'Actual') {
+    let adjRows = [];
+    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
+    adjRows.forEach(adj => {
+      if (!adj.resource_name) return;
+      if (excluded.has(adj.resource_name)) return;
+      const isCommitted = (adj.status === 'Committed');
+      const isModeled   = (adj.status === 'Modeled');
+      const include = isCommitted ||
+        (viewMode === 'Scenario' && isModeled &&
+         (!params.scenarioId || adj.scenario_id === params.scenarioId));
+      if (!include) return;
+      expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
+        const b = bucket(adj.resource_name, m.period_start);
+        const hrs = Number(m.hours_reduction) || 0;
+        b.reduction += hrs;
+        if (isCommitted) {
+          b.billable  = Math.max(0, b.billable  - hrs);
+          b.committed = Math.max(0, b.committed - hrs);
+        } else if (isModeled) {
+          b.scenario = b.scenario - hrs; // can go negative (net reduction)
         }
       });
     });
@@ -968,9 +996,13 @@ function computeResourceDetail(params) {
   const calendar = readCalendar_();
   const months = {};
 
+  function ensureMonth_(k) {
+    if (!months[k]) months[k] = { billable: 0, internal: 0, education: 0, pto: 0, scenario: 0, reduction: 0 };
+  }
+
   alloc.forEach(a => {
     const k = monthKey_(a.period_start);
-    months[k] = months[k] || { billable: 0, internal: 0, education: 0, pto: 0, scenario: 0 };
+    ensureMonth_(k);
     const h = Number(a.hours) || 0;
     if (a.allocation_type === 'Billable') months[k].billable += h;
     else if (a.allocation_type === 'Internal') months[k].internal += h;
@@ -988,7 +1020,7 @@ function computeResourceDetail(params) {
       if (!include) return;
       expandAssignmentToMonthly_(a, calendar).forEach(m => {
         const k = monthKey_(m.period_start);
-        months[k] = months[k] || { billable: 0, internal: 0, education: 0, pto: 0, scenario: 0 };
+        ensureMonth_(k);
         if (isCommitted) {
           months[k].billable += m.hours;
         } else if (isScenario) {
@@ -996,14 +1028,32 @@ function computeResourceDetail(params) {
         }
       });
     });
+
+    // Drop 6: apply capacity adjustments as a reduction series
+    let adjRows = [];
+    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET).filter(a => a.resource_name === resource); } catch (e) { adjRows = []; }
+    adjRows.forEach(adj => {
+      const isCommitted = (adj.status === 'Committed');
+      const isModeled   = (adj.status === 'Modeled');
+      const include = isCommitted ||
+        (viewMode === 'Scenario' && isModeled &&
+         (!params.scenarioId || adj.scenario_id === params.scenarioId));
+      if (!include) return;
+      expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
+        const k = monthKey_(m.period_start);
+        ensureMonth_(k);
+        months[k].reduction += Number(m.hours_reduction) || 0;
+      });
+    });
   }
 
   return Object.keys(months).sort().map(k => ({
-    monthKey: String(k),
-    billable: Number(months[k].billable) || 0,
-    internal: Number(months[k].internal) || 0,
+    monthKey:  String(k),
+    billable:  Number(months[k].billable)  || 0,
+    internal:  Number(months[k].internal)  || 0,
     education: Number(months[k].education) || 0,
-    pto: Number(months[k].pto) || 0,
-    scenario: Number(months[k].scenario) || 0
+    pto:       Number(months[k].pto)       || 0,
+    scenario:  Number(months[k].scenario)  || 0,
+    reduction: Number(months[k].reduction) || 0
   }));
 }

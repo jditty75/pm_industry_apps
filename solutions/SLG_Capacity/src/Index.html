@@ -195,8 +195,11 @@
         </div>
         <div class="card">
           <div class="card-header">
-            <div class="card-title" id="resourceTitle">Select a resource</div>
-            <div class="muted" id="resourceSub"></div>
+            <div>
+              <div class="card-title" id="resourceTitle">Select a resource</div>
+              <div class="muted" id="resourceSub"></div>
+            </div>
+            <button class="btn-ghost" id="reduceHoursBtn" hidden>Reduce hours</button>
           </div>
           <div style="position:relative;height:320px;width:100%">
             <canvas id="resourceChart"></canvas>
@@ -307,6 +310,29 @@
                 </tr>
               </thead>
               <tbody id="scenarioAssignmentsBody"></tbody>
+            </table>
+          </div>
+          <div class="card-header" style="margin-top:16px;border-top:1px solid var(--desk);">
+            <div class="card-title sm">Reductions</div>
+            <button class="btn-ghost btn-ghost-sm" id="addReductionBtn" disabled>+ Add Reduction</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="scenarioReductions">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Start</th>
+                  <th>End</th>
+                  <th class="num">Hours Reduction</th>
+                  <th>Distribution</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="scenarioReductionsBody">
+                <tr><td colspan="8" class="muted" style="padding:8px">Select a scenario to see reductions.</td></tr>
+              </tbody>
             </table>
           </div>
         </div>
@@ -751,10 +777,13 @@
         <div class="card">
           <div class="card-header">
             <div class="card-title">Generic Resources</div>
-            <button class="btn-ghost" id="saveGenericBtn">Save</button>
+            <div class="card-tools">
+              <button class="btn-primary" id="addGenericBtn">+ Add Generic Worker</button>
+              <button class="btn-ghost" id="saveGenericBtn">Save</button>
+            </div>
           </div>
-          <div class="table-wrap" style="max-height:360px">
-            <table class="data-table">
+          <div class="table-wrap" style="max-height:420px">
+            <table class="data-table" id="genericTable">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -763,13 +792,17 @@
                   <th>Manager</th>
                   <th>Team</th>
                   <th>Practice</th>
+                  <th>Start Date</th>
+                  <th>End Date</th>
                   <th class="num">Capacity (hrs/mo)</th>
                   <th>Status</th>
+                  <th>Notes</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody id="genericBody">
                 <tr>
-                  <td colspan="8" class="muted" style="padding:12px">No generic resources configured yet.</td>
+                  <td colspan="12" class="muted" style="padding:12px">No generic resources configured yet.</td>
                 </tr>
               </tbody>
             </table>
@@ -1321,6 +1354,112 @@
         <button type="button" class="btn-ghost" data-close>Cancel</button>
         <button type="button" class="btn-primary" id="saveOverrideBtn">Save overrides</button>
       </footer>
+    </div>
+  </aside>
+
+  <!-- ============ Reduction Drawer ============ -->
+  <aside class="drawer" id="reductionDrawer" hidden>
+    <div class="drawer-backdrop" data-close></div>
+    <div class="drawer-panel">
+      <header class="drawer-header">
+        <div>
+          <div class="muted">Workforce Modeling</div>
+          <div class="drawer-title">Reduce Worker Capacity</div>
+          <div class="muted" id="reductionDrawerWorkerSub" style="margin-top:2px;font-size:12px;"></div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <form class="drawer-form" id="reductionForm">
+        <input type="hidden" id="r_adjustment_id">
+
+        <label class="field">
+          <span>Worker <span style="color:var(--thumbtack);">*</span></span>
+          <select id="r_resource" class="select" required></select>
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Start date</span>
+            <input type="date" id="r_start" class="input" required>
+          </label>
+          <label class="field">
+            <span>End date</span>
+            <input type="date" id="r_end" class="input" required>
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Hours to reduce <span style="color:var(--thumbtack);">*</span></span>
+          <input type="number" min="1" step="1" id="r_hours" class="input" required>
+        </label>
+
+        <label class="field">
+          <span>Distribution</span>
+          <div class="seg" id="r_distribution">
+            <button type="button" data-val="Even" class="on">Even</button>
+            <button type="button" data-val="Front-loaded">Front-loaded</button>
+            <button type="button" data-val="Back-loaded">Back-loaded</button>
+            <button type="button" data-val="Custom">Custom</button>
+          </div>
+        </label>
+
+        <div class="field" id="rCustomMonthsField" hidden>
+          <div class="custom-months-header">
+            <span class="custom-months-title">Custom reduction by month</span>
+            <button type="button" class="btn-ghost btn-ghost-sm" id="rCustomMonthsResetBtn">Reset to Even</button>
+          </div>
+          <div class="muted" style="margin-top:4px;margin-bottom:8px;font-size:11px;">
+            Enter reduction hours for each month. Total must equal hours to reduce (within 0.5h).
+          </div>
+          <div class="custom-months-list" id="rCustomMonthsList"></div>
+          <div class="custom-months-footer" id="rCustomMonthsFooter">
+            <span class="muted">Total:</span>
+            <strong id="rCustomMonthsTotal">0</strong>
+            <span class="muted">of</span>
+            <strong id="rCustomMonthsTarget">0</strong>
+            <span id="rCustomMonthsDelta" class="custom-months-delta"></span>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Reason <span style="color:var(--thumbtack);">*</span></span>
+          <textarea id="r_reason" class="input" rows="2" placeholder="Required — explain why this reduction is being modeled" style="resize:vertical;"></textarea>
+        </label>
+
+        <label class="field">
+          <span>Scenario <span class="muted">(optional — blank = globally committed)</span></span>
+          <select id="r_scenario" class="select">
+            <option value="">— No scenario —</option>
+          </select>
+        </label>
+
+        <!-- Baseline context: PSA committed hours vs proposed reduction -->
+        <div class="card inner" id="reductionBaselineCard" hidden>
+          <div class="card-header">
+            <div class="card-title sm">PSA Baseline vs Proposed Reduction</div>
+          </div>
+          <div style="position:relative;height:140px;width:100%">
+            <canvas id="reductionBaselineChart"></canvas>
+          </div>
+          <div id="reductionBaselineNote" class="muted" style="font-size:11px;padding:4px 0;"></div>
+        </div>
+
+        <!-- Monthly preview chart -->
+        <div class="card inner">
+          <div class="card-header">
+            <div class="card-title sm">Reduction Preview</div>
+          </div>
+          <div style="position:relative;height:140px;width:100%">
+            <canvas id="reductionPreviewChart"></canvas>
+          </div>
+        </div>
+
+        <div class="drawer-actions">
+          <button type="button" class="btn-ghost" data-close>Cancel</button>
+          <button type="submit" class="btn-primary" id="saveReductionModeledBtn">Save as Modeled</button>
+          <button type="button" class="btn-solid-accent" id="commitReductionNowBtn">Commit Now</button>
+        </div>
+      </form>
     </div>
   </aside>
 

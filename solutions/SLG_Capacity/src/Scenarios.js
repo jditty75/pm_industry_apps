@@ -32,8 +32,20 @@ function commitScenario_(scenario_id) {
     .filter(a => a.scenario_id === scenario_id && a.status === 'Modeled');
   rows.forEach(a => setAssignmentStatus_(a.assignment_id, 'Committed'));
   invalidateCache_(ASSIGNMENTS);
+
+  // Drop 6: also commit capacity adjustments belonging to this scenario.
+  let adjsPromoted = 0;
+  try {
+    const adjs = readTable_(CAPACITY_ADJUSTMENTS_SHEET)
+      .filter(a => a.scenario_id === scenario_id && a.status === 'Modeled');
+    adjs.forEach(a => setAdjustmentStatus_(a.adjustment_id, 'Committed'));
+    adjsPromoted = adjs.length;
+  } catch (e) {
+    Logger.log('commitScenario_: adjustments commit failed — ' + e);
+  }
+
   invalidateCache_(SCENARIOS);
-  return { promoted: rows.length };
+  return { promoted: rows.length, adjustments_promoted: adjsPromoted };
 }
 
 function archiveScenario_(scenario_id) {

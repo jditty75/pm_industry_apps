@@ -1421,15 +1421,131 @@ function api_listGenericResources() {
   try { return readGenericResources_(); } catch (e) { return []; }
 }
 
+/** Admin variant — returns all rows including Inactive so the admin table can manage them. */
+function api_listAllGenericResources() {
+  try {
+    let rows;
+    try { rows = cachedRead_(CFG_GENERIC); } catch (e) { return []; }
+    return rows.map(r => ({
+      name:           String(r.name || ''),
+      resource_type:  String(r.resource_type || ''),
+      project_role:   String(r.project_role || ''),
+      manager_org:    String(r.manager_org || ''),
+      team:           String(r.team || ''),
+      practice:       String(r.practice || ''),
+      start_date:     r.start_date || '',
+      end_date:       r.end_date || '',
+      capacity_hours: Number(r.capacity_hours) || 160,
+      status:         String(r.status || 'Active'),
+      notes:          String(r.notes || '')
+    })).filter(g => g.name);
+  } catch (e) { return []; }
+}
+
 function api_saveGenericResources(payload) {
-  const rows = (payload && payload.resources) || [];
-  const headers = [
-    'name', 'resource_type', 'project_role', 'manager_org', 'team', 'practice',
-    'start_date', 'end_date', 'capacity_hours', 'status', 'notes'
-  ];
-  writeTable_(CFG_GENERIC, headers, rows);
+  const rawRows = (payload && payload.resources) || [];
+  // Normalize: accept both arrays of objects and arrays of arrays so that
+  // writeTable_'s setValues() receives the 2-D format GAS requires.
+  const rows = rawRows.map(function (r) {
+    if (Array.isArray(r)) return r;
+    return GENERIC_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  });
+  writeTable_(CFG_GENERIC, GENERIC_HEADERS, rows);
   if (typeof invalidateCache_ === 'function') invalidateCache_(CFG_GENERIC);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   return { ok: true, count: rows.length };
+}
+
+// ============================================================
+// Drop 6: Capacity Adjustments API
+// ============================================================
+
+/**
+ * Wire format sanitizer — mirrors _sanitizeAssignmentForWire_.
+ * Converts Date fields to ISO strings and coerces all other fields
+ * to primitive types safe for JSON serialization.
+ */
+function _sanitizeAdjustmentForWire_(a) {
+  if (!a) return a;
+  const out = {};
+  ADJUSTMENT_HEADERS.forEach(function (h) {
+    let v = a[h];
+    if (v instanceof Date) {
+      out[h] = v.toISOString().slice(0, 10);
+    } else if (v === null || v === undefined) {
+      out[h] = '';
+    } else {
+      out[h] = v;
+    }
+  });
+  return out;
+}
+
+/**
+ * List capacity adjustments. Optionally filter by resource_name,
+ * scenario_id, or status.
+ */
+function api_listCapacityAdjustments(filter) {
+  try {
+    const rows = listCapacityAdjustments_(filter || {});
+    return rows.map(_sanitizeAdjustmentForWire_);
+  } catch (e) {
+    Logger.log('api_listCapacityAdjustments: ' + e);
+    return [];
+  }
+}
+
+/** Create or update a capacity adjustment. */
+function api_saveCapacityAdjustment(adj) {
+  const saved = saveCapacityAdjustment_(adj);
+  return _sanitizeAdjustmentForWire_(saved);
+}
+
+/** Hard-delete a capacity adjustment row. */
+function api_deleteCapacityAdjustment(adjustment_id) {
+  return deleteCapacityAdjustment_(adjustment_id);
+}
+
+/**
+ * Preview monthly expansion for the reduction drawer chart.
+ * Mirrors api_previewAssignment.
+ * @return {{ monthKey: string, hours_reduction: number }[]}
+ */
+function api_previewCapacityAdjustment(adj) {
+  if (adj.start_date) adj.start_date = new Date(adj.start_date);
+  if (adj.end_date)   adj.end_date   = new Date(adj.end_date);
+  adj.hours_reduction = Number(adj.hours_reduction) || 0;
+  return expandAdjustmentToMonthly_(adj, readCalendar_())
+    .map(m => ({ monthKey: monthKey_(m.period_start), hours_reduction: m.hours_reduction }));
+}
+
+/**
+ * Return per-month PSA committed hours for a resource over the planning
+ * window. Used by the reduction drawer's baseline context panel so
+ * Delivery Directors can see the "current PSA forecast" they are modeling
+ * against.
+ * @param {string} resource_name
+ * @return {{ monthKey: string, committed_hours: number }[]}
+ */
+function api_getResourceBaseline(resource_name) {
+  if (!resource_name) return [];
+  try {
+    const alloc = cachedRead_(ALLOC_NORM).filter(a =>
+      a.resource_name === resource_name && a.allocation_type === 'Billable'
+    );
+    const byMonth = {};
+    alloc.forEach(a => {
+      const k = monthKey_(a.period_start);
+      byMonth[k] = (byMonth[k] || 0) + (Number(a.hours) || 0);
+    });
+    return Object.keys(byMonth).sort().map(k => ({
+      monthKey: k,
+      committed_hours: byMonth[k]
+    }));
+  } catch (e) {
+    Logger.log('api_getResourceBaseline: ' + e);
+    return [];
+  }
 }
 
 function api_getExclusions() {

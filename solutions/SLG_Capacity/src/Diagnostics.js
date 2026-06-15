@@ -1153,6 +1153,85 @@ function _test_drop5_endpoints() {
   Logger.log('Sanity: cold ref resources = ' + ((coldRef.resources || []).length));
 }
 
+// ============================================================
+// Drop 6: Scenario + Reductions debug
+// ============================================================
+
+/**
+ * List all assignments and capacity adjustments in a scenario, with
+ * their per-month net effect for each affected worker. Useful for
+ * verifying the math after committing a scenario.
+ *
+ * Run from the Apps Script editor: set scenarioId to your scenario's UUID.
+ * Results appear in View → Logs.
+ *
+ * @param {string} scenarioId
+ */
+function _dbg_debugScenarioWithReductions(scenarioId) {
+  _dbg_requireAdmin_();
+  if (!scenarioId) {
+    Logger.log('_dbg_debugScenarioWithReductions: scenarioId is required');
+    return;
+  }
+
+  const calendar = readCalendar_();
+
+  // Assignments
+  const assigns = readTable_(ASSIGNMENTS)
+    .filter(a => a.scenario_id === scenarioId);
+  Logger.log('=== Scenario: ' + scenarioId + ' ===');
+  Logger.log('Assignments (' + assigns.length + '):');
+  assigns.forEach(a => {
+    const months = expandAssignmentToMonthly_(a, calendar);
+    const total = months.reduce((s, m) => s + m.hours, 0);
+    Logger.log('  [' + a.status + '] ' + (a.resource_name || '(blank)') +
+      ' | ' + a.estimated_hours + 'h (' + a.distribution + ')' +
+      ' | net total across months: ' + Math.round(total) + 'h');
+    months.forEach(m => {
+      Logger.log('      ' + monthKey_(m.period_start) + ': +' + Math.round(m.hours) + 'h');
+    });
+  });
+
+  // Adjustments (reductions)
+  let adjs = [];
+  try { adjs = readTable_(CAPACITY_ADJUSTMENTS_SHEET).filter(a => a.scenario_id === scenarioId); } catch (e) {}
+  Logger.log('Capacity Adjustments (' + adjs.length + '):');
+  adjs.forEach(adj => {
+    const months = expandAdjustmentToMonthly_(adj, calendar);
+    const total = months.reduce((s, m) => s + m.hours_reduction, 0);
+    Logger.log('  [' + adj.status + '] ' + (adj.resource_name || '(blank)') +
+      ' | -' + adj.hours_reduction + 'h (' + adj.distribution + ')' +
+      ' | net total across months: -' + Math.round(total) + 'h');
+    months.forEach(m => {
+      Logger.log('      ' + monthKey_(m.period_start) + ': -' + Math.round(m.hours_reduction) + 'h');
+    });
+  });
+
+  // Per-worker net effect
+  const workerNet = {};
+  assigns.forEach(a => {
+    if (!a.resource_name) return;
+    const months = expandAssignmentToMonthly_(a, calendar);
+    months.forEach(m => {
+      const k = a.resource_name + '|' + monthKey_(m.period_start);
+      workerNet[k] = (workerNet[k] || 0) + m.hours;
+    });
+  });
+  adjs.forEach(adj => {
+    if (!adj.resource_name) return;
+    const months = expandAdjustmentToMonthly_(adj, calendar);
+    months.forEach(m => {
+      const k = adj.resource_name + '|' + monthKey_(m.period_start);
+      workerNet[k] = (workerNet[k] || 0) - m.hours_reduction;
+    });
+  });
+
+  Logger.log('Net per-worker per-month:');
+  Object.keys(workerNet).sort().forEach(k => {
+    Logger.log('  ' + k + ': ' + Math.round(workerNet[k]) + 'h');
+  });
+}
+
 function _test_phase8_ingest_filter_logic() {
   _dbg_requireAdmin_();
   // Exercises the include/exclude/group semantics with a synthetic

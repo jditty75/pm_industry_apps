@@ -2228,6 +2228,12 @@
         scenarioId: State.filters.scenarioId
       });
       renderResourceChart_(name, detail);
+      // Show "Reduce hours" button now that a resource is selected
+      const reduceBtn = $('#reduceHoursBtn');
+      if (reduceBtn) {
+        reduceBtn.hidden = false;
+        reduceBtn.onclick = () => openReductionDrawer_(null, name);
+      }
     } catch (err) {
       toast('Resource detail failed: ' + err.message, 'err');
     }
@@ -2242,22 +2248,29 @@
 
     const ctx = $('#resourceChart').getContext('2d');
     if (State.charts.resource) State.charts.resource.destroy();
+    // Reductions rendered as negative values on a separate dataset (below x-axis)
+    const hasReductions = months.some(m => (m.reduction || 0) > 0);
+    const datasets = [
+      { label: 'Billable',    data: months.map(m => m.billable),   backgroundColor: cssVar_('--ballpoint') },
+      { label: 'Internal',    data: months.map(m => m.internal),   backgroundColor: cssVar_('--water-cooler') },
+      { label: 'Education',   data: months.map(m => m.education),  backgroundColor: cssVar_('--tack') },
+      { label: 'PTO/Holiday', data: months.map(m => m.pto),        backgroundColor: cssVar_('--pencil') },
+      { label: 'Scenario',    data: months.map(m => m.scenario),   backgroundColor: cssVar_('--happy-hour') }
+    ];
+    if (hasReductions) {
+      datasets.push({
+        label: 'Reductions',
+        data: months.map(m => -Math.abs(m.reduction || 0)),
+        backgroundColor: '#e74c3c99'
+      });
+    }
     State.charts.resource = new Chart(ctx, {
       type: 'bar',
-      data: {
-        labels: months.map(m => fmtMonth(m.monthKey)),
-        datasets: [
-          { label: 'Billable', data: months.map(m => m.billable), backgroundColor: cssVar_('--ballpoint') },
-          { label: 'Internal', data: months.map(m => m.internal), backgroundColor: cssVar_('--water-cooler') },
-          { label: 'Education', data: months.map(m => m.education), backgroundColor: cssVar_('--tack') },
-          { label: 'PTO/Holiday', data: months.map(m => m.pto), backgroundColor: cssVar_('--pencil') },
-          { label: 'Scenario', data: months.map(m => m.scenario), backgroundColor: cssVar_('--happy-hour') }
-        ]
-      },
+      data: { labels: months.map(m => fmtMonth(m.monthKey)), datasets },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { position: 'bottom' } },
-        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true } }
+        scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true } }
       }
     });
   }
@@ -2427,6 +2440,46 @@
       $('#commitScenarioBtn').disabled = sel.status === 'Archived';
       $('#archiveScenarioBtn').disabled = sel.status === 'Archived';
     }
+
+    // Drop 6: load reductions table for this scenario
+    await loadScenarioReductions_(scenarioId);
+    const addReductionBtn = $('#addReductionBtn');
+    if (addReductionBtn) {
+      addReductionBtn.disabled = false;
+      addReductionBtn.onclick = () => openReductionDrawer_(null, null, scenarioId);
+    }
+  }
+
+  async function loadScenarioReductions_(scenarioId) {
+    const reductBody = $('#scenarioReductionsBody');
+    if (!reductBody) return;
+    try {
+      const adjs = await call('api_listCapacityAdjustments', { scenario_id: scenarioId });
+      if (!adjs || !adjs.length) {
+        reductBody.innerHTML = '<tr><td colspan="8" class="muted" style="padding:8px">No reductions in this scenario.</td></tr>';
+        return;
+      }
+      reductBody.innerHTML = adjs.map(a => `
+        <tr>
+          <td>${escapeHtml_(a.resource_name || '—')}</td>
+          <td>${fmtDate(a.start_date)}</td>
+          <td>${fmtDate(a.end_date)}</td>
+          <td class="num">${a.hours_reduction}</td>
+          <td>${escapeHtml_(a.distribution)}</td>
+          <td>${escapeHtml_(a.reason || '—')}</td>
+          <td>${escapeHtml_(a.status)}</td>
+          <td>
+            <button class="btn-ghost row-btn" data-edit-adj="${escapeHtml_(a.adjustment_id)}">Edit</button>
+          </td>
+        </tr>
+      `).join('');
+      // Wire Edit buttons
+      reductBody.querySelectorAll('[data-edit-adj]').forEach(btn => {
+        btn.addEventListener('click', () => openReductionDrawer_(btn.dataset.editAdj));
+      });
+    } catch (err) {
+      reductBody.innerHTML = '<tr><td colspan="8" class="muted" style="padding:8px">Failed to load reductions.</td></tr>';
+    }
   }
 
   function openScenarioModal_(scenario) {
@@ -2473,6 +2526,397 @@
     State.selectedScenario = null;
     await loadScenarios();
   }
+</script>
+
+<script>
+  // ============================================================
+  // Drop 6: Reduction Drawer
+  // ============================================================
+
+  /**
+   * Open the reduction drawer in create or edit mode.
+   * @param {string|null} adjustmentId  — existing adj to edit (null = create)
+   * @param {string|null} prefilledResource — worker name pre-selected from CE
+   * @param {string|null} prefilledScenario — scenario pre-selected from Scenarios view
+   */
+  async function openReductionDrawer_(adjustmentId, prefilledResource, prefilledScenario) {
+    const drawer = $('#reductionDrawer');
+    if (!drawer) return;
+
+    // Populate resource select
+    const rSel = $('#r_resource');
+    rSel.innerHTML = '<option value="">— Select worker —</option>' +
+      (State.ref.resources || []).map(r =>
+        `<option value="${escapeHtml_(r.name)}">${escapeHtml_(r.name)}</option>`
+      ).join('');
+
+    // Populate scenario select
+    const sSel = $('#r_scenario');
+    sSel.innerHTML = '<option value="">— No scenario —</option>' +
+      (State.scenarios || []).filter(s => s.status !== 'Archived')
+        .map(s => `<option value="${s.scenario_id}">${escapeHtml_(s.name)}</option>`).join('');
+
+    // Reset form
+    $('#r_adjustment_id').value = '';
+    $('#r_start').value = '';
+    $('#r_end').value = '';
+    $('#r_hours').value = '';
+    $('#r_reason').value = '';
+    $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
+    $('#rCustomMonthsField').hidden = true;
+    const sub = $('#reductionDrawerWorkerSub');
+    if (sub) sub.textContent = '';
+
+    if (adjustmentId) {
+      // Edit mode: fetch the existing adjustment
+      try {
+        const adjs = await call('api_listCapacityAdjustments', {});
+        const adj = (adjs || []).find(a => a.adjustment_id === adjustmentId);
+        if (adj) {
+          $('#r_adjustment_id').value = adj.adjustment_id;
+          rSel.value = adj.resource_name || '';
+          rSel.disabled = false;
+          if (adj.start_date) $('#r_start').value = String(adj.start_date).slice(0,10);
+          if (adj.end_date)   $('#r_end').value   = String(adj.end_date).slice(0,10);
+          $('#r_hours').value  = adj.hours_reduction || '';
+          $('#r_reason').value = adj.reason || '';
+          sSel.value = adj.scenario_id || '';
+          $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === (adj.distribution || 'Even')));
+          if (adj.distribution === 'Custom') {
+            renderReductionCustomMonths_();
+            $('#rCustomMonthsField').hidden = false;
+          }
+          if (sub) sub.textContent = adj.resource_name || '';
+        }
+      } catch (e) {
+        toast('Failed to load adjustment: ' + e.message, 'err');
+      }
+    } else {
+      // Create mode
+      if (prefilledResource) {
+        rSel.value = prefilledResource;
+        rSel.disabled = true;
+        if (sub) sub.textContent = prefilledResource;
+      } else {
+        rSel.disabled = false;
+      }
+      if (prefilledScenario) sSel.value = prefilledScenario;
+    }
+
+    drawer.hidden = false;
+
+    // Load baseline when resource + dates are already set
+    const res = rSel.value;
+    const st = $('#r_start').value;
+    const en = $('#r_end').value;
+    if (res && st && en) loadResourceBaselineForDrawer_(res, st, en);
+  }
+
+  /**
+   * Render custom per-month inputs for the reduction drawer.
+   * Mirrors renderCustomMonths_ but uses rCustomMonths* IDs.
+   */
+  function renderReductionCustomMonths_() {
+    const startVal = $('#r_start').value;
+    const endVal   = $('#r_end').value;
+    const total    = Number($('#r_hours').value) || 0;
+    const list     = $('#rCustomMonthsList');
+    if (!list || !startVal || !endVal) return;
+
+    const start = new Date(startVal + 'T00:00:00');
+    const end   = new Date(endVal   + 'T00:00:00');
+    const months = [];
+    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+    while (cur <= end) {
+      months.push(new Date(cur));
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+    if (!months.length) return;
+
+    const n = months.length;
+    const evenBase = Math.floor(total / n);
+    const remainder = total - evenBase * n;
+
+    list.innerHTML = months.map((m, i) => {
+      const mk = m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2,'0');
+      const label = m.toLocaleString('default', { month: 'short', year: '2-digit' });
+      const val = (i === n - 1) ? (evenBase + remainder) : evenBase;
+      return `<div class="custom-month-row">
+        <span class="custom-month-label">${label}</span>
+        <input type="number" min="0" step="1"
+          class="input rCustomMonthInput"
+          data-month-key="${mk}" value="${val}">
+        <span class="muted custom-month-hrs">hrs</span>
+      </div>`;
+    }).join('');
+
+    updateReductionCustomTotal_();
+  }
+
+  function updateReductionCustomTotal_() {
+    const inputs = $$('.rCustomMonthInput');
+    const total  = inputs.reduce((s, el) => s + (Number(el.value) || 0), 0);
+    const target = Number($('#r_hours').value) || 0;
+    const delta  = total - target;
+    const totalEl = $('#rCustomMonthsTotal');
+    const targetEl = $('#rCustomMonthsTarget');
+    const deltaEl  = $('#rCustomMonthsDelta');
+    if (totalEl) totalEl.textContent = String(total);
+    if (targetEl) targetEl.textContent = String(target);
+    if (deltaEl) {
+      if (delta === 0) {
+        deltaEl.textContent = '✓ matched';
+        deltaEl.className = 'custom-months-delta matched';
+      } else if (delta > 0) {
+        deltaEl.textContent = '(+' + delta + ' over)';
+        deltaEl.className = 'custom-months-delta mismatch';
+      } else {
+        deltaEl.textContent = '(' + delta + ' short)';
+        deltaEl.className = 'custom-months-delta mismatch';
+      }
+    }
+    const saveBtn   = $('#saveReductionModeledBtn');
+    const commitBtn = $('#commitReductionNowBtn');
+    if (saveBtn)   saveBtn.disabled   = delta !== 0;
+    if (commitBtn) commitBtn.disabled = delta !== 0;
+  }
+
+  function collectReductionCustomJson_() {
+    const inputs = $$('.rCustomMonthInput');
+    if (!inputs.length) return '';
+    const obj = {};
+    inputs.forEach(el => {
+      if (el.dataset.monthKey) obj[el.dataset.monthKey] = Number(el.value) || 0;
+    });
+    return JSON.stringify(obj);
+  }
+
+  // Distribution segmented control for reduction drawer
+  $$('#r_distribution button').forEach(b => {
+    b.addEventListener('click', () => {
+      $$('#r_distribution button').forEach(x => x.classList.toggle('on', x === b));
+      const isCustom = b.dataset.val === 'Custom';
+      if (isCustom) {
+        renderReductionCustomMonths_();
+        $('#rCustomMonthsField').hidden = false;
+      } else {
+        $('#rCustomMonthsField').hidden = true;
+        const saveBtn   = $('#saveReductionModeledBtn');
+        const commitBtn = $('#commitReductionNowBtn');
+        if (saveBtn)   saveBtn.disabled   = false;
+        if (commitBtn) commitBtn.disabled = false;
+      }
+      updateReductionPreview_();
+    });
+  });
+
+  // Sync custom month inputs for reduction drawer
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('rCustomMonthInput')) {
+      updateReductionCustomTotal_();
+      clearTimeout(window._reductionPreviewTimer);
+      window._reductionPreviewTimer = setTimeout(updateReductionPreview_, 200);
+    }
+  });
+
+  $('#rCustomMonthsResetBtn')?.addEventListener('click', () => {
+    renderReductionCustomMonths_();
+    updateReductionPreview_();
+    toast('Custom hours reset to Even distribution', 'ok');
+  });
+
+  // Re-render custom months when dates or hours change
+  ['r_start', 'r_end', 'r_hours'].forEach(id => {
+    $('#' + id)?.addEventListener('input', () => {
+      const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
+      if (activeBtn && activeBtn.dataset.val === 'Custom') {
+        renderReductionCustomMonths_();
+        toast('Custom hours reset — date or hours changed', 'warn');
+      }
+      clearTimeout(window._reductionPreviewTimer);
+      window._reductionPreviewTimer = setTimeout(updateReductionPreview_, 200);
+      // reload baseline when resource is set
+      const res = $('#r_resource').value;
+      const st  = $('#r_start').value;
+      const en  = $('#r_end').value;
+      if (res && st && en) loadResourceBaselineForDrawer_(res, st, en);
+    });
+  });
+
+  $('#r_resource')?.addEventListener('change', () => {
+    const res = $('#r_resource').value;
+    const st  = $('#r_start').value;
+    const en  = $('#r_end').value;
+    const sub = $('#reductionDrawerWorkerSub');
+    if (sub) sub.textContent = res || '';
+    if (res && st && en) loadResourceBaselineForDrawer_(res, st, en);
+  });
+
+  /**
+   * Load baseline PSA committed hours for a worker and render the
+   * baseline context panel inside the reduction drawer.
+   */
+  async function loadResourceBaselineForDrawer_(resourceName, startDate, endDate) {
+    const card = $('#reductionBaselineCard');
+    if (!card) return;
+    try {
+      const baseline = await call('api_getResourceBaseline', resourceName);
+      if (!baseline || !baseline.length) {
+        card.hidden = true;
+        return;
+      }
+      // Filter to months within the drawer's date range
+      const start = startDate ? startDate.slice(0,7) : null;
+      const end   = endDate   ? endDate.slice(0,7)   : null;
+      const filtered = baseline.filter(b =>
+        (!start || b.monthKey >= start) && (!end || b.monthKey <= end)
+      );
+      if (!filtered.length) { card.hidden = true; return; }
+
+      const hoursReduction = Number($('#r_hours').value) || 0;
+      const n = filtered.length;
+      const perMonth = n > 0 ? hoursReduction / n : 0;
+
+      const ctx = $('#reductionBaselineChart').getContext('2d');
+      if (window._reductionBaselineChartInst) window._reductionBaselineChartInst.destroy();
+      window._reductionBaselineChartInst = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: filtered.map(b => fmtMonth(b.monthKey)),
+          datasets: [
+            { label: 'PSA Committed', data: filtered.map(b => b.committed_hours), backgroundColor: cssVar_('--ballpoint') },
+            { label: 'Proposed Reduction', data: filtered.map(() => perMonth), backgroundColor: '#e74c3c88' }
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { position: 'bottom' } },
+          scales: { x: { stacked: false, grid: { display: false } }, y: { beginAtZero: true } }
+        }
+      });
+
+      const totalBaseline = filtered.reduce((s, b) => s + b.committed_hours, 0);
+      const net = totalBaseline - hoursReduction;
+      const noteEl = $('#reductionBaselineNote');
+      if (noteEl) noteEl.textContent = `Baseline: ${Math.round(totalBaseline)}h — Reduction: ${Math.round(hoursReduction)}h — Net: ${Math.round(net)}h`;
+      card.hidden = false;
+    } catch (e) {
+      card.hidden = true;
+    }
+  }
+
+  /** Refresh the reduction preview chart. */
+  async function updateReductionPreview_() {
+    const resource = $('#r_resource').value;
+    const start    = $('#r_start').value;
+    const end      = $('#r_end').value;
+    const hours    = Number($('#r_hours').value) || 0;
+    if (!start || !end || !hours) return;
+    const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
+    const dist = activeBtn ? activeBtn.dataset.val : 'Even';
+    const adj = {
+      start_date: start, end_date: end,
+      hours_reduction: hours, distribution: dist,
+      custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : ''
+    };
+    try {
+      const preview = await call('api_previewCapacityAdjustment', adj);
+      const ctx = $('#reductionPreviewChart').getContext('2d');
+      if (window._reductionPreviewChartInst) window._reductionPreviewChartInst.destroy();
+      window._reductionPreviewChartInst = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: (preview || []).map(m => fmtMonth(m.monthKey)),
+          datasets: [{ label: 'Reduction (hrs)', data: (preview || []).map(m => m.hours_reduction), backgroundColor: '#e74c3c88' }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { position: 'bottom' } },
+          scales: { x: { grid: { display: false } }, y: { beginAtZero: true } }
+        }
+      });
+    } catch (e) { /* preview is best-effort */ }
+  }
+
+  // Wire preview to dates/hours changes
+  ['r_start', 'r_end', 'r_hours'].forEach(id => {
+    // Only updateReductionPreview_ here (baseline reloaded in the
+    // earlier listener for the same fields above).
+    // Use a shared timer to avoid double-scheduling.
+  });
+
+  // Submit reduction form
+  $('#reductionForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await submitReductionForm_(false);
+  });
+
+  $('#commitReductionNowBtn')?.addEventListener('click', async () => {
+    await submitReductionForm_(true);
+  });
+
+  async function submitReductionForm_(commitNow) {
+    const resource = $('#r_resource').value;
+    const start    = $('#r_start').value;
+    const end      = $('#r_end').value;
+    const hours    = Number($('#r_hours').value) || 0;
+    const reason   = $('#r_reason').value.trim();
+    const scenario = $('#r_scenario').value;
+    const adjId    = $('#r_adjustment_id').value;
+
+    if (!resource) { toast('Worker is required', 'err'); return; }
+    if (!start || !end) { toast('Date range is required', 'err'); return; }
+    if (hours <= 0) { toast('Hours to reduce must be > 0', 'err'); return; }
+    if (!reason) { toast('Reason is required', 'err'); return; }
+
+    const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
+    const dist = activeBtn ? activeBtn.dataset.val : 'Even';
+
+    if (dist === 'Custom') {
+      const totalEl = $('#rCustomMonthsTotal');
+      const customTotal = Number(totalEl ? totalEl.textContent : 0);
+      if (Math.abs(customTotal - hours) > 0.5) {
+        toast('Custom distribution total does not match hours to reduce', 'err');
+        return;
+      }
+    }
+
+    const adj = {
+      adjustment_id:     adjId || null,
+      resource_name:     resource,
+      start_date:        start,
+      end_date:          end,
+      hours_reduction:   hours,
+      distribution:      dist,
+      custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : '',
+      reason:            reason,
+      scenario_id:       scenario || '',
+      status:            commitNow ? 'Committed' : 'Modeled'
+    };
+
+    try {
+      await call('api_saveCapacityAdjustment', adj);
+      toast(commitNow ? 'Reduction committed' : 'Reduction saved as modeled', 'ok');
+      $('#reductionDrawer').hidden = true;
+
+      // Refresh relevant views
+      if (State.currentView === 'scenarios' && State.selectedScenario) {
+        await loadScenarioAssignments_(State.selectedScenario);
+      }
+      if (State.currentView === 'explorer' && State.selectedResource) {
+        loadResourceDetail_(State.selectedResource);
+      }
+    } catch (err) {
+      toast('Save failed: ' + err.message, 'err');
+    }
+  }
+
+  // Reduction drawer close
+  $('#reductionDrawer')?.addEventListener('click', (e) => {
+    if (e.target.dataset && e.target.dataset.close !== undefined) {
+      $('#reductionDrawer').hidden = true;
+    }
+  });
 </script>
 
 <script>
@@ -2973,22 +3417,8 @@
         </tr>
       `).join('');
 
-      const generics = await call('api_listGenericResources');
-      const gBody = $('#genericBody');
-      if (generics.length) {
-        gBody.innerHTML = generics.map(g => `
-          <tr>
-            <td>${escapeHtml_(g.name)}</td>
-            <td>${escapeHtml_(g.resource_type)}</td>
-            <td>${escapeHtml_(g.project_role)}</td>
-            <td>${escapeHtml_(g.manager_org)}</td>
-            <td>${escapeHtml_(g.team)}</td>
-            <td>${escapeHtml_(g.practice)}</td>
-            <td class="num">${g.capacity_hours}</td>
-            <td>${escapeHtml_(g.status)}</td>
-          </tr>
-        `).join('');
-      }
+      const generics = await call('api_listAllGenericResources');
+      renderGenericResources_(generics);
 
       const excl = await call('api_getExclusions');
       $('#exclusionsBody').innerHTML = (excl || []).map(w => `
@@ -3034,6 +3464,149 @@
     await call('api_refreshOpportunities');
     toast('Opportunities refreshed', 'ok');
     loadAdmin();
+  });
+
+  // ============================================================
+  // Drop 6: Generic Resources — editable table
+  // ============================================================
+
+  /**
+   * Render Generic Resources rows as an editable table.
+   * Each row has inline inputs; newly added rows get .generic-new-row.
+   * @param {Object[]} rows — rows from api_listGenericResources (all rows, including Inactive)
+   */
+  function renderGenericResources_(rows) {
+    const gBody = $('#genericBody');
+    if (!gBody) return;
+    const managerOptions = (State.ref.managerOrgs || [])
+      .map(m => `<option value="${escapeHtml_(m)}">${escapeHtml_(m)}</option>`)
+      .join('');
+    if (!rows || !rows.length) {
+      gBody.innerHTML = '<tr><td colspan="12" class="muted" style="padding:12px">No generic resources configured yet.</td></tr>';
+      return;
+    }
+    gBody.innerHTML = rows.map((g, i) => _genericRow_(g, i, managerOptions)).join('');
+  }
+
+  /** Build a single editable row string. */
+  function _genericRow_(g, i, managerOptions) {
+    const mgr = g.manager_org || '';
+    const statusOpts = ['Active','Inactive'].map(s =>
+      `<option value="${s}"${g.status === s ? ' selected' : ''}>${s}</option>`
+    ).join('');
+    const mgrOpts = '<option value="">— None —</option>' +
+      (State.ref.managerOrgs || []).map(m =>
+        `<option value="${escapeHtml_(m)}"${mgr === m ? ' selected' : ''}>${escapeHtml_(m)}</option>`
+      ).join('');
+    const startVal = g.start_date ? (g.start_date instanceof Date
+      ? g.start_date.toISOString().slice(0,10) : String(g.start_date).slice(0,10)) : '';
+    const endVal = g.end_date ? (g.end_date instanceof Date
+      ? g.end_date.toISOString().slice(0,10) : String(g.end_date).slice(0,10)) : '';
+    return `
+      <tr data-row-index="${i}">
+        <td><input type="text" class="table-input" data-g="name" value="${escapeHtml_(g.name)}" placeholder="Name" required></td>
+        <td><input type="text" class="table-input" data-g="resource_type" value="${escapeHtml_(g.resource_type)}" placeholder="e.g. Functional"></td>
+        <td><input type="text" class="table-input" data-g="project_role" value="${escapeHtml_(g.project_role)}"></td>
+        <td><select class="table-input select" data-g="manager_org">${mgrOpts}</select></td>
+        <td><input type="text" class="table-input" data-g="team" value="${escapeHtml_(g.team)}"></td>
+        <td><input type="text" class="table-input" data-g="practice" value="${escapeHtml_(g.practice)}"></td>
+        <td><input type="date" class="table-input" data-g="start_date" value="${startVal}"></td>
+        <td><input type="date" class="table-input" data-g="end_date" value="${endVal}"></td>
+        <td><input type="number" class="table-input" data-g="capacity_hours" min="0" value="${Number(g.capacity_hours) || 160}" style="width:70px;text-align:right;"></td>
+        <td><select class="table-input select" data-g="status">${statusOpts}</select></td>
+        <td><input type="text" class="table-input" data-g="notes" value="${escapeHtml_(g.notes)}"></td>
+        <td><button type="button" class="generic-delete-btn" title="Delete this row">×</button></td>
+      </tr>`;
+  }
+
+  /**
+   * Walk the rendered rows, build an array of objects matching the
+   * Generic_Resources schema. Rows with a blank name are filtered out
+   * (user added then abandoned).
+   */
+  function collectGenericResources_() {
+    return $$('#genericBody tr[data-row-index]').map(tr => {
+      const get = (attr) => {
+        const el = tr.querySelector('[data-g="' + attr + '"]');
+        return el ? el.value : '';
+      };
+      return {
+        name:           get('name').trim(),
+        resource_type:  get('resource_type').trim(),
+        project_role:   get('project_role').trim(),
+        manager_org:    get('manager_org'),
+        team:           get('team').trim(),
+        practice:       get('practice').trim(),
+        start_date:     get('start_date'),
+        end_date:       get('end_date'),
+        capacity_hours: Number(get('capacity_hours')) || 160,
+        status:         get('status') || 'Active',
+        notes:          get('notes').trim()
+      };
+    }).filter(r => r.name !== '');
+  }
+
+  // Inline Delete confirmation
+  document.addEventListener('click', (e) => {
+    const delBtn = e.target.closest('.generic-delete-btn');
+    if (!delBtn) return;
+    const td = delBtn.parentElement;
+    delBtn.style.display = 'none';
+    const confirm = document.createElement('span');
+    confirm.className = 'generic-delete-confirm';
+    confirm.innerHTML = '<button class="confirm-yes">Confirm</button><button class="confirm-cancel">Cancel</button>';
+    td.appendChild(confirm);
+    confirm.querySelector('.confirm-yes').addEventListener('click', () => {
+      delBtn.closest('tr').remove();
+    });
+    confirm.querySelector('.confirm-cancel').addEventListener('click', () => {
+      confirm.remove();
+      delBtn.style.display = '';
+    });
+  });
+
+  // "+ Add Generic Worker" button
+  $('#addGenericBtn')?.addEventListener('click', () => {
+    const gBody = $('#genericBody');
+    // Clear the empty-state placeholder row if present
+    const placeholder = gBody.querySelector('td[colspan]');
+    if (placeholder) placeholder.closest('tr').remove();
+
+    const idx = $$('#genericBody tr[data-row-index]').length;
+    const blank = {
+      name: '', resource_type: '', project_role: '',
+      manager_org: '', team: '', practice: '',
+      start_date: '', end_date: '',
+      capacity_hours: 160, status: 'Active', notes: ''
+    };
+    const div = document.createElement('tbody');
+    div.innerHTML = _genericRow_(blank, idx, '');
+    const newRow = div.querySelector('tr');
+    newRow.classList.add('generic-new-row');
+    gBody.prepend(newRow);
+    newRow.querySelector('[data-g="name"]')?.focus();
+  });
+
+  // Save Generic Resources
+  $('#saveGenericBtn')?.addEventListener('click', async () => {
+    const resources = collectGenericResources_();
+    // Duplicate name check
+    const names = resources.map(r => r.name.toLowerCase());
+    const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+    if (dupes.length) {
+      toast('Duplicate names: ' + [...new Set(dupes)].join(', '), 'err');
+      return;
+    }
+    try {
+      await call('api_saveGenericResources', { resources });
+      await call('api_flushCaches');
+      State.ref = await call('api_getReference');
+      toast('Generic resources saved', 'ok');
+      const fresh = await call('api_listAllGenericResources');
+      renderGenericResources_(fresh);
+    } catch (err) {
+      toast('Save failed: ' + err.message, 'err');
+    }
   });
 
   // ============================================================

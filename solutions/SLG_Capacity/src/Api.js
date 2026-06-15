@@ -1284,6 +1284,23 @@ function api_listOpportunities(filter) {
   });
 }
 
+/**
+ * Normalize a project/deployment name string for matching.
+ * Lowercases, collapses whitespace, strips # symbols.
+ * Keeps commas, slashes, and parens (semantically meaningful).
+ * Applied symmetrically to both sides of a comparison so matches are consistent.
+ * @param {string} s
+ * @return {string}
+ */
+function _normalizeProjectName_(s) {
+  if (!s) return '';
+  return String(s)
+    .toLowerCase()
+    .replace(/#/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function api_listDeployments() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(DEPLOYMENTS_SHEET);
@@ -1305,26 +1322,28 @@ function api_listDeployments() {
   values.forEach(function (row) {
     const account = v(row, 'Account Name');
     const depName = v(row, 'Deployment Name');
-    const depId = v(row, 'Deployment ID');
+    const depId   = v(row, 'Deployment ID');
     if (!account && !depName) return;
 
+    const partner = String(v(row, 'Priming Partner: Account Name') || '');
     out.push({
-      account_name: String(account || ''),
-      deployment_name: String(depName || ''),
-      services_approach: String(v(row, 'Services Approach') || ''),
-      industry: String(v(row, 'Industry') || ''),
-      sub_region: String(v(row, 'Sub-Region') || ''),
-      priming_partner_account: String(v(row, 'Priming Partner: Account Name') || ''),
-      deployment_stage: String(v(row, 'Deployment Stage') || ''),
-      deployment_health: String(v(row, 'Deployment Health') || ''),
-      current_mtp_date: _toIso_(v(row, 'Current MTP Date')),
-      ps_locations: String(v(row, 'Professional Services Locations') || ''),
-      ps_locations_details: String(v(row, 'Professional Services Locations Details') || ''),
-      dam_name: String(v(row, 'Delivery Assurance Manager: Full Name') || ''),
-      em_name: String(v(row, 'Workday Engagement Manager: Full Name') || ''),
-      current_update: String(v(row, 'Current Deployment Update') || ''),
-      deployment_id: String(depId || ''),
-      psa_worker_count: 0
+      account_name:            String(account || ''),
+      deployment_name:         String(depName || ''),
+      psa_project_name:        String(v(row, 'PSA Project Name') || ''),
+      services_approach:       String(v(row, 'Services Approach') || ''),
+      industry:                String(v(row, 'Industry') || ''),
+      priming_partner_account: partner,
+      partner:                 partner,
+      deployment_stage:        String(v(row, 'Deployment Stage') || ''),
+      deployment_health:       String(v(row, 'Deployment Health') || ''),
+      start_date:              _toIso_(v(row, 'Start Date')),
+      current_mtp_date:        _toIso_(v(row, 'Current MTP Date')),
+      dam_name:                String(v(row, 'Delivery Assurance Manager: Full Name') || ''),
+      em_name:                 String(v(row, 'Workday Engagement Manager: Full Name') || ''),
+      current_update:          String(v(row, 'Current Deployment Update') || ''),
+      deployment_id:           String(depId || ''),
+      psa_worker_count:        0,
+      match_type:              'none'
     });
   });
 
@@ -1334,22 +1353,48 @@ function api_listDeployments() {
     applyOverridesToRecord_(item, item.deployment_id, overrideIndex, 'Deployments');
   });
 
-  // Compute psa_worker_count per deployment from ALLOC_NORM.
-  // Build depName → Set of unique resource_names for PSA work types.
+  // Compute psa_worker_count + match_type per deployment using two-tier matching.
+  // Single walk over ALLOC_NORM builds both indexes for all deployments.
   try {
-    const PSA_TYPES = { Billable: true, Internal: true, Education: true };
-    const allocs = cachedRead_(ALLOC_NORM);
-    const depWorkers = {}; // deployment_name → Set
+    const PSA_TYPES  = { Billable: true, Internal: true, Education: true };
+    const allocs     = cachedRead_(ALLOC_NORM);
+
+    // Index 1: normalized project_name → Set<resource_name>
+    const byProject  = {};
+    // Index 2: account_name → Set<resource_name>
+    const byAccount  = {};
     allocs.forEach(function (row) {
       if (!PSA_TYPES[String(row.allocation_type || '')]) return;
-      const pn = String(row.project_name || '').trim();
-      if (!pn) return;
-      if (!depWorkers[pn]) depWorkers[pn] = new Set();
-      depWorkers[pn].add(String(row.resource_name || ''));
+      const rn   = String(row.resource_name  || '').trim();
+      const pn   = _normalizeProjectName_(row.project_name);
+      const acct = String(row.account_name   || '').trim();
+      if (!rn) return;
+      if (pn)   { if (!byProject[pn])   byProject[pn]   = new Set(); byProject[pn].add(rn);   }
+      if (acct) { if (!byAccount[acct]) byAccount[acct] = new Set(); byAccount[acct].add(rn); }
     });
+
     out.forEach(function (dep) {
-      const ws = depWorkers[dep.deployment_name];
-      dep.psa_worker_count = ws ? ws.size : 0;
+      // Tier 1: precise project match via psa_project_name
+      if (dep.psa_project_name) {
+        const norm = _normalizeProjectName_(dep.psa_project_name);
+        const ws   = byProject[norm];
+        if (ws && ws.size > 0) {
+          dep.psa_worker_count = ws.size;
+          dep.match_type = 'project';
+          return;
+        }
+      }
+      // Tier 2: account fallback
+      if (dep.account_name) {
+        const ws = byAccount[dep.account_name];
+        if (ws && ws.size > 0) {
+          dep.psa_worker_count = ws.size;
+          dep.match_type = 'account';
+          return;
+        }
+      }
+      dep.psa_worker_count = 0;
+      dep.match_type = 'none';
     });
   } catch (e) {
     Logger.log('api_listDeployments: psa_worker_count failed — ' + e);
@@ -1556,52 +1601,109 @@ function api_getDeploymentsForWorker(resourceName) {
  * @param {string} deploymentId
  * @return {{ resource_name: string, hours_on_deployment: number }[]}  sorted by hours desc
  */
+/**
+ * Return workers who have PSA allocations on the given deployment,
+ * along with their total hours using two-tier matching.
+ *
+ * @param {string} deploymentId
+ * @return {{ workers: {resource_name:string, hours:number}[], match_type: string }}
+ */
 function api_getWorkersForDeployment(deploymentId) {
-  if (!deploymentId) return [];
+  if (!deploymentId) return { workers: [], match_type: 'none' };
 
-  // 1. Resolve deployment name from deployment_id.
   const depRef = _resolveDeploymentRef_(deploymentId);
-  if (!depRef) return [];
-  const depName = depRef.deployment_name;
+  if (!depRef) return { workers: [], match_type: 'none' };
 
-  // 2. Filter ALLOC_NORM to PSA rows matching this deployment.
   var allocs;
   try { allocs = cachedRead_(ALLOC_NORM); } catch (e) { allocs = []; }
 
   const PSA_TYPES = { Billable: true, Internal: true, Education: true };
-  const workerHours = {};
-  allocs.forEach(function (row) {
-    if (!PSA_TYPES[String(row.allocation_type || '')]) return;
-    if (String(row.project_name || '').trim() !== depName) return;
-    const rn = String(row.resource_name || '').trim();
-    if (!rn) return;
-    workerHours[rn] = (workerHours[rn] || 0) + (Number(row.hours) || 0);
+  // Filter to PSA work rows within the planning window
+  const pw = buildPlanningWindow_(readPlanningWindowMonths_());
+  const relevant = allocs.filter(function (a) {
+    if (!PSA_TYPES[String(a.allocation_type || '')]) return false;
+    return !!pw.monthKeys[monthKey_(a.period_start)];
   });
 
-  const out = Object.keys(workerHours).map(function (name) {
-    return { resource_name: name, hours_on_deployment: Math.round(workerHours[name]) };
+  // Tier 1: precise project match via psa_project_name
+  var matched = [];
+  var matchType = 'none';
+  if (depRef.psa_project_name) {
+    const targetNorm = _normalizeProjectName_(depRef.psa_project_name);
+    matched = relevant.filter(function (a) {
+      return _normalizeProjectName_(a.project_name) === targetNorm;
+    });
+    if (matched.length > 0) matchType = 'project';
+  }
+
+  // Tier 2: account fallback
+  if (matched.length === 0 && depRef.account_name) {
+    matched = relevant.filter(function (a) {
+      return String(a.account_name || '') === depRef.account_name;
+    });
+    if (matched.length > 0) matchType = 'account';
+  }
+
+  const byWorker = {};
+  matched.forEach(function (a) {
+    const rn = String(a.resource_name || '').trim();
+    if (!rn) return;
+    byWorker[rn] = (byWorker[rn] || 0) + (Number(a.hours) || 0);
   });
-  out.sort(function (a, b) { return b.hours_on_deployment - a.hours_on_deployment; });
-  return out;
+
+  const workers = Object.keys(byWorker).map(function (n) {
+    return { resource_name: n, hours: Math.round(byWorker[n]) };
+  });
+  workers.sort(function (a, b) { return b.hours - a.hours; });
+  return { workers: workers, match_type: matchType };
 }
 
 /**
- * Return per-month PSA baseline for a worker, split into total vs. deployment-scoped hours.
- * Used by the reduction drawer baseline panel when a deployment is locked.
+ * Return per-month PSA baseline for a worker, split into total vs. deployment-matched hours.
+ * Uses the same two-tier matching as api_getWorkersForDeployment.
  *
  * @param {string} resourceName
  * @param {string} deploymentId
- * @return {{ monthKey: string, total_psa_hours: number, deployment_hours: number }[]}
+ * @return {{ months: {monthKey:string, total_psa_hours:number, matched_hours:number}[], match_type: string }}
  */
 function api_getResourceBaselineForDeployment(resourceName, deploymentId) {
-  if (!resourceName || !deploymentId) return [];
+  if (!resourceName || !deploymentId) return { months: [], match_type: 'none' };
 
   const depRef = _resolveDeploymentRef_(deploymentId);
-  const depName = depRef ? depRef.deployment_name : null;
+  if (!depRef) return { months: [], match_type: 'none' };
 
   const PSA_TYPES = { Billable: true, Internal: true, Education: true };
   var allocs;
   try { allocs = cachedRead_(ALLOC_NORM); } catch (e) { allocs = []; }
+
+  // Determine match type using same tier logic as api_getWorkersForDeployment
+  // (but for this specific worker across all months)
+  var matchType = 'none';
+  var matchFn;
+  if (depRef.psa_project_name) {
+    const targetNorm = _normalizeProjectName_(depRef.psa_project_name);
+    const projectMatchCount = allocs.filter(function (a) {
+      return String(a.resource_name || '') === resourceName &&
+             PSA_TYPES[String(a.allocation_type || '')] &&
+             _normalizeProjectName_(a.project_name) === targetNorm;
+    }).length;
+    if (projectMatchCount > 0) {
+      matchType = 'project';
+      matchFn = function (a) { return _normalizeProjectName_(a.project_name) === targetNorm; };
+    }
+  }
+  if (matchType === 'none' && depRef.account_name) {
+    const acctMatchCount = allocs.filter(function (a) {
+      return String(a.resource_name || '') === resourceName &&
+             PSA_TYPES[String(a.allocation_type || '')] &&
+             String(a.account_name || '') === depRef.account_name;
+    }).length;
+    if (acctMatchCount > 0) {
+      matchType = 'account';
+      matchFn = function (a) { return String(a.account_name || '') === depRef.account_name; };
+    }
+  }
+  if (!matchFn) matchFn = function () { return false; };
 
   const byMonth = {};
   allocs.forEach(function (row) {
@@ -1609,29 +1711,28 @@ function api_getResourceBaselineForDeployment(resourceName, deploymentId) {
     if (!PSA_TYPES[String(row.allocation_type || '')]) return;
     const k = monthKey_(row.period_start);
     if (!k) return;
-    if (!byMonth[k]) byMonth[k] = { total: 0, dep: 0 };
+    if (!byMonth[k]) byMonth[k] = { total: 0, matched: 0 };
     const h = Number(row.hours) || 0;
     byMonth[k].total += h;
-    if (depName && String(row.project_name || '').trim() === depName) {
-      byMonth[k].dep += h;
-    }
+    if (matchFn(row)) byMonth[k].matched += h;
   });
 
-  return Object.keys(byMonth).sort().map(function (k) {
+  const months = Object.keys(byMonth).sort().map(function (k) {
     return {
-      monthKey: k,
+      monthKey:        k,
       total_psa_hours: Math.round(byMonth[k].total),
-      deployment_hours: Math.round(byMonth[k].dep)
+      matched_hours:   Math.round(byMonth[k].matched)
     };
   });
+  return { months: months, match_type: matchType };
 }
 
 /**
- * Resolve a deployment_id to its { account_name, deployment_name }, or null if not found.
+ * Resolve a deployment_id to its key fields, or null if not found.
  * Reads the Deployments tab directly (no cache needed — called infrequently).
  *
  * @param {string} deploymentId
- * @return {{ account_name: string, deployment_name: string }|null}
+ * @return {{ account_name: string, deployment_name: string, psa_project_name: string }|null}
  */
 function _resolveDeploymentRef_(deploymentId) {
   if (!deploymentId) return null;
@@ -1646,13 +1747,14 @@ function _resolveDeploymentRef_(deploymentId) {
     hdr.forEach(function (h, i) { hIdx[String(h).trim()] = i; });
     for (let ri = 1; ri < vals.length; ri++) {
       const row = vals[ri];
-      const dId   = String(hIdx['Deployment ID']   >= 0 ? row[hIdx['Deployment ID']]   : '').trim();
-      const dName = String(hIdx['Deployment Name'] >= 0 ? row[hIdx['Deployment Name']] : '').trim();
-      const dAcct = String(hIdx['Account Name']    >= 0 ? row[hIdx['Account Name']]    : '').trim();
+      const dId   = String(hIdx['Deployment ID']      >= 0 ? row[hIdx['Deployment ID']]      : '').trim();
+      const dName = String(hIdx['Deployment Name']    >= 0 ? row[hIdx['Deployment Name']]    : '').trim();
+      const dAcct = String(hIdx['Account Name']       >= 0 ? row[hIdx['Account Name']]       : '').trim();
+      const dPsa  = String(hIdx['PSA Project Name']   >= 0 ? row[hIdx['PSA Project Name']]   : '').trim();
       // Match by Deployment ID; also match by Deployment Name for cases
       // where deployment_id was stored as the project_name directly.
       if ((dId && dId === deploymentId) || dName === deploymentId) {
-        return { account_name: dAcct, deployment_name: dName };
+        return { account_name: dAcct, deployment_name: dName, psa_project_name: dPsa };
       }
     }
     return null;

@@ -2563,8 +2563,17 @@
       d.account_name.toLowerCase().indexOf(q) >= 0
     );
     body.innerHTML = filtered.map(d => {
-      const canReduce = (d.psa_worker_count || 0) > 0;
-      const reduceDisabledAttr = canReduce ? '' : ' disabled title="No PSA allocations to reduce on this deployment."';
+      const isWPS = d.priming_partner_account === 'Workday Professional Services';
+      let reduceDisabledAttr = '';
+      if (!isWPS) {
+        reduceDisabledAttr = ' disabled title="Reductions only apply to Workday Professional Services-led deployments."';
+      } else if ((d.psa_worker_count || 0) === 0) {
+        reduceDisabledAttr = ' disabled title="No workers with PSA allocations on this project or account."';
+      }
+      // Small badge for account-level fallback match so Director knows precision
+      const approxBadge = (isWPS && (d.psa_worker_count || 0) > 0 && d.match_type === 'account')
+        ? ' <span class="muted" style="font-size:10px;" title="Matched by account (no PSA project name)">~</span>'
+        : '';
       return `
       <tr>
         <td>${escapeHtml_(d.deployment_name)}</td>
@@ -2576,7 +2585,7 @@
         <td>${_renderCellWithOverride_(d, 'dam_name', d.dam_name)}</td>
         <td>
           <button class="btn-ghost row-btn" data-dep="${escapeHtml_(d.deployment_id)}">Assign</button>
-          <button class="btn-ghost row-btn" data-dep-reduce="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;"${reduceDisabledAttr}>Reduce</button>
+          <button class="btn-ghost row-btn" data-dep-reduce="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;"${reduceDisabledAttr}>Reduce${approxBadge}</button>
           <button class="btn-ghost row-btn" data-edit-dep="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;">Edit</button>
         </td>
       </tr>
@@ -2796,16 +2805,41 @@
     const depSel = $('#r_deployment_id');
     if (depSel) { depSel.value = deploymentId; depSel.disabled = true; }
 
-    // Fetch workers for this deployment
+    // Fetch workers for this deployment (new shape: { workers, match_type })
     const rSel = $('#r_resource');
     rSel.innerHTML = '<option value="">— Select worker —</option>';
-    let workers = [];
-    try { workers = await call('api_getWorkersForDeployment', deploymentId); } catch (e) { workers = []; }
+    let workerResult = { workers: [], match_type: 'none' };
+    try { workerResult = await call('api_getWorkersForDeployment', deploymentId); } catch (e) {}
 
-    if (!workers || !workers.length) {
+    const workers   = workerResult.workers  || [];
+    const matchType = workerResult.match_type || 'none';
+    // Store match_type on the drawer so baseline panel can use correct labels
+    drawer.dataset.depMatchType = matchType;
+
+    // Update drawer header: add a third line based on match_type
+    const subEl = $('#reductionDrawerWorkerSub');
+    if (subEl) {
+      if (matchType === 'project' && dep && dep.psa_project_name) {
+        subEl.textContent = '\u2713 Matched by PSA project: ' + dep.psa_project_name;
+        subEl.style.color = '';
+      } else if (matchType === 'account') {
+        // Count WPS deployments for same account to show warning
+        const sameAcctCount = (State.deployments || []).filter(function (d2) {
+          return d2.account_name === (dep && dep.account_name) &&
+                 d2.priming_partner_account === 'Workday Professional Services';
+        }).length;
+        subEl.textContent = '\u26A0 Matched by account. This account has ' + sameAcctCount + ' active deployment(s). Verify which one you intend to reduce.';
+        subEl.style.color = 'var(--lunchBreak, #e8a317)';
+      } else {
+        subEl.textContent = '';
+        subEl.style.color = '';
+      }
+    }
+
+    if (!workers.length) {
       const ph = document.createElement('option');
       ph.value = '';
-      ph.textContent = '— No workers with PSA allocations —';
+      ph.textContent = '— No matching workers —';
       ph.disabled = true;
       rSel.innerHTML = '';
       rSel.appendChild(ph);
@@ -2816,10 +2850,11 @@
       if (commitBtn) commitBtn.disabled = true;
     } else {
       rSel.disabled = false;
+      const locationLabel = matchType === 'project' ? 'on this project' : 'on this account';
       workers.forEach(function (w) {
         const opt = document.createElement('option');
         opt.value = w.resource_name;
-        opt.textContent = w.resource_name + ' (' + w.hours_on_deployment + 'h on this deployment)';
+        opt.textContent = w.resource_name + ' (' + w.hours + 'h ' + locationLabel + ')';
         rSel.appendChild(opt);
       });
     }
@@ -3134,14 +3169,17 @@
       const hoursReduction = Number($('#r_hours').value) || 0;
 
       if (depLock) {
-        // Deployment-locked mode: fetch two-row baseline
-        const baseline = await call('api_getResourceBaselineForDeployment', resourceName, depLock);
-        if (!baseline || !baseline.length) { card.hidden = true; return; }
-        const filtered = baseline.filter(b =>
+        // Deployment-locked mode: fetch two-row baseline (new shape: {months, match_type})
+        const resp = await call('api_getResourceBaselineForDeployment', resourceName, depLock);
+        const baselineMonths = (resp && resp.months) ? resp.months : (Array.isArray(resp) ? resp : []);
+        const depMatchType   = (resp && resp.match_type) || ($('#reductionDrawer').dataset.depMatchType) || 'none';
+        if (!baselineMonths.length) { card.hidden = true; return; }
+        const filtered = baselineMonths.filter(b =>
           (!start || b.monthKey >= start) && (!end || b.monthKey <= end)
         );
         if (!filtered.length && (start || end)) { card.hidden = true; return; }
-        const data = filtered.length ? filtered : baseline;
+        const data = filtered.length ? filtered : baselineMonths;
+        const matchedLabel = depMatchType === 'project' ? 'On this project' : 'On this account';
         const ctx2 = $('#reductionBaselineChart').getContext('2d');
         if (window._reductionBaselineChartInst) window._reductionBaselineChartInst.destroy();
         window._reductionBaselineChartInst = new Chart(ctx2, {
@@ -3150,7 +3188,7 @@
             labels: data.map(b => fmtMonth(b.monthKey)),
             datasets: [
               { label: 'Total PSA', data: data.map(b => b.total_psa_hours), backgroundColor: cssVar_('--ballpoint') },
-              { label: 'On this deployment', data: data.map(b => b.deployment_hours || 0), backgroundColor: cssVar_('--lunchBreak') }
+              { label: matchedLabel, data: data.map(b => b.matched_hours || 0), backgroundColor: cssVar_('--lunchBreak') }
             ]
           },
           options: {
@@ -3159,9 +3197,9 @@
             scales: { x: { stacked: false, grid: { display: false } }, y: { beginAtZero: true } }
           }
         });
-        const totalDep = data.reduce((s, b) => s + (b.deployment_hours || 0), 0);
+        const totalMatched = data.reduce((s, b) => s + (b.matched_hours || 0), 0);
         const noteEl = $('#reductionBaselineNote');
-        if (noteEl) noteEl.textContent = `On this deployment: ${Math.round(totalDep)}h total PSA`;
+        if (noteEl) noteEl.textContent = `${matchedLabel}: ${Math.round(totalMatched)}h PSA`;
         card.hidden = false;
       } else {
         // Standard mode: single "PSA Committed" row

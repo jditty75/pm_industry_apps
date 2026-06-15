@@ -1865,4 +1865,200 @@ td.cell-with-bar {
   border-color: var(--thumbtack);
   color: var(--thumbtack);
 }
+
+/* ============================================================
+   Drop 7: Explorer right column wrapper
+   ============================================================ */
+.explorer-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* ============================================================
+   Drop 7: Worker Planning Detail card
+   ============================================================ */
+
+/* Filter bar */
+.planning-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.seg-sm button {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+.select-sm {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--desk);
+  background: #fff;
+  color: var(--ink);
+}
+
+/* Planning table */
+.planning-table td { vertical-align: middle; }
+
+/* Status pills */
+.plan-status-pill {
+  display: inline-block;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: filter .1s, transform .1s;
+}
+.plan-status-pill:hover { filter: brightness(0.92); transform: translateY(-1px); }
+.plan-status-pill.status-modeled   { background: #FFF8E1; color: #8a5c00; }
+.plan-status-pill.status-committed { background: #e7f3ec; color: #1e7a3c; }
+.plan-status-pill.status-archived  { background: var(--business-card); color: var(--staple); }
+
+/* Status flip popover menu */
+.plan-status-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid var(--desk);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 4px 0;
+  min-width: 130px;
+}
+.plan-status-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--ink);
+}
+.plan-status-menu button:hover { background: var(--business-card); }
+
+/* Type icons */
+.type-icon {
+  display: inline-block;
+  font-size: 10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  text-align: center;
+  line-height: 18px;
+  font-weight: 700;
+}
+.type-icon.assign { background: #EAF4FB; color: var(--ballpoint); }
+.type-icon.reduce { background: #FDECEA; color: var(--thumbtack); }
+
+/* Reduction hours cell */
+.reduction-hours { color: var(--thumbtack); font-weight: 600; }
+
+/* Row actions — hidden until row hover */
+.plan-row-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.plan-row:hover .plan-row-actions { opacity: 1; }
+.row-btn {
+  font-size: 11px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.row-btn.danger { color: var(--thumbtack); }
+.row-btn.danger:hover { background: #FDECEA; }
+
+/* Planning footer */
+.planning-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--business-card);
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty state */
+.planning-empty {
+  text-align: center;
+  color: var(--staple);
+  padding: 24px;
+  font-size: 13px;
+}
+
+/* ============================================================
+   Drop 7: is-loading button state
+   ============================================================ */
+.is-loading {
+  position: relative;
+  pointer-events: none;
+  cursor: wait;
+  opacity: 0.7;
+}
+.is-loading::after {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 8px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+/* ============================================================
+   Drop 7: Drawer overlay during submit
+   ============================================================ */
+.drawer-panel { position: relative; }
+.drawer-panel.is-submitting::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(253, 252, 247, 0.6);
+  z-index: 50;
+  pointer-events: all;
+  border-radius: inherit;
+}
+.drawer-panel .drawer-spinner { display: none; }
+.drawer-panel.is-submitting .drawer-spinner {
+  display: flex;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 51;
+  background: white;
+  padding: 14px 22px;
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  font-weight: 600;
+  color: var(--after-hours);
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.drawer-panel.is-submitting .drawer-spinner::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--business-card);
+  border-top-color: var(--ballpoint);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

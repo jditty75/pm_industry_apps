@@ -478,7 +478,13 @@ function _resolveTeamForBucket_(bucket, roleTeamLabels, rtTeamMap) {
   // Fallback if EnrichedData.gs not yet available.
   var wc = String((bucket && bucket.worker_class) || '');
   if (wc === 'SLG_Real' || wc === 'SLG_Generic') {
-    return (roleTeamLabels || {})[bucket.icp || ''] || 'Unclassified';
+    var teamLabel = (roleTeamLabels || {})[bucket.icp || ''] || '';
+    // Drop 7: SLG_Generic fallback via resource_type when icp is blank.
+    if (!teamLabel && wc === 'SLG_Generic' && bucket.resource_type) {
+      var rtKey = String(bucket.resource_type).trim().toLowerCase();
+      teamLabel = (rtTeamMap || {})[rtKey] || '';
+    }
+    return teamLabel || 'Unclassified';
   }
   function tryKey(v) {
     if (!v) return '';
@@ -997,7 +1003,11 @@ function computeResourceDetail(params) {
   const months = {};
 
   function ensureMonth_(k) {
-    if (!months[k]) months[k] = { billable: 0, internal: 0, education: 0, pto: 0, scenario: 0, reduction: 0 };
+    if (!months[k]) months[k] = {
+      billable: 0, internal: 0, education: 0, pto: 0, scenario: 0,
+      reduction: 0,
+      reductionByStatus: { committed: 0, modeled: 0 }
+    };
   }
 
   alloc.forEach(a => {
@@ -1028,35 +1038,39 @@ function computeResourceDetail(params) {
         }
       });
     });
-
-    // Drop 6: apply capacity adjustments as a reduction series.
-    // Committed always included. Modeled included in Scenario viewMode when
-    // the adjustment's scenario matches (or the adjustment has no scenario,
-    // meaning it is globally applicable to all scenario views).
-    let adjRows = [];
-    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET).filter(a => a.resource_name === resource); } catch (e) { adjRows = []; }
-    adjRows.forEach(adj => {
-      const isCommitted = (adj.status === 'Committed');
-      const isModeled   = (adj.status === 'Modeled');
-      const include = isCommitted ||
-        (viewMode === 'Scenario' && isModeled &&
-         (!adj.scenario_id || adj.scenario_id === params.scenarioId));
-      if (!include) return;
-      expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
-        const k = monthKey_(m.period_start);
-        ensureMonth_(k);
-        months[k].reduction += Number(m.hours_reduction) || 0;
-      });
-    });
   }
 
+  // Drop 7: ALWAYS surface reductions regardless of viewMode or scenario.
+  // The Explorer chart shows all adjustments so Directors see the full
+  // picture. reductionByStatus lets the client colour-code by status.
+  let adjRows = [];
+  try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET).filter(a => a.resource_name === resource); } catch (e) { adjRows = []; }
+  adjRows.forEach(adj => {
+    const status = String(adj.status || 'Modeled');
+    expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
+      const k = monthKey_(m.period_start);
+      ensureMonth_(k);
+      const hrs = Number(m.hours_reduction) || 0;
+      months[k].reduction += hrs;
+      if (status === 'Committed') {
+        months[k].reductionByStatus.committed += hrs;
+      } else {
+        months[k].reductionByStatus.modeled += hrs;
+      }
+    });
+  });
+
   return Object.keys(months).sort().map(k => ({
-    monthKey:  String(k),
-    billable:  Number(months[k].billable)  || 0,
-    internal:  Number(months[k].internal)  || 0,
-    education: Number(months[k].education) || 0,
-    pto:       Number(months[k].pto)       || 0,
-    scenario:  Number(months[k].scenario)  || 0,
-    reduction: Number(months[k].reduction) || 0
+    monthKey:          String(k),
+    billable:          Number(months[k].billable)  || 0,
+    internal:          Number(months[k].internal)  || 0,
+    education:         Number(months[k].education) || 0,
+    pto:               Number(months[k].pto)       || 0,
+    scenario:          Number(months[k].scenario)  || 0,
+    reduction:         Number(months[k].reduction) || 0,
+    reductionByStatus: {
+      committed: Number(months[k].reductionByStatus.committed) || 0,
+      modeled:   Number(months[k].reductionByStatus.modeled)   || 0
+    }
   }));
 }

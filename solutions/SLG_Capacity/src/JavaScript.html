@@ -46,6 +46,7 @@
     currentView: 'dashboard',
     selectedResource: null,
     selectedScenario: null,
+    workerPlanning: null,      // Drop 7: { rows, summary } for Planning Detail card
     reporting: null,
     rpAccountsAll: [],
     rpHoursTotal: 0,
@@ -131,6 +132,34 @@
       clearTimeout(timer);
       timer = setTimeout(() => fn.apply(this, args), wait);
     };
+  }
+
+  /**
+   * Drop 7: Generic loading-state wrapper for async button handlers.
+   * Disables the button, swaps its label, adds .is-loading, and restores
+   * on completion (success or failure). Returns asyncFn's result.
+   *
+   * @param {HTMLElement|null} button
+   * @param {function():Promise} asyncFn
+   * @param {{ label?: string }} [options]
+   */
+  async function withLoading_(button, asyncFn, options) {
+    options = options || {};
+    if (!button) return asyncFn();
+    const originalText = button.textContent;
+    const loadingLabel = options.label || 'Working...';
+    button.disabled = true;
+    button.classList.add('is-loading');
+    button.dataset.originalText = originalText;
+    button.textContent = loadingLabel;
+    try {
+      return await asyncFn();
+    } finally {
+      button.disabled = false;
+      button.classList.remove('is-loading');
+      button.textContent = button.dataset.originalText || originalText;
+      delete button.dataset.originalText;
+    }
   }
 
   // ============================================================
@@ -2243,8 +2272,19 @@
 
   $('#resourceSearch')?.addEventListener('input', debounce_(renderResourceList, 200));
 
+  // Hide the planning card whenever no worker is selected.
+  function _hidePlanningCard_() {
+    const card = $('#workerPlanningCard');
+    if (card) card.hidden = true;
+    State.workerPlanning = null;
+    State.selectedResource = null;
+  }
+
   async function loadResourceDetail_(name) {
-    if (!name) return;
+    if (!name) {
+      _hidePlanningCard_();
+      return;
+    }
     try {
       const detail = await call('api_getResourceDetail', {
         resource: name,
@@ -2258,6 +2298,8 @@
         reduceBtn.hidden = false;
         reduceBtn.onclick = () => openReductionDrawer_(null, name);
       }
+      // Drop 7: load Worker Planning Detail card in parallel
+      loadWorkerPlanning_(name);
     } catch (err) {
       toast('Resource detail failed: ' + err.message, 'err');
     }
@@ -2272,25 +2314,31 @@
 
     const ctx = $('#resourceChart').getContext('2d');
     if (State.charts.resource) State.charts.resource.destroy();
-    // Reductions rendered as negative values so bars extend below the x-axis.
-    const hasReductions = months.some(m => (m.reduction || 0) > 0);
+    // Positive series stacked above x-axis (stack 'a').
+    // Reduction series rendered as negative values below x-axis (stack 'b').
+    // Two distinct datasets: Committed (solid red) + Modeled (lighter red).
     const datasets = [
-      { label: 'Billable',    data: months.map(m => m.billable),   backgroundColor: cssVar_('--ballpoint'),     stack: 'a' },
-      { label: 'Internal',    data: months.map(m => m.internal),   backgroundColor: cssVar_('--water-cooler'),  stack: 'a' },
-      { label: 'Education',   data: months.map(m => m.education),  backgroundColor: cssVar_('--tack'),          stack: 'a' },
-      { label: 'PTO/Holiday', data: months.map(m => m.pto),        backgroundColor: cssVar_('--pencil'),        stack: 'a' },
-      { label: 'Scenario',    data: months.map(m => m.scenario),   backgroundColor: cssVar_('--happy-hour'),    stack: 'a' }
-    ];
-    if (hasReductions) {
-      // Negate so bars extend below zero. Uses a separate stack so they
-      // don't combine with the positive stacked bars.
-      datasets.push({
-        label: 'Reductions',
-        data: months.map(m => -(m.reduction || 0)),
+      { label: 'Billable',    data: months.map(m => m.billable),   backgroundColor: cssVar_('--ballpoint'),    stack: 'a' },
+      { label: 'Internal',    data: months.map(m => m.internal),   backgroundColor: cssVar_('--water-cooler'), stack: 'a' },
+      { label: 'Education',   data: months.map(m => m.education),  backgroundColor: cssVar_('--tack'),         stack: 'a' },
+      { label: 'PTO/Holiday', data: months.map(m => m.pto),        backgroundColor: cssVar_('--pencil'),       stack: 'a' },
+      { label: 'Scenario',    data: months.map(m => m.scenario),   backgroundColor: cssVar_('--happy-hour'),   stack: 'a' },
+      {
+        label: 'Reductions (Committed)',
+        data: months.map(m => -((m.reductionByStatus && m.reductionByStatus.committed) || 0)),
         backgroundColor: cssVar_('--thumbtack'),
         stack: 'b'
-      });
-    }
+      },
+      {
+        label: 'Reductions (Modeled)',
+        data: months.map(m => -((m.reductionByStatus && m.reductionByStatus.modeled) || 0)),
+        backgroundColor: '#e74c3c55',
+        borderColor: cssVar_('--thumbtack'),
+        borderWidth: 1,
+        borderDash: [4, 4],
+        stack: 'b'
+      }
+    ];
     State.charts.resource = new Chart(ctx, {
       type: 'bar',
       data: { labels: months.map(m => fmtMonth(m.monthKey)), datasets },
@@ -2878,11 +2926,11 @@
   // Submit reduction form
   $('#reductionForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    await submitReductionForm_(false);
+    await withLoading_($('#saveReductionModeledBtn') || e.submitter, () => submitReductionForm_(false), { label: 'Saving...' });
   });
 
-  $('#commitReductionNowBtn')?.addEventListener('click', async () => {
-    await submitReductionForm_(true);
+  $('#commitReductionNowBtn')?.addEventListener('click', async function() {
+    await withLoading_(this, () => submitReductionForm_(true), { label: 'Committing...' });
   });
 
   async function submitReductionForm_(commitNow) {
@@ -2924,6 +2972,10 @@
       status:            commitNow ? 'Committed' : 'Modeled'
     };
 
+    const panel = $('#reductionDrawer .drawer-panel') || $('#reductionDrawer');
+    const spinner = panel?.querySelector('.drawer-spinner');
+    if (panel) panel.classList.add('is-submitting');
+    if (spinner) spinner.textContent = commitNow ? 'Committing...' : 'Saving...';
     try {
       await call('api_saveCapacityAdjustment', adj);
       toast(commitNow ? 'Reduction committed' : 'Reduction saved as modeled', 'ok');
@@ -2938,6 +2990,8 @@
       }
     } catch (err) {
       toast('Save failed: ' + err.message, 'err');
+    } finally {
+      if (panel) panel.classList.remove('is-submitting');
     }
   }
 
@@ -2947,6 +3001,281 @@
       $('#reductionDrawer').hidden = true;
     }
   });
+</script>
+
+<script>
+  // ============================================================
+  // Drop 7: Worker Planning Detail card
+  // ============================================================
+
+  /**
+   * Fetch api_getWorkerPlanning + api_getWorkerPlanningSummary in parallel.
+   * Shows the planning card, populates State.workerPlanning.
+   */
+  async function loadWorkerPlanning_(resourceName) {
+    if (!resourceName) {
+      const card = $('#workerPlanningCard');
+      if (card) card.hidden = true;
+      return;
+    }
+    try {
+      const [rows, summary] = await Promise.all([
+        call('api_getWorkerPlanning', resourceName, {}),
+        call('api_getWorkerPlanningSummary', resourceName)
+      ]);
+      State.workerPlanning = { rows: rows || [], summary: summary || {}, resource: resourceName };
+      _populatePlanningScenarioFilter_();
+      renderWorkerPlanning_();
+      const card = $('#workerPlanningCard');
+      if (card) card.hidden = false;
+    } catch (err) {
+      toast('Planning load failed: ' + err.message, 'err');
+    }
+  }
+
+  function _populatePlanningScenarioFilter_() {
+    const sel = $('#planningScenarioFilter');
+    if (!sel || !State.workerPlanning) return;
+    const rows = State.workerPlanning.rows || [];
+    const scenIds = [...new Set(rows.map(r => r.scenario_id).filter(Boolean))];
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All scenarios</option>' +
+      scenIds.map(id => {
+        const name = (State.scenarios || []).find(s => s.scenario_id === id)?.name || id;
+        return `<option value="${escapeHtml_(id)}">${escapeHtml_(name)}</option>`;
+      }).join('');
+    if (current) sel.value = current;
+  }
+
+  /**
+   * Apply current filter controls client-side and render the table.
+   */
+  function renderWorkerPlanning_() {
+    if (!State.workerPlanning) return;
+    const { rows, summary, resource } = State.workerPlanning;
+
+    $('#planningWorkerName').textContent = resource || '—';
+
+    // Apply filters
+    const statusF   = ($$('#planningStatusFilter button').find(b => b.classList.contains('on')) || {}).dataset?.val || '';
+    const typeF     = ($$('#planningTypeFilter button').find(b => b.classList.contains('on')) || {}).dataset?.val || '';
+    const scenF     = $('#planningScenarioFilter')?.value || '';
+
+    let visible = rows;
+    if (statusF) visible = visible.filter(r => r.status === statusF);
+    if (typeF)   visible = visible.filter(r => r.type   === typeF);
+    if (scenF)   visible = visible.filter(r => r.scenario_id === scenF);
+
+    const subtitle = `${rows.filter(r => r.type === 'assignment').length} assignments · ${rows.filter(r => r.type === 'reduction').length} reductions`;
+    $('#planningSubtitle').textContent = subtitle;
+
+    const body = $('#workerPlanningBody');
+    if (!visible.length) {
+      body.innerHTML = '<tr><td colspan="8" class="planning-empty">No records match the current filters.</td></tr>';
+    } else {
+      body.innerHTML = visible.map(r => _planningRow_(r)).join('');
+      // Wire row actions
+      body.querySelectorAll('[data-plan-edit]').forEach(btn => {
+        btn.addEventListener('click', () => _planningEdit_(btn.dataset.planEdit, btn.dataset.planType, btn.dataset.planOppId));
+      });
+      body.querySelectorAll('[data-plan-commit]').forEach(btn => {
+        btn.addEventListener('click', () => _planningCommit_(btn.dataset.planCommit, btn.dataset.planType));
+      });
+      body.querySelectorAll('[data-plan-revert]').forEach(btn => {
+        btn.addEventListener('click', () => _planningRevert_(btn.dataset.planRevert, btn.dataset.planType));
+      });
+      body.querySelectorAll('[data-plan-delete]').forEach(btn => {
+        btn.addEventListener('click', () => _planningDelete_(btn.dataset.planDelete, btn.dataset.planType));
+      });
+      // Wire status pills
+      body.querySelectorAll('.plan-status-pill').forEach(pill => {
+        pill.addEventListener('click', e => _planningStatusPillClick_(e));
+      });
+    }
+
+    // Footer
+    if (summary) {
+      $('#pfTotalAssigned').textContent = (summary.totalAssignedHours || 0) + 'h';
+      $('#pfTotalReductions').textContent = '-' + (summary.totalReductionHours || 0) + 'h';
+      $('#pfNet').textContent = (summary.netHours || 0) + 'h';
+      $('#pfMeta').textContent = `${summary.distinctProjects || 0} project(s) · ${summary.distinctScenarios || 0} scenario(s)`;
+      const footer = $('#planningFooter');
+      if (footer) footer.hidden = false;
+    }
+  }
+
+  function _planningRow_(r) {
+    const isAssign = r.type === 'assignment';
+    const typeIcon = isAssign
+      ? '<span class="type-icon assign" title="Assignment">▶</span>'
+      : '<span class="type-icon reduce" title="Reduction">▼</span>';
+    const titleHtml = isAssign
+      ? `<div>${escapeHtml_(r.title)}</div><div class="muted" style="font-size:11px;">${escapeHtml_(r.subtitle || '')}</div>`
+      : `<div>${escapeHtml_(r.title)}</div>${r.reason ? `<div class="muted" style="font-size:11px;">${escapeHtml_(r.reason)}</div>` : ''}`;
+    const dates = r.start_date && r.end_date
+      ? fmtDate(r.start_date) + ' – ' + fmtDate(r.end_date) : '—';
+    const hoursHtml = isAssign
+      ? `<span>${r.hours}h</span>`
+      : `<span class="reduction-hours">-${r.hours}h</span>`;
+    const statusHtml = `<span class="plan-status-pill status-${r.status.toLowerCase()}" data-row-id="${escapeHtml_(r.id)}" data-row-type="${r.type}" data-row-status="${r.status}">${escapeHtml_(r.status)}</span>`;
+    const scenHtml = r.scenario_name ? escapeHtml_(r.scenario_name) : '<span class="muted">—</span>';
+    const distPill = `<span class="badge ghost" style="font-size:11px;">${escapeHtml_(r.distribution)}</span>`;
+
+    // Action buttons — revealed on row hover via CSS
+    let actions = `<div class="plan-row-actions">
+      <button class="btn-ghost row-btn" data-plan-edit="${escapeHtml_(r.id)}" data-plan-type="${r.type}" data-plan-opp-id="${escapeHtml_(r.opportunity_id || '')}">Edit</button>`;
+    if (r.status === 'Modeled') {
+      actions += `<button class="btn-ghost row-btn" data-plan-commit="${escapeHtml_(r.id)}" data-plan-type="${r.type}">Commit</button>`;
+    } else if (r.status === 'Committed') {
+      actions += `<button class="btn-ghost row-btn" data-plan-revert="${escapeHtml_(r.id)}" data-plan-type="${r.type}">Revert</button>`;
+    }
+    actions += `<button class="btn-ghost row-btn danger" data-plan-delete="${escapeHtml_(r.id)}" data-plan-type="${r.type}">Delete</button>
+    </div>`;
+
+    return `<tr class="plan-row">
+      <td>${typeIcon}</td>
+      <td>${titleHtml}</td>
+      <td style="white-space:nowrap;">${dates}</td>
+      <td class="num">${hoursHtml}</td>
+      <td>${distPill}</td>
+      <td>${statusHtml}</td>
+      <td>${scenHtml}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }
+
+  // Status pill click — show inline flip options via popover-style injection
+  function _planningStatusPillClick_(e) {
+    const pill = e.currentTarget;
+    const id = pill.dataset.rowId;
+    const type = pill.dataset.rowType;
+    const status = pill.dataset.rowStatus;
+    // Remove any existing flip menu
+    document.querySelectorAll('.plan-status-menu').forEach(el => el.remove());
+    const menu = document.createElement('div');
+    menu.className = 'plan-status-menu';
+    const options = [];
+    if (status === 'Modeled')   { options.push(['Commit', 'commit']); options.push(['Archive', 'archive']); }
+    if (status === 'Committed') { options.push(['Revert', 'revert']); options.push(['Archive', 'archive']); }
+    if (status === 'Archived')  { options.push(['Un-archive', 'unarchive']); }
+    menu.innerHTML = options.map(([label, action]) =>
+      `<button data-action="${action}" data-id="${escapeHtml_(id)}" data-type="${type}">${label}</button>`
+    ).join('');
+    pill.parentElement.style.position = 'relative';
+    pill.parentElement.appendChild(menu);
+    menu.addEventListener('click', async e2 => {
+      const btn = e2.target.closest('button');
+      if (!btn) return;
+      menu.remove();
+      const { action, id: rowId, type: rowType } = btn.dataset;
+      await withLoading_(btn, async () => {
+        if (action === 'commit')   await _planningCommit_(rowId, rowType);
+        if (action === 'revert')   await _planningRevert_(rowId, rowType);
+        if (action === 'archive')  await _planningDelete_(rowId, rowType, true);
+        if (action === 'unarchive') await _planningRevert_(rowId, rowType);
+      }, { label: 'Working...' });
+    });
+    document.addEventListener('click', function dismissMenu(e3) {
+      if (!menu.contains(e3.target) && e3.target !== pill) {
+        menu.remove();
+        document.removeEventListener('click', dismissMenu);
+      }
+    }, { capture: true, once: false });
+  }
+
+  async function _planningEdit_(id, type, oppId) {
+    if (type === 'assignment') {
+      // Re-open assign drawer for editing: need the assignment row to pre-fill.
+      const rows = (State.workerPlanning && State.workerPlanning.rows) || [];
+      const row = rows.find(r => r.id === id);
+      if (row && row.opportunity_id) {
+        // Make sure opportunities are loaded before opening drawer
+        if (!State.opportunities.length && !State.deployments.length) {
+          try { State.opportunities = await call('api_listOpportunities', {}); } catch (e) {}
+        }
+        await openAssignDrawerForEdit_(id, row);
+      } else {
+        toast('Cannot open edit drawer — opportunity context missing', 'err');
+      }
+    } else {
+      openReductionDrawer_(id);
+    }
+  }
+
+  /**
+   * Open the Assign drawer pre-populated with an existing assignment.
+   * @param {string} assignmentId
+   * @param {Object} planRow  — row from State.workerPlanning.rows
+   */
+  async function openAssignDrawerForEdit_(assignmentId, planRow) {
+    if (!State.scenarios.length) await loadScenariosList();
+    // Ensure opportunities list is populated
+    if (!State.opportunities || !State.opportunities.length) {
+      try { State.opportunities = await call('api_listOpportunities', {}); } catch (e) {}
+    }
+    const oppId = planRow.opportunity_id;
+    const opp = State.opportunities.find(o => o.opportunity_id === oppId) || { opportunity_id: oppId };
+    await openAssignDrawer_(oppId, 'pipeline');
+    // Pre-fill assignment-specific fields
+    $('#f_assignment_id').value = assignmentId;
+    const resSel = $('#f_resource');
+    if (resSel && State.workerPlanning) resSel.value = State.workerPlanning.resource || '';
+    if ($('#f_start'))  $('#f_start').value  = planRow.start_date || '';
+    if ($('#f_end'))    $('#f_end').value    = planRow.end_date || '';
+    if ($('#f_hours'))  $('#f_hours').value  = planRow.hours || '';
+    $$('#f_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === (planRow.distribution || 'Even')));
+    const scenSel = $('#f_scenario');
+    if (scenSel && planRow.scenario_id) scenSel.value = planRow.scenario_id;
+  }
+
+  async function _planningCommit_(id, type) {
+    if (!confirm(`Commit this ${type}? It will become part of the committed baseline.`)) return;
+    try {
+      if (type === 'assignment') await call('api_commitAssignment', id);
+      else await call('api_commitCapacityAdjustment', id);
+      toast('Committed', 'ok');
+      await loadWorkerPlanning_(State.selectedResource);
+    } catch (err) { toast('Commit failed: ' + err.message, 'err'); }
+  }
+
+  async function _planningRevert_(id, type) {
+    if (!confirm(`Revert to Modeled? This removes it from the committed baseline.`)) return;
+    try {
+      if (type === 'assignment') await call('api_revertAssignmentToModeled', id);
+      else await call('api_revertCapacityAdjustmentToModeled', id);
+      toast('Reverted to Modeled', 'ok');
+      await loadWorkerPlanning_(State.selectedResource);
+    } catch (err) { toast('Revert failed: ' + err.message, 'err'); }
+  }
+
+  async function _planningDelete_(id, type, skipConfirm) {
+    if (type === 'assignment') {
+      const reason = skipConfirm ? 'Archived via status flip' : prompt('Reason for archiving this assignment (required):');
+      if (!reason || !reason.trim()) return;
+      try {
+        await call('api_archiveAssignment', id, reason.trim());
+        toast('Assignment archived', 'ok');
+        await loadWorkerPlanning_(State.selectedResource);
+      } catch (err) { toast('Archive failed: ' + err.message, 'err'); }
+    } else {
+      if (!skipConfirm && !confirm('Delete this reduction? This cannot be undone.')) return;
+      try {
+        await call('api_deleteCapacityAdjustment', id);
+        toast('Reduction deleted', 'ok');
+        await loadWorkerPlanning_(State.selectedResource);
+      } catch (err) { toast('Delete failed: ' + err.message, 'err'); }
+    }
+  }
+
+  // Planning filter controls (client-side, no re-fetch)
+  $$('#planningStatusFilter button, #planningTypeFilter button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const parent = btn.closest('.seg');
+      parent.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+      renderWorkerPlanning_();
+    });
+  });
+  $('#planningScenarioFilter')?.addEventListener('change', renderWorkerPlanning_);
 </script>
 
 <script>
@@ -3039,11 +3368,11 @@
 
   $('#assignForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    await saveAssignment_('Modeled');
+    await withLoading_($('#saveModeledBtn'), () => saveAssignment_('Modeled'), { label: 'Saving...' });
   });
 
-  $('#commitNowBtn')?.addEventListener('click', async () => {
-    await saveAssignment_('Committed');
+  $('#commitNowBtn')?.addEventListener('click', async function() {
+    await withLoading_(this, () => saveAssignment_('Committed'), { label: 'Committing...' });
   });
 
     // ============================================================
@@ -3106,14 +3435,24 @@
       notes: $('#f_notes').value,
       status: status
     };
+    const panel = $('#assignDrawer .drawer-panel') || $('#assignDrawer');
+    const spinner = panel?.querySelector('.drawer-spinner');
+    if (panel) panel.classList.add('is-submitting');
+    if (spinner) spinner.textContent = (status === 'Committed') ? 'Committing...' : 'Saving...';
     try {
       await call('api_saveAssignment', payload);
       toast('Assignment saved as ' + status, 'ok');
       $('#assignDrawer').hidden = true;
       if (State.currentView === 'dashboard') loadDashboard();
       else if (State.currentView === 'scenarios') loadScenarios();
+      // Refresh planning card if the affected worker is selected
+      if (State.selectedResource && State.selectedResource === resourceName) {
+        loadWorkerPlanning_(resourceName);
+      }
     } catch (err) {
       toast('Save failed: ' + err.message, 'err');
+    } finally {
+      if (panel) panel.classList.remove('is-submitting');
     }
   }
 
@@ -3464,23 +3803,40 @@
     }
   }
 
-  $('#saveIcpBtn')?.addEventListener('click', async () => {
+  $('#saveIcpBtn')?.addEventListener('click', async function() {
     const rows = $$('#icpBody tr').map(tr => ({
       role: tr.querySelector('[data-icp-role]').value,
       target_utilization: Number(tr.querySelector('[data-icp-target]').value),
       red_threshold: Number(tr.querySelector('[data-icp-red]').value)
     }));
-    await call('api_saveIcp', rows);
-    toast('ICP saved', 'ok');
+    await withLoading_(this, async () => {
+      await call('api_saveIcp', rows);
+      toast('ICP saved', 'ok');
+    }, { label: 'Saving...' });
   });
 
-  $('#saveRolesBtn')?.addEventListener('click', async () => {
+  $('#saveRolesBtn')?.addEventListener('click', async function() {
     const rows = $$('#rolesBody tr').map(tr => ({
       role: tr.querySelector('[data-role-name]').value,
       monthly_capacity_hours: Number(tr.querySelector('[data-role-hours]').value)
     }));
-    await call('api_saveRoles', rows);
-    toast('Roles saved', 'ok');
+    await withLoading_(this, async () => {
+      await call('api_saveRoles', rows);
+      toast('Roles saved', 'ok');
+    }, { label: 'Saving...' });
+  });
+
+  $('#saveExclusionsBtn')?.addEventListener('click', async function() {
+    const rows = $$('#exclusionsBody tr').map(tr => ({
+      worker_name: (tr.querySelector('[data-excl-name]') || {}).textContent || '',
+      manager_org: (tr.querySelector('[data-excl-org]') || {}).textContent || '',
+      reason:      (tr.querySelector('[data-excl-reason]') || {}).textContent || '',
+      active:      (tr.querySelector('[data-excl-active]') || {}).checked ? 'Yes' : 'No'
+    }));
+    await withLoading_(this, async () => {
+      await call('api_saveExclusions', { workers: rows });
+      toast('Exclusions saved', 'ok');
+    }, { label: 'Saving...' });
   });
 
   $('#flushCachesBtn')?.addEventListener('click', async () => {
@@ -3618,25 +3974,27 @@
   });
 
   // Save Generic Resources
-  $('#saveGenericBtn')?.addEventListener('click', async () => {
+  $('#saveGenericBtn')?.addEventListener('click', async function() {
     const resources = collectGenericResources_();
-    // Duplicate name check
+    // Duplicate name check (client-side for fast feedback)
     const names = resources.map(r => r.name.toLowerCase());
     const dupes = names.filter((n, i) => names.indexOf(n) !== i);
     if (dupes.length) {
       toast('Duplicate names: ' + [...new Set(dupes)].join(', '), 'err');
       return;
     }
-    try {
-      await call('api_saveGenericResources', { resources });
-      await call('api_flushCaches');
-      State.ref = await call('api_getReference');
-      toast('Generic resources saved', 'ok');
-      const fresh = await call('api_listAllGenericResources');
-      renderGenericResources_(fresh);
-    } catch (err) {
-      toast('Save failed: ' + err.message, 'err');
-    }
+    await withLoading_(this, async () => {
+      try {
+        await call('api_saveGenericResources', { resources });
+        await call('api_flushCaches');
+        State.ref = await call('api_getReference');
+        toast('Generic resources saved', 'ok');
+        const fresh = await call('api_listAllGenericResources');
+        renderGenericResources_(fresh);
+      } catch (err) {
+        toast('Save failed: ' + err.message, 'err');
+      }
+    }, { label: 'Saving...' });
   });
 
   // ============================================================
@@ -3906,8 +4264,10 @@
       return;
     }
 
-    const saveBtn = $('#saveOverrideBtn');
-    if (saveBtn) saveBtn.disabled = true;
+    const panel = $('#overrideDrawer .drawer-panel') || $('#overrideDrawer');
+    const spinner = panel?.querySelector('.drawer-spinner');
+    if (panel) panel.classList.add('is-submitting');
+    if (spinner) spinner.textContent = 'Saving...';
 
     try {
       for (let i = 0; i < ops.length; i++) {
@@ -3925,7 +4285,7 @@
     } catch (err) {
       toast('Save failed: ' + err.message, 'err');
     } finally {
-      if (saveBtn) saveBtn.disabled = false;
+      if (panel) panel.classList.remove('is-submitting');
     }
   }
 
@@ -3939,8 +4299,12 @@
       }
     });
 
-    $('#saveOverrideBtn')?.addEventListener('click', submitOverrideForm_);
-    $('#overrideForm')?.addEventListener('submit', submitOverrideForm_);
+    $('#saveOverrideBtn')?.addEventListener('click', async function(e) {
+      await withLoading_(this, () => submitOverrideForm_(e), { label: 'Saving...' });
+    });
+    $('#overrideForm')?.addEventListener('submit', async function(e) {
+      await withLoading_($('#saveOverrideBtn'), () => submitOverrideForm_(e), { label: 'Saving...' });
+    });
   });
 </script>
 
@@ -4164,24 +4528,27 @@
 
     // Bulk remove
     $('#ovBulkRemoveBtn')?.addEventListener('click', async function () {
+      const btn = this;
       const checked = $$('#ovTableBody .ov-row-check:checked');
       if (!checked || !checked.length) return;
       const ids = Array.from(checked).map(function (cb) { return cb.dataset.id; });
       const reason = prompt('Reason for removing ' + ids.length + ' override(s):');
       if (!reason || !reason.trim()) return;
-      try {
-        const results = await call('api_bulkDeleteOverrides', ids, reason.trim());
-        const failed = results.filter(function (r) { return !r.ok; }).length;
-        if (failed > 0) {
-          toast('Removed ' + (ids.length - failed) + ', failed ' + failed, 'err');
-        } else {
-          toast('Removed ' + ids.length + ' override(s)', 'ok');
+      await withLoading_(btn, async function() {
+        try {
+          const results = await call('api_bulkDeleteOverrides', ids, reason.trim());
+          const failed = results.filter(function (r) { return !r.ok; }).length;
+          if (failed > 0) {
+            toast('Removed ' + (ids.length - failed) + ', failed ' + failed, 'err');
+          } else {
+            toast('Removed ' + ids.length + ' override(s)', 'ok');
+          }
+          await loadOvManagerTable_();
+          await loadOvHygiene_();
+        } catch (err) {
+          toast('Bulk remove failed: ' + err.message, 'err');
         }
-        await loadOvManagerTable_();
-        await loadOvHygiene_();
-      } catch (err) {
-        toast('Bulk remove failed: ' + err.message, 'err');
-      }
+      }, { label: 'Removing...' });
     });
 
     // Export CSV

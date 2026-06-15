@@ -44,6 +44,26 @@ function saveCapacityAdjustment_(adj) {
   if (adj.end_date)   adj.end_date   = new Date(adj.end_date);
 
   if (!adj.adjustment_id) {
+    // 60-second natural-key dedup: prevent double-submit duplicates.
+    const _startIso = adj.start_date ? adj.start_date.toISOString().slice(0,10) : '';
+    const _endIso   = adj.end_date   ? adj.end_date.toISOString().slice(0,10)   : '';
+    const _existing = listCapacityAdjustments_({}).find(function (r) {
+      if (r.resource_name !== adj.resource_name) return false;
+      if (String(r.start_date || '').slice(0,10) !== _startIso) return false;
+      if (String(r.end_date   || '').slice(0,10) !== _endIso)   return false;
+      if (Number(r.hours_reduction) !== adj.hours_reduction) return false;
+      if (String(r.status || 'Modeled') !== adj.status) return false;
+      if (String(r.scenario_id || '') !== String(adj.scenario_id || '')) return false;
+      try {
+        var _age = Date.now() - new Date(r.created_at).getTime();
+        return _age >= 0 && _age < 60000;
+      } catch (e) { return false; }
+    });
+    if (_existing) {
+      Logger.log('saveCapacityAdjustment_: dedup hit — returning existing ' + _existing.adjustment_id);
+      return _existing;
+    }
+
     adj.adjustment_id = uuid_();
     adj.created_by    = user;
     adj.created_at    = ts;

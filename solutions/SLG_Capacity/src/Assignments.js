@@ -84,6 +84,26 @@ function saveAssignment_(a) {
   a.team = teamLabel;
 
   if (!a.assignment_id) {
+    // 60-second natural-key dedup: prevents double-submit duplicates.
+    const _startIso = a.start_date ? a.start_date.toISOString().slice(0,10) : '';
+    const _endIso   = a.end_date   ? a.end_date.toISOString().slice(0,10)   : '';
+    const _existing = listAssignments_({}).find(function (r) {
+      if (r.opportunity_id !== a.opportunity_id) return false;
+      if (r.resource_name  !== a.resource_name)  return false;
+      if (String(r.start_date || '').slice(0,10) !== _startIso) return false;
+      if (String(r.end_date   || '').slice(0,10) !== _endIso)   return false;
+      if (Number(r.estimated_hours) !== Number(a.estimated_hours)) return false;
+      if (String(r.status || 'Modeled') !== String(a.status || 'Modeled')) return false;
+      try {
+        var _age = Date.now() - new Date(r.created_at).getTime();
+        return _age >= 0 && _age < 60000;
+      } catch (e) { return false; }
+    });
+    if (_existing) {
+      Logger.log('saveAssignment_: dedup hit — returning existing ' + _existing.assignment_id);
+      return _existing;
+    }
+
     a.assignment_id = uuid_();
     a.created_by = user;
     a.created_at = ts;

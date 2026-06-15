@@ -276,11 +276,18 @@ function _buildResourceTeamResolver_() {
   var rtMap = readConfigResourceType_();
   var roleTeamLabels = (typeof readRoleTeamLabels_ === 'function')
     ? readRoleTeamLabels_() : {};
+  var rtTeamMapFallback = (typeof _readResourceTypeTeamMap_ === 'function')
+    ? _readResourceTypeTeamMap_() : {};
   return function (resource) {
     if (!resource) return 'Unclassified';
     var wc = String(resource.worker_class || '');
     if (wc === 'SLG_Real' || wc === 'SLG_Generic') {
-      return roleTeamLabels[String(resource.icp || '')] || 'Unclassified';
+      var tLabel = roleTeamLabels[String(resource.icp || '')] || '';
+      // Drop 7: SLG_Generic fallback via resource_type when icp is blank.
+      if (!tLabel && wc === 'SLG_Generic' && resource.resource_type) {
+        tLabel = rtTeamMapFallback[String(resource.resource_type).trim().toLowerCase()] || '';
+      }
+      return tLabel || 'Unclassified';
     }
     return _classifyTeam_({
       role_category: resource.role_category || '',
@@ -1444,6 +1451,15 @@ function api_listAllGenericResources() {
 
 function api_saveGenericResources(payload) {
   const rawRows = (payload && payload.resources) || [];
+  // Server-side name uniqueness check — catches client bugs / concurrent edits.
+  const names = rawRows.map(function (r) {
+    return String(Array.isArray(r) ? (r[0] || '') : (r.name || '')).trim().toLowerCase();
+  }).filter(Boolean);
+  const seen = {};
+  names.forEach(function (n) {
+    if (seen[n]) throw new Error('Duplicate generic worker name: ' + n);
+    seen[n] = true;
+  });
   // Normalize: accept both arrays of objects and arrays of arrays so that
   // writeTable_'s setValues() receives the 2-D format GAS requires.
   const rows = rawRows.map(function (r) {
@@ -1801,6 +1817,153 @@ function api_saveSettings(rows) {
  * Used by the Admin → Planning Config → Settings card.
  */
 function api_listSettings() {
+// ============================================================
+// Drop 7: Worker Planning Detail API
+// ============================================================
+
+/**
+ * Return combined, sorted assignments + capacity adjustments for one worker.
+ * Joins opportunity names and scenario names server-side so the client
+ * doesn't need secondary lookups.
+ *
+ * @param {string} resourceName
+ * @param {{ status?: string, type?: string, scenario_id?: string }} filter
+ * @return {Object[]}
+ */
+function api_getWorkerPlanning(resourceName, filter) {
+  filter = filter || {};
+  if (!resourceName) return [];
+
+  const assigns = listAssignments_({ resource_name: resourceName });
+  let adjs = [];
+  try { adjs = listCapacityAdjustments_({ resource_name: resourceName }); } catch (e) { adjs = []; }
+
+  // Build opportunity name index from OPPS_NORM (opportunistic — missing = blank).
+  const oppIndex = {};
+  try {
+    readTable_(OPPS_NORM).forEach(function (o) {
+      if (o.opportunity_id) oppIndex[o.opportunity_id] = { name: o.opportunity_name || '', account: o.account || '' };
+    });
+  } catch (e) {}
+
+  // Build scenario name index.
+  const scenIndex = {};
+  try {
+    readTable_(SCENARIOS).forEach(function (s) {
+      if (s.scenario_id) scenIndex[s.scenario_id] = s.name || '';
+    });
+  } catch (e) {}
+
+  function _toIsoDate_(v) {
+    if (!v) return '';
+    try { return new Date(v).toISOString().slice(0,10); } catch (e) { return String(v).slice(0,10); }
+  }
+
+  let rows = [];
+
+  assigns.forEach(function (a) {
+    rows.push({
+      type:          'assignment',
+      id:            String(a.assignment_id || ''),
+      title:         (oppIndex[a.opportunity_id] || {}).name || a.opportunity_id || '',
+      subtitle:      (oppIndex[a.opportunity_id] || {}).account || '',
+      start_date:    _toIsoDate_(a.start_date),
+      end_date:      _toIsoDate_(a.end_date),
+      hours:         Number(a.estimated_hours) || 0,
+      distribution:  String(a.distribution || 'Even'),
+      status:        String(a.status || 'Modeled'),
+      scenario_id:   String(a.scenario_id || ''),
+      scenario_name: a.scenario_id ? (scenIndex[a.scenario_id] || a.scenario_id) : '',
+      opportunity_id: String(a.opportunity_id || ''),
+      reason:        null,
+      created_by:    String(a.created_by || ''),
+      created_at:    _toIsoDate_(a.created_at),
+      modified_at:   _toIsoDate_(a.modified_at)
+    });
+  });
+
+  adjs.forEach(function (adj) {
+    rows.push({
+      type:          'reduction',
+      id:            String(adj.adjustment_id || ''),
+      title:         'Reduction',
+      subtitle:      '',
+      start_date:    _toIsoDate_(adj.start_date),
+      end_date:      _toIsoDate_(adj.end_date),
+      hours:         Number(adj.hours_reduction) || 0,
+      distribution:  String(adj.distribution || 'Even'),
+      status:        String(adj.status || 'Modeled'),
+      scenario_id:   String(adj.scenario_id || ''),
+      scenario_name: adj.scenario_id ? (scenIndex[adj.scenario_id] || adj.scenario_id) : '',
+      opportunity_id: '',
+      reason:        String(adj.reason || ''),
+      created_by:    String(adj.created_by || ''),
+      created_at:    _toIsoDate_(adj.created_at),
+      modified_at:   _toIsoDate_(adj.modified_at)
+    });
+  });
+
+  // Client-side filter pass (applied here so server response is filtered).
+  if (filter.status)      rows = rows.filter(function (r) { return r.status === filter.status; });
+  if (filter.type)        rows = rows.filter(function (r) { return r.type === filter.type; });
+  if (filter.scenario_id) rows = rows.filter(function (r) { return r.scenario_id === filter.scenario_id; });
+
+  // Sort newest start_date first.
+  rows.sort(function (a, b) { return (b.start_date || '').localeCompare(a.start_date || ''); });
+  return rows;
+}
+
+/**
+ * Return footer summary aggregates for the Planning Detail card.
+ * @param {string} resourceName
+ * @return {{ totalAssignedHours, totalReductionHours, netHours, distinctProjects, distinctScenarios }}
+ */
+function api_getWorkerPlanningSummary(resourceName) {
+  if (!resourceName) return { totalAssignedHours: 0, totalReductionHours: 0, netHours: 0, distinctProjects: 0, distinctScenarios: 0 };
+  const assigns = listAssignments_({ resource_name: resourceName }).filter(function (a) { return a.status !== 'Archived'; });
+  let adjs = [];
+  try { adjs = listCapacityAdjustments_({ resource_name: resourceName }).filter(function (a) { return a.status !== 'Archived'; }); } catch (e) {}
+
+  const totalAssigned  = assigns.reduce(function (s, a) { return s + (Number(a.estimated_hours) || 0); }, 0);
+  const totalReduction = adjs.reduce(function (s, a) { return s + (Number(a.hours_reduction) || 0); }, 0);
+  const distinctProjects  = new Set(assigns.map(function (a) { return a.opportunity_id; }).filter(Boolean)).size;
+  const distinctScenarios = new Set(
+    [...assigns, ...adjs].map(function (a) { return a.scenario_id; }).filter(Boolean)
+  ).size;
+  return {
+    totalAssignedHours:  Math.round(totalAssigned),
+    totalReductionHours: Math.round(totalReduction),
+    netHours:            Math.round(totalAssigned - totalReduction),
+    distinctProjects:    distinctProjects,
+    distinctScenarios:   distinctScenarios
+  };
+}
+
+/** Soft-delete an assignment by setting status='Archived'. */
+function api_archiveAssignment(assignment_id) {
+  return setAssignmentStatus_(assignment_id, 'Archived');
+}
+
+/** Flip a Committed assignment back to Modeled. */
+function api_revertAssignmentToModeled(assignment_id) {
+  return setAssignmentStatus_(assignment_id, 'Modeled');
+}
+
+/** Flip a Modeled assignment to Committed (per-row, not whole-scenario). */
+function api_commitAssignment(assignment_id) {
+  return setAssignmentStatus_(assignment_id, 'Committed');
+}
+
+/** Flip a Modeled capacity adjustment to Committed. */
+function api_commitCapacityAdjustment(adjustment_id) {
+  return setAdjustmentStatus_(adjustment_id, 'Committed');
+}
+
+/** Flip a Committed capacity adjustment back to Modeled. */
+function api_revertCapacityAdjustmentToModeled(adjustment_id) {
+  return setAdjustmentStatus_(adjustment_id, 'Modeled');
+}
+
   const KNOWN_SETTINGS = [
     { key: 'planning_window_months', label: 'Planning window (months)',    description: 'Number of months shown in the planning window heatmap.', defaultValue: '6'    },
     { key: 'hide_all_external',      label: 'Hide all external workers',   description: 'When true, External workers are excluded from all views.', defaultValue: 'false' },

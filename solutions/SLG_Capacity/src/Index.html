@@ -193,16 +193,70 @@
           </div>
           <div class="resource-list" id="resourceList"></div>
         </div>
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title" id="resourceTitle">Select a resource</div>
-              <div class="muted" id="resourceSub"></div>
+        <div class="explorer-right-col">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title" id="resourceTitle">Select a resource</div>
+                <div class="muted" id="resourceSub"></div>
+              </div>
+              <button class="btn-ghost" id="reduceHoursBtn" hidden>Reduce hours</button>
             </div>
-            <button class="btn-ghost" id="reduceHoursBtn" hidden>Reduce hours</button>
+            <div style="position:relative;height:320px;width:100%">
+              <canvas id="resourceChart"></canvas>
+            </div>
           </div>
-          <div style="position:relative;height:320px;width:100%">
-            <canvas id="resourceChart"></canvas>
+
+          <!-- Planning Detail card — hidden until worker selected -->
+          <div class="card" id="workerPlanningCard" hidden>
+            <div class="card-header">
+              <div>
+                <div class="card-title">Planning for <span id="planningWorkerName">—</span></div>
+                <div class="muted" id="planningSubtitle"></div>
+              </div>
+            </div>
+            <!-- Filter bar -->
+            <div class="planning-filter-bar">
+              <div class="seg seg-sm" id="planningStatusFilter">
+                <button type="button" data-val="" class="on">All</button>
+                <button type="button" data-val="Modeled">Modeled</button>
+                <button type="button" data-val="Committed">Committed</button>
+                <button type="button" data-val="Archived">Archived</button>
+              </div>
+              <div class="seg seg-sm" id="planningTypeFilter">
+                <button type="button" data-val="" class="on">All</button>
+                <button type="button" data-val="assignment">Assignments</button>
+                <button type="button" data-val="reduction">Reductions</button>
+              </div>
+              <select id="planningScenarioFilter" class="select select-sm">
+                <option value="">All scenarios</option>
+              </select>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table planning-table" id="workerPlanningTable">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Title</th>
+                    <th>Dates</th>
+                    <th class="num">Hours</th>
+                    <th>Distribution</th>
+                    <th>Status</th>
+                    <th>Scenario</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="workerPlanningBody">
+                  <tr><td colspan="8" class="planning-empty">Select a resource to view their planning detail.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="planning-footer" id="planningFooter" hidden>
+              <span>Assigned: <strong id="pfTotalAssigned">0h</strong></span>
+              <span>Reductions: <strong id="pfTotalReductions" class="reduction-hours">0h</strong></span>
+              <span>Net: <strong id="pfNet">0h</strong></span>
+              <span class="muted" id="pfMeta"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -1075,6 +1129,7 @@
         </div>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
       </header>
+      <div class="drawer-spinner">Saving...</div>
       <form class="drawer-form" id="assignForm">
           <input type="hidden" id="f_assignment_id">
           <input type="hidden" id="f_opportunity_id">
@@ -1330,6 +1385,7 @@
         </div>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
       </header>
+      <div class="drawer-spinner">Saving...</div>
       <form class="drawer-form" id="overrideForm">
         <input type="hidden" id="o_source">
         <input type="hidden" id="o_record_id">
@@ -1369,6 +1425,7 @@
         </div>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
       </header>
+      <div class="drawer-spinner">Saving...</div>
       <form class="drawer-form" id="reductionForm">
         <input type="hidden" id="r_adjustment_id">
 

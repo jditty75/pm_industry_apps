@@ -150,7 +150,15 @@ function resolveTeamLabel_(row, ctx) {
 
   if (wc === 'SLG_Real' || wc === 'SLG_Generic') {
     // SLG workers: resolve via Config_Roles.team_label keyed on ICP role.
-    result = ctx.roleTeamLabels[icp] || 'Unclassified';
+    result = ctx.roleTeamLabels[icp] || '';
+    // Drop 7 fix: SLG_Generic workers have no ICP role. When icp is blank,
+    // fall back to the resource_type lookup (same chain used for External
+    // workers). This ensures generic workers classified as e.g. "Functional"
+    // resolve to "Functional Consulting" and appear in Team-filtered views.
+    if (!result && wc === 'SLG_Generic' && rt) {
+      result = ctx.rtTeamMap[rt.trim().toLowerCase()] || '';
+    }
+    result = result || 'Unclassified';
   } else {
     // External workers: case-insensitive chain lookup in rtTeamMap.
     function tryKey(v) {

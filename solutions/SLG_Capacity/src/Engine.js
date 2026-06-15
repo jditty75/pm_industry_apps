@@ -992,9 +992,9 @@ function computeUtilization(params) {
 function computeResourceDetail(params) {
   params = params || {};
   const resource = params.resource;
-  if (!resource) return [];
+  if (!resource) return { months: [], summary: null };
   const excluded = readExclusions_();
-  if (excluded.has(resource)) return [];
+  if (excluded.has(resource)) return { months: [], summary: null };
 
   const viewMode = params.viewMode || 'Committed';
   const alloc = cachedRead_(ALLOC_NORM).filter(a => a.resource_name === resource);
@@ -1060,7 +1060,7 @@ function computeResourceDetail(params) {
     });
   });
 
-  return Object.keys(months).sort().map(k => ({
+  const monthsArr = Object.keys(months).sort().map(k => ({
     monthKey:          String(k),
     billable:          Number(months[k].billable)  || 0,
     internal:          Number(months[k].internal)  || 0,
@@ -1073,4 +1073,141 @@ function computeResourceDetail(params) {
       modeled:   Number(months[k].reductionByStatus.modeled)   || 0
     }
   }));
+
+  // ----------------------------------------------------------------
+  // Patch: Worker Utilization Summary — worst-case view including ALL
+  // modeled work regardless of viewMode/scenario (Explorer card).
+  // ----------------------------------------------------------------
+  const _roleCap      = readRoleCapacity_();
+  const _windowMos    = readPlanningWindowMonths_();
+  const _planWindow   = buildPlanningWindow_(_windowMos);
+
+  // Derive worker's monthly capacity from ICP role or resource_type.
+  const _allocRow     = alloc.length ? alloc[0] : null;
+  const _workerIcp    = _allocRow ? String(_allocRow.ICP_role || '') : '';
+  const _workerRt     = _allocRow ? String(_allocRow.resource_type || '') : '';
+  const _monthlyHours = _roleCap[_workerIcp] || _roleCap[_workerRt] || 160;
+
+  // Per-month summary buckets (independent of chart months map).
+  const _sm = {};
+  function _ensureSm_(k) {
+    if (!_sm[k]) _sm[k] = {
+      psaBillable: 0, psaInternal: 0, psaEducation: 0, psaPto: 0,
+      committedAssign: 0, modeledAssign: 0,
+      committedReduction: 0, modeledReduction: 0
+    };
+  }
+
+  alloc.forEach(a => {
+    const k = monthKey_(a.period_start);
+    _ensureSm_(k);
+    const h = Number(a.hours) || 0;
+    if (a.allocation_type === 'Billable')     _sm[k].psaBillable  += h;
+    else if (a.allocation_type === 'Internal')  _sm[k].psaInternal  += h;
+    else if (a.allocation_type === 'Education') _sm[k].psaEducation += h;
+    else if (a.allocation_type === 'PTO_Holiday') _sm[k].psaPto    += h;
+  });
+
+  // Include ALL assignments (Committed + Modeled) regardless of viewMode.
+  // When multiple scenarios have modeled work for the same month, they all
+  // accumulate — worst-case semantics for the "see everything" summary.
+  assigns.forEach(a => {
+    if (a.status !== 'Committed' && a.status !== 'Modeled') return;
+    expandAssignmentToMonthly_(a, calendar).forEach(m => {
+      const k = monthKey_(m.period_start);
+      _ensureSm_(k);
+      if (a.status === 'Committed') _sm[k].committedAssign += m.hours;
+      else _sm[k].modeledAssign += m.hours;
+    });
+  });
+
+  adjRows.forEach(adj => {
+    const status = String(adj.status || 'Modeled');
+    expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
+      const k = monthKey_(m.period_start);
+      _ensureSm_(k);
+      const hrs = Number(m.hours_reduction) || 0;
+      if (status === 'Committed') _sm[k].committedReduction += hrs;
+      else _sm[k].modeledReduction += hrs;
+    });
+  });
+
+  const _includeTimeOff = !!params.includeTimeOff;
+  let _sumCU = 0, _peakCU = 0, _peakCUKey = '';
+  let _sumSU = 0, _peakSU = 0, _peakSUKey = '';
+  let _planMoCount = 0;
+  const _comp = {
+    psaBillable: 0, psaInternal: 0, psaEducation: 0, psaPto: 0,
+    committedAssignments: 0, modeledAssignments: 0,
+    committedReductions: 0, modeledReductions: 0
+  };
+
+  _planWindow.monthsList.forEach(k => {
+    const m = _sm[k] || { psaBillable: 0, psaInternal: 0, psaEducation: 0, psaPto: 0, committedAssign: 0, modeledAssign: 0, committedReduction: 0, modeledReduction: 0 };
+    _planMoCount++;
+    const _to = _includeTimeOff ? (m.psaInternal + m.psaEducation + m.psaPto) : 0;
+    const _cH = m.psaBillable + _to + m.committedAssign - m.committedReduction;
+    const _sH = _cH + m.modeledAssign - m.modeledReduction;
+    if (_monthlyHours > 0) {
+      const _cu = _cH / _monthlyHours;
+      const _su = _sH / _monthlyHours;
+      _sumCU += _cu;
+      _sumSU += _su;
+      if (_cu > _peakCU) { _peakCU = _cu; _peakCUKey = k; }
+      if (_su > _peakSU) { _peakSU = _su; _peakSUKey = k; }
+    }
+    _comp.psaBillable          += m.psaBillable;
+    _comp.psaInternal          += m.psaInternal;
+    _comp.psaEducation         += m.psaEducation;
+    _comp.psaPto               += m.psaPto;
+    _comp.committedAssignments += m.committedAssign;
+    _comp.modeledAssignments   += m.modeledAssign;
+    _comp.committedReductions  += m.committedReduction;
+    _comp.modeledReductions    += m.modeledReduction;
+  });
+
+  const _avgCU = _planMoCount > 0 ? _sumCU / _planMoCount : 0;
+  const _avgSU = _planMoCount > 0 ? _sumSU / _planMoCount : 0;
+  const _to = _includeTimeOff ? (_comp.psaInternal + _comp.psaEducation + _comp.psaPto) : 0;
+  const _totalCH = _comp.psaBillable + _to + _comp.committedAssignments - _comp.committedReductions;
+  const _totalSH = _totalCH + _comp.modeledAssignments - _comp.modeledReductions;
+
+  const summary = {
+    capacity: {
+      monthlyHours:        _monthlyHours,
+      planningWindowMonths: _planMoCount,
+      totalCapacityHours:  _monthlyHours * _planMoCount
+    },
+    committed: {
+      avgUtilization:  _avgCU,
+      peakUtilization: _peakCU,
+      peakMonthKey:    _peakCUKey,
+      totalHours:      Math.round(_totalCH)
+    },
+    scenario: {
+      avgUtilization:  _avgSU,
+      peakUtilization: _peakSU,
+      peakMonthKey:    _peakSUKey,
+      totalHours:      Math.round(_totalSH)
+    },
+    components: {
+      psaBillable:          Math.round(_comp.psaBillable),
+      psaInternal:          Math.round(_comp.psaInternal),
+      psaEducation:         Math.round(_comp.psaEducation),
+      psaPto:               Math.round(_comp.psaPto),
+      committedAssignments: Math.round(_comp.committedAssignments),
+      modeledAssignments:   Math.round(_comp.modeledAssignments),
+      committedReductions:  Math.round(_comp.committedReductions),
+      modeledReductions:    Math.round(_comp.modeledReductions)
+    },
+    flags: {
+      overCapacityCommitted: _peakCU > 1.0,
+      overCapacityScenario:  _peakSU > 1.0,
+      overCapacityHours:     Math.max(0, Math.round((_peakSU * _monthlyHours) - _monthlyHours)),
+      peakIsScenario:        _peakSU > _peakCU,
+      isUnderutilized:       _avgCU < 0.60
+    }
+  };
+
+  return { months: monthsArr, summary: summary };
 }

@@ -2272,12 +2272,129 @@
 
   $('#resourceSearch')?.addEventListener('input', debounce_(renderResourceList, 200));
 
-  // Hide the planning card whenever no worker is selected.
+  // Hide the planning + summary cards whenever no worker is selected.
   function _hidePlanningCard_() {
     const card = $('#workerPlanningCard');
     if (card) card.hidden = true;
+    const sumCard = $('#utilizationSummaryCard');
+    if (sumCard) sumCard.hidden = true;
     State.workerPlanning = null;
     State.selectedResource = null;
+  }
+
+  /**
+   * Render the Utilization Summary card from the summary object returned by
+   * computeResourceDetail.
+   * @param {Object|null} summary
+   */
+  function renderUtilizationSummary_(summary) {
+    const card = $('#utilizationSummaryCard');
+    if (!card) return;
+    if (!summary) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+
+    const cap = summary.capacity || {};
+    const comm = summary.committed || {};
+    const scen = summary.scenario  || {};
+    const comp = summary.components || {};
+    const flags = summary.flags || {};
+
+    function fmtUtil(v) { return Math.round((v || 0) * 100) + '%'; }
+    function utilClass(v) {
+      if (v > 1.0) return 'util-red';
+      if (v >= 0.85) return 'util-amber';
+      return 'util-green';
+    }
+
+    // Committed avg
+    const cAvgEl = $('#utilCommittedAvg');
+    if (cAvgEl) {
+      cAvgEl.textContent = fmtUtil(comm.avgUtilization);
+      cAvgEl.className = 'util-headline-value ' + utilClass(comm.avgUtilization);
+    }
+    const cPeakEl = $('#utilCommittedPeak');
+    if (cPeakEl) {
+      const peakLabel = comm.peakMonthKey ? fmtMonth(comm.peakMonthKey) : '—';
+      cPeakEl.textContent = `peak ${fmtUtil(comm.peakUtilization)} (${peakLabel})`;
+    }
+
+    // Scenario avg
+    const sAvgEl = $('#utilScenarioAvg');
+    if (sAvgEl) {
+      sAvgEl.textContent = fmtUtil(scen.avgUtilization);
+      sAvgEl.className = 'util-headline-value ' + utilClass(scen.avgUtilization);
+    }
+    const sPeakEl = $('#utilScenarioPeak');
+    if (sPeakEl) {
+      const peakLabel = scen.peakMonthKey ? fmtMonth(scen.peakMonthKey) : '—';
+      sPeakEl.textContent = `peak ${fmtUtil(scen.peakUtilization)} (${peakLabel})`;
+    }
+
+    // Capacity
+    const capEl = $('#utilCapacity');
+    if (capEl) capEl.textContent = (cap.monthlyHours || 0) + 'h/mo';
+    const winEl = $('#utilCapacityWindow');
+    if (winEl) winEl.textContent = (cap.planningWindowMonths || 0) + ' months';
+
+    // Components
+    const incTO = State.filters.includeTimeOff;
+    const totalCap = (cap.monthlyHours || 160) * (cap.planningWindowMonths || 1);
+    function pct(v) { return totalCap > 0 ? Math.round((v || 0) / totalCap * 100) + '%' : '0%'; }
+    function compRow(dot, label, hours, negative) {
+      if (!hours) return '';
+      const hoursDisplay = negative ? `-${Math.abs(hours)}h` : `${hours}h`;
+      return `<div class="util-component-row${negative ? ' reduction' : ''}">
+        <span class="util-component-dot" style="background:${dot}"></span>
+        <span class="util-component-label">${escapeHtml_(label)}</span>
+        <span class="util-component-hours">${hoursDisplay}</span>
+        <span class="util-component-pct">${pct(hours)}</span>
+      </div>`;
+    }
+
+    const compHtml = [
+      compRow('var(--ballpoint)',   'PSA Billable',         comp.psaBillable,          false),
+      incTO ? compRow('var(--water-cooler)', 'PSA Internal', comp.psaInternal,          false) : '',
+      incTO ? compRow('var(--tack)',         'PSA Education', comp.psaEducation,         false) : '',
+      incTO ? compRow('var(--pencil)',       'PSA PTO/Holiday', comp.psaPto,             false) : '',
+      compRow('var(--smoothie)',    'Committed Assigns',    comp.committedAssignments,  false),
+      compRow('var(--happy-hour)', 'Modeled Assigns',      comp.modeledAssignments,    false),
+      comp.committedReductions ? compRow('var(--thumbtack)', 'Committed Reductions',  comp.committedReductions, true) : '',
+      comp.modeledReductions   ? compRow('var(--thumbtack)', 'Modeled Reductions',    comp.modeledReductions,   true) : ''
+    ].join('');
+    const compEl = $('#utilComponents');
+    if (compEl) compEl.innerHTML = compHtml || '<div class="util-component-row"><span class="util-component-label muted">No data in planning window.</span></div>';
+
+    // Status line
+    const statusEl = $('#utilStatus');
+    if (statusEl) {
+      let statusText = '', statusClass = '';
+      if (flags.overCapacityScenario) {
+        const mo = scen.peakMonthKey ? fmtMonth(scen.peakMonthKey) : '';
+        statusText = `⚠ Over capacity by ${flags.overCapacityHours}h in scenario view — peak ${fmtUtil(scen.peakUtilization)}${mo ? ' in ' + mo : ''}`;
+        statusClass = 'warn';
+      } else if (flags.overCapacityCommitted) {
+        const mo = comm.peakMonthKey ? fmtMonth(comm.peakMonthKey) : '';
+        statusText = `⚠ Over capacity by ${flags.overCapacityHours}h in committed view — peak ${fmtUtil(comm.peakUtilization)}${mo ? ' in ' + mo : ''}`;
+        statusClass = 'warn';
+      } else if (flags.peakIsScenario && scen.peakUtilization > 0.9) {
+        const mo = scen.peakMonthKey ? fmtMonth(scen.peakMonthKey) : '';
+        statusText = `Near capacity in scenario view — peak ${fmtUtil(scen.peakUtilization)}${mo ? ' in ' + mo : ''}`;
+        statusClass = 'amber';
+      } else if (flags.isUnderutilized) {
+        statusText = `Underutilized — committed avg ${fmtUtil(comm.avgUtilization)}`;
+        statusClass = 'info';
+      }
+      if (statusText) {
+        statusEl.textContent = statusText;
+        statusEl.className = 'util-status ' + statusClass;
+        statusEl.hidden = false;
+      } else {
+        statusEl.hidden = true;
+      }
+    }
   }
 
   async function loadResourceDetail_(name) {
@@ -2289,9 +2406,13 @@
       const detail = await call('api_getResourceDetail', {
         resource: name,
         viewMode: State.filters.viewMode,
-        scenarioId: State.filters.scenarioId
+        scenarioId: State.filters.scenarioId,
+        includeTimeOff: State.filters.includeTimeOff
       });
-      renderResourceChart_(name, detail);
+      // Patch: detail now has shape { months, summary }
+      const months = detail && detail.months ? detail.months : detail;
+      renderResourceChart_(name, months);
+      renderUtilizationSummary_(detail && detail.summary ? detail.summary : null);
       // Show "Reduce hours" button now that a resource is selected
       const reduceBtn = $('#reduceHoursBtn');
       if (reduceBtn) {
@@ -3787,7 +3908,8 @@
       `).join('');
 
       const generics = await call('api_listAllGenericResources');
-      renderGenericResources_(generics);
+      const rtOpts = await loadResourceTypeOptions_();
+      renderGenericResources_(generics, rtOpts);
 
       const excl = await call('api_getExclusions');
       $('#exclusionsBody').innerHTML = (excl || []).map(w => `
@@ -3861,21 +3983,63 @@
    * Each row has inline inputs; newly added rows get .generic-new-row.
    * @param {Object[]} rows — rows from api_listGenericResources (all rows, including Inactive)
    */
-  function renderGenericResources_(rows) {
+  /**
+   * Render the Generic Resources table body.
+   * @param {Object[]} rows   — rows from api_listAllGenericResources
+   * @param {Object}   [rtOptions]  — map from api_getResourceTypeOptions
+   */
+  function renderGenericResources_(rows, rtOptions) {
     const gBody = $('#genericBody');
     if (!gBody) return;
-    const managerOptions = (State.ref.managerOrgs || [])
-      .map(m => `<option value="${escapeHtml_(m)}">${escapeHtml_(m)}</option>`)
-      .join('');
     if (!rows || !rows.length) {
       gBody.innerHTML = '<tr><td colspan="12" class="muted" style="padding:12px">No generic resources configured yet.</td></tr>';
       return;
     }
-    gBody.innerHTML = rows.map((g, i) => _genericRow_(g, i, managerOptions)).join('');
+    gBody.innerHTML = rows.map((g, i) => _genericRow_(g, i, rtOptions || {})).join('');
   }
 
-  /** Build a single editable row string. */
-  function _genericRow_(g, i, managerOptions) {
+  /**
+   * Build a team <select> option list for the given current value.
+   * @param {Object} rtOptions  — { team: [resource_types] }
+   * @param {string} currentVal — existing row.team value
+   */
+  function _teamSelectOptions_(rtOptions, currentVal) {
+    const teams = Object.keys(rtOptions || {}).sort();
+    const hasMatch = teams.includes(currentVal);
+    let html = '<option value="">— Select team —</option>';
+    if (currentVal && !hasMatch) {
+      html += `<option value="${escapeHtml_(currentVal)}" selected>(unmapped: ${escapeHtml_(currentVal)})</option>`;
+    }
+    html += teams.map(t =>
+      `<option value="${escapeHtml_(t)}"${t === currentVal ? ' selected' : ''}>${escapeHtml_(t)}</option>`
+    ).join('');
+    return html;
+  }
+
+  /**
+   * Build a resource-type <select> option list for the given team + current value.
+   * @param {Object} rtOptions  — { team: [resource_types] }
+   * @param {string} team       — currently selected team
+   * @param {string} currentVal — existing row.resource_type value
+   */
+  function _rtSelectOptions_(rtOptions, team, currentVal) {
+    if (!team) {
+      return `<option value="">— Select team first —</option>`;
+    }
+    const rts = (rtOptions && rtOptions[team]) || [];
+    const hasMatch = rts.includes(currentVal);
+    let html = '<option value="">— Select —</option>';
+    if (currentVal && !hasMatch) {
+      html += `<option value="${escapeHtml_(currentVal)}" selected>(unmapped: ${escapeHtml_(currentVal)})</option>`;
+    }
+    html += rts.map(rt =>
+      `<option value="${escapeHtml_(rt)}"${rt === currentVal ? ' selected' : ''}>${escapeHtml_(rt)}</option>`
+    ).join('');
+    return html;
+  }
+
+  /** Build a single editable row string with cascading Team/Resource Type selects. */
+  function _genericRow_(g, i, rtOptions) {
     const mgr = g.manager_org || '';
     const statusOpts = ['Active','Inactive'].map(s =>
       `<option value="${s}"${g.status === s ? ' selected' : ''}>${s}</option>`
@@ -3888,13 +4052,17 @@
       ? g.start_date.toISOString().slice(0,10) : String(g.start_date).slice(0,10)) : '';
     const endVal = g.end_date ? (g.end_date instanceof Date
       ? g.end_date.toISOString().slice(0,10) : String(g.end_date).slice(0,10)) : '';
+    const currentTeam = g.team || '';
+    const currentRt   = g.resource_type || '';
+    const teamDisabled  = '';
+    const rtDisabled    = currentTeam ? '' : ' disabled';
     return `
       <tr data-row-index="${i}">
         <td><input type="text" class="table-input" data-g="name" value="${escapeHtml_(g.name)}" placeholder="Name" required></td>
-        <td><input type="text" class="table-input" data-g="resource_type" value="${escapeHtml_(g.resource_type)}" placeholder="e.g. Functional"></td>
+        <td><select class="table-input select" data-g="resource_type" id="gen-rt-${i}"${rtDisabled}>${_rtSelectOptions_(rtOptions, currentTeam, currentRt)}</select></td>
         <td><input type="text" class="table-input" data-g="project_role" value="${escapeHtml_(g.project_role)}"></td>
         <td><select class="table-input select" data-g="manager_org">${mgrOpts}</select></td>
-        <td><input type="text" class="table-input" data-g="team" value="${escapeHtml_(g.team)}"></td>
+        <td><select class="table-input select" data-g="team" id="gen-team-${i}">${_teamSelectOptions_(rtOptions, currentTeam)}</select></td>
         <td><input type="text" class="table-input" data-g="practice" value="${escapeHtml_(g.practice)}"></td>
         <td><input type="date" class="table-input" data-g="start_date" value="${startVal}"></td>
         <td><input type="date" class="table-input" data-g="end_date" value="${endVal}"></td>
@@ -3951,8 +4119,23 @@
     });
   });
 
+  // Cascading Team → Resource Type: event delegation on genericBody
+  $('#genericBody')?.addEventListener('change', function(e) {
+    const sel = e.target;
+    if (!sel.matches('[data-g="team"]')) return;
+    const tr = sel.closest('tr[data-row-index]');
+    if (!tr) return;
+    const idx = tr.dataset.rowIndex;
+    const rtSel = tr.querySelector('[data-g="resource_type"]');
+    if (!rtSel) return;
+    const newTeam = sel.value;
+    const rtOptions = _resourceTypeOptionsCache || {};
+    rtSel.innerHTML = _rtSelectOptions_(rtOptions, newTeam, '');
+    rtSel.disabled = !newTeam;
+  });
+
   // "+ Add Generic Worker" button
-  $('#addGenericBtn')?.addEventListener('click', () => {
+  $('#addGenericBtn')?.addEventListener('click', async () => {
     const gBody = $('#genericBody');
     // Clear the empty-state placeholder row if present
     const placeholder = gBody.querySelector('td[colspan]');
@@ -3965,8 +4148,9 @@
       start_date: '', end_date: '',
       capacity_hours: 160, status: 'Active', notes: ''
     };
+    const rtOptions = await loadResourceTypeOptions_();
     const div = document.createElement('tbody');
-    div.innerHTML = _genericRow_(blank, idx, '');
+    div.innerHTML = _genericRow_(blank, idx, rtOptions);
     const newRow = div.querySelector('tr');
     newRow.classList.add('generic-new-row');
     gBody.prepend(newRow);
@@ -3990,7 +4174,8 @@
         State.ref = await call('api_getReference');
         toast('Generic resources saved', 'ok');
         const fresh = await call('api_listAllGenericResources');
-        renderGenericResources_(fresh);
+        const freshRtOpts = await loadResourceTypeOptions_();
+        renderGenericResources_(fresh, freshRtOpts);
       } catch (err) {
         toast('Save failed: ' + err.message, 'err');
       }
@@ -4106,6 +4291,17 @@
   // Override Drawer (Drop 3)
   // ============================================================
   let _overridableFieldsCache_ = null;
+
+  // Patch: client-side cache for api_getResourceTypeOptions.
+  // { "Delivery": ["Engagement Manager", ...], ... }
+  let _resourceTypeOptionsCache = null;
+
+  async function loadResourceTypeOptions_() {
+    if (!_resourceTypeOptionsCache) {
+      _resourceTypeOptionsCache = await call('api_getResourceTypeOptions');
+    }
+    return _resourceTypeOptionsCache;
+  }
 
   async function loadOverridableFields_() {
     if (!_overridableFieldsCache_) {

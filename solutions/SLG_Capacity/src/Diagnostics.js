@@ -1251,3 +1251,63 @@ function _test_phase8_ingest_filter_logic() {
   // Phase 5 PSA upload diagnostics instead)
   Logger.log('Phase 8 test stub — exercise by re-running Phase 5 diagnostics');
 }
+
+function _dbg_findParseError() {
+  // Force evaluation of every file by attempting to enumerate functions.
+  // If any file has a syntax error, this will throw immediately with
+  // the location.
+  try {
+    const allKeys = Object.keys(this).filter(k => typeof this[k] === 'function');
+    Logger.log('Functions registered: ' + allKeys.length);
+    Logger.log('api_getWorkerPlanning exists: ' + (typeof api_getWorkerPlanning === 'function'));
+    Logger.log('api_getWorkerPlanningSummary exists: ' + (typeof api_getWorkerPlanningSummary === 'function'));
+    Logger.log('api_archiveAssignment exists: ' + (typeof api_archiveAssignment === 'function'));
+    Logger.log('api_commitAssignment exists: ' + (typeof api_commitAssignment === 'function'));
+    Logger.log('api_commitCapacityAdjustment exists: ' + (typeof api_commitCapacityAdjustment === 'function'));
+    Logger.log('api_listOpportunities exists: ' + (typeof api_listOpportunities === 'function'));
+    Logger.log('api_getReference exists: ' + (typeof api_getReference === 'function'));
+  } catch (e) {
+    Logger.log('PARSE ERROR DETECTED: ' + e.message);
+    Logger.log('Stack: ' + e.stack);
+  }
+}
+
+function _dbg_forceReparse() {
+  try {
+    // Apps Script lazy-loads files. Touching a known function from
+    // each file forces evaluation. If a file has a syntax error,
+    // an attempt to reference any function from below the error
+    // will throw.
+    Logger.log('Api.gs touches:');
+    Logger.log('  api_getReference: ' + (typeof api_getReference));
+    Logger.log('  api_listOpportunities: ' + (typeof api_listOpportunities));
+    Logger.log('  api_listSettings: ' + (typeof api_listSettings));
+    Logger.log('  api_listOverrides: ' + (typeof api_listOverrides));
+    Logger.log('  api_saveSettings: ' + (typeof api_saveSettings));
+    Logger.log('  api_bulkDeleteOverrides: ' + (typeof api_bulkDeleteOverrides));
+    Logger.log('  api_getOverrideHygieneSummary: ' + (typeof api_getOverrideHygieneSummary));
+    Logger.log('  api_listCapacityAdjustments: ' + (typeof api_listCapacityAdjustments));
+    Logger.log('  api_saveCapacityAdjustment: ' + (typeof api_saveCapacityAdjustment));
+    Logger.log('  api_getResourceBaseline: ' + (typeof api_getResourceBaseline));
+    Logger.log('  api_getWorkerPlanning: ' + (typeof api_getWorkerPlanning));
+    Logger.log('');
+    Logger.log('Other files (sanity):');
+    Logger.log('  saveAssignment_: ' + (typeof saveAssignment_));
+    Logger.log('  saveCapacityAdjustment_: ' + (typeof saveCapacityAdjustment_));
+    Logger.log('  saveOverride_: ' + (typeof saveOverride_));
+  } catch (e) {
+    Logger.log('THREW: ' + e.message);
+  }
+}
+
+function _dbg_checkResourceTypeForDelivery() {
+  var rtMap = readConfigResourceType_();
+  Logger.log('All keys: ' + JSON.stringify(Object.keys(rtMap)));
+  Logger.log('Keys containing "deliv": ');
+  Object.keys(rtMap).forEach(function(k) {
+    if (k.toLowerCase().indexOf('deliv') >= 0) {
+      Logger.log('  "' + k + '" -> "' + rtMap[k] + '"');
+    }
+  });
+  Logger.log('Direct rtMap["Delivery"]: ' + rtMap['Delivery']);
+}

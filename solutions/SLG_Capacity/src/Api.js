@@ -1429,6 +1429,37 @@ function api_listGenericResources() {
 }
 
 /** Admin variant — returns all rows including Inactive so the admin table can manage them. */
+/**
+ * Return resource_type keys grouped by team_label for the cascading
+ * Team → Resource Type dropdowns in Generic Resources admin.
+ *
+ * Shape: { "Delivery": ["Engagement Manager", ...], "Functional Consulting": [...], ... }
+ * Teams sorted alphabetically; resource_type arrays sorted alphabetically within each team.
+ *
+ * @return {Object}
+ */
+function api_getResourceTypeOptions() {
+  var rtMap = readConfigResourceType_();
+  var grouped = {};
+  Object.keys(rtMap).forEach(function (rt) {
+    var team = String(rtMap[rt] || '').trim();
+    if (!team) return;
+    if (!grouped[team]) grouped[team] = [];
+    grouped[team].push(rt);
+  });
+  // Sort resource_types within each team
+  Object.keys(grouped).forEach(function (team) {
+    grouped[team].sort();
+  });
+  // Return as plain object; JSON serialization preserves insertion order
+  // (GAS sorts string keys alphabetically in V8 for non-numeric keys).
+  var sorted = {};
+  Object.keys(grouped).sort().forEach(function (team) {
+    sorted[team] = grouped[team];
+  });
+  return sorted;
+}
+
 function api_listAllGenericResources() {
   try {
     let rows;
@@ -1460,6 +1491,52 @@ function api_saveGenericResources(payload) {
     if (seen[n]) throw new Error('Duplicate generic worker name: ' + n);
     seen[n] = true;
   });
+
+  // Patch: validate team / resource_type combinations against Config_Resource_Type.
+  const rtMap = readConfigResourceType_(); // { resource_type: team_label }
+  // Build reverse: { team_label: Set<resource_type> }
+  const teamToRts = {};
+  Object.keys(rtMap).forEach(function (rt) {
+    const team = String(rtMap[rt] || '').trim();
+    if (!team) return;
+    if (!teamToRts[team]) teamToRts[team] = new Set ? new Set() : {};
+    if (teamToRts[team].add) teamToRts[team].add(rt);
+    else teamToRts[team][rt] = true;
+  });
+  const validTeams = new Set ? new Set(Object.keys(teamToRts)) : {};
+  if (!validTeams.has) {
+    // Fallback for GAS without Set.has (shouldn't occur in V8)
+    Object.keys(teamToRts).forEach(function (t) { validTeams[t] = true; });
+    validTeams.has = function (v) { return !!validTeams[v]; };
+  }
+  const errors = [];
+  rawRows.forEach(function (r) {
+    if (Array.isArray(r)) return; // skip 2D-array rows (legacy format)
+    const rowName = String(r.name || '').trim() || '(unnamed)';
+    const rowTeam = String(r.team || '').trim();
+    const rowRt   = String(r.resource_type || '').trim();
+    if (!rowTeam && !rowRt) return; // blanks allowed
+    if (rowTeam) {
+      var teamRtSet = teamToRts[rowTeam];
+      var validRt = teamRtSet
+        ? (teamRtSet.has ? teamRtSet.has(rowRt) : !!teamRtSet[rowRt])
+        : false;
+      if (!validTeams.has(rowTeam)) {
+        errors.push('"' + rowName + '": team "' + rowTeam + '" is not in Config_Resource_Type.');
+      } else if (rowRt && !validRt) {
+        errors.push('"' + rowName + '": resource_type "' + rowRt + '" is not valid for team "' + rowTeam + '".');
+      }
+    } else if (rowRt) {
+      // resource_type set but team blank — only validate rt exists
+      if (!rtMap[rowRt]) {
+        errors.push('"' + rowName + '": resource_type "' + rowRt + '" does not exist in Config_Resource_Type.');
+      }
+    }
+  });
+  if (errors.length) {
+    throw new Error('Validation failed:\n' + errors.join('\n'));
+  }
+
   // Normalize: accept both arrays of objects and arrays of arrays so that
   // writeTable_'s setValues() receives the 2-D format GAS requires.
   const rows = rawRows.map(function (r) {
@@ -1817,6 +1894,26 @@ function api_saveSettings(rows) {
  * Used by the Admin → Planning Config → Settings card.
  */
 function api_listSettings() {
+
+  const KNOWN_SETTINGS = [
+    { key: 'planning_window_months', label: 'Planning window (months)',    description: 'Number of months shown in the planning window heatmap.', defaultValue: '6'    },
+    { key: 'hide_all_external',      label: 'Hide all external workers',   description: 'When true, External workers are excluded from all views.', defaultValue: 'false' },
+    { key: 'default_team_filter',    label: 'Default team filter',         description: 'Pre-select this team in the Team dropdown on load.',    defaultValue: ''     },
+    { key: 'recognized_non_manager_emails', label: 'Recognized non-manager emails', description: 'Comma-separated emails that are recognized but not managers (suppresses "not recognized" banner).', defaultValue: '' }
+  ];
+  const currentSettings = readSettings_();
+  return KNOWN_SETTINGS.map(function (s) {
+    const inSheet = currentSettings.hasOwnProperty(s.key);
+    return {
+      key:         s.key,
+      label:       s.label,
+      description: s.description,
+      value:       inSheet ? currentSettings[s.key] : s.defaultValue,
+      isDefault:   !inSheet
+    };
+  });
+}
+
 // ============================================================
 // Drop 7: Worker Planning Detail API
 // ============================================================
@@ -1962,23 +2059,4 @@ function api_commitCapacityAdjustment(adjustment_id) {
 /** Flip a Committed capacity adjustment back to Modeled. */
 function api_revertCapacityAdjustmentToModeled(adjustment_id) {
   return setAdjustmentStatus_(adjustment_id, 'Modeled');
-}
-
-  const KNOWN_SETTINGS = [
-    { key: 'planning_window_months', label: 'Planning window (months)',    description: 'Number of months shown in the planning window heatmap.', defaultValue: '6'    },
-    { key: 'hide_all_external',      label: 'Hide all external workers',   description: 'When true, External workers are excluded from all views.', defaultValue: 'false' },
-    { key: 'default_team_filter',    label: 'Default team filter',         description: 'Pre-select this team in the Team dropdown on load.',    defaultValue: ''     },
-    { key: 'recognized_non_manager_emails', label: 'Recognized non-manager emails', description: 'Comma-separated emails that are recognized but not managers (suppresses "not recognized" banner).', defaultValue: '' }
-  ];
-  const currentSettings = readSettings_();
-  return KNOWN_SETTINGS.map(function (s) {
-    const inSheet = currentSettings.hasOwnProperty(s.key);
-    return {
-      key:         s.key,
-      label:       s.label,
-      description: s.description,
-      value:       inSheet ? currentSettings[s.key] : s.defaultValue,
-      isDefault:   !inSheet
-    };
-  });
 }

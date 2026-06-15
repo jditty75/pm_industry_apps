@@ -194,6 +194,7 @@
           <div class="resource-list" id="resourceList"></div>
         </div>
         <div class="explorer-right-col">
+          <!-- Worker title strip shared by chart + summary -->
           <div class="card">
             <div class="card-header">
               <div>
@@ -205,6 +206,32 @@
             <div style="position:relative;height:320px;width:100%">
               <canvas id="resourceChart"></canvas>
             </div>
+          </div>
+
+          <!-- Utilization Summary card — hidden until worker selected -->
+          <div class="card" id="utilizationSummaryCard" hidden>
+            <div class="card-header">
+              <div class="card-title">Utilization Summary</div>
+            </div>
+            <div class="util-headline-row">
+              <div class="util-headline-cell">
+                <div class="util-headline-label">Committed</div>
+                <div class="util-headline-value" id="utilCommittedAvg">—</div>
+                <div class="util-headline-sub" id="utilCommittedPeak">—</div>
+              </div>
+              <div class="util-headline-cell">
+                <div class="util-headline-label">Scenario</div>
+                <div class="util-headline-value" id="utilScenarioAvg">—</div>
+                <div class="util-headline-sub" id="utilScenarioPeak">—</div>
+              </div>
+              <div class="util-headline-cell">
+                <div class="util-headline-label">Capacity</div>
+                <div class="util-headline-value" id="utilCapacity">—</div>
+                <div class="util-headline-sub" id="utilCapacityWindow">—</div>
+              </div>
+            </div>
+            <div class="util-components" id="utilComponents"></div>
+            <div class="util-status" id="utilStatus" hidden></div>
           </div>
 
           <!-- Planning Detail card — hidden until worker selected -->
@@ -830,7 +857,10 @@
       <div class="admin-panel" data-admin-panel="workforce" hidden>
         <div class="card">
           <div class="card-header">
-            <div class="card-title">Generic Resources</div>
+            <div>
+              <div class="card-title">Generic Resources</div>
+              <div class="muted" style="font-size:11px;margin-top:2px;">Pick Team first, then Resource Type populates automatically.</div>
+            </div>
             <div class="card-tools">
               <button class="btn-primary" id="addGenericBtn">+ Add Generic Worker</button>
               <button class="btn-ghost" id="saveGenericBtn">Save</button>

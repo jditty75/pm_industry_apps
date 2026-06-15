@@ -1711,6 +1711,58 @@ td.cell-with-bar {
 }
 
 /* ============================================================
+   Override Hygiene tiles (Drop 4)
+   ============================================================ */
+.hygiene-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 16px 20px;
+}
+@media (max-width: 900px) {
+  .hygiene-tiles { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 568px) {
+  .hygiene-tiles { grid-template-columns: 1fr; }
+}
+.hygiene-tile {
+  background: var(--paper);
+  border: 1px solid var(--business-card);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.hygiene-tile.warn {
+  border-color: #F4D88A;
+  background: #FFF8E1;
+}
+.hygiene-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--staple);
+  letter-spacing: .6px;
+}
+.hygiene-value {
+  font-size: 24px;
+  color: var(--after-hours);
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+/* Overrides Manager table (Drop 4) */
+#ovTable td, #ovTable th {
+  font-size: 12px;
+  padding: 8px 10px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-cell-wide { max-width: 320px !important; }
+.ov-status-active  { color: #1e7a3c; font-weight: 600; }
+.ov-status-expired { color: #8a5c00; font-weight: 600; }
+.ov-status-removed { color: var(--staple); }
+
+/* ============================================================
    Source overrides (Drop 3)
    ============================================================ */
 .override-badge {

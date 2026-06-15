@@ -1533,16 +1533,78 @@ function api_listOverridableFields() {
 }
 
 function api_getOverrideAudit(filter) {
-  const rows = listOverrideAudit_(filter || {});
-  return rows.slice(0, 200).map(_sanitizeOverrideAuditForWire_);
+  filter = filter || {};
+  const limit  = Math.min(Number(filter.limit)  || 100, 500);
+  const offset = Math.max(Number(filter.offset) || 0, 0);
+  const queryFilter = {};
+  if (filter.source)      queryFilter.source      = filter.source;
+  if (filter.record_id)   queryFilter.record_id   = filter.record_id;
+  if (filter.override_id) queryFilter.override_id = filter.override_id;
+  if (filter.actor)       queryFilter.actor       = filter.actor;
+  const rows = listOverrideAudit_(queryFilter);
+  const total = rows.length;
+  const page  = rows.slice(offset, offset + limit).map(_sanitizeOverrideAuditForWire_);
+  return { total: total, offset: offset, limit: limit, rows: page };
 }
 
 function api_runOverrideHygiene() {
-  return { expired: 0, stale: [], ranAt: new Date().toISOString() };
+  const expired = expireOverdueOverrides_();
+  const stale   = findStaleOverrides_();
+  return { expired: expired, stale: stale, ranAt: new Date().toISOString() };
 }
 
 function api_bulkDeleteOverrides(ids, reason) {
   return bulkDeleteOverrides_(ids, reason);
+}
+
+function api_exportOverridesCsv(filter) {
+  return exportOverridesCsv_(filter);
+}
+
+function api_importOverridesCsv(matrix) {
+  return importOverridesCsv_(matrix);
+}
+
+function api_getOverrideHygieneSummary() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const soon = new Date(today);
+  soon.setDate(soon.getDate() + 30);
+  const ninetyDaysAgo = new Date(today);
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+  const active = listOverrides_({ status: 'Active' });
+  const activeTotal = active.length;
+  const expiringSoon = active.filter(function (o) {
+    if (!o.expires_at) return false;
+    const d = new Date(o.expires_at);
+    if (isNaN(d.getTime())) return false;
+    d.setHours(0, 0, 0, 0);
+    return d >= today && d <= soon;
+  }).length;
+  const longRunning = active.filter(function (o) {
+    if (o.expires_at) return false;
+    if (!o.created_at) return false;
+    const d = new Date(o.created_at);
+    if (isNaN(d.getTime())) return false;
+    return d < ninetyDaysAgo;
+  }).length;
+  const stale = findStaleOverrides_().length;
+  return { activeTotal: activeTotal, expiringSoon: expiringSoon, longRunning: longRunning, stale: stale };
+}
+
+function api_saveSettings(rows) {
+  const existing = readTable_(CFG_SETTINGS);
+  const existingByKey = {};
+  existing.forEach(function (r) { existingByKey[String(r.key || '')] = r; });
+  (rows || []).forEach(function (item) {
+    const k = String(item.key || '').trim();
+    if (!k) return;
+    existingByKey[k] = { key: k, value: String(item.value !== undefined ? item.value : '') };
+  });
+  const matrix = Object.values(existingByKey).map(function (r) { return [r.key, r.value]; });
+  writeTable_(CFG_SETTINGS, ['key', 'value'], matrix);
+  return { ok: true, count: matrix.length };
 }
 
 /**

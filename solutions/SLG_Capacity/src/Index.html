@@ -797,14 +797,134 @@
         </div>
       </div>
 
-      <!-- Source Overrides panel -->
+      <!-- Source Overrides panel (Drop 4) -->
       <div class="admin-panel" data-admin-panel="overrides" hidden>
-        <div class="card">
+
+        <!-- Card 1: Hygiene -->
+        <div class="card" id="overridesHygieneCard">
           <div class="card-header">
-            <div class="card-title">Source Overrides</div>
+            <div class="card-title">Override Hygiene</div>
+            <button class="btn-ghost" id="ovHygieneRefreshBtn">Refresh</button>
           </div>
-          <div style="padding:24px;color:var(--staple);">Override editor coming in Drop 3</div>
+          <div class="card-body">
+            <div class="hygiene-tiles">
+              <div class="hygiene-tile">
+                <div class="hygiene-label">Active</div>
+                <div class="hygiene-value" id="ovHygActive">—</div>
+              </div>
+              <div class="hygiene-tile">
+                <div class="hygiene-label">Expiring ≤30d</div>
+                <div class="hygiene-value" id="ovHygExpiring">—</div>
+              </div>
+              <div class="hygiene-tile">
+                <div class="hygiene-label">Long-running</div>
+                <div class="hygiene-value" id="ovHygLongRun">—</div>
+              </div>
+              <div class="hygiene-tile warn">
+                <div class="hygiene-label">Stale (source changed)</div>
+                <div class="hygiene-value" id="ovHygStale">—</div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer muted" style="font-size:12px;">
+            "Long-running" = active with no expiry set, created &gt;90 days ago.
+            "Stale" = override's stored original value no longer matches the source sheet.
+          </div>
         </div>
+
+        <!-- Card 2: Overrides Manager -->
+        <div class="card" id="overridesManagerCard">
+          <div class="card-header">
+            <div class="card-title">Overrides Manager</div>
+          </div>
+          <div class="card-tools" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 20px;border-bottom:1px solid var(--business-card);">
+            <select id="ovFilterSource" class="input" style="width:140px;">
+              <option value="">All sources</option>
+              <option value="Pipeline">Pipeline</option>
+              <option value="Deployments">Deployments</option>
+            </select>
+            <select id="ovFilterStatus" class="input" style="width:130px;">
+              <option value="Active" selected>Active</option>
+              <option value="Expired">Expired</option>
+              <option value="Removed">Removed</option>
+              <option value="">All statuses</option>
+            </select>
+            <input type="text" id="ovFilterSearch" class="input" placeholder="Search record / field / reason…" style="flex:1;min-width:180px;">
+            <button class="btn-ghost" id="ovExportBtn">Export CSV</button>
+            <button class="btn-ghost" id="ovImportBtn">Import CSV</button>
+            <button class="btn-ghost danger" id="ovBulkRemoveBtn" disabled>Remove selected</button>
+          </div>
+          <div class="table-wrap" style="max-height:420px;">
+            <table class="data-table" id="ovTable">
+              <thead>
+                <tr>
+                  <th style="width:32px;"><input type="checkbox" id="ovSelectAll" title="Select all"></th>
+                  <th>Source</th>
+                  <th>Record ID</th>
+                  <th>Field</th>
+                  <th>Original</th>
+                  <th class="ov-cell-wide">Override</th>
+                  <th class="ov-cell-wide">Reason</th>
+                  <th>Expires</th>
+                  <th>Status</th>
+                  <th>Created by</th>
+                  <th>Modified</th>
+                </tr>
+              </thead>
+              <tbody id="ovTableBody">
+                <tr><td colspan="11" class="muted" style="padding:12px">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Card 3: Audit Log (collapsible) -->
+        <div class="card" id="overridesAuditCard">
+          <div class="card-header card-header-collapsible" id="ovAuditHeader" style="cursor:pointer;user-select:none;">
+            <span class="collapse-chev" id="ovAuditChev">▶</span>
+            <div class="card-title" style="margin-left:6px;">Audit Log</div>
+            <span class="muted" id="ovAuditSummary" style="font-size:12px;margin-left:8px;"></span>
+          </div>
+          <div id="ovAuditBody" hidden>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 20px;border-bottom:1px solid var(--business-card);">
+              <select id="ovAuditFilterSource" class="input" style="width:140px;">
+                <option value="">All sources</option>
+                <option value="Pipeline">Pipeline</option>
+                <option value="Deployments">Deployments</option>
+              </select>
+              <input type="text" id="ovAuditFilterRecord" class="input" placeholder="Record ID…" style="width:160px;">
+              <input type="text" id="ovAuditFilterActor" class="input" placeholder="Actor email…" style="width:200px;">
+              <button class="btn-ghost" id="ovAuditApplyBtn">Apply</button>
+            </div>
+            <div class="table-wrap" style="max-height:320px;">
+              <table class="data-table" id="ovAuditTable">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Source</th>
+                    <th>Record</th>
+                    <th>Field</th>
+                    <th>Before → After</th>
+                  </tr>
+                </thead>
+                <tbody id="ovAuditTableBody">
+                  <tr><td colspan="7" class="muted" style="padding:12px;">Expand to load…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-footer muted" style="font-size:12px;">
+              Showing the most recent <span id="ovAuditLimit">—</span> of
+              <span id="ovAuditTotal">—</span> live audit rows.
+              Older entries (&gt;1 year) are archived to Overrides_Audit_Archive.
+            </div>
+          </div>
+        </div>
+
+        <!-- Hidden file input for CSV import -->
+        <input type="file" id="ovImportFile" accept=".csv,text/csv" hidden>
+
       </div>
 
     </section>

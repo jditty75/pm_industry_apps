@@ -472,6 +472,22 @@
       updateFilterCountBadge_();
 
       showView('dashboard');
+
+      // Background fetch: populate Admin tab override badge without blocking init.
+      setTimeout(function () {
+        call('api_getOverrideHygieneSummary').then(function (h) {
+          const count = (h.expiringSoon || 0) + (h.stale || 0);
+          const badge = $('#adminTabBadgeOverrides');
+          if (!badge) return;
+          if (count > 0) {
+            badge.textContent = String(count);
+            badge.hidden = false;
+          } else {
+            badge.hidden = true;
+          }
+        }).catch(function () {});
+      }, 1500);
+
     } catch (err) {
       toast('Init failed: ' + err.message, 'err');
       console.error(err);
@@ -3044,6 +3060,7 @@
     });
     try { localStorage.setItem(ADMIN_TAB_KEY, tabName); } catch (e) {}
     if (tabName === 'planning') loadAdminSettings_();
+    if (tabName === 'overrides') loadOverridesAdmin_();
   }
 
   async function loadAdminSettings_() {
@@ -3058,7 +3075,7 @@
             <div class="muted" style="font-size:12px">${escapeHtml_(s.description)}</div>
           </td>
           <td>
-            <code>${escapeHtml_(s.value)}</code>
+            <input type="text" class="input settings-input" data-key="${escapeHtml_(s.key)}" value="${escapeHtml_(s.value)}" style="width:100%;">
             ${s.isDefault ? '<span class="badge ghost" style="margin-left:6px;font-size:11px;">(default)</span>' : ''}
           </td>
           <td class="muted" style="font-size:12px">${escapeHtml_(s.key)}</td>
@@ -3069,8 +3086,20 @@
     }
   }
 
-  $('#saveSettingsBtn')?.addEventListener('click', () => {
-    toast('Settings editing coming in Drop 4', 'info');
+  $('#saveSettingsBtn')?.addEventListener('click', async () => {
+    const inputs = $$('.settings-input');
+    if (!inputs.length) { toast('No settings loaded', 'info'); return; }
+    const rows = Array.from(inputs).map(input => ({
+      key:   input.dataset.key,
+      value: input.value
+    }));
+    try {
+      await call('api_saveSettings', rows);
+      await call('api_flushCaches');
+      toast('Settings saved', 'ok');
+    } catch (err) {
+      toast('Save failed: ' + err.message, 'err');
+    }
   });
 
   // PSA upload
@@ -3309,5 +3338,324 @@
 
     $('#saveOverrideBtn')?.addEventListener('click', submitOverrideForm_);
     $('#overrideForm')?.addEventListener('submit', submitOverrideForm_);
+  });
+</script>
+
+<script>
+  // ============================================================
+  // Overrides Manager Admin panel (Drop 4)
+  // ============================================================
+  let _ovAllRows = [];
+  let _ovAuditOpen = false;
+  let _ovAuditLoaded = false;
+
+  async function loadOverridesAdmin_() {
+    await Promise.all([loadOvHygiene_(), loadOvManagerTable_()]);
+  }
+
+  async function loadOvHygiene_() {
+    try {
+      const h = await call('api_getOverrideHygieneSummary');
+      const setText = function (id, val) {
+        const el = $('#' + id);
+        if (el) el.textContent = String(val);
+      };
+      setText('ovHygActive',   h.activeTotal   || 0);
+      setText('ovHygExpiring', h.expiringSoon  || 0);
+      setText('ovHygLongRun',  h.longRunning   || 0);
+      setText('ovHygStale',    h.stale         || 0);
+      const count = (h.expiringSoon || 0) + (h.stale || 0);
+      const badge = $('#adminTabBadgeOverrides');
+      if (badge) {
+        badge.textContent = String(count);
+        badge.hidden = count === 0;
+      }
+    } catch (err) {
+      toast('Hygiene load failed: ' + err.message, 'err');
+    }
+  }
+
+  async function loadOvManagerTable_() {
+    try {
+      const src    = $('#ovFilterSource')?.value || '';
+      const status = $('#ovFilterStatus')?.value || '';
+      const filter = {};
+      if (src)    filter.source = src;
+      if (status) filter.status = status;
+      _ovAllRows = await call('api_listOverrides', filter);
+      renderOvManagerTable_();
+    } catch (err) {
+      const body = $('#ovTableBody');
+      if (body) body.innerHTML = '<tr><td colspan="11" class="muted" style="padding:12px;">Load failed: ' +
+        escapeHtml_(err.message) + '</td></tr>';
+    }
+  }
+
+  function renderOvManagerTable_() {
+    const body = $('#ovTableBody');
+    if (!body) return;
+    const q = ($('#ovFilterSearch')?.value || '').toLowerCase().trim();
+    const filtered = q ? _ovAllRows.filter(function (r) {
+      return (String(r.record_id || '') + ' ' + String(r.field || '') + ' ' + String(r.reason || '')).toLowerCase().includes(q);
+    }) : _ovAllRows;
+
+    if (!filtered.length) {
+      body.innerHTML = '<tr><td colspan="11" class="muted" style="padding:12px;">No overrides found.</td></tr>';
+      updateOvBulkButton_();
+      return;
+    }
+
+    body.innerHTML = filtered.map(function (r) {
+      const statusClass = {
+        'Active':  'ov-status-active',
+        'Expired': 'ov-status-expired',
+        'Removed': 'ov-status-removed'
+      }[r.status] || '';
+      const expires = r.expires_at ? String(r.expires_at).slice(0, 10) : '—';
+      const modified = r.modified_at ? String(r.modified_at).slice(0, 10) : '—';
+      return '<tr>' +
+        '<td><input type="checkbox" class="ov-row-check" data-id="' + escapeHtml_(String(r.override_id || '')) + '"></td>' +
+        '<td>' + escapeHtml_(r.source || '') + '</td>' +
+        '<td title="' + escapeHtml_(String(r.record_id || '')) + '">' + escapeHtml_(String(r.record_id || '')) + '</td>' +
+        '<td>' + escapeHtml_(r.field || '') + '</td>' +
+        '<td title="' + escapeHtml_(String(r.original_value || '')) + '">' + escapeHtml_(String(r.original_value || '')) + '</td>' +
+        '<td class="ov-cell-wide" title="' + escapeHtml_(String(r.override_value || '')) + '">' + escapeHtml_(String(r.override_value || '')) + '</td>' +
+        '<td class="ov-cell-wide" title="' + escapeHtml_(r.reason || '') + '">' + escapeHtml_(r.reason || '') + '</td>' +
+        '<td>' + expires + '</td>' +
+        '<td class="' + statusClass + '">' + escapeHtml_(r.status || '') + '</td>' +
+        '<td>' + escapeHtml_(r.created_by || '') + '</td>' +
+        '<td>' + modified + '</td>' +
+        '</tr>';
+    }).join('');
+
+    body.addEventListener('change', function (e) {
+      if (e.target.classList.contains('ov-row-check')) updateOvBulkButton_();
+    }, { once: true });
+
+    updateOvBulkButton_();
+  }
+
+  function updateOvBulkButton_() {
+    const checked = $$('#ovTableBody .ov-row-check:checked');
+    const btn = $('#ovBulkRemoveBtn');
+    if (!btn) return;
+    const n = checked ? checked.length : 0;
+    btn.disabled = n === 0;
+    btn.textContent = n > 0 ? 'Remove selected (' + n + ')' : 'Remove selected';
+  }
+
+  function _csvCell_(v) {
+    const s = String(v === null || v === undefined ? '' : v);
+    if (/[,"\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  function _parseCsv_(text) {
+    const rows = [];
+    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    let i = 0;
+    while (i < lines.length) {
+      const row = [];
+      while (i < lines.length && lines[i] !== '\n') {
+        if (lines[i] === '"') {
+          i++;
+          let cell = '';
+          while (i < lines.length) {
+            if (lines[i] === '"' && lines[i + 1] === '"') { cell += '"'; i += 2; }
+            else if (lines[i] === '"') { i++; break; }
+            else { cell += lines[i]; i++; }
+          }
+          row.push(cell);
+          if (lines[i] === ',') i++;
+        } else {
+          let cell = '';
+          while (i < lines.length && lines[i] !== ',' && lines[i] !== '\n') {
+            cell += lines[i]; i++;
+          }
+          row.push(cell);
+          if (lines[i] === ',') i++;
+        }
+      }
+      if (lines[i] === '\n') i++;
+      if (row.length > 0) rows.push(row);
+    }
+    return rows;
+  }
+
+  async function loadOvAudit_() {
+    const body = $('#ovAuditTableBody');
+    if (!body) return;
+    body.innerHTML = '<tr><td colspan="7" class="muted" style="padding:12px;">Loading…</td></tr>';
+    try {
+      const filter = {};
+      const src    = $('#ovAuditFilterSource')?.value;
+      const rec    = ($('#ovAuditFilterRecord')?.value || '').trim();
+      const actor  = ($('#ovAuditFilterActor')?.value || '').trim();
+      if (src)   filter.source    = src;
+      if (rec)   filter.record_id = rec;
+      if (actor) filter.actor     = actor;
+      filter.limit  = 100;
+      filter.offset = 0;
+      const result = await call('api_getOverrideAudit', filter);
+      const rows   = result.rows || [];
+      const total  = result.total || 0;
+      const limit  = result.limit || 100;
+
+      const totalEl = $('#ovAuditTotal');
+      const limitEl = $('#ovAuditLimit');
+      const summEl  = $('#ovAuditSummary');
+      if (totalEl) totalEl.textContent = String(total);
+      if (limitEl) limitEl.textContent = String(Math.min(limit, total));
+      if (summEl)  summEl.textContent  = total > 0 ? '(' + Math.min(rows.length, limit) + ' of ' + total + ')' : '';
+
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7" class="muted" style="padding:12px;">No audit rows match the filter.</td></tr>';
+        return;
+      }
+
+      body.innerHTML = rows.map(function (r) {
+        let beforeAfter = '—';
+        try {
+          const b = r.before_json ? JSON.parse(r.before_json) : null;
+          const a = r.after_json  ? JSON.parse(r.after_json)  : null;
+          const bVal = b ? String(b.override_value !== undefined ? b.override_value : '∅') : '∅';
+          const aVal = a ? String(a.override_value !== undefined ? a.override_value : '∅') : '∅';
+          beforeAfter = escapeHtml_(bVal) + ' → ' + escapeHtml_(aVal);
+        } catch (e) {
+          beforeAfter = '<span class="muted">(parse error)</span>';
+        }
+        const when = r.timestamp ? String(r.timestamp).slice(0, 16).replace('T', ' ') : '—';
+        return '<tr>' +
+          '<td>' + escapeHtml_(when) + '</td>' +
+          '<td>' + escapeHtml_(r.actor || '') + '</td>' +
+          '<td>' + escapeHtml_(r.action || '') + '</td>' +
+          '<td>' + escapeHtml_(r.source || '') + '</td>' +
+          '<td>' + escapeHtml_(String(r.record_id || '')) + '</td>' +
+          '<td>' + escapeHtml_(r.field || '') + '</td>' +
+          '<td>' + beforeAfter + '</td>' +
+          '</tr>';
+      }).join('');
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="7" class="muted" style="padding:12px;">Load failed: ' + escapeHtml_(err.message) + '</td></tr>';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // Hygiene refresh
+    $('#ovHygieneRefreshBtn')?.addEventListener('click', loadOvHygiene_);
+
+    // Manager table filters
+    $('#ovFilterSource')?.addEventListener('change', loadOvManagerTable_);
+    $('#ovFilterStatus')?.addEventListener('change', loadOvManagerTable_);
+    if (typeof debounce_ === 'function') {
+      $('#ovFilterSearch')?.addEventListener('input', debounce_(renderOvManagerTable_, 200));
+    } else {
+      $('#ovFilterSearch')?.addEventListener('input', renderOvManagerTable_);
+    }
+
+    // Select all
+    $('#ovSelectAll')?.addEventListener('change', function (e) {
+      $$('#ovTableBody .ov-row-check').forEach(function (cb) { cb.checked = e.target.checked; });
+      updateOvBulkButton_();
+    });
+
+    // Bulk remove
+    $('#ovBulkRemoveBtn')?.addEventListener('click', async function () {
+      const checked = $$('#ovTableBody .ov-row-check:checked');
+      if (!checked || !checked.length) return;
+      const ids = Array.from(checked).map(function (cb) { return cb.dataset.id; });
+      const reason = prompt('Reason for removing ' + ids.length + ' override(s):');
+      if (!reason || !reason.trim()) return;
+      try {
+        const results = await call('api_bulkDeleteOverrides', ids, reason.trim());
+        const failed = results.filter(function (r) { return !r.ok; }).length;
+        if (failed > 0) {
+          toast('Removed ' + (ids.length - failed) + ', failed ' + failed, 'err');
+        } else {
+          toast('Removed ' + ids.length + ' override(s)', 'ok');
+        }
+        await loadOvManagerTable_();
+        await loadOvHygiene_();
+      } catch (err) {
+        toast('Bulk remove failed: ' + err.message, 'err');
+      }
+    });
+
+    // Export CSV
+    $('#ovExportBtn')?.addEventListener('click', async function () {
+      try {
+        const src    = $('#ovFilterSource')?.value || '';
+        const status = $('#ovFilterStatus')?.value || '';
+        const filter = {};
+        if (src)    filter.source = src;
+        if (status) filter.status = status;
+        const matrix = await call('api_exportOverridesCsv', filter);
+        const csvText = matrix.map(function (row) {
+          return row.map(_csvCell_).join(',');
+        }).join('\n');
+        const blob = new Blob([csvText], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+        a.href = url;
+        a.download = 'overrides_' + ts + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+      } catch (err) {
+        toast('Export failed: ' + err.message, 'err');
+      }
+    });
+
+    // Import CSV
+    $('#ovImportBtn')?.addEventListener('click', function () {
+      $('#ovImportFile')?.click();
+    });
+
+    $('#ovImportFile')?.addEventListener('change', async function (e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const matrix = _parseCsv_(text);
+        if (matrix.length < 2) { toast('CSV has no data rows', 'err'); return; }
+        const dataRows = matrix.length - 1;
+        if (!confirm('Import ' + dataRows + ' row(s) as new overrides?')) return;
+        const result = await call('api_importOverridesCsv', matrix);
+        if (result.skipped && result.skipped.length > 0) {
+          toast('Imported ' + result.created + ', skipped ' + result.skipped.length, 'err');
+          console.warn('Skipped rows:', result.skipped);
+        } else {
+          toast('Imported ' + result.created + ' override(s)', 'ok');
+        }
+        e.target.value = '';
+        await loadOvManagerTable_();
+        await loadOvHygiene_();
+      } catch (err) {
+        toast('Import failed: ' + err.message, 'err');
+      }
+    });
+
+    // Audit log collapsible
+    const auditHeader = $('#ovAuditHeader');
+    if (auditHeader) {
+      auditHeader.addEventListener('click', function () {
+        _ovAuditOpen = !_ovAuditOpen;
+        const body = $('#ovAuditBody');
+        const chev = $('#ovAuditChev');
+        if (body) body.hidden = !_ovAuditOpen;
+        if (chev) chev.classList.toggle('open', _ovAuditOpen);
+        if (_ovAuditOpen && !_ovAuditLoaded) {
+          _ovAuditLoaded = true;
+          loadOvAudit_();
+        }
+      });
+    }
+
+    $('#ovAuditApplyBtn')?.addEventListener('click', function () {
+      _ovAuditLoaded = true;
+      loadOvAudit_();
+    });
   });
 </script>

@@ -43,6 +43,34 @@
 
 var CoreData = (function () {
 
+    // ===========================================================================
+  // PHASE 3j: PER-EXECUTION CACHE
+  // ---------------------------------------------------------------------------
+  // Sheet reads are by far the slowest operation in any report build. Within
+  // a single Apps Script execution (which is typically a single function call
+  // like buildInlineHtmlWithAnalytics), we cache the three most-read maps so
+  // they're computed at most once. The cache is invalidated on every new
+  // execution because Apps Script tears down the V8 runtime between calls.
+  // ===========================================================================
+  var _cache = {
+    sfdcRows: null,       // result of readSfdcDeploymentsRaw_
+    metaMap: null,        // result of getDeploymentsMetaMap_
+    overridesMap: null,   // result of getDeploymentOverridesMap_
+    goLivesOverridesMap: null  // result of getGoLivesOverridesMap_
+  };
+
+  /**
+   * Clear the per-execution cache. Call this if you need to force re-reads
+   * within a single execution (e.g., after writing an override and wanting
+   * the next read to see it).
+   */
+  function _clearCache() {
+    _cache.sfdcRows = null;
+    _cache.metaMap = null;
+    _cache.overridesMap = null;
+    _cache.goLivesOverridesMap = null;
+  }
+
   // ===========================================================================
   // INTERNAL HELPERS
   // ===========================================================================
@@ -64,34 +92,32 @@ var CoreData = (function () {
   }
 
   function getDeploymentsMetaMap_(config) {
+    if (_cache.metaMap !== null) return _cache.metaMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.deploymentsMeta);
     var map = {};
     if (!sheet) return map;
+
     var values = sheet.getDataRange().getValues();
     if (values.length < 2) return map;
+
     values.slice(1).forEach(function (row) {
       var id = String(row[0] || '').trim();
       if (!id) return;
-      var entry = {
+      map[id] = {
         deliveryDirector: row[1] || '',
-        ddNotes: row[2] || '',
-        username: row[3] || '',
-        timestamp: row[4] ? CoreUtils.formatDateToIsoString(row[4]) : ''
+        ddNotes:          row[2] || '',
+        username:         row[3] || '',
+        timestamp:        row[4] ? CoreUtils.formatDateToIsoString(row[4]) : ''
       };
-      map[id] = entry;
-      // Phase 3j: dual-key by 15-char prefix so HENP overrides written
-      // against the legacy 15-char IDs still resolve under 18-char SFDC IDs.
-      if (id.length === 18) {
-        var shortId = id.slice(0, 15);
-        if (!map[shortId]) map[shortId] = entry;
-      }
     });
+    _cache.metaMap = map;
     return map;
   }
 
   function getDeploymentOverridesMap_(config) {
+    if (_cache.overridesMap !== null) return _cache.overridesMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.deploymentOverrides);
@@ -117,29 +143,25 @@ var CoreData = (function () {
     values.slice(1).forEach(function (row) {
       var id = String(row[idxId] || '').trim();
       if (!id) return;
-      var entry = {
-        overrideHealth: idxHealth >= 0 ? (row[idxHealth] || '') : '',
-        overrideMtp: idxMtpDate >= 0 ? row[idxMtpDate] : null,
-        overrideStage: idxStage >= 0 ? (row[idxStage] || '') : '',
-        overrideAccount: idxAcct >= 0 ? (row[idxAcct] || '') : '',
-        overrideName: idxDepName >= 0 ? (row[idxDepName] || '') : '',
-        overrideCurrentUpdate: idxCurrUpd >= 0 ? (row[idxCurrUpd] || '') : '',
-        exclude: idxExclude >= 0 ? Boolean(row[idxExclude]) : false,
-        lastEditedBy: idxUser >= 0 ? (row[idxUser] || '') : '',
-        lastEditedAt: (idxTime >= 0 && row[idxTime]) ? CoreUtils.formatDateToIsoString(row[idxTime]) : '',
-        classification: normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
+      map[id] = {
+        overrideHealth:        idxHealth   >= 0 ? (row[idxHealth] || '') : '',
+        overrideMtp:           idxMtpDate  >= 0 ? row[idxMtpDate] : null,
+        overrideStage:         idxStage    >= 0 ? (row[idxStage] || '') : '',
+        overrideAccount:       idxAcct     >= 0 ? (row[idxAcct] || '') : '',
+        overrideName:          idxDepName  >= 0 ? (row[idxDepName] || '') : '',
+        overrideCurrentUpdate: idxCurrUpd  >= 0 ? (row[idxCurrUpd] || '') : '',
+        exclude:               idxExclude  >= 0 ? Boolean(row[idxExclude]) : false,
+        lastEditedBy:          idxUser     >= 0 ? (row[idxUser] || '') : '',
+        lastEditedAt:          (idxTime    >= 0 && row[idxTime]) ? CoreUtils.formatDateToIsoString(row[idxTime]) : '',
+        classification:        normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
       };
-      map[id] = entry;
-      // Phase 3j: dual-key by 15-char prefix (see getDeploymentsMetaMap_).
-      if (id.length === 18) {
-        var shortId = id.slice(0, 15);
-        if (!map[shortId]) map[shortId] = entry;
-      }
     });
+    _cache.overridesMap = map;
     return map;
   }
 
   function getGoLivesOverridesMap_(config) {
+    if (_cache.goLivesOverridesMap !== null) return _cache.goLivesOverridesMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.goLivesOverrides);
@@ -170,6 +192,7 @@ var CoreData = (function () {
         classification:  normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
       };
     });
+    _cache.goLivesOverridesMap = map;
     return map;
   }
 
@@ -200,98 +223,7 @@ var CoreData = (function () {
     });
   }
 
-  /**
-   * Phase 3j: SFDC-based effective deployments builder.
-   * Reads SFDC_Deployments (Active only), applies meta + overrides.
-   * Returns the same row shape as the legacy ActiveDeployments builder.
-   *
-   * Callers should not invoke this directly; use getAllEffectiveDeployments(),
-   * which handles fallback to the legacy reader.
-   *
-   * @param {AppConfig} config
-   * @return {Array<Object>}
-   * @private
-   */
-  function buildEffectiveDeploymentsFromSfdc_(config) {
-    var cfg = CoreConfig.withDefaults(config);
-    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
-    var activeStatus = statusValues.active || 'Active';
-
-    var sfdcRows = [];
-    try {
-      sfdcRows = readSfdcDeploymentsRaw_(cfg);
-    } catch (err) {
-      Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: readSfdcDeploymentsRaw_ failed: ' + err);
-      return [];
-    }
-    if (!sfdcRows || sfdcRows.length === 0) return [];
-
-    // Filter to Active only. Rows with blank status are treated as Active
-    // (defensive: avoid silent drops if the Status column is missing).
-    var activeRaw = sfdcRows.filter(function (r) {
-      return !r.status || r.status === activeStatus;
-    });
-
-    if (activeRaw.length === 0) {
-      Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: no Active rows after status filter.');
-      return [];
-    }
-
-    var metaMap = getDeploymentsMetaMap_(cfg);
-    var overridesMap = getDeploymentOverridesMap_(cfg);
-
-    var effective = activeRaw.map(function (r, index) {
-      var meta = metaMap[r.deploymentId] || {};
-      var base = Object.assign({}, r, {
-        rowIndex: index + 2, // approximate; used for edit modal key
-        deliveryDirector: meta.deliveryDirector || '',
-        ddNotes: meta.ddNotes || '',
-        metaUsername: meta.username || '',
-        metaTimestamp: meta.timestamp || ''
-      });
-      return buildEffectiveDeploymentRow_(base, overridesMap);
-    }).filter(function (r) {
-      return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
-    });
-
-    Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: ' + effective.length + ' effective rows.');
-    return effective;
-  }
-
-  /**
-   * Phase 3j: Canonical effective deployments view.
-   *
-   * Behavior:
-   * 1. Try SFDC_Deployments (with meta + overrides).
-   * 2. If SFDC returns empty or throws, fall back to legacy ActiveDeployments.
-   *
-   * All downstream callers (CorePortfolioHealth, CoreAnalytics, CoreReport)
-   * should use this function. The legacy reader is preserved only as a fallback.
-   *
-   * @param {AppConfig} config
-   * @return {Array<Object>}
-   */
-  function getAllEffectiveDeployments(config) {
-    var cfg = CoreConfig.withDefaults(config);
-    var effective = [];
-    try {
-      effective = buildEffectiveDeploymentsFromSfdc_(cfg);
-    } catch (err) {
-      Logger.log('CoreData.getAllEffectiveDeployments: SFDC path threw — falling back. Error: ' + err);
-      effective = [];
-    }
-    if (effective && effective.length) {
-      return effective;
-    }
-    try {
-      return getAllEffectiveDeploymentsLegacy_(cfg);
-    } catch (err) {
-      Logger.log('CoreData.getAllEffectiveDeployments: legacy fallback also failed: ' + err);
-      return [];
-    }
-  }
-
-  function getAllEffectiveDeploymentsLegacy_(config) {
+  function getAllEffectiveDeployments_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.activeDeployments);
@@ -366,6 +298,7 @@ var CoreData = (function () {
    * @private
    */
   function readSfdcDeploymentsRaw_(cfg) {
+    if (_cache.sfdcRows !== null) return _cache.sfdcRows;
     var sheetName = cfg.sheets.deployments || 'SFDC_Deployments';
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(sheetName);
@@ -411,7 +344,7 @@ var CoreData = (function () {
 
     var colAccountName    = detect_(['customer__r.name', 'customername'],          0);
     var colIndustry       = detect_(['customer__r.industry', "customer__r.industry"], 1);
-    var colSubRegion      = detect_(['ps_sub_region', 'ps_region', 'sub_region', 'region'], 2);
+    var colSubRegion      = detect_(['ps_sub_region', 'sub_region'],               2);
     var colDepName        = detect_(['name'],                                       5); // 'Name' alone (deployment name)
     var colPhase          = detect_(['deployment_phase'],                           6);
     var colPartner        = detect_(['partner_name', 'deployment_partner'],         7);
@@ -483,6 +416,7 @@ var CoreData = (function () {
 
     Logger.log('CoreData.readSfdcDeploymentsRaw_: read ' + rows.length +
                ' rows from "' + sheetName + '".');
+    _cache.sfdcRows = rows;
     return rows;
   }
 
@@ -540,40 +474,17 @@ var CoreData = (function () {
   }
 
   function lookupAccountForDeployment_(cfg, deploymentId) {
-    var id = String(deploymentId || '').trim();
-    if (!id) return '';
-    var shortId = id.length === 18 ? id.slice(0, 15) : id;
-
-    // Phase 3j: prefer SFDC_Deployments.
-    try {
-      var sfdcRows = readSfdcDeploymentsRaw_(cfg) || [];
-      for (var i = 0; i < sfdcRows.length; i++) {
-        var r = sfdcRows[i];
-        if (!r.deploymentId) continue;
-        var rid = String(r.deploymentId).trim();
-        if (rid === id || rid.slice(0, 15) === shortId) {
-          return String(r.accountName || '');
-        }
-      }
-    } catch (err) {
-      Logger.log('CoreData.lookupAccountForDeployment_: SFDC lookup failed, falling back. Error: ' + err);
-    }
-
-    // Fallback: legacy ActiveDeployments.
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.activeDeployments);
     if (!sheet) return '';
     var lastRow = sheet.getLastRow();
     if (lastRow < 2) return '';
     var cols = cfg.columns.deployments;
-    if (!cols || !cols.DEPLOYMENT_ID || !cols.ACCOUNT_NAME) return '';
-    var idValues = sheet.getRange(2, cols.DEPLOYMENT_ID, lastRow - 1, 1).getValues();
-    var acctValues = sheet.getRange(2, cols.ACCOUNT_NAME, lastRow - 1, 1).getValues();
+    var idValues   = sheet.getRange(2, cols.DEPLOYMENT_ID, lastRow - 1, 1).getValues();
+    var acctValues = sheet.getRange(2, cols.ACCOUNT_NAME,  lastRow - 1, 1).getValues();
+    var target = String(deploymentId).trim();
     for (var i = 0; i < idValues.length; i++) {
-      var raw = String(idValues[i][0] || '').trim();
-      if (!raw) continue;
-      var rawShort = raw.length === 18 ? raw.slice(0, 15) : raw;
-      if (raw === id || rawShort === shortId) {
+      if (String(idValues[i][0]).trim() === target) {
         return String(acctValues[i][0] || '');
       }
     }
@@ -625,7 +536,7 @@ var CoreData = (function () {
 
   function getActiveDeployments(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var allEffective = getAllEffectiveDeployments(cfg);
+    var allEffective = getAllEffectiveDeployments_(cfg);
 
     var redYellow = allEffective
       .filter(function (r) {
@@ -657,32 +568,63 @@ var CoreData = (function () {
    */
   function getAllDeployments(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
+    var activeStatus = statusValues.active || 'Active';
 
-    // Phase 3j: SFDC-first effective view (shared helper).
-    var allEffective = [];
+    // Phase 3i: prefer SFDC_Deployments; fall back to the legacy ActiveDeployments
+    // reader if the new sheet is not yet available.
+    var sfdcRows = [];
     try {
-      allEffective = buildEffectiveDeploymentsFromSfdc_(cfg);
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
     } catch (err) {
-      Logger.log('CoreData.getAllDeployments: SFDC path failed, will fallback. Error: ' + err);
-      allEffective = [];
-    }
-    if (!allEffective || !allEffective.length) {
-      allEffective = getAllEffectiveDeploymentsLegacy_(cfg);
+      Logger.log('CoreData.getAllDeployments: readSfdcDeploymentsRaw_ failed — ' +
+                 'falling back to ActiveDeployments. Error: ' + err);
     }
 
-    // Phase 3a: enrich with isPhased / upcomingDates from CoreSalesforce.
+    var allEffective;
+    if (sfdcRows.length > 0) {
+      // Filter to Active-only (preserve backward-compat default).
+      var activeRaw = sfdcRows.filter(function (r) {
+        // Rows without a status field (e.g. column not found) are treated as Active.
+        return !r.status || r.status === activeStatus;
+      });
+
+      // Apply meta + overrides to each Active row.
+      var metaMap      = getDeploymentsMetaMap_(cfg);
+      var overridesMap = getDeploymentOverridesMap_(cfg);
+
+      allEffective = activeRaw.map(function (r, index) {
+        var meta = metaMap[r.deploymentId] || {};
+        var base = Object.assign({}, r, {
+          rowIndex:         index + 2, // approximate; used for edit modal key
+          deliveryDirector: meta.deliveryDirector || '',
+          ddNotes:          meta.ddNotes || '',
+          metaUsername:     meta.username || '',
+          metaTimestamp:    meta.timestamp || ''
+        });
+        return buildEffectiveDeploymentRow_(base, overridesMap);
+      }).filter(function (r) {
+        return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
+      });
+    } else {
+      // Fallback: use the existing ActiveDeployments reader.
+      allEffective = getAllEffectiveDeployments_(cfg);
+    }
+
+    // Phase 3a: enrich with isPhased. Degrade gracefully when sheet is absent.
     var enrichmentMap = {};
     try {
       enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
     } catch (err) {
-      Logger.log('CoreData.getAllDeployments: CoreSalesforce enrichment failed — isPhased will default to false. Error: ' + err);
+      Logger.log('CoreData.getAllDeployments: CoreSalesforce enrichment failed — ' +
+                 'isPhased will default to false. Error: ' + err);
     }
 
     var sorted = allEffective.map(function (row) {
       var enrichment = enrichmentMap[row.deploymentId];
       return Object.assign({}, row, {
-        isPhased: enrichment ? !!enrichment.isPhased : false,
-        upcomingDates: enrichment ? (enrichment.upcomingDates || []) : [],
+        isPhased:       enrichment ? !!enrichment.isPhased : false,
+        upcomingDates:  enrichment ? (enrichment.upcomingDates || []) : [],
         nextGoLiveDate: enrichment ? (enrichment.nextGoLiveDate || null) : null
       });
     }).sort(function (a, b) {
@@ -840,7 +782,7 @@ var CoreData = (function () {
     var cfg = CoreConfig.withDefaults(config);
 
     // Get the effective view of all deployments (post-meta + post-overrides).
-    var allEffective = getAllEffectiveDeployments(cfg);
+    var allEffective = getAllEffectiveDeployments_(cfg);
 
     // Get GoLives overrides (exclusion, partner override, date override).
     var goLivesOverrides = getGoLivesOverridesMap_(cfg);
@@ -2356,83 +2298,6 @@ var CoreData = (function () {
   };
 }
 
-  /**
-   * Phase 3j diagnostic: compare SFDC-based and legacy effective views.
-   * Logs counts and sample mismatches. Run from the Apps Script editor in
-   * each app project before flipping the WebApp deployment.
-   *
-   * @param {AppConfig} config
-   * @param {number=} sampleLimit Number of mismatched rows to log per side (default 20).
-   * @return {{ sfdcCount:number, legacyCount:number, onlyInSfdc:number, onlyInLegacy:number }}
-   */
-  function _validateEffectiveDeployments(config, sampleLimit) {
-    var cfg = CoreConfig.withDefaults(config);
-    var limit = sampleLimit || 20;
-
-    var sfdcRows = [];
-    try { sfdcRows = buildEffectiveDeploymentsFromSfdc_(cfg) || []; }
-    catch (err) { Logger.log('SFDC path threw: ' + err); }
-
-    var legacyRows = [];
-    try { legacyRows = getAllEffectiveDeploymentsLegacy_(cfg) || []; }
-    catch (err) { Logger.log('Legacy path threw: ' + err); }
-
-    var toKey = function (r) {
-      var id = String(r.deploymentId || '').trim();
-      return id.length >= 15 ? id.slice(0, 15) : id;
-    };
-
-    var sfdcMap = {};
-    sfdcRows.forEach(function (r) { var k = toKey(r); if (k) sfdcMap[k] = r; });
-    var legacyMap = {};
-    legacyRows.forEach(function (r) { var k = toKey(r); if (k) legacyMap[k] = r; });
-
-    var onlyInSfdc = [];
-    Object.keys(sfdcMap).forEach(function (k) {
-      if (!legacyMap[k]) onlyInSfdc.push(sfdcMap[k]);
-    });
-    var onlyInLegacy = [];
-    Object.keys(legacyMap).forEach(function (k) {
-      if (!sfdcMap[k]) onlyInLegacy.push(legacyMap[k]);
-    });
-
-    Logger.log('=== _validateEffectiveDeployments(' + (cfg.appId || '?') + ') ===');
-    Logger.log('  sfdcCount=' + sfdcRows.length +
-               ', legacyCount=' + legacyRows.length +
-               ', onlyInSfdc=' + onlyInSfdc.length +
-               ', onlyInLegacy=' + onlyInLegacy.length);
-
-    // Per-bucket health diff
-    var healthOf = function (rows) {
-      var c = { Green: 0, Yellow: 0, Red: 0, Other: 0 };
-      rows.forEach(function (r) {
-        var h = String(r.health || '').trim();
-        if (c[h] !== undefined) c[h]++; else c.Other++;
-      });
-      return c;
-    };
-    Logger.log('  SFDC   health: ' + JSON.stringify(healthOf(sfdcRows)));
-    Logger.log('  Legacy health: ' + JSON.stringify(healthOf(legacyRows)));
-
-    onlyInSfdc.slice(0, limit).forEach(function (r, i) {
-      Logger.log('  onlyInSfdc[' + i + ']: ' + (r.accountName || '') +
-                 ' [' + r.deploymentId + '] ' + (r.deploymentName || '') +
-                 ' (' + (r.health || '') + ')');
-    });
-    onlyInLegacy.slice(0, limit).forEach(function (r, i) {
-      Logger.log('  onlyInLegacy[' + i + ']: ' + (r.accountName || '') +
-                 ' [' + r.deploymentId + '] ' + (r.deploymentName || '') +
-                 ' (' + (r.health || '') + ')');
-    });
-
-    return {
-      sfdcCount: sfdcRows.length,
-      legacyCount: legacyRows.length,
-      onlyInSfdc: onlyInSfdc.length,
-      onlyInLegacy: onlyInLegacy.length
-    };
-  }
-
   // ===========================================================================
   // EXPORTS
   // ===========================================================================
@@ -2440,7 +2305,7 @@ var CoreData = (function () {
   return {
     // Phase 1 surface — preserved unchanged for backward compatibility
     getActiveDeployments:                getActiveDeployments,
-    getAllEffectiveDeployments:          getAllEffectiveDeployments,    // Phase 3j
+    getAllEffectiveDeployments:          getAllEffectiveDeployments_,
     getGoLives:                          getGoLives,
     getUpcomingGoLives:                  getUpcomingGoLives,
     updateDeploymentMeta:                updateDeploymentMeta,
@@ -2464,9 +2329,6 @@ var CoreData = (function () {
 
     // MGM / PGL additions
     getUpcomingSurveys:          getUpcomingSurveys,
-    _resolveMgmPglWindow:        resolveMgmPglWindow_,
-
-    // Phase 3j additions
-    _validateEffectiveDeployments: _validateEffectiveDeployments
+    _resolveMgmPglWindow:        resolveMgmPglWindow_
   };
 })();

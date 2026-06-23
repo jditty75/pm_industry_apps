@@ -35,9 +35,27 @@
  *   Phase 3i: extended with recentDates + lastGoLiveDate from Actual move dates;
  *             isPhased now considers the union of all upcoming + recent dates.
  */
-var _coreSalesforceCache = {
-  enrichmentMap: null
-};
+
+// ===========================================================================
+// PERFORMANCE LAYER 1: PER-EXECUTION IN-MEMORY CACHE
+// ---------------------------------------------------------------------------
+// The enrichment map is the most expensive computation in CoreLib. It reads
+// SFDC_DeploymentProductFunctions (thousands of rows) and builds a deployment
+// -> upcoming/recent dates structure. Without caching, each WebApp endpoint
+// that needs this rebuilds it from scratch — 6+ rebuilds per page load.
+// ===========================================================================
+
+// Performance Layer 1: per-execution cache for enrichment map.
+var _enrichmentCache = null;
+
+/**
+ * Clears the enrichment cache. Currently not called by anything in CoreSalesforce
+ * because the underlying SFDC_DeploymentProductFunctions sheet is read-only
+ * (populated by the SOQL connector). Provided for future use.
+ */
+function _clearEnrichmentCache() {
+  _enrichmentCache = null;
+}
 
 var CoreSalesforce = {
 
@@ -49,11 +67,9 @@ var CoreSalesforce = {
    * @return {Object}  Map keyed by Deployment__c (the FK / DeploymentID).
    */
     getDeploymentEnrichmentMap: function (cfg) {
-    // Phase 3j perf: per-execution cache (matches the pattern in CoreData).
-    if (_coreSalesforceCache.enrichmentMap !== null) {
-      return _coreSalesforceCache.enrichmentMap;
-    }
     cfg = CoreConfig.withDefaults(cfg);
+    // Performance Layer 1: return cached result if present.
+    if (_enrichmentCache !== null) return _enrichmentCache;
     var sheetName = cfg.sheets.sfdcDeploymentProductFunctions || 'SFDC_DeploymentProductFunctions';
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -233,7 +249,8 @@ var CoreSalesforce = {
                ' rows, ' + deploymentCount + ' deployments, ' + phasedCount +
                ' phased (upcoming+recent), ' + orphanCount + ' orphaned/skipped rows.');
 
-    _coreSalesforceCache.enrichmentMap = enrichmentMap;
+    // Performance Layer 1: cache before returning.
+    _enrichmentCache = enrichmentMap;
     return enrichmentMap;
   },
 

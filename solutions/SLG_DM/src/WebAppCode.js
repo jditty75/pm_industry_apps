@@ -355,3 +355,15 @@ function _diagnose_phased_deployments() {
 
   Logger.log('\n=== END DIAGNOSTIC ===');
 }
+
+// ============================================================================
+// PERFORMANCE LAYER 2: CACHE PRE-WARMING
+// ============================================================================
+// Called by an Apps Script time-based trigger (set up manually in Jeff's
+// runbook). Pre-warms the _PerfCache sheet so user-triggered endpoints hit
+// warm cache instead of paying cold-start computation.
+// ============================================================================
+
+function _warmCaches() {
+  return CoreLib.CoreSalesforce._warmCaches(APP_CONFIG);
+}

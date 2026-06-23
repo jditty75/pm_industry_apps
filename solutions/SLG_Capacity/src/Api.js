@@ -379,6 +379,7 @@ function api_flushCaches() {
 // ------------------------------------------------------------
 
 function api_getDashboard(params) {
+  _requireAuthorized_();
   params = params || {};
   return computeUtilization({
     viewMode: params.viewMode,
@@ -394,6 +395,7 @@ function api_getDashboard(params) {
 }
 
 function api_getResourceDetail(params) {
+  _requireAuthorized_();
   return computeResourceDetail(params);
 }
 
@@ -412,6 +414,7 @@ function api_getResourceDetail(params) {
 // ------------------------------------------------------------
 
 function api_getReportingSummary(params) {
+  _requireAuthorized_();
   params = params || {};
   const workerScope = String(params.workerScope || 'All');
   const viewMode = String(params.viewMode || 'Committed');
@@ -1082,6 +1085,7 @@ function api_getReportingSummary(params) {
 // ------------------------------------------------------------
 
 function api_getReference() {
+  _requireAuthorized_();
   // Per-user 60-second cache wrapper. api_getReference is hit on every
   // page load and reads 5 sheets. Caching the response cuts dashboard
   // load time. Cache is per-user so different users see their own
@@ -1235,6 +1239,7 @@ function api_getReference() {
 // ------------------------------------------------------------
 
 function api_listOpportunities(filter) {
+  _requireAuthorized_();
   filter = filter || {};
   let rows = readTable_(OPPS_NORM);
   if (filter.segment) {
@@ -1302,6 +1307,7 @@ function _normalizeProjectName_(s) {
 }
 
 function api_listDeployments() {
+  _requireAuthorized_();
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(DEPLOYMENTS_SHEET);
   if (!sh) return [];
@@ -1433,16 +1439,19 @@ function _sanitizeAssignmentForWire_(a) {
 }
 
 function api_listAssignments(params) {
+  _requireAuthorized_();
   const rows = listAssignments_(params) || [];
   return rows.map(_sanitizeAssignmentForWire_);
 }
 
 function api_saveAssignment(a) {
+  _requireAuthorized_();
   const saved = saveAssignment_(a);
   return _sanitizeAssignmentForWire_(saved);
 }
 
 function api_previewAssignment(a) {
+  _requireAuthorized_();
   const calendar = readCalendar_();
   return expandAssignmentToMonthly_(a, calendar).map(m => ({
     monthKey: monthKey_(m.period_start),
@@ -1468,30 +1477,35 @@ function _sanitizeScenarioForWire_(s) {
 }
 
 function api_listScenarios() {
+  _requireAuthorized_();
   const rows = listScenarios_() || [];
   return rows.map(_sanitizeScenarioForWire_);
 }
 
 function api_saveScenario(s) {
+  _requireAuthorized_();
   const saved = saveScenario_(s);
   return _sanitizeScenarioForWire_(saved);
 }
-function api_commitScenario(id) { return commitScenario_(id); }
-function api_archiveScenario(id) { return archiveScenario_(id); }
+function api_commitScenario(id) { _requireAuthorized_(); return commitScenario_(id); }
+function api_archiveScenario(id) { _requireAuthorized_(); return archiveScenario_(id); }
 
 function api_saveIcp(rows) {
+  _requireAuthorized_();
   writeTable_(CFG_ICP, ICP_HEADERS, rows);
   if (typeof invalidateCache_ === 'function') invalidateCache_(CFG_ICP);
   return { ok: true };
 }
 
 function api_saveRoles(rows) {
+  _requireAuthorized_();
   writeTable_(CFG_ROLES, ROLE_HEADERS, rows);
   if (typeof invalidateCache_ === 'function') invalidateCache_(CFG_ROLES);
   return { ok: true };
 }
 
 function api_listGenericResources() {
+  _requireAuthorized_();
   try { return readGenericResources_(); } catch (e) { return []; }
 }
 
@@ -1506,6 +1520,7 @@ function api_listGenericResources() {
  * @return {Object}
  */
 function api_getResourceTypeOptions() {
+  _requireAuthorized_();
   var rtMap = readConfigResourceType_();
   var grouped = {};
   Object.keys(rtMap).forEach(function (rt) {
@@ -1536,6 +1551,7 @@ function api_getResourceTypeOptions() {
  * @return {{ deployment_id: string, label: string }[]}  sorted alphabetically by label
  */
 function api_getDeploymentsForWorker(resourceName) {
+  _requireAuthorized_();
   if (!resourceName) return [];
 
   // 1. Collect distinct project_names for this worker from ALLOC_NORM.
@@ -1609,6 +1625,7 @@ function api_getDeploymentsForWorker(resourceName) {
  * @return {{ workers: {resource_name:string, hours:number}[], match_type: string }}
  */
 function api_getWorkersForDeployment(deploymentId) {
+  _requireAuthorized_();
   if (!deploymentId) return { workers: [], match_type: 'none' };
 
   const depRef = _resolveDeploymentRef_(deploymentId);
@@ -1667,6 +1684,7 @@ function api_getWorkersForDeployment(deploymentId) {
  * @return {{ months: {monthKey:string, total_psa_hours:number, matched_hours:number}[], match_type: string }}
  */
 function api_getResourceBaselineForDeployment(resourceName, deploymentId) {
+  _requireAuthorized_();
   if (!resourceName || !deploymentId) return { months: [], match_type: 'none' };
 
   const depRef = _resolveDeploymentRef_(deploymentId);
@@ -1765,6 +1783,7 @@ function _resolveDeploymentRef_(deploymentId) {
 }
 
 function api_listAllGenericResources() {
+  _requireAuthorized_();
   try {
     let rows;
     try { rows = cachedRead_(CFG_GENERIC); } catch (e) { return []; }
@@ -1785,6 +1804,7 @@ function api_listAllGenericResources() {
 }
 
 function api_saveGenericResources(payload) {
+  _requireAuthorized_();
   const rawRows = (payload && payload.resources) || [];
   // Server-side name uniqueness check — catches client bugs / concurrent edits.
   const names = rawRows.map(function (r) {
@@ -1886,6 +1906,7 @@ function _sanitizeAdjustmentForWire_(a) {
  * scenario_id, or status.
  */
 function api_listCapacityAdjustments(filter) {
+  _requireAuthorized_();
   try {
     const rows = listCapacityAdjustments_(filter || {});
     return rows.map(_sanitizeAdjustmentForWire_);
@@ -1897,12 +1918,14 @@ function api_listCapacityAdjustments(filter) {
 
 /** Create or update a capacity adjustment. */
 function api_saveCapacityAdjustment(adj) {
+  _requireAuthorized_();
   const saved = saveCapacityAdjustment_(adj);
   return _sanitizeAdjustmentForWire_(saved);
 }
 
 /** Hard-delete a capacity adjustment row. */
 function api_deleteCapacityAdjustment(adjustment_id) {
+  _requireAuthorized_();
   return deleteCapacityAdjustment_(adjustment_id);
 }
 
@@ -1912,6 +1935,7 @@ function api_deleteCapacityAdjustment(adjustment_id) {
  * @return {{ monthKey: string, hours_reduction: number }[]}
  */
 function api_previewCapacityAdjustment(adj) {
+  _requireAuthorized_();
   if (adj.start_date) adj.start_date = new Date(adj.start_date);
   if (adj.end_date)   adj.end_date   = new Date(adj.end_date);
   adj.hours_reduction = Number(adj.hours_reduction) || 0;
@@ -1928,6 +1952,7 @@ function api_previewCapacityAdjustment(adj) {
  * @return {{ monthKey: string, committed_hours: number }[]}
  */
 function api_getResourceBaseline(resource_name) {
+  _requireAuthorized_();
   if (!resource_name) return [];
   try {
     const alloc = cachedRead_(ALLOC_NORM).filter(a =>
@@ -1949,10 +1974,12 @@ function api_getResourceBaseline(resource_name) {
 }
 
 function api_getExclusions() {
+  _requireAuthorized_();
   try { return readTable_('Config_Worker_Exclusions') || []; } catch (e) { return []; }
 }
 
 function api_saveExclusions(payload) {
+  _requireAuthorized_();
   const rows = (payload && payload.workers) || [];
   const headers = ['worker_name', 'manager_org', 'reason', 'active'];
   writeTable_('Config_Worker_Exclusions', headers, rows);
@@ -1967,6 +1994,7 @@ function api_saveExclusions(payload) {
 }
 
 function api_listAllWorkers() {
+  _requireAuthorized_();
   const alloc = readTable_(ALLOC_NORM);
   const idx = _resourceIndex_(alloc);
   return Object.values(idx)
@@ -1979,14 +2007,17 @@ function api_listAllWorkers() {
 }
 
 function api_uploadStaffFile(base64, filename) {
+  _requireAuthorized_();
   return uploadStaffFile(base64, filename);
 }
 
 function api_refreshOpportunities() {
+  _requireAuthorized_();
   return normalizeOpportunities();
 }
 
 function api_getRefreshLog() {
+  _requireAuthorized_();
   try {
     const rows = readTable_(REFRESH_LOG) || [];
     return rows
@@ -2008,6 +2039,7 @@ function api_getRefreshLog() {
 }
 
 function api_getPipelineRefreshLog() {
+  _requireAuthorized_();
   try {
     // Salesforce connector-managed tab. The connector owns the name
     // 'Auto Refresh Execution Log 1' (with trailing 1) and renames it
@@ -2055,6 +2087,7 @@ function api_getPipelineRefreshLog() {
 }
 
 function api_checkPsaAssignment(name) {
+  _requireAuthorized_();
   const alloc = readTable_(ALLOC_NORM);
   const found = alloc.some(r => r.resource_name === name);
   return { found: found };
@@ -2101,23 +2134,28 @@ function _sanitizeOverrideAuditForWire_(a) {
 }
 
 function api_listOverrides(filter) {
+  _requireAuthorized_();
   return listOverrides_(filter).map(_sanitizeOverrideForWire_);
 }
 
 function api_saveOverride(o) {
+  _requireAuthorized_();
   const saved = saveOverride_(o);
   return _sanitizeOverrideForWire_(saved);
 }
 
 function api_deleteOverride(override_id, reason) {
+  _requireAuthorized_();
   return deleteOverride_(override_id, reason);
 }
 
 function api_listOverridableFields() {
+  _requireAuthorized_();
   return readOverridableFields_();
 }
 
 function api_getOverrideAudit(filter) {
+  _requireAuthorized_();
   filter = filter || {};
   const limit  = Math.min(Number(filter.limit)  || 100, 500);
   const offset = Math.max(Number(filter.offset) || 0, 0);
@@ -2133,24 +2171,29 @@ function api_getOverrideAudit(filter) {
 }
 
 function api_runOverrideHygiene() {
+  _requireAuthorized_();
   const expired = expireOverdueOverrides_();
   const stale   = findStaleOverrides_();
   return { expired: expired, stale: stale, ranAt: new Date().toISOString() };
 }
 
 function api_bulkDeleteOverrides(ids, reason) {
+  _requireAuthorized_();
   return bulkDeleteOverrides_(ids, reason);
 }
 
 function api_exportOverridesCsv(filter) {
+  _requireAuthorized_();
   return exportOverridesCsv_(filter);
 }
 
 function api_importOverridesCsv(matrix) {
+  _requireAuthorized_();
   return importOverridesCsv_(matrix);
 }
 
 function api_getOverrideHygieneSummary() {
+  _requireAuthorized_();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const soon = new Date(today);
@@ -2179,6 +2222,7 @@ function api_getOverrideHygieneSummary() {
 }
 
 function api_saveSettings(rows) {
+  _requireAuthorized_();
   const existing = readTable_(CFG_SETTINGS);
   const existingByKey = {};
   existing.forEach(function (r) { existingByKey[String(r.key || '')] = r; });
@@ -2198,12 +2242,14 @@ function api_saveSettings(rows) {
  * Used by the Admin → Planning Config → Settings card.
  */
 function api_listSettings() {
+  _requireAuthorized_();
 
   const KNOWN_SETTINGS = [
     { key: 'planning_window_months', label: 'Planning window (months)',    description: 'Number of months shown in the planning window heatmap.', defaultValue: '6'    },
     { key: 'hide_all_external',      label: 'Hide all external workers',   description: 'When true, External workers are excluded from all views.', defaultValue: 'false' },
     { key: 'default_team_filter',    label: 'Default team filter',         description: 'Pre-select this team in the Team dropdown on load.',    defaultValue: ''     },
-    { key: 'recognized_non_manager_emails', label: 'Recognized non-manager emails', description: 'Comma-separated emails that are recognized but not managers (suppresses "not recognized" banner).', defaultValue: '' }
+    { key: 'admin_emails',           label: 'Admin emails',                description: 'Comma-separated emails granted admin access (in addition to SLG managers).', defaultValue: '' },
+    { key: 'app_access_restricted',  label: 'Restrict app to authorized users', description: 'When true, only emails in Config_SLG_Managers or admin_emails can access the app. Default false for safe deploys.', defaultValue: 'false' }
   ];
   const currentSettings = readSettings_();
   return KNOWN_SETTINGS.map(function (s) {
@@ -2232,6 +2278,7 @@ function api_listSettings() {
  * @return {Object[]}
  */
 function api_getWorkerPlanning(resourceName, filter) {
+  _requireAuthorized_();
   filter = filter || {};
   if (!resourceName) return [];
 
@@ -2366,6 +2413,7 @@ function api_getWorkerPlanning(resourceName, filter) {
  * @return {{ totalAssignedHours, totalReductionHours, netHours, distinctProjects, distinctScenarios }}
  */
 function api_getWorkerPlanningSummary(resourceName) {
+  _requireAuthorized_();
   if (!resourceName) return { totalAssignedHours: 0, totalReductionHours: 0, netHours: 0, distinctProjects: 0, distinctScenarios: 0 };
   const assigns = listAssignments_({ resource_name: resourceName }).filter(function (a) { return a.status !== 'Archived'; });
   let adjs = [];
@@ -2388,25 +2436,30 @@ function api_getWorkerPlanningSummary(resourceName) {
 
 /** Soft-delete an assignment by setting status='Archived'. */
 function api_archiveAssignment(assignment_id) {
+  _requireAuthorized_();
   return setAssignmentStatus_(assignment_id, 'Archived');
 }
 
 /** Flip a Committed assignment back to Modeled. */
 function api_revertAssignmentToModeled(assignment_id) {
+  _requireAuthorized_();
   return setAssignmentStatus_(assignment_id, 'Modeled');
 }
 
 /** Flip a Modeled assignment to Committed (per-row, not whole-scenario). */
 function api_commitAssignment(assignment_id) {
+  _requireAuthorized_();
   return setAssignmentStatus_(assignment_id, 'Committed');
 }
 
 /** Flip a Modeled capacity adjustment to Committed. */
 function api_commitCapacityAdjustment(adjustment_id) {
+  _requireAuthorized_();
   return setAdjustmentStatus_(adjustment_id, 'Committed');
 }
 
 /** Flip a Committed capacity adjustment back to Modeled. */
 function api_revertCapacityAdjustmentToModeled(adjustment_id) {
+  _requireAuthorized_();
   return setAdjustmentStatus_(adjustment_id, 'Modeled');
 }

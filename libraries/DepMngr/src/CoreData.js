@@ -43,6 +43,34 @@
 
 var CoreData = (function () {
 
+    // ===========================================================================
+  // PHASE 3j: PER-EXECUTION CACHE
+  // ---------------------------------------------------------------------------
+  // Sheet reads are by far the slowest operation in any report build. Within
+  // a single Apps Script execution (which is typically a single function call
+  // like buildInlineHtmlWithAnalytics), we cache the three most-read maps so
+  // they're computed at most once. The cache is invalidated on every new
+  // execution because Apps Script tears down the V8 runtime between calls.
+  // ===========================================================================
+  var _cache = {
+    sfdcRows: null,       // result of readSfdcDeploymentsRaw_
+    metaMap: null,        // result of getDeploymentsMetaMap_
+    overridesMap: null,   // result of getDeploymentOverridesMap_
+    goLivesOverridesMap: null  // result of getGoLivesOverridesMap_
+  };
+
+  /**
+   * Clear the per-execution cache. Call this if you need to force re-reads
+   * within a single execution (e.g., after writing an override and wanting
+   * the next read to see it).
+   */
+  function _clearCache() {
+    _cache.sfdcRows = null;
+    _cache.metaMap = null;
+    _cache.overridesMap = null;
+    _cache.goLivesOverridesMap = null;
+  }
+
   // ===========================================================================
   // INTERNAL HELPERS
   // ===========================================================================
@@ -64,6 +92,7 @@ var CoreData = (function () {
   }
 
   function getDeploymentsMetaMap_(config) {
+    if (_cache.metaMap !== null) return _cache.metaMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.deploymentsMeta);
@@ -83,10 +112,12 @@ var CoreData = (function () {
         timestamp:        row[4] ? CoreUtils.formatDateToIsoString(row[4]) : ''
       };
     });
+    _cache.metaMap = map;
     return map;
   }
 
   function getDeploymentOverridesMap_(config) {
+    if (_cache.overridesMap !== null) return _cache.overridesMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.deploymentOverrides);
@@ -125,10 +156,12 @@ var CoreData = (function () {
         classification:        normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
       };
     });
+    _cache.overridesMap = map;
     return map;
   }
 
   function getGoLivesOverridesMap_(config) {
+    if (_cache.goLivesOverridesMap !== null) return _cache.goLivesOverridesMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.goLivesOverrides);
@@ -159,6 +192,7 @@ var CoreData = (function () {
         classification:  normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
       };
     });
+    _cache.goLivesOverridesMap = map;
     return map;
   }
 
@@ -264,6 +298,7 @@ var CoreData = (function () {
    * @private
    */
   function readSfdcDeploymentsRaw_(cfg) {
+    if (_cache.sfdcRows !== null) return _cache.sfdcRows;
     var sheetName = cfg.sheets.deployments || 'SFDC_Deployments';
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(sheetName);
@@ -381,6 +416,7 @@ var CoreData = (function () {
 
     Logger.log('CoreData.readSfdcDeploymentsRaw_: read ' + rows.length +
                ' rows from "' + sheetName + '".');
+    _cache.sfdcRows = rows;
     return rows;
   }
 

@@ -109,7 +109,17 @@
     return new Promise((resolve, reject) => {
       google.script.run
         .withSuccessHandler(resolve)
-        .withFailureHandler(reject)[fn](...args);
+        .withFailureHandler(err => {
+          // Detect server-side authorization failure mid-session
+          if (err && String(err.message || '').indexOf('NOT_AUTHORIZED') >= 0) {
+            renderAccessDenied_({
+              email: (State.ref && State.ref.user) || '',
+              emailDomain: 'workday.com'  // assume Workday since they got past init
+            });
+            return;  // do not invoke reject; the page is now access-denied
+          }
+          reject(err);
+        })[fn](...args);
     });
   }
   function toast(msg, kind) {
@@ -460,6 +470,19 @@
   // ============================================================
   async function init() {
     try {
+      let access;
+      try {
+        access = await call('api_getCurrentUserAccess');
+      } catch (err) {
+        renderAccessError_('There was a problem checking your access. Try refreshing.');
+        return;
+      }
+
+      if (!access.canViewApp) {
+        renderAccessDenied_(access);
+        return;  // do not proceed with the rest of init
+      }
+
       State.ref = await call('api_getReference');
       $('#userChip').textContent = State.ref.user || 'unknown';
 
@@ -529,31 +552,61 @@
   document.addEventListener('DOMContentLoaded', init);
 
   // ============================================================
+  // Access-denied renderers (RESTRICTED_DOMAIN gating)
+  // ============================================================
+
+  function renderAccessDenied_(access) {
+    const email = escapeHtml_((access && access.email) || '(unknown)');
+    const domain = (access && access.emailDomain) || '';
+    let html;
+    if (domain === 'workday.com') {
+      // Variant B — Workday account but not authorized
+      html = `<div class="access-denied">
+        <h1>Access required</h1>
+        <p>The SLG Capacity Planner is restricted to authorized users. If you believe you should have access, contact <a href="mailto:jeffrey.ditty@workday.com">jeffrey.ditty@workday.com</a>.</p>
+        <p class="muted">Signed in as: <strong>${email}</strong></p>
+      </div>`;
+    } else {
+      // Variant A — non-Workday account
+      html = `<div class="access-denied">
+        <h1>Access required</h1>
+        <p>The SLG Capacity Planner requires a Workday corporate account.</p>
+        <p class="muted">Signed in as: <strong>${email}</strong></p>
+        <p>Please <a href="https://accounts.google.com/Logout" target="_blank" rel="noopener">sign out of Google</a> and sign back in with your @workday.com identity.</p>
+      </div>`;
+    }
+    const app = document.getElementById('app');
+    if (app) app.innerHTML = html;
+  }
+
+  function renderAccessError_(msg) {
+    const html = `<div class="access-denied">
+      <h1>Unable to verify access</h1>
+      <p>${escapeHtml_(msg)}</p>
+      <p><a href="javascript:location.reload()">Refresh page</a></p>
+    </div>`;
+    const app = document.getElementById('app');
+    if (app) app.innerHTML = html;
+  }
+
+  // ============================================================
   // Priority 1: Auto-set Manager filter from logged-in user
   // ============================================================
   function applyAutoManagerDefaults_() {
     const ref = State.ref || {};
     const matched = ref.matchedManager || null;
-    const recognized = !!ref.recognized;
-
-    const bannerWrap = $('#autoManagerBannerWrap');
 
     if (matched) {
       State.filters.managers = [matched];
       State.filters.includeMyManagers = true;
       const sel = $('#teamsSelect');
       if (sel) sel.value = matched;
-      if (bannerWrap) bannerWrap.hidden = true;
       return;
     }
 
     State.filters.managers = [];
     const sel = $('#teamsSelect');
     if (sel) sel.value = '';
-
-    if (bannerWrap) {
-      bannerWrap.hidden = recognized;
-    }
   }
 
   function onAppliedFiltersChanged_() {

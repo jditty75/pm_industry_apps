@@ -60,11 +60,14 @@ var CoreData = (function () {
   };
 
   /**
-   * Clear the per-execution cache. Call this if you need to force re-reads
-   * within a single execution (e.g., after writing an override and wanting
-   * the next read to see it).
+   * Clears the in-memory cache. Called by every mutation function after
+   * it writes to a source sheet, so subsequent reads in the same execution
+   * see the new values.
+   *
+   * @param {AppConfig=} cfg Currently unused; kept for symmetry with Layer 2
+   *                        (sheet-tab cache) which will use cfg.appId.
    */
-  function _clearCache() {
+  function _clearCache(cfg) {
     _cache.sfdcRows = null;
     _cache.metaMap = null;
     _cache.overridesMap = null;
@@ -514,7 +517,7 @@ var CoreData = (function () {
     var colMtpDate        = detect_(['current_mtp_date'],                          10);
     var colDam            = detect_(['delivery_assurance_manager', 'dam_full_name'], 11);
     var colWdEm           = detect_(['engagement_manager'],                        12);
-    var colCurrentUpdate  = detect_(['deployment_summary'],                        13);
+    var colCurrentUpdate  = detect_(['deployment_summary'],                        -1);
     var colStatus           = detect_(['overall_status'],                            -1); // Phase 3i — new
     var colFirstMtpActual   = detect_(['first_move_to_production_date_actual', 'first_move_actual'], -1); // Phase 3i — new
     var colDeploymentStart  = detect_(['deployment_start_date', 'start_date__c'],   -1); // MGM/PGL — new
@@ -1254,6 +1257,7 @@ var CoreData = (function () {
     sheet.getRange(rowIndex, 4).setValue(user);
     sheet.getRange(rowIndex, 5).setValue(now);
 
+    _clearCache(cfg);
     return { success: true };
   }
 
@@ -1326,6 +1330,7 @@ var CoreData = (function () {
       notes:            String(notes || '')   // Phase 3d
     });
 
+    _clearCache(cfg);
     return { success: true };
   }
 
@@ -1402,6 +1407,7 @@ var CoreData = (function () {
       notes:            String(notes || '')   // Phase 3d
     });
 
+    _clearCache(cfg);
     return { success: true };
   }
 
@@ -1627,6 +1633,7 @@ var CoreData = (function () {
       newValueSnapshot: JSON.stringify(after)
     });
 
+    _clearCache(cfg);
     return { success: true };
   }
 
@@ -1685,6 +1692,7 @@ var CoreData = (function () {
       }
     );
 
+    _clearCache(cfg);
     return {
       success:         true,
       cleared:         depCleared + golivesCleared,
@@ -1721,6 +1729,7 @@ var CoreData = (function () {
       function () { return true; }
     );
 
+    _clearCache(cfg);
     return {
       success:         true,
       cleared:         depCleared + golivesCleared,

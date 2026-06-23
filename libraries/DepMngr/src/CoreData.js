@@ -223,7 +223,7 @@ var CoreData = (function () {
     });
   }
 
-  function getAllEffectiveDeployments_(config) {
+  function getAllEffectiveDeploymentsLegacy_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.activeDeployments);
@@ -278,6 +278,167 @@ var CoreData = (function () {
         if (!r || !r.deploymentId) return false;
         return !!(r.accountName || r.deploymentName);
       });
+  }
+
+  /**
+   * Phase 3j: SFDC-based effective deployments builder.
+   * Reads SFDC_Deployments (Active only), applies meta + overrides.
+   * Returns the same row shape as the legacy ActiveDeployments builder.
+   *
+   * Callers should not invoke this directly; use getAllEffectiveDeployments(),
+   * which handles fallback to the legacy reader.
+   *
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildEffectiveDeploymentsFromSfdc_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
+    var activeStatus = statusValues.active || 'Active';
+
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: readSfdcDeploymentsRaw_ failed: ' + err);
+      return [];
+    }
+    if (!sfdcRows || sfdcRows.length === 0) return [];
+
+    var activeRaw = sfdcRows.filter(function (r) {
+      return !r.status || r.status === activeStatus;
+    });
+
+    if (activeRaw.length === 0) {
+      Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: no Active rows after status filter.');
+      return [];
+    }
+
+    var metaMap = getDeploymentsMetaMap_(cfg);
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+
+    var effective = activeRaw.map(function (r, index) {
+      var meta = metaMap[r.deploymentId] || {};
+      var base = Object.assign({}, r, {
+        rowIndex: index + 2,
+        deliveryDirector: meta.deliveryDirector || '',
+        ddNotes: meta.ddNotes || '',
+        metaUsername: meta.username || '',
+        metaTimestamp: meta.timestamp || ''
+      });
+      return buildEffectiveDeploymentRow_(base, overridesMap);
+    }).filter(function (r) {
+      return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
+    });
+
+    Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: ' + effective.length + ' effective rows.');
+    return effective;
+  }
+
+  /**
+   * Phase 3j: Canonical effective deployments view.
+   *
+   * Behavior:
+   * 1. Try SFDC_Deployments (with meta + overrides).
+   * 2. If SFDC returns empty or throws, fall back to legacy ActiveDeployments.
+   *
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   */
+  function getAllEffectiveDeployments(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var effective = [];
+    try {
+      effective = buildEffectiveDeploymentsFromSfdc_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getAllEffectiveDeployments: SFDC path threw, falling back. Error: ' + err);
+      effective = [];
+    }
+    if (effective && effective.length) {
+      return effective;
+    }
+    try {
+      return getAllEffectiveDeploymentsLegacy_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getAllEffectiveDeployments: legacy fallback also failed: ' + err);
+      return [];
+    }
+  }
+
+  /**
+   * Phase 3j diagnostic: compare SFDC-based and legacy effective views.
+   * Logs counts and sample mismatches.
+   *
+   * @param {AppConfig} config
+   * @param {number=} sampleLimit Number of mismatched rows to log per side (default 20).
+   * @return {{ sfdcCount:number, legacyCount:number, onlyInSfdc:number, onlyInLegacy:number }}
+   */
+  function _validateEffectiveDeployments(config, sampleLimit) {
+    var cfg = CoreConfig.withDefaults(config);
+    var limit = sampleLimit || 20;
+
+    var sfdcRows = [];
+    try { sfdcRows = buildEffectiveDeploymentsFromSfdc_(cfg) || []; }
+    catch (err) { Logger.log('SFDC path threw: ' + err); }
+
+    var legacyRows = [];
+    try { legacyRows = getAllEffectiveDeploymentsLegacy_(cfg) || []; }
+    catch (err) { Logger.log('Legacy path threw: ' + err); }
+
+    var toKey = function (r) {
+      var id = String(r.deploymentId || '').trim();
+      return id.length >= 15 ? id.slice(0, 15) : id;
+    };
+
+    var sfdcMap = {};
+    sfdcRows.forEach(function (r) { var k = toKey(r); if (k) sfdcMap[k] = r; });
+    var legacyMap = {};
+    legacyRows.forEach(function (r) { var k = toKey(r); if (k) legacyMap[k] = r; });
+
+    var onlyInSfdc = [];
+    Object.keys(sfdcMap).forEach(function (k) {
+      if (!legacyMap[k]) onlyInSfdc.push(sfdcMap[k]);
+    });
+    var onlyInLegacy = [];
+    Object.keys(legacyMap).forEach(function (k) {
+      if (!sfdcMap[k]) onlyInLegacy.push(legacyMap[k]);
+    });
+
+    Logger.log('=== _validateEffectiveDeployments(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  sfdcCount=' + sfdcRows.length +
+               ', legacyCount=' + legacyRows.length +
+               ', onlyInSfdc=' + onlyInSfdc.length +
+               ', onlyInLegacy=' + onlyInLegacy.length);
+
+    var healthOf = function (rows) {
+      var c = { Green: 0, Yellow: 0, Red: 0, Other: 0 };
+      rows.forEach(function (r) {
+        var h = String(r.health || '').trim();
+        if (c[h] !== undefined) c[h]++; else c.Other++;
+      });
+      return c;
+    };
+    Logger.log('  SFDC   health: ' + JSON.stringify(healthOf(sfdcRows)));
+    Logger.log('  Legacy health: ' + JSON.stringify(healthOf(legacyRows)));
+
+    onlyInSfdc.slice(0, limit).forEach(function (r, i) {
+      Logger.log('  onlyInSfdc[' + i + ']: ' + (r.accountName || '') +
+                 ' [' + r.deploymentId + '] ' + (r.deploymentName || '') +
+                 ' (' + (r.health || '') + ')');
+    });
+    onlyInLegacy.slice(0, limit).forEach(function (r, i) {
+      Logger.log('  onlyInLegacy[' + i + ']: ' + (r.accountName || '') +
+                 ' [' + r.deploymentId + '] ' + (r.deploymentName || '') +
+                 ' (' + (r.health || '') + ')');
+    });
+
+    return {
+      sfdcCount: sfdcRows.length,
+      legacyCount: legacyRows.length,
+      onlyInSfdc: onlyInSfdc.length,
+      onlyInLegacy: onlyInLegacy.length
+    };
   }
 
   // ===========================================================================
@@ -536,7 +697,7 @@ var CoreData = (function () {
 
   function getActiveDeployments(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var allEffective = getAllEffectiveDeployments_(cfg);
+    var allEffective = getAllEffectiveDeployments(cfg);
 
     var redYellow = allEffective
       .filter(function (r) {
@@ -608,7 +769,7 @@ var CoreData = (function () {
       });
     } else {
       // Fallback: use the existing ActiveDeployments reader.
-      allEffective = getAllEffectiveDeployments_(cfg);
+      allEffective = getAllEffectiveDeployments(cfg);
     }
 
     // Phase 3a: enrich with isPhased. Degrade gracefully when sheet is absent.
@@ -782,7 +943,7 @@ var CoreData = (function () {
     var cfg = CoreConfig.withDefaults(config);
 
     // Get the effective view of all deployments (post-meta + post-overrides).
-    var allEffective = getAllEffectiveDeployments_(cfg);
+    var allEffective = getAllEffectiveDeployments(cfg);
 
     // Get GoLives overrides (exclusion, partner override, date override).
     var goLivesOverrides = getGoLivesOverridesMap_(cfg);
@@ -2313,7 +2474,8 @@ var CoreData = (function () {
   return {
     // Phase 1 surface — preserved unchanged for backward compatibility
     getActiveDeployments:                getActiveDeployments,
-    getAllEffectiveDeployments:          getAllEffectiveDeployments_,
+    getAllEffectiveDeployments:          getAllEffectiveDeployments,
+    _validateEffectiveDeployments:       _validateEffectiveDeployments,
     getGoLives:                          getGoLives,
     getUpcomingGoLives:                  getUpcomingGoLives,
     updateDeploymentMeta:                updateDeploymentMeta,

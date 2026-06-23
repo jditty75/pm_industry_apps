@@ -79,21 +79,77 @@ function _getPerfCacheSheet_S_() {
   return sheet;
 }
 
+// Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
+var _PERF_CACHE_CHUNK_SIZE_S = 45000;
+
 function _perfCacheReadS_(key) {
   try {
     var sheet = _getPerfCacheSheet_S_();
     var lastRow = sheet.getLastRow();
     if (lastRow < 2) return null;
     var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+
+    var single = null;
+    var chunks = [];
+    var tsMs = null;
+    var chunkPrefix = key + ':chunk:';
+
     for (var i = 0; i < values.length; i++) {
-      if (String(values[i][0]) !== key) continue;
-      var tsCell = values[i][2];
-      var tsMs = (tsCell instanceof Date) ? tsCell.getTime() : Number(tsCell);
-      if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC_S * 1000) return null;
-      var json = String(values[i][1] || '');
-      if (!json) return null;
-      return JSON.parse(json);
+      var rowKey = String(values[i][0]);
+      if (rowKey === key) {
+        single = String(values[i][1] || '');
+        var tc = values[i][2];
+        tsMs = (tc instanceof Date) ? tc.getTime() : Number(tc);
+      } else if (rowKey.indexOf(chunkPrefix) === 0) {
+        var idx = parseInt(rowKey.substring(chunkPrefix.length), 10);
+        if (!isNaN(idx)) {
+          chunks.push({ idx: idx, data: String(values[i][1] || '') });
+          if (tsMs === null) {
+            var tc2 = values[i][2];
+            tsMs = (tc2 instanceof Date) ? tc2.getTime() : Number(tc2);
+          }
+        }
+      }
     }
+
+    // TTL check.
+    if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC_S * 1000) {
+      return null;
+    }
+
+    // Single-row entry path.
+    if (single !== null && chunks.length === 0) {
+      if (!single) return null;
+      try {
+        return JSON.parse(single);
+      } catch (parseErr) {
+        Logger.log('CoreSalesforce._perfCacheReadS_: malformed single-row JSON for key=' + key +
+                   '; treating as cache miss. Error: ' + parseErr);
+        return null;
+      }
+    }
+
+    // Chunked entry path.
+    if (chunks.length > 0) {
+      chunks.sort(function (a, b) { return a.idx - b.idx; });
+      for (var ci = 0; ci < chunks.length; ci++) {
+        if (chunks[ci].idx !== ci) {
+          Logger.log('CoreSalesforce._perfCacheReadS_: chunk gap at idx ' + ci +
+                     ' for key=' + key + '; treating as cache miss.');
+          return null;
+        }
+      }
+      var combined = chunks.map(function (c) { return c.data; }).join('');
+      if (!combined) return null;
+      try {
+        return JSON.parse(combined);
+      } catch (parseErr) {
+        Logger.log('CoreSalesforce._perfCacheReadS_: malformed reassembled JSON for key=' + key +
+                   '; treating as cache miss. Error: ' + parseErr);
+        return null;
+      }
+    }
+
     return null;
   } catch (err) {
     Logger.log('CoreSalesforce._perfCacheReadS_: ' + err);
@@ -101,24 +157,67 @@ function _perfCacheReadS_(key) {
   }
 }
 
+// Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
+var _PERF_CACHE_CHUNK_SIZE_S = 45000;
+
 function _perfCacheWriteS_(key, value) {
   try {
     var sheet = _getPerfCacheSheet_S_();
     var json = JSON.stringify(value);
     var now = new Date();
-    var lastRow = sheet.getLastRow();
-    if (lastRow >= 2) {
-      var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      for (var i = 0; i < keys.length; i++) {
-        if (String(keys[i][0]) === key) {
-          sheet.getRange(i + 2, 1, 1, 3).setValues([[key, json, now]]);
-          return;
-        }
-      }
+
+    // First, delete any existing rows for this key.
+    _perfCacheDeleteKeyS_(sheet, key);
+
+    if (json.length <= _PERF_CACHE_CHUNK_SIZE_S) {
+      sheet.appendRow([key, json, now]);
+      return;
     }
-    sheet.appendRow([key, json, now]);
+
+    var chunkCount = Math.ceil(json.length / _PERF_CACHE_CHUNK_SIZE_S);
+    var rows = [];
+    for (var i = 0; i < chunkCount; i++) {
+      var start = i * _PERF_CACHE_CHUNK_SIZE_S;
+      var chunk = json.substring(start, start + _PERF_CACHE_CHUNK_SIZE_S);
+      rows.push([key + ':chunk:' + i, chunk, now]);
+    }
+    var firstRow = sheet.getLastRow() + 1;
+    sheet.getRange(firstRow, 1, rows.length, 3).setValues(rows);
+    Logger.log('CoreSalesforce._perfCacheWriteS_: chunked key=' + key + ' into ' + chunkCount + ' rows.');
   } catch (err) {
     Logger.log('CoreSalesforce._perfCacheWriteS_: failed for key=' + key + ': ' + err);
+  }
+}
+
+/**
+ * Removes all rows from the cache sheet matching the given key (single-row or chunked).
+ */
+function _perfCacheDeleteKeyS_(sheet, key) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var chunkPrefix = key + ':chunk:';
+  for (var i = keys.length - 1; i >= 0; i--) {
+    var k = String(keys[i][0]);
+    if (k === key || k.indexOf(chunkPrefix) === 0) {
+      sheet.deleteRow(i + 2);
+    }
+  }
+}
+
+/**
+ * Removes all rows from the cache sheet matching the given key.
+ */
+function _perfCacheDeleteKeyS_(sheet, key) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var chunkPrefix = key + ':chunk:';
+  for (var i = keys.length - 1; i >= 0; i--) {
+    var k = String(keys[i][0]);
+    if (k === key || k.indexOf(chunkPrefix) === 0) {
+      sheet.deleteRow(i + 2);
+    }
   }
 }
 

@@ -142,29 +142,86 @@ var CoreData = (function () {
    * @return {*} the parsed JSON value or null
    * @private
    */
-  function _perfCacheRead_(key) {
-    try {
-      var sheet = _getPerfCacheSheet_();
-      var lastRow = sheet.getLastRow();
-      if (lastRow < 2) return null;
-      var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-      for (var i = 0; i < values.length; i++) {
-        if (String(values[i][0]) !== key) continue;
-        var tsCell = values[i][2];
-        var tsMs = (tsCell instanceof Date) ? tsCell.getTime() : Number(tsCell);
-        if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC * 1000) {
-          return null; // stale
+    // Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
+    var _PERF_CACHE_CHUNK_SIZE = 45000;
+
+    function _perfCacheRead_(key) {
+      try {
+        var sheet = _getPerfCacheSheet_();
+        var lastRow = sheet.getLastRow();
+        if (lastRow < 2) return null;
+        var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+  
+        // Collect any matching rows: either a single-row entry (key matches exactly)
+        // or chunk entries (key starts with "<key>:chunk:<idx>").
+        var single = null;
+        var chunks = [];
+        var tsMs = null;
+        var chunkPrefix = key + ':chunk:';
+  
+        for (var i = 0; i < values.length; i++) {
+          var rowKey = String(values[i][0]);
+          if (rowKey === key) {
+            single = String(values[i][1] || '');
+            var tc = values[i][2];
+            tsMs = (tc instanceof Date) ? tc.getTime() : Number(tc);
+          } else if (rowKey.indexOf(chunkPrefix) === 0) {
+            var idx = parseInt(rowKey.substring(chunkPrefix.length), 10);
+            if (!isNaN(idx)) {
+              chunks.push({ idx: idx, data: String(values[i][1] || '') });
+              if (tsMs === null) {
+                var tc2 = values[i][2];
+                tsMs = (tc2 instanceof Date) ? tc2.getTime() : Number(tc2);
+              }
+            }
+          }
         }
-        var json = String(values[i][1] || '');
-        if (!json) return null;
-        return JSON.parse(json);
+  
+        // TTL check.
+        if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC * 1000) {
+          return null; // stale or no rows found
+        }
+  
+        // Single-row entry path: defensively parse, return null on any error.
+        if (single !== null && chunks.length === 0) {
+          if (!single) return null;
+          try {
+            return JSON.parse(single);
+          } catch (parseErr) {
+            Logger.log('CoreData._perfCacheRead_: malformed single-row JSON for key=' + key +
+                       '; treating as cache miss. Error: ' + parseErr);
+            return null;
+          }
+        }
+  
+        // Chunked entry path.
+        if (chunks.length > 0) {
+          chunks.sort(function (a, b) { return a.idx - b.idx; });
+          // Validate chunks are contiguous (no gaps from idx 0 to N-1).
+          for (var ci = 0; ci < chunks.length; ci++) {
+            if (chunks[ci].idx !== ci) {
+              Logger.log('CoreData._perfCacheRead_: chunk gap at idx ' + ci +
+                         ' for key=' + key + '; treating as cache miss.');
+              return null;
+            }
+          }
+          var combined = chunks.map(function (c) { return c.data; }).join('');
+          if (!combined) return null;
+          try {
+            return JSON.parse(combined);
+          } catch (parseErr) {
+            Logger.log('CoreData._perfCacheRead_: malformed reassembled JSON for key=' + key +
+                       '; treating as cache miss. Error: ' + parseErr);
+            return null;
+          }
+        }
+  
+        return null;
+      } catch (err) {
+        Logger.log('CoreData._perfCacheRead_: ' + err);
+        return null;
       }
-      return null;
-    } catch (err) {
-      Logger.log('CoreData._perfCacheRead_: ' + err);
-      return null;
     }
-  }
 
   /**
    * Writes a value to the sheet-tab cache. Overwrites any existing row with
@@ -173,26 +230,76 @@ var CoreData = (function () {
    * @param {*} value any JSON-serializable value
    * @private
    */
-  function _perfCacheWrite_(key, value) {
-    try {
-      var sheet = _getPerfCacheSheet_();
-      var json = JSON.stringify(value);
-      var now = new Date();
+    // Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
+    var _PERF_CACHE_CHUNK_SIZE = 45000;
+
+    function _perfCacheWrite_(key, value) {
+      try {
+        var sheet = _getPerfCacheSheet_();
+        var json = JSON.stringify(value);
+        var now = new Date();
+  
+        // First, delete any existing rows for this key (both single and chunked).
+        _perfCacheDeleteKey_(sheet, key);
+  
+        // If the JSON fits in one cell, write as a single row.
+        if (json.length <= _PERF_CACHE_CHUNK_SIZE) {
+          sheet.appendRow([key, json, now]);
+          return;
+        }
+  
+        // Otherwise, chunk it. Each chunk gets its own row keyed as <key>:chunk:<idx>.
+        var chunkCount = Math.ceil(json.length / _PERF_CACHE_CHUNK_SIZE);
+        var rows = [];
+        for (var i = 0; i < chunkCount; i++) {
+          var start = i * _PERF_CACHE_CHUNK_SIZE;
+          var chunk = json.substring(start, start + _PERF_CACHE_CHUNK_SIZE);
+          rows.push([key + ':chunk:' + i, chunk, now]);
+        }
+        // Append all chunks in one batch write.
+        var firstRow = sheet.getLastRow() + 1;
+        sheet.getRange(firstRow, 1, rows.length, 3).setValues(rows);
+        Logger.log('CoreData._perfCacheWrite_: chunked key=' + key + ' into ' + chunkCount + ' rows.');
+      } catch (err) {
+        Logger.log('CoreData._perfCacheWrite_: failed for key=' + key + ': ' + err);
+      }
+    }
+  
+    /**
+     * Removes all rows from the cache sheet matching the given key (whether
+     * single-row or chunked across multiple rows).
+     * @private
+     */
+    function _perfCacheDeleteKey_(sheet, key) {
       var lastRow = sheet.getLastRow();
-      // Find existing row to overwrite, if any.
-      if (lastRow >= 2) {
-        var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-        for (var i = 0; i < keys.length; i++) {
-          if (String(keys[i][0]) === key) {
-            sheet.getRange(i + 2, 1, 1, 3).setValues([[key, json, now]]);
-            return;
-          }
+      if (lastRow < 2) return;
+      var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      var chunkPrefix = key + ':chunk:';
+      // Iterate bottom-to-top so deletes don't shift indices.
+      for (var i = keys.length - 1; i >= 0; i--) {
+        var k = String(keys[i][0]);
+        if (k === key || k.indexOf(chunkPrefix) === 0) {
+          sheet.deleteRow(i + 2);
         }
       }
-      // Append new row.
-      sheet.appendRow([key, json, now]);
-    } catch (err) {
-      Logger.log('CoreData._perfCacheWrite_: failed for key=' + key + ': ' + err);
+    }
+
+  /**
+   * Removes all rows from the cache sheet matching the given key (whether
+   * single-row or chunked across multiple rows).
+   * @private
+   */
+  function _perfCacheDeleteKey_(sheet, key) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return;
+    var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    var chunkPrefix = key + ':chunk:';
+    // Iterate bottom-to-top so deletes don't shift indices.
+    for (var i = keys.length - 1; i >= 0; i--) {
+      var k = String(keys[i][0]);
+      if (k === key || k.indexOf(chunkPrefix) === 0) {
+        sheet.deleteRow(i + 2);
+      }
     }
   }
 

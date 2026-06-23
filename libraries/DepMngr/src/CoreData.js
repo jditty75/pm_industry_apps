@@ -43,6 +43,34 @@
 
 var CoreData = (function () {
 
+    // ===========================================================================
+  // PHASE 3j: PER-EXECUTION CACHE
+  // ---------------------------------------------------------------------------
+  // Sheet reads are by far the slowest operation in any report build. Within
+  // a single Apps Script execution (which is typically a single function call
+  // like buildInlineHtmlWithAnalytics), we cache the three most-read maps so
+  // they're computed at most once. The cache is invalidated on every new
+  // execution because Apps Script tears down the V8 runtime between calls.
+  // ===========================================================================
+  var _cache = {
+    sfdcRows: null,       // result of readSfdcDeploymentsRaw_
+    metaMap: null,        // result of getDeploymentsMetaMap_
+    overridesMap: null,   // result of getDeploymentOverridesMap_
+    goLivesOverridesMap: null  // result of getGoLivesOverridesMap_
+  };
+
+  /**
+   * Clear the per-execution cache. Call this if you need to force re-reads
+   * within a single execution (e.g., after writing an override and wanting
+   * the next read to see it).
+   */
+  function _clearCache() {
+    _cache.sfdcRows = null;
+    _cache.metaMap = null;
+    _cache.overridesMap = null;
+    _cache.goLivesOverridesMap = null;
+  }
+
   // ===========================================================================
   // INTERNAL HELPERS
   // ===========================================================================
@@ -64,6 +92,7 @@ var CoreData = (function () {
   }
 
   function getDeploymentsMetaMap_(config) {
+    if (_cache.metaMap !== null) return _cache.metaMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.deploymentsMeta);
@@ -83,10 +112,12 @@ var CoreData = (function () {
         timestamp:        row[4] ? CoreUtils.formatDateToIsoString(row[4]) : ''
       };
     });
+    _cache.metaMap = map;
     return map;
   }
 
   function getDeploymentOverridesMap_(config) {
+    if (_cache.overridesMap !== null) return _cache.overridesMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.deploymentOverrides);
@@ -125,10 +156,12 @@ var CoreData = (function () {
         classification:        normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
       };
     });
+    _cache.overridesMap = map;
     return map;
   }
 
   function getGoLivesOverridesMap_(config) {
+    if (_cache.goLivesOverridesMap !== null) return _cache.goLivesOverridesMap;
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.goLivesOverrides);
@@ -159,6 +192,7 @@ var CoreData = (function () {
         classification:  normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
       };
     });
+    _cache.goLivesOverridesMap = map;
     return map;
   }
 
@@ -189,7 +223,7 @@ var CoreData = (function () {
     });
   }
 
-  function getAllEffectiveDeployments_(config) {
+  function getAllEffectiveDeploymentsLegacy_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.activeDeployments);
@@ -246,6 +280,167 @@ var CoreData = (function () {
       });
   }
 
+  /**
+   * Phase 3j: SFDC-based effective deployments builder.
+   * Reads SFDC_Deployments (Active only), applies meta + overrides.
+   * Returns the same row shape as the legacy ActiveDeployments builder.
+   *
+   * Callers should not invoke this directly; use getAllEffectiveDeployments(),
+   * which handles fallback to the legacy reader.
+   *
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildEffectiveDeploymentsFromSfdc_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
+    var activeStatus = statusValues.active || 'Active';
+
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: readSfdcDeploymentsRaw_ failed: ' + err);
+      return [];
+    }
+    if (!sfdcRows || sfdcRows.length === 0) return [];
+
+    var activeRaw = sfdcRows.filter(function (r) {
+      return !r.status || r.status === activeStatus;
+    });
+
+    if (activeRaw.length === 0) {
+      Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: no Active rows after status filter.');
+      return [];
+    }
+
+    var metaMap = getDeploymentsMetaMap_(cfg);
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+
+    var effective = activeRaw.map(function (r, index) {
+      var meta = metaMap[r.deploymentId] || {};
+      var base = Object.assign({}, r, {
+        rowIndex: index + 2,
+        deliveryDirector: meta.deliveryDirector || '',
+        ddNotes: meta.ddNotes || '',
+        metaUsername: meta.username || '',
+        metaTimestamp: meta.timestamp || ''
+      });
+      return buildEffectiveDeploymentRow_(base, overridesMap);
+    }).filter(function (r) {
+      return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
+    });
+
+    Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: ' + effective.length + ' effective rows.');
+    return effective;
+  }
+
+  /**
+   * Phase 3j: Canonical effective deployments view.
+   *
+   * Behavior:
+   * 1. Try SFDC_Deployments (with meta + overrides).
+   * 2. If SFDC returns empty or throws, fall back to legacy ActiveDeployments.
+   *
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   */
+  function getAllEffectiveDeployments(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var effective = [];
+    try {
+      effective = buildEffectiveDeploymentsFromSfdc_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getAllEffectiveDeployments: SFDC path threw, falling back. Error: ' + err);
+      effective = [];
+    }
+    if (effective && effective.length) {
+      return effective;
+    }
+    try {
+      return getAllEffectiveDeploymentsLegacy_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getAllEffectiveDeployments: legacy fallback also failed: ' + err);
+      return [];
+    }
+  }
+
+  /**
+   * Phase 3j diagnostic: compare SFDC-based and legacy effective views.
+   * Logs counts and sample mismatches.
+   *
+   * @param {AppConfig} config
+   * @param {number=} sampleLimit Number of mismatched rows to log per side (default 20).
+   * @return {{ sfdcCount:number, legacyCount:number, onlyInSfdc:number, onlyInLegacy:number }}
+   */
+  function _validateEffectiveDeployments(config, sampleLimit) {
+    var cfg = CoreConfig.withDefaults(config);
+    var limit = sampleLimit || 20;
+
+    var sfdcRows = [];
+    try { sfdcRows = buildEffectiveDeploymentsFromSfdc_(cfg) || []; }
+    catch (err) { Logger.log('SFDC path threw: ' + err); }
+
+    var legacyRows = [];
+    try { legacyRows = getAllEffectiveDeploymentsLegacy_(cfg) || []; }
+    catch (err) { Logger.log('Legacy path threw: ' + err); }
+
+    var toKey = function (r) {
+      var id = String(r.deploymentId || '').trim();
+      return id.length >= 15 ? id.slice(0, 15) : id;
+    };
+
+    var sfdcMap = {};
+    sfdcRows.forEach(function (r) { var k = toKey(r); if (k) sfdcMap[k] = r; });
+    var legacyMap = {};
+    legacyRows.forEach(function (r) { var k = toKey(r); if (k) legacyMap[k] = r; });
+
+    var onlyInSfdc = [];
+    Object.keys(sfdcMap).forEach(function (k) {
+      if (!legacyMap[k]) onlyInSfdc.push(sfdcMap[k]);
+    });
+    var onlyInLegacy = [];
+    Object.keys(legacyMap).forEach(function (k) {
+      if (!sfdcMap[k]) onlyInLegacy.push(legacyMap[k]);
+    });
+
+    Logger.log('=== _validateEffectiveDeployments(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  sfdcCount=' + sfdcRows.length +
+               ', legacyCount=' + legacyRows.length +
+               ', onlyInSfdc=' + onlyInSfdc.length +
+               ', onlyInLegacy=' + onlyInLegacy.length);
+
+    var healthOf = function (rows) {
+      var c = { Green: 0, Yellow: 0, Red: 0, Other: 0 };
+      rows.forEach(function (r) {
+        var h = String(r.health || '').trim();
+        if (c[h] !== undefined) c[h]++; else c.Other++;
+      });
+      return c;
+    };
+    Logger.log('  SFDC   health: ' + JSON.stringify(healthOf(sfdcRows)));
+    Logger.log('  Legacy health: ' + JSON.stringify(healthOf(legacyRows)));
+
+    onlyInSfdc.slice(0, limit).forEach(function (r, i) {
+      Logger.log('  onlyInSfdc[' + i + ']: ' + (r.accountName || '') +
+                 ' [' + r.deploymentId + '] ' + (r.deploymentName || '') +
+                 ' (' + (r.health || '') + ')');
+    });
+    onlyInLegacy.slice(0, limit).forEach(function (r, i) {
+      Logger.log('  onlyInLegacy[' + i + ']: ' + (r.accountName || '') +
+                 ' [' + r.deploymentId + '] ' + (r.deploymentName || '') +
+                 ' (' + (r.health || '') + ')');
+    });
+
+    return {
+      sfdcCount: sfdcRows.length,
+      legacyCount: legacyRows.length,
+      onlyInSfdc: onlyInSfdc.length,
+      onlyInLegacy: onlyInLegacy.length
+    };
+  }
+
   // ===========================================================================
   // PHASE 3i: SFDC_DEPLOYMENTS READER (Active + Complete unified source)
   // ===========================================================================
@@ -264,6 +459,7 @@ var CoreData = (function () {
    * @private
    */
   function readSfdcDeploymentsRaw_(cfg) {
+    if (_cache.sfdcRows !== null) return _cache.sfdcRows;
     var sheetName = cfg.sheets.deployments || 'SFDC_Deployments';
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(sheetName);
@@ -381,6 +577,7 @@ var CoreData = (function () {
 
     Logger.log('CoreData.readSfdcDeploymentsRaw_: read ' + rows.length +
                ' rows from "' + sheetName + '".');
+    _cache.sfdcRows = rows;
     return rows;
   }
 
@@ -500,7 +697,7 @@ var CoreData = (function () {
 
   function getActiveDeployments(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var allEffective = getAllEffectiveDeployments_(cfg);
+    var allEffective = getAllEffectiveDeployments(cfg);
 
     var redYellow = allEffective
       .filter(function (r) {
@@ -572,7 +769,7 @@ var CoreData = (function () {
       });
     } else {
       // Fallback: use the existing ActiveDeployments reader.
-      allEffective = getAllEffectiveDeployments_(cfg);
+      allEffective = getAllEffectiveDeployments(cfg);
     }
 
     // Phase 3a: enrich with isPhased. Degrade gracefully when sheet is absent.
@@ -746,7 +943,7 @@ var CoreData = (function () {
     var cfg = CoreConfig.withDefaults(config);
 
     // Get the effective view of all deployments (post-meta + post-overrides).
-    var allEffective = getAllEffectiveDeployments_(cfg);
+    var allEffective = getAllEffectiveDeployments(cfg);
 
     // Get GoLives overrides (exclusion, partner override, date override).
     var goLivesOverrides = getGoLivesOverridesMap_(cfg);
@@ -1019,6 +1216,7 @@ var CoreData = (function () {
    */
   function updateDeploymentMeta(config, deploymentId, metaData) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     if (!deploymentId) throw new Error('updateDeploymentMeta: deploymentId is required');
 
     var ss = getSpreadsheet_();
@@ -1066,6 +1264,7 @@ var CoreData = (function () {
    */
   function updateDeploymentOverride(config, deploymentId, overrideData, notes) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     if (!deploymentId) throw new Error('deploymentId required');
 
     var ss = getSpreadsheet_();
@@ -1135,6 +1334,8 @@ var CoreData = (function () {
    * it through to writeAuditRow_.
    */
   function updateDeploymentWithMetaAndOverride(config, deploymentId, metaData, overrideData, notes) {
+    var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     updateDeploymentMeta(config, deploymentId, metaData);
     updateDeploymentOverride(config, deploymentId, overrideData, notes);
     return { success: true };
@@ -1147,6 +1348,7 @@ var CoreData = (function () {
    */
   function updateGoLivesOverride(config, accountName, overrideData, notes) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     if (!accountName) throw new Error('accountName required');
 
     var ss = getSpreadsheet_();
@@ -1366,6 +1568,7 @@ var CoreData = (function () {
    */
   function setOverrideClassification(config, type, idOrAccount, classification) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     requirePm_(cfg, 'setOverrideClassification');
 
     var newClassification = normalizeClassification_(classification);
@@ -1440,6 +1643,7 @@ var CoreData = (function () {
    */
   function bulkClearMonthlyOverrides(config, opts) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     requirePm_(cfg, 'bulkClearMonthlyOverrides');
 
     var yearMonth = (opts && opts.yearMonth) || formatYearMonth_(new Date());
@@ -1500,6 +1704,7 @@ var CoreData = (function () {
    */
   function bulkClearAllOverrides(config) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     requirePm_(cfg, 'bulkClearAllOverrides');
 
     var depCleared = clearOverrideRowsByPredicate_(
@@ -2269,7 +2474,8 @@ var CoreData = (function () {
   return {
     // Phase 1 surface — preserved unchanged for backward compatibility
     getActiveDeployments:                getActiveDeployments,
-    getAllEffectiveDeployments:          getAllEffectiveDeployments_,
+    getAllEffectiveDeployments:          getAllEffectiveDeployments,
+    _validateEffectiveDeployments:       _validateEffectiveDeployments,
     getGoLives:                          getGoLives,
     getUpcomingGoLives:                  getUpcomingGoLives,
     updateDeploymentMeta:                updateDeploymentMeta,

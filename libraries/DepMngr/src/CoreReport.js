@@ -27,7 +27,6 @@ var CoreReport = (function () {
    * @return {string} full <!DOCTYPE html> string
    */
   function buildInlineHtml(config) {
-    CoreAnalytics.update(config);
     var cfg = CoreConfig.withDefaults(config);
     var bodyContent = buildReportSections_(cfg, false);
     return wrapHtmlShellInline_(cfg, bodyContent);
@@ -40,7 +39,6 @@ var CoreReport = (function () {
    * @return {string} full <!DOCTYPE html> string
    */
   function buildOutlookHtml(config) {
-    CoreAnalytics.update(config);
     var cfg = CoreConfig.withDefaults(config);
     var bodyContent = buildReportSectionsForOutlook_(cfg);
     return wrapHtmlShellOutlook_(cfg, bodyContent);

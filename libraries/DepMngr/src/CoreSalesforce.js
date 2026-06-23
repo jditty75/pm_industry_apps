@@ -35,6 +35,9 @@
  *   Phase 3i: extended with recentDates + lastGoLiveDate from Actual move dates;
  *             isPhased now considers the union of all upcoming + recent dates.
  */
+var _coreSalesforceCache = {
+  enrichmentMap: null
+};
 
 var CoreSalesforce = {
 
@@ -45,10 +48,13 @@ var CoreSalesforce = {
    * @param {AppConfig} cfg  App configuration (run through CoreConfig.withDefaults).
    * @return {Object}  Map keyed by Deployment__c (the FK / DeploymentID).
    */
-  getDeploymentEnrichmentMap: function (cfg) {
+    getDeploymentEnrichmentMap: function (cfg) {
+    // Phase 3j perf: per-execution cache (matches the pattern in CoreData).
+    if (_coreSalesforceCache.enrichmentMap !== null) {
+      return _coreSalesforceCache.enrichmentMap;
+    }
     cfg = CoreConfig.withDefaults(cfg);
-    var sheetName = cfg.sheets.sfdcDeploymentProductFunctions ||
-                    'SFDC_DeploymentProductFunctions';
+    var sheetName = cfg.sheets.sfdcDeploymentProductFunctions || 'SFDC_DeploymentProductFunctions';
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(sheetName);
@@ -227,6 +233,7 @@ var CoreSalesforce = {
                ' rows, ' + deploymentCount + ' deployments, ' + phasedCount +
                ' phased (upcoming+recent), ' + orphanCount + ' orphaned/skipped rows.');
 
+    _coreSalesforceCache.enrichmentMap = enrichmentMap;
     return enrichmentMap;
   },
 

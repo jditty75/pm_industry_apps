@@ -47,13 +47,19 @@ var CoreUI = (function () {
    * @param {AppConfig} config
    * @return {string}
    */
-  function getAppShell(config) {
+  function getAppShell(config, userAccess) {
     if (typeof _CoreUI_Markup_getAppShell !== 'function') {
       throw new Error('CoreUI.getAppShell: _CoreUI_Markup_getAppShell not defined. ' +
         'Confirm CoreUI_Markup.gs is present in CoreLib.');
     }
     var cfg = CoreConfig.withDefaults(config);
-    return _CoreUI_Markup_getAppShell(cfg);
+    // Resolve access here if not provided so the template can pass it explicitly.
+    var access = userAccess;
+    if (!access) {
+      try { access = CoreUsers.getCurrentUserAccess(cfg); }
+      catch (e) { access = { role: 'READ_ONLY', canViewApp: true, email: '' }; }
+    }
+    return _CoreUI_Markup_getAppShell(cfg, access);
   }
 
   /**
@@ -69,10 +75,31 @@ var CoreUI = (function () {
     return _CoreUI_Js_getJsBundle();
   }
 
+  /**
+   * Returns access-denied HTML body for users who cannot view the app
+   * (anonymous or non-workday.com domain). Used by WebApp.html when
+   * userAccess.canViewApp is false.
+   *
+   * @return {string}
+   */
+  function getAccessDeniedShell() {
+    return [
+      '<div style="font-family:Arial,sans-serif;padding:60px 40px;text-align:center;max-width:600px;margin:0 auto;">',
+      '  <h2 style="color:#0f4c81;margin-bottom:16px;">Access Denied</h2>',
+      '  <p>You do not have access to this application.</p>',
+      '  <p>',
+      '    Contact <a href="mailto:jeffrey.ditty@workday.com">jeffrey.ditty@workday.com</a>',
+      '    if you believe this is an error.',
+      '  </p>',
+      '</div>'
+    ].join('\n');
+  }
+
   return {
-    getStylesheet:  getStylesheet,
-    getHeadScripts: getHeadScripts,
-    getAppShell:    getAppShell,
-    getJsBundle:    getJsBundle
+    getStylesheet:        getStylesheet,
+    getHeadScripts:       getHeadScripts,
+    getAppShell:          getAppShell,
+    getAccessDeniedShell: getAccessDeniedShell,
+    getJsBundle:          getJsBundle
   };
 })();

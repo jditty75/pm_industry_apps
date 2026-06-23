@@ -1,10 +1,18 @@
 /**
  * Healthcare (HC) App configuration for CoreLib.
  *
+ * Phase 3j + Stage 1: SFDC-first effective deployments + role-based access.
+ *  - cfg.sheets.deployments = 'SFDC_Deployments' (canonical source via SOQL)
+ *  - cfg.columns.deployments aligned to HC's SFDC_Deployments column positions
+ *    (NOTE: HC has 14 columns, not 16 — Priming/Implementation Partner are
+ *    omitted from HC's SOQL, so Deployment_Partner_Name__c lands at col 14.)
+ *  - SOQL-side filtering enforces industry, region, status, and phase
+ *    exclusions; APP_CONFIG just registers sheet/columns.
+ *
  * NOTE:
- *   - Assumes the Core library is added as "CoreLib" in Project → Libraries.
- *   - Assumes HC's TABLES and BAR_CONFIG constants (from its Code.gs)
- *     are defined in this project and reused here.
+ *  - Assumes the Core library is added as "CoreLib" in Project → Libraries.
+ *  - Assumes HC's TABLES and BAR_CONFIG constants (from its Code.gs)
+ *    are defined in this project and reused here.
  */
 
 /** @type {AppConfig} */
@@ -12,17 +20,22 @@ var APP_CONFIG = {
   appId: 'HC',
 
   sheets: {
-    activeDeployments:     'ActiveDeployments',
-    goLives:               'Go Lives',
-    deploymentOverrides:   'DeploymentOverrides',
-    goLivesOverrides:      'GoLivesOverrides',
-    deploymentsMeta:       'DeploymentsMeta',
-    changeLog:             'ChangeLog',
-    execSummary:           'ExecSummary',
-    healthReportSnapshots: 'HealthReportSnapshots',
-    healthMonthlySummary:  'HealthMonthlySummary',
-    healthYtdSummary:      'HealthYtdSummary',
-    dashboard:             'Dashboard'
+    activeDeployments:                'ActiveDeployments',
+    goLives:                          'Go Lives',
+    deploymentOverrides:              'DeploymentOverrides',
+    goLivesOverrides:                 'GoLivesOverrides',
+    deploymentsMeta:                  'DeploymentsMeta',
+    changeLog:                        'ChangeLog',
+    execSummary:                      'ExecSummary',
+    healthReportSnapshots:            'HealthReportSnapshots',
+    healthMonthlySummary:             'HealthMonthlySummary',
+    healthYtdSummary:                 'HealthYtdSummary',
+    dashboard:                        'Dashboard',
+    appUsers:                         'AppUsers',
+    ddAssignment:                     'DD',
+    sfdcDeploymentProductFunctions:   'SFDC_DeploymentProductFunctions',
+    deployments:                      'SFDC_Deployments',
+    deploymentContacts:               'SFDC_DeploymentContacts'
   },
 
   namedRanges: {
@@ -30,130 +43,143 @@ var APP_CONFIG = {
   },
 
   columns: {
-    // HC currently shares the same column layout as SLG/HENP.
     deployments: {
-      ACCOUNT_NAME: 1,  // A
-      DEPLOYMENT_NAME: 2,  // B
-      SERVICES_APPROACH: 3,  // C
-      INDUSTRY: 4,  // D
-      SUB_REGION: 5,  // E
-      PARTNER: 6,  // F
-      DEPLOYMENT_STAGE: 7,  // G
-      DEPLOYMENT_HEALTH: 8,  // H
-      CURRENT_MTP_DATE: 9,  // I
-      PROF_SERVICES_LOCS: 10,  // J
-      PROF_SERVICES_DETAILS: 11,  // K
-      DAM_FULL_NAME: 12,  // L
-      WD_ENG_MANAGER: 13,  // M
-      CURRENT_DEPLOYMENT_UPDATE: 14, // N
-      DEPLOYMENT_ID: 15  // O
+      // HC SFDC_Deployments column positions (14 cols, not 16).
+      // Header detection in CoreData.readSfdcDeploymentsRaw_ is primary;
+      // these positional values are fallback only.
+      DEPLOYMENT_ID: 1,             // Id
+      DEPLOYMENT_NAME: 2,            // Name
+      ACCOUNT_NAME: 3,               // Customer__r.Name
+      INDUSTRY: 4,                   // Customer__r.Industry
+      SUB_REGION: 5,                 // Customer__r.PS_Region_New__c
+      CURRENT_MTP_DATE: 7,           // Current_MTP_Date__c
+      DEPLOYMENT_PHASE: 10,          // Deployment_Phase__c
+      DEPLOYMENT_STAGE: 11,          // Deployment_Stage__c
+      DEPLOYMENT_HEALTH: 12,         // Overall_Health__c
+      PARTNER: 14,                   // Deployment_Partner_Name__c (col 14 in HC, not 16)
+      // Fields not present in HC SFDC_Deployments — unused but declared
+      // for shape compatibility with CoreConfig defaults.
+      SERVICES_APPROACH: 10,         // alias of DEPLOYMENT_PHASE
+      PROF_SERVICES_LOCS: 0,
+      PROF_SERVICES_DETAILS: 0,
+      DAM_FULL_NAME: 0,
+      WD_ENG_MANAGER: 0,
+      CURRENT_DEPLOYMENT_UPDATE: 0
     },
     goLives: {
-      ACCOUNT_NAME: 1,  // A
-      INDUSTRY: 2,  // B
-      DAM_FULL_NAME: 3,  // C
-      WD_ENG_MANAGER: 4,  // D
-      PARTNER: 5,  // E
-      DEPLOYMENT_NAME: 6,  // F
-      SERVICES_APPROACH: 7,  // G
-      PRODUCT_AREA: 8,  // H
-      GO_LIVE_DATE_ACTUAL: 9,  // I
-      IN_PRODUCTION: 10  // J
+      ACCOUNT_NAME: 1,
+      INDUSTRY: 2,
+      DAM_FULL_NAME: 3,
+      WD_ENG_MANAGER: 4,
+      PARTNER: 5,
+      DEPLOYMENT_NAME: 6,
+      SERVICES_APPROACH: 7,
+      PRODUCT_AREA: 8,
+      GO_LIVE_DATE_ACTUAL: 9,
+      IN_PRODUCTION: 10
     }
   },
 
   report: {
-    // Filenames used when exporting HTML to Drive
-    inlineFilename:  'Healthcare_DeploymentHealth_Dashboard.html',
-    outlookFilename: 'Healthcare_DeploymentHealth_Dashboard_Outlook.html',
-
-    // Title and branding specific to Healthcare
-    title: 'Healthcare Deployment Health Report',
-    headerLogoUrl: 'https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg?c=1bxid64Mup7aczewSAYMX&t=1761286530298',
-    sanaLogoUrl:   'https://emoji.slack-edge.com/T7U335QS3/sana-labs/1746635f6808c56a.png',
+    inlineFilename:    'Healthcare_DeploymentHealth_Dashboard.html',
+    outlookFilename:   'Healthcare_DeploymentHealth_Dashboard_Outlook.html',
+    title:             'Healthcare Deployment Health Report',
+    headerLogoUrl:     'https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg?c=1bxid64Mup7aczewSAYMX&t=1761286530298',
+    sanaLogoUrl:       'https://emoji.slack-edge.com/T7U335QS3/sana-labs/1746635f6808c56a.png',
     footerAttribution: 'Generated by the Healthcare Program Management team',
+    tables:            TABLES,
+    barConfig:         BAR_CONFIG,
 
-    // Use Healthcare’s existing TABLES / BAR_CONFIG from its Code.gs
-    tables:    TABLES,
-    barConfig: BAR_CONFIG,
+    goLivesWindowDays:        60,
+    redYellowPartnerFilter:   null,
+    includeIndustryRedYellow: false,
+    includeIndustryGoLives:   false,
+    redYellowOwnerLabel:      'EM',
 
-    // Behavior flags (differences vs SLG/HENP)
-    goLivesWindowDays: 60,
-    redYellowPartnerFilter: null,
-    includeIndustryRedYellow: false,  // HC Red/Yellow section does not show Industry
-    includeIndustryGoLives:   false,  // HC Go Lives section uses Deployment Name instead
-
-    // Portfolio Health tab (HC)
     portfolioHealth: {
-      title: 'Portfolio Health',
-      workdayPartner: 'Workday Professional Services',
-      workdayLabel: 'Workday',
-      otherLabel: 'Partners/Other',
+      title:                   'Portfolio Health',
+      workdayPartner:          'Workday Professional Services',
+      workdayLabel:            'Workday',
+      otherLabel:              'Partners/Other',
       recentGoLivesWindowDays: 60,
-      historyWindowMonths: 6,
+      historyWindowMonths:     6,
       industryBuckets: [
-        { label: 'Health Insurance',                match: ['Health Insurance'] },
-        { label: 'Acute Hospital / Health System',  match: ['Acute Hospital / Health System'] },
-        { label: 'Ambulatory',                      match: ['Ambulatory'] },
-        { label: 'Post Acute',                      match: ['Post Acute'] },
-        { label: 'Other Healthcare',                match: ['Other Healthcare'] }
+        { label: 'Health Insurance',               match: ['Health Insurance'] },
+        { label: 'Acute Hospital / Health System', match: ['Acute Hospital / Health System'] },
+        { label: 'Ambulatory',                     match: ['Ambulatory'] },
+        { label: 'Post Acute',                     match: ['Post Acute'] },
+        { label: 'Other Healthcare',               match: ['Other Healthcare'] }
       ]
     }
   },
 
-  // ---------------------------------------------------------------------------
-  // UI configuration (Phase 0). Consumed by CoreLib.CoreUI.
-  // ---------------------------------------------------------------------------
+  salesforce: {
+    upcomingWindowDays: 90,
+    recentWindowDays:   60,
+    statusValues: {
+      active:   'Active',
+      complete: 'Complete'
+    }
+  },
+
   ui: {
     appTitle:       'Healthcare Deployment Health Manager',
     headerTitle:    'Healthcare Deployment Health Manager',
     headerSubtitle: 'Review and manage deployment data across all stages',
 
+    // v2 consolidated tab structure (matches HENP/SLG).
     tabs: [
-      { id: 'deployments', label: 'Red & Yellow Deployments' },
-      { id: 'golives',     label: 'Recent Go Lives (60 days)' },
-      { id: 'upcoming',    label: 'Upcoming Go Lives (90 days)' },
+      { id: 'deployments', label: 'Deployments' },
+      { id: 'golives',     label: 'Go Lives' },
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
-      { id: 'portfolio',   label: 'Portfolio Health' }
+      { id: 'portfolio',   label: 'Portfolio Health' },
+      { id: 'overrides',   label: 'Manage Overrides' }
     ],
 
+    mgmPglTab: { enabled: false },
+
     deploymentsTable: {
-      showIndustry: false,           // HC: no Industry column
-      showEmColumn: true,            // HC: shows EM column
-      ownerColumnLabel: 'EM',
-      showMissingDDHighlight: false, // HC: no missing-DD row highlight
-      missingDDMessage: 'Delivery Director needs assigned',  // unused for HC
-      searchPlaceholder: 'Search by account, deployment name, partner...'
+      showIndustry:           false,
+      showEmColumn:           true,    // HC: shows EM column
+      ownerColumnLabel:       'EM',
+      showMissingDDHighlight: false,   // HC: no missing-DD highlight
+      missingDDMessage:       'Delivery Director needs assigned',
+      searchPlaceholder:      'Search by account, deployment name, partner...',
+      defaultHealthFilter:    ['Red', 'Yellow'],
+      showStageColumn:        false,
+      expandableRows:         true
     },
 
     goLivesTable: {
-      showIndustry: false,
-      showProductAreas: false,       // HC: Go Lives shows Deployment Name instead
-      showDeploymentName: true,
-      searchPlaceholder: 'Search by account name...'
+      showIndustry:        false,
+      showProductAreas:    false,   // HC shows Deployment Name instead
+      showDeploymentName:  true,
+      searchPlaceholder:   'Search by account name...'
     },
 
-    upcomingTable: {
-      showIndustry: false,
-      showProductAreas: false,
-      showDeploymentName: true,
-      searchPlaceholder: 'Search by account name...'
+    goLivesTab: {
+      defaultView:        'recent',
+      recentWindowDays:   60,
+      upcomingWindowDays: 90
+    },
+
+    manageOverrides: {
+      showAuditTrail:   true,
+      bulkClearScopes:  ['monthly', 'all']
     },
 
     editModal: {
-      ownerFieldLabel: 'Delivery Director',
-      ownerInputType: 'dropdown',
-      // Phase 0: preserved exactly as in HC production (likely-stale SLG names).
-      // Will be revisited in Phase 1 when HC's real DD/EM list is finalized.
-      ownerOptions: ['Steve Rogers', 'Roman Cortes', 'Lakshmi Visvanathan']
+      ownerFieldLabel: 'EM',
+      ownerInputType:  'text',     // Phase 3j: drop the stale SLG dropdown options
+      ownerOptions:    []
     },
 
     personalization: {
-      enabled: false,
-      defaultViewMode: 'myPortfolio',
-      affectsTabs: ['deployments', 'golives', 'upcoming', 'trends', 'overrides'],
-      welcomeMessageEnabled: true,
+      enabled:                    false,
+      defaultViewMode:            'allDeployments',
+      affectsTabs:                ['deployments', 'golives', 'overrides'],
+      welcomeMessageEnabled:      false,
       showFullPortfolioIndicator: true
     }
   }

@@ -361,6 +361,21 @@ var CoreConfig = (function () {
     if (!cfg.ui.goLivesTab.recentWindowDays)   cfg.ui.goLivesTab.recentWindowDays = 60;
     if (!cfg.ui.goLivesTab.upcomingWindowDays) cfg.ui.goLivesTab.upcomingWindowDays = 90;
 
+    // Stage 1: Role-based tab visibility.
+    // Maps access role -> list of tab IDs the user is allowed to see.
+    // CoreUI_Markup uses this to render only allowed tabs server-side.
+    // Apps may override this in their APP_CONFIG.ui.roleVisibility block.
+    cfg.ui.roleVisibility = cfg.ui.roleVisibility || {};
+    if (!Array.isArray(cfg.ui.roleVisibility.READ_ONLY)) {
+      cfg.ui.roleVisibility.READ_ONLY = ['deployments', 'golives', 'portfolio', 'trends'];
+    }
+    if (!Array.isArray(cfg.ui.roleVisibility.POWER_USER)) {
+      cfg.ui.roleVisibility.POWER_USER = ['deployments', 'golives', 'mgmPgl', 'execsummary', 'report', 'portfolio', 'overrides', 'trends'];
+    }
+    if (!Array.isArray(cfg.ui.roleVisibility.ADMIN)) {
+      cfg.ui.roleVisibility.ADMIN = cfg.ui.roleVisibility.POWER_USER.slice();
+    }
+
     // Phase 2: Manage Overrides tab config
     cfg.ui.manageOverrides = cfg.ui.manageOverrides || {};
     if (cfg.ui.manageOverrides.showAuditTrail === undefined)

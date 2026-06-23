@@ -1,167 +1,163 @@
 /**
  * HENP App configuration for CoreLib.
  *
+ * Phase 3j (v12): SFDC-first effective deployments.
+ *  - cfg.sheets.deployments = 'SFDC_Deployments' (canonical source via SOQL)
+ *  - cfg.columns.deployments aligned to SFDC_Deployments column positions
+ *  - SOQL-side filtering already enforces industry, region, status, and
+ *    deployment phase exclusions; APP_CONFIG just registers sheet/columns.
+ *
  * NOTE:
- *   - Assumes the Core library is added as "CoreLib" in Project → Libraries.
- *   - Assumes HENP's TABLES and BAR_CONFIG constants (from its Code.gs)
- *     are defined in this project and reused here.
+ *  - Requires CoreLib library added with identifier "CoreLib".
+ *  - Requires TABLES and BAR_CONFIG constants from Code.gs (HENP).
+ *  - Industries / regions / phase exclusions live in the Salesforce
+ *    connector SOQL, NOT in this config.
  */
 
 /** @type {AppConfig} */
 var APP_CONFIG = {
   appId: 'HENP',
-
   sheets: {
-    activeDeployments:     'ActiveDeployments',
-    goLives:               'Go Lives',
-    deploymentOverrides:   'DeploymentOverrides',
-    goLivesOverrides:      'GoLivesOverrides',
-    deploymentsMeta:       'DeploymentsMeta',
-    changeLog:             'ChangeLog',
-    execSummary:           'ExecSummary',
+    activeDeployments: 'ActiveDeployments',
+    goLives: 'Go Lives',
+    deploymentOverrides: 'DeploymentOverrides',
+    goLivesOverrides: 'GoLivesOverrides',
+    deploymentsMeta: 'DeploymentsMeta',
+    changeLog: 'ChangeLog',
+    execSummary: 'ExecSummary',
     healthReportSnapshots: 'HealthReportSnapshots',
-    healthMonthlySummary:  'HealthMonthlySummary',
-    healthYtdSummary:      'HealthYtdSummary',
-    dashboard:             'Dashboard'
+    healthMonthlySummary: 'HealthMonthlySummary',
+    healthYtdSummary: 'HealthYtdSummary',
+    dashboard: 'Dashboard',
+    appUsers: 'AppUsers',
+    ddAssignment: 'DD',
+    sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions',
+    deployments: 'SFDC_Deployments',
+    deploymentContacts: 'SFDC_DeploymentContacts'
   },
-
   namedRanges: {
     healthTotal: 'HealthTotal'
   },
-
   columns: {
-    // HENP currently shares the same column layout as SLG/HC.
     deployments: {
-      ACCOUNT_NAME: 1,  // A
-      DEPLOYMENT_NAME: 2,  // B
-      SERVICES_APPROACH: 3,  // C
-      INDUSTRY: 4,  // D
-      SUB_REGION: 5,  // E
-      PARTNER: 6,  // F
-      DEPLOYMENT_STAGE: 7,  // G
-      DEPLOYMENT_HEALTH: 8,  // H
-      CURRENT_MTP_DATE: 9,  // I
-      PROF_SERVICES_LOCS: 10,  // J
-      PROF_SERVICES_DETAILS: 11,  // K
-      DAM_FULL_NAME: 12,  // L
-      WD_ENG_MANAGER: 13,  // M
-      CURRENT_DEPLOYMENT_UPDATE: 14, // N
-      DEPLOYMENT_ID: 15  // O
+      // SFDC_Deployments column positions (1-based, header order).
+      // Header detection in CoreData.readSfdcDeploymentsRaw_ is the
+      // primary path; these positional values are the safety fallback.
+      DEPLOYMENT_ID: 1,            // Id
+      DEPLOYMENT_NAME: 2,           // Name
+      ACCOUNT_NAME: 3,              // Customer__r.Name
+      INDUSTRY: 4,                  // Customer__r.Industry
+      SUB_REGION: 5,                // Customer__r.PS_Region_New__c
+      CURRENT_MTP_DATE: 7,          // Current_MTP_Date__c
+      DEPLOYMENT_PHASE: 10,         // Deployment_Phase__c
+      DEPLOYMENT_STAGE: 11,         // Deployment_Stage__c
+      DEPLOYMENT_HEALTH: 12,        // Overall_Health__c
+      PARTNER: 16,                  // Deployment_Partner_Name__c
+      // Fields not present in HENP SFDC_Deployments — unused but
+      // declared for shape compatibility with CoreConfig defaults.
+      SERVICES_APPROACH: 10,        // alias of DEPLOYMENT_PHASE
+      PROF_SERVICES_LOCS: 0,
+      PROF_SERVICES_DETAILS: 0,
+      DAM_FULL_NAME: 0,
+      WD_ENG_MANAGER: 0,
+      CURRENT_DEPLOYMENT_UPDATE: 0
     },
     goLives: {
-      ACCOUNT_NAME: 1,  // A
-      INDUSTRY: 2,  // B
-      DAM_FULL_NAME: 3,  // C
-      WD_ENG_MANAGER: 4,  // D
-      PARTNER: 5,  // E
-      DEPLOYMENT_NAME: 6,  // F
-      SERVICES_APPROACH: 7,  // G
-      PRODUCT_AREA: 8,  // H
-      GO_LIVE_DATE_ACTUAL: 9,  // I
-      IN_PRODUCTION: 10  // J
+      ACCOUNT_NAME: 1,
+      INDUSTRY: 2,
+      DAM_FULL_NAME: 3,
+      WD_ENG_MANAGER: 4,
+      PARTNER: 5,
+      DEPLOYMENT_NAME: 6,
+      SERVICES_APPROACH: 7,
+      PRODUCT_AREA: 8,
+      GO_LIVE_DATE_ACTUAL: 9,
+      IN_PRODUCTION: 10
     }
   },
-
   report: {
-    // Filenames used when exporting HTML to Drive
-    inlineFilename:  'HENP_DeploymentHealth_Dashboard.html',
+    inlineFilename: 'HENP_DeploymentHealth_Dashboard.html',
     outlookFilename: 'HENP_DeploymentHealth_Dashboard_Outlook.html',
-
-    // Title and branding specific to HENP
-    title: 'Higher Education / Non Profit Deployment Health Report',
-    headerLogoUrl: 'https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg?c=1bxid64Mup7aczewSAYMX&t=1761286530298',
-    sanaLogoUrl:   'https://emoji.slack-edge.com/T7U335QS3/sana-labs/1746635f6808c56a.png',
+    title: 'Higher Education & Non-Profit Deployment Health Report',
+    headerLogoUrl: 'https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg',
+    sanaLogoUrl: 'https://emoji.slack-edge.com/T7U335QS3/sana-labs/1746635f6808c56a.png',
     footerAttribution: 'Generated by the HENP Program Management team',
-
-    // Use HENP's existing TABLES / BAR_CONFIG from its Code.gs
-    tables:    TABLES,
+    tables: TABLES,
     barConfig: BAR_CONFIG,
-
-    // Behavior flags
     goLivesWindowDays: 60,
     redYellowPartnerFilter: null,
-    includeIndustryRedYellow: true,   // HENP shows Industry in Red/Yellow
-    includeIndustryGoLives:   true,   // HENP shows Industry in Go Lives
-
-    // Portfolio Health tab (HENP)
+    includeIndustryRedYellow: false,
+    includeIndustryGoLives: false,
+    redYellowOwnerLabel: 'Delivery Director',
     portfolioHealth: {
       title: 'Portfolio Health',
       workdayPartner: 'Workday Professional Services',
       workdayLabel: 'Workday',
       otherLabel: 'Partners/Other',
       recentGoLivesWindowDays: 60,
-      historyWindowMonths: 6,
       industryBuckets: [
         { label: 'Higher Education', match: ['Higher Education'] },
-        { label: 'Non-Profit',       match: ['Non-Profit', 'Non Profit', 'Nonprofit'] }
+        { label: 'Non-Profit', match: ['Non-Profit'] }
       ]
     }
   },
-
-  // ---------------------------------------------------------------------------
-  // UI configuration (Phase 0). Consumed by CoreLib.CoreUI.
-  // ---------------------------------------------------------------------------
+  salesforce: {
+    upcomingWindowDays: 90,
+    recentWindowDays: 60,
+    statusValues: {
+      active: 'Active',
+      complete: 'Complete'
+    }
+  },
   ui: {
-    appTitle:       'HENP Deployment Health Manager',
-    headerTitle:    'HENP Deployment Health Manager',
+    appTitle: 'HENP Deployment Health Manager',
+    headerTitle: 'HENP Deployment Health Manager',
     headerSubtitle: 'Review and manage deployment data across all stages',
-
     tabs: [
-      { id: 'deployments', label: 'Red & Yellow Deployments' },
-      { id: 'golives',     label: 'Recent Go Lives (60 days)' },
-      { id: 'upcoming',    label: 'Upcoming Go Lives (90 days)' },
+      { id: 'deployments', label: 'Deployments' },
+      { id: 'golives', label: 'Go Lives' },
       { id: 'execsummary', label: 'Executive Summary' },
-      { id: 'report',      label: 'Monthly Report Preview' },
-      { id: 'portfolio',   label: 'Portfolio Health' }
+      { id: 'report', label: 'Monthly Report Preview' },
+      { id: 'portfolio', label: 'Portfolio Health' },
+      { id: 'overrides', label: 'Manage Overrides' }
     ],
-
+    mgmPglTab: { enabled: false },
     deploymentsTable: {
-      showIndustry: true,            // HENP: shows Industry column
+      showIndustry: false,
       showEmColumn: false,
-      ownerColumnLabel: 'Deployment Executive',
+      ownerColumnLabel: 'Delivery Director',
       showMissingDDHighlight: true,
-      missingDDMessage: 'Deployment Executive needs assigned',
-      searchPlaceholder: 'Search by account, industry, deployment name, partner...'
+      missingDDMessage: 'Delivery Director needs assigned',
+      searchPlaceholder: 'Search by account, deployment name, partner...',
+      defaultHealthFilter: ['Red', 'Yellow'],
+      showStageColumn: false,
+      expandableRows: true
     },
-
     goLivesTable: {
-      showIndustry: true,            // HENP: shows Industry column
+      showIndustry: false,
       showProductAreas: true,
       showDeploymentName: false,
-      searchPlaceholder: 'Search by account or industry...'
+      searchPlaceholder: 'Search by account name...'
     },
-
-    upcomingTable: {
-      showIndustry: true,            // HENP: shows Industry column
-      showProductAreas: false,
-      showDeploymentName: true,
-      searchPlaceholder: 'Search by account or industry...'
+    goLivesTab: {
+      defaultView: 'recent',
+      recentWindowDays: 60,
+      upcomingWindowDays: 90
     },
-
+    manageOverrides: {
+      showAuditTrail: true,
+      bulkClearScopes: ['monthly', 'all']
+    },
     editModal: {
-      ownerFieldLabel: 'Deployment Executive',
-      ownerInputType: 'datalist',
-      // 11 names from HENP production WebApp.html
-      ownerOptions: [
-        'Bonnie Benson',
-        'Byron Menchion',
-        'Dave Harvey',
-        'Howard Chow',
-        'John Eckroth',
-        'Kim Davis',
-        'Lisa Jennings',
-        'Londa Caine',
-        'Phillip Ross',
-        'Sarah Nunn',
-        'Shannon Pino'
-      ]
+      ownerFieldLabel: 'Delivery Director',
+      ownerInputType: 'text',
+      ownerOptions: []
     },
-
     personalization: {
       enabled: false,
-      defaultViewMode: 'myPortfolio',
-      affectsTabs: ['deployments', 'golives', 'upcoming', 'trends', 'overrides'],
-      welcomeMessageEnabled: true,
+      defaultViewMode: 'allDeployments',
+      affectsTabs: ['deployments', 'golives', 'overrides'],
+      welcomeMessageEnabled: false,
       showFullPortfolioIndicator: true
     }
   }

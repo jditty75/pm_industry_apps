@@ -57,6 +57,136 @@ function _clearEnrichmentCache() {
   _enrichmentCache = null;
 }
 
+// ===========================================================================
+// PERFORMANCE LAYER 2: SHEET-TAB CACHE for enrichment map
+// ---------------------------------------------------------------------------
+// Mirrors the pattern in CoreData. 5-minute TTL. Cleared by CoreData's
+// _clearCache(cfg) via the cross-module call CoreSalesforce._clearEnrichmentSheetCache.
+// ===========================================================================
+
+var _PERF_CACHE_SHEET_S = '_PerfCache';
+var _PERF_CACHE_TTL_SEC_S = 300; // 5 minutes
+
+function _getPerfCacheSheet_S_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(_PERF_CACHE_SHEET_S);
+  if (!sheet) {
+    sheet = ss.insertSheet(_PERF_CACHE_SHEET_S);
+    sheet.getRange(1, 1, 1, 3).setValues([['Key', 'ValueJson', 'Timestamp']]);
+    sheet.setFrozenRows(1);
+    sheet.hideSheet();
+  }
+  return sheet;
+}
+
+function _perfCacheReadS_(key) {
+  try {
+    var sheet = _getPerfCacheSheet_S_();
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return null;
+    var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (var i = 0; i < values.length; i++) {
+      if (String(values[i][0]) !== key) continue;
+      var tsCell = values[i][2];
+      var tsMs = (tsCell instanceof Date) ? tsCell.getTime() : Number(tsCell);
+      if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC_S * 1000) return null;
+      var json = String(values[i][1] || '');
+      if (!json) return null;
+      return JSON.parse(json);
+    }
+    return null;
+  } catch (err) {
+    Logger.log('CoreSalesforce._perfCacheReadS_: ' + err);
+    return null;
+  }
+}
+
+function _perfCacheWriteS_(key, value) {
+  try {
+    var sheet = _getPerfCacheSheet_S_();
+    var json = JSON.stringify(value);
+    var now = new Date();
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < keys.length; i++) {
+        if (String(keys[i][0]) === key) {
+          sheet.getRange(i + 2, 1, 1, 3).setValues([[key, json, now]]);
+          return;
+        }
+      }
+    }
+    sheet.appendRow([key, json, now]);
+  } catch (err) {
+    Logger.log('CoreSalesforce._perfCacheWriteS_: failed for key=' + key + ': ' + err);
+  }
+}
+
+/**
+ * Public entry point called by CoreData._clearCache(cfg) to invalidate
+ * the enrichment map sheet-tab cache after a mutation.
+ */
+function _clearEnrichmentSheetCache() {
+  _enrichmentCache = null;
+  try {
+    var sheet = _getPerfCacheSheet_S_();
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = data.length - 1; i >= 0; i--) {
+        var k = String(data[i][0] || '');
+        if (k.indexOf('enrichmentMap:') === 0) {
+          sheet.deleteRow(i + 2);
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log('CoreSalesforce._clearEnrichmentSheetCache: ' + err);
+  }
+}
+
+/**
+ * Performance Layer 2: Pre-warm the sheet-tab cache for this app.
+ * Called by an Apps Script time-based trigger in each app (every 4-5 min
+ * during business hours). Computes SFDC raw rows and the enrichment map,
+ * writing both to the _PerfCache sheet so user-triggered endpoints hit
+ * warm cache instead of paying cold-start computation.
+ *
+ * @param {AppConfig} config
+ * @return {{ ok:boolean, durationMs:number, rows:number, enrichmentDeployments:number }}
+ */
+function _warmCaches(config) {
+  var start = Date.now();
+  var cfg = CoreConfig.withDefaults(config);
+  // Clear in-memory first so we force fresh reads from live sheets, then
+  // populate the sheet-tab cache from those fresh reads.
+  _enrichmentCache = null;
+  var rowCount = 0;
+  var deploymentCount = 0;
+  try {
+    // Trigger the enrichment computation. This will read live and write to
+    // both tier 1 (in-memory) and tier 2 (sheet-tab cache) per Layer 2.
+    var enrichment = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    deploymentCount = Object.keys(enrichment || {}).length;
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: enrichment build failed: ' + err);
+  }
+  // Also warm the SFDC raw rows via CoreData.
+  try {
+    // Force a fresh read by clearing CoreData's tier 1, then calling.
+    // We deliberately don't call CoreData._clearCache(cfg) here because
+    // that would also wipe the enrichment we just warmed.
+    CoreData._warmSfdcRows(cfg);
+    rowCount = (CoreData._getCachedSfdcRowCount && CoreData._getCachedSfdcRowCount()) || 0;
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: SFDC warm failed: ' + err);
+  }
+  var elapsed = Date.now() - start;
+  Logger.log('CoreSalesforce._warmCaches(' + cfg.appId + '): ' + elapsed + 'ms, ' +
+             rowCount + ' SFDC rows, ' + deploymentCount + ' enriched deployments.');
+  return { ok: true, durationMs: elapsed, rows: rowCount, enrichmentDeployments: deploymentCount };
+}
+
 var CoreSalesforce = {
 
   /**
@@ -68,8 +198,15 @@ var CoreSalesforce = {
    */
     getDeploymentEnrichmentMap: function (cfg) {
     cfg = CoreConfig.withDefaults(cfg);
-    // Performance Layer 1: return cached result if present.
+    // Performance Layer 1: tier 1 (in-memory).
     if (_enrichmentCache !== null) return _enrichmentCache;
+    // Performance Layer 2: tier 2 (sheet-tab cache).
+    var enrichmentCacheKey = 'enrichmentMap:' + (cfg && cfg.appId ? cfg.appId : 'default');
+    var cachedEnrichment = _perfCacheReadS_(enrichmentCacheKey);
+    if (cachedEnrichment !== null) {
+      _enrichmentCache = cachedEnrichment;
+      return cachedEnrichment;
+    }
     var sheetName = cfg.sheets.sfdcDeploymentProductFunctions || 'SFDC_DeploymentProductFunctions';
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -249,8 +386,10 @@ var CoreSalesforce = {
                ' rows, ' + deploymentCount + ' deployments, ' + phasedCount +
                ' phased (upcoming+recent), ' + orphanCount + ' orphaned/skipped rows.');
 
-    // Performance Layer 1: cache before returning.
+    // Performance Layer 1: tier 1 (in-memory).
     _enrichmentCache = enrichmentMap;
+    // Performance Layer 2: tier 2 (sheet-tab cache).
+    _perfCacheWriteS_(enrichmentCacheKey, enrichmentMap);
     return enrichmentMap;
   },
 
@@ -338,7 +477,11 @@ var CoreSalesforce = {
     }
     if (!d || isNaN(d.getTime())) return null;
     return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
-  }
+  },
+
+  // Performance Layer 2 exports
+  _clearEnrichmentSheetCache: _clearEnrichmentSheetCache,
+  _warmCaches: _warmCaches
 };
 
 // ---------------------------------------------------------------------------

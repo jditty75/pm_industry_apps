@@ -68,10 +68,149 @@ var CoreData = (function () {
    *                        (sheet-tab cache) which will use cfg.appId.
    */
   function _clearCache(cfg) {
+    // Tier 1: in-memory.
     _cache.sfdcRows = null;
     _cache.metaMap = null;
     _cache.overridesMap = null;
     _cache.goLivesOverridesMap = null;
+    // Tier 2: sheet-tab cache. Layer 2.
+    _perfCacheClearAll_();
+    // Also clear the enrichment cache in CoreSalesforce (cross-module).
+    try { CoreSalesforce._clearEnrichmentSheetCache(); } catch (e) {}
+  }
+
+  /**
+   * Performance Layer 2: Pre-warm the SFDC raw rows in the sheet-tab cache.
+   * Called by CoreSalesforce._warmCaches via the time-based trigger in each app.
+   *
+   * @param {AppConfig} config
+   */
+  function _warmSfdcRows(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    // Force a fresh read by clearing tier 1 first; the function will then
+    // write fresh data to both tier 1 and tier 2.
+    _cache.sfdcRows = null;
+    try {
+      readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData._warmSfdcRows: ' + err);
+    }
+  }
+
+  /**
+   * Returns the current cached SFDC row count. Used by _warmCaches for
+   * its log output.
+   * @return {number}
+   */
+  function _getCachedSfdcRowCount() {
+    return _cache.sfdcRows ? _cache.sfdcRows.length : 0;
+  }
+
+  // ===========================================================================
+  // PERFORMANCE LAYER 2: SHEET-TAB CACHE (cross-execution persistence)
+  // ---------------------------------------------------------------------------
+  // Stores computed values in a per-app _PerfCache sheet so they survive
+  // across Apps Script executions. 5-minute TTL. Cleared on writes via
+  // _clearCache(cfg). Reads check tier 1 (in-memory) -> tier 2 (sheet) ->
+  // tier 3 (live recompute). Sheet name is _PerfCache; each row is a key,
+  // a JSON blob, and a timestamp.
+  // ===========================================================================
+
+  var _PERF_CACHE_SHEET = '_PerfCache';
+  var _PERF_CACHE_TTL_SEC = 300; // 5 minutes
+
+  /**
+   * Returns the active spreadsheet's _PerfCache sheet, creating it if missing.
+   * @return {Sheet}
+   * @private
+   */
+  function _getPerfCacheSheet_() {
+    var ss = getSpreadsheet_();
+    var sheet = ss.getSheetByName(_PERF_CACHE_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(_PERF_CACHE_SHEET);
+      sheet.getRange(1, 1, 1, 3).setValues([['Key', 'ValueJson', 'Timestamp']]);
+      sheet.setFrozenRows(1);
+      sheet.hideSheet(); // keep clutter out of the user's view
+    }
+    return sheet;
+  }
+
+  /**
+   * Reads a value from the sheet-tab cache. Returns null if missing or stale.
+   * @param {string} key
+   * @return {*} the parsed JSON value or null
+   * @private
+   */
+  function _perfCacheRead_(key) {
+    try {
+      var sheet = _getPerfCacheSheet_();
+      var lastRow = sheet.getLastRow();
+      if (lastRow < 2) return null;
+      var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+      for (var i = 0; i < values.length; i++) {
+        if (String(values[i][0]) !== key) continue;
+        var tsCell = values[i][2];
+        var tsMs = (tsCell instanceof Date) ? tsCell.getTime() : Number(tsCell);
+        if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC * 1000) {
+          return null; // stale
+        }
+        var json = String(values[i][1] || '');
+        if (!json) return null;
+        return JSON.parse(json);
+      }
+      return null;
+    } catch (err) {
+      Logger.log('CoreData._perfCacheRead_: ' + err);
+      return null;
+    }
+  }
+
+  /**
+   * Writes a value to the sheet-tab cache. Overwrites any existing row with
+   * the same key. Best-effort: failures are logged but never throw.
+   * @param {string} key
+   * @param {*} value any JSON-serializable value
+   * @private
+   */
+  function _perfCacheWrite_(key, value) {
+    try {
+      var sheet = _getPerfCacheSheet_();
+      var json = JSON.stringify(value);
+      var now = new Date();
+      var lastRow = sheet.getLastRow();
+      // Find existing row to overwrite, if any.
+      if (lastRow >= 2) {
+        var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (var i = 0; i < keys.length; i++) {
+          if (String(keys[i][0]) === key) {
+            sheet.getRange(i + 2, 1, 1, 3).setValues([[key, json, now]]);
+            return;
+          }
+        }
+      }
+      // Append new row.
+      sheet.appendRow([key, json, now]);
+    } catch (err) {
+      Logger.log('CoreData._perfCacheWrite_: failed for key=' + key + ': ' + err);
+    }
+  }
+
+  /**
+   * Removes all rows from the sheet-tab cache. Called by _clearCache(cfg)
+   * when a mutation invalidates the data.
+   * @private
+   */
+  function _perfCacheClearAll_() {
+    try {
+      var sheet = _getPerfCacheSheet_();
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        sheet.getRange(2, 1, lastRow - 1, 3).clearContent();
+      }
+    } catch (err) {
+      Logger.log('CoreData._perfCacheClearAll_: ' + err);
+    }
   }
 
   // ===========================================================================
@@ -462,7 +601,15 @@ var CoreData = (function () {
    * @private
    */
   function readSfdcDeploymentsRaw_(cfg) {
+    // Performance Layer 1: tier 1 (in-memory).
     if (_cache.sfdcRows !== null) return _cache.sfdcRows;
+    // Performance Layer 2: tier 2 (sheet-tab cache).
+    var cacheKey = 'sfdcRows:' + (cfg && cfg.appId ? cfg.appId : 'default');
+    var cached = _perfCacheRead_(cacheKey);
+    if (cached !== null) {
+      _cache.sfdcRows = cached; // hoist to tier 1 for the rest of this execution
+      return cached;
+    }
     var sheetName = cfg.sheets.deployments || 'SFDC_Deployments';
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(sheetName);
@@ -580,7 +727,10 @@ var CoreData = (function () {
 
     Logger.log('CoreData.readSfdcDeploymentsRaw_: read ' + rows.length +
                ' rows from "' + sheetName + '".');
+    // Performance Layer 1: tier 1 (in-memory).
     _cache.sfdcRows = rows;
+    // Performance Layer 2: tier 2 (sheet-tab cache).
+    _perfCacheWrite_(cacheKey, rows);
     return rows;
   }
 
@@ -2508,6 +2658,10 @@ var CoreData = (function () {
 
     // MGM / PGL additions
     getUpcomingSurveys:          getUpcomingSurveys,
-    _resolveMgmPglWindow:        resolveMgmPglWindow_
+    _resolveMgmPglWindow:        resolveMgmPglWindow_,
+
+    // Performance Layer 2 additions
+    _warmSfdcRows:               _warmSfdcRows,
+    _getCachedSfdcRowCount:      _getCachedSfdcRowCount
   };
 })();

@@ -1019,6 +1019,7 @@ var CoreData = (function () {
    */
   function updateDeploymentMeta(config, deploymentId, metaData) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     if (!deploymentId) throw new Error('updateDeploymentMeta: deploymentId is required');
 
     var ss = getSpreadsheet_();
@@ -1066,6 +1067,7 @@ var CoreData = (function () {
    */
   function updateDeploymentOverride(config, deploymentId, overrideData, notes) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     if (!deploymentId) throw new Error('deploymentId required');
 
     var ss = getSpreadsheet_();
@@ -1135,6 +1137,8 @@ var CoreData = (function () {
    * it through to writeAuditRow_.
    */
   function updateDeploymentWithMetaAndOverride(config, deploymentId, metaData, overrideData, notes) {
+    var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     updateDeploymentMeta(config, deploymentId, metaData);
     updateDeploymentOverride(config, deploymentId, overrideData, notes);
     return { success: true };
@@ -1147,6 +1151,7 @@ var CoreData = (function () {
    */
   function updateGoLivesOverride(config, accountName, overrideData, notes) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     if (!accountName) throw new Error('accountName required');
 
     var ss = getSpreadsheet_();
@@ -1366,6 +1371,7 @@ var CoreData = (function () {
    */
   function setOverrideClassification(config, type, idOrAccount, classification) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     requirePm_(cfg, 'setOverrideClassification');
 
     var newClassification = normalizeClassification_(classification);
@@ -1440,6 +1446,7 @@ var CoreData = (function () {
    */
   function bulkClearMonthlyOverrides(config, opts) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     requirePm_(cfg, 'bulkClearMonthlyOverrides');
 
     var yearMonth = (opts && opts.yearMonth) || formatYearMonth_(new Date());
@@ -1500,6 +1507,7 @@ var CoreData = (function () {
    */
   function bulkClearAllOverrides(config) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     requirePm_(cfg, 'bulkClearAllOverrides');
 
     var depCleared = clearOverrideRowsByPredicate_(

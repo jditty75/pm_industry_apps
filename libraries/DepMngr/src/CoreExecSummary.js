@@ -41,6 +41,7 @@ var CoreExecSummary = (function () {
    */
   function save(config, html) {
     var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(cfg.sheets.execSummary);
     if (!sheet) {

@@ -43,38 +43,64 @@ function _CoreUI_Markup_getHeadScripts() {
 // APP SHELL ORCHESTRATOR
 // ---------------------------------------------------------------------------
 
-function _CoreUI_Markup_getAppShell(cfg) {
+function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   var ui = cfg.ui || {};
+  var access = userAccess || { role: 'READ_ONLY', canViewApp: true, email: '' };
+  var role = access.role || 'READ_ONLY';
+  var isReadOnly = (role === 'READ_ONLY');
+
+  // Stage 1: filter the tab list by roleVisibility before passing to builders.
+  var roleVis = ui.roleVisibility || {};
+  var allowedForRole = Array.isArray(roleVis[role]) ? roleVis[role] : null;
+  var allowedSet = null;
+  if (allowedForRole) {
+    allowedSet = {};
+    allowedForRole.forEach(function (id) { allowedSet[id] = true; });
+  }
+  function _isTabAllowed(id) {
+    if (!allowedSet) return true; // no filter -> show everything
+    return !!allowedSet[id];
+  }
+
+  // Pre-filter the tabs array so the tab BAR builder also reflects the filter.
+  var filteredUi = Object.assign({}, ui, {
+    tabs: (ui.tabs || []).filter(function (t) { return _isTabAllowed(t.id); }),
+    // Read-only flag for builders that need to hide in-tab controls.
+    _accessRole: role,
+    _isReadOnly: isReadOnly
+  });
 
   var parts = [];
-  parts.push(_CoreUI_Markup_buildHeader_(ui));
+
+  parts.push(_CoreUI_Markup_buildHeader_(filteredUi));
   parts.push('<div class="container">');
 
   // Welcome banner placeholder — JS populates and shows/hides based on user role.
   parts.push(_CoreUI_Markup_buildWelcomeBannerPlaceholder_());
 
-  parts.push(_CoreUI_Markup_buildTabBar_(ui));
+  parts.push(_CoreUI_Markup_buildTabBar_(filteredUi));
 
-  var tabIds = (ui.tabs || []).map(function (t) { return t.id; });
+  var tabIds = filteredUi.tabs.map(function (t) { return t.id; });
 
-  if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(ui));
-  if (tabIds.indexOf('golives')     !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(ui));
-  if (tabIds.indexOf('mgmPgl')      !== -1 && ui.mgmPglTab && ui.mgmPglTab.enabled)
-    parts.push(_CoreUI_Markup_buildMgmPglTab_(ui));
-  if (tabIds.indexOf('execsummary') !== -1) parts.push(_CoreUI_Markup_buildExecSummaryTab_(ui));
-  if (tabIds.indexOf('report')      !== -1) parts.push(_CoreUI_Markup_buildReportTab_(ui, cfg));
-  if (tabIds.indexOf('portfolio')   !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(ui));
-  if (tabIds.indexOf('overrides')   !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(ui));
-  if (tabIds.indexOf('trends')      !== -1 && ui.trendsTab && ui.trendsTab.enabled)
-    parts.push(_CoreUI_Markup_buildTrendsTab_(ui));
+  if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(filteredUi));
+  if (tabIds.indexOf('golives') !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(filteredUi));
+  if (tabIds.indexOf('mgmPgl') !== -1 && ui.mgmPglTab && ui.mgmPglTab.enabled) parts.push(_CoreUI_Markup_buildMgmPglTab_(filteredUi));
+  if (tabIds.indexOf('execsummary') !== -1) parts.push(_CoreUI_Markup_buildExecSummaryTab_(filteredUi));
+  if (tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportTab_(filteredUi, cfg));
+  if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi));
+  if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
+  if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi));
 
   parts.push('</div>'); // .container
 
-  parts.push(_CoreUI_Markup_buildMetaModal_(ui));
-  parts.push(_CoreUI_Markup_buildEditModal_(ui));
-  parts.push(_CoreUI_Markup_buildGoLivesModal_(ui));
-  parts.push(_CoreUI_Markup_buildConfirmModal_(ui));
-  parts.push(_CoreUI_Markup_buildAuditDetailModal_(ui));
+  // Modals — only included for power users (read-only never opens them).
+  if (!isReadOnly) {
+    parts.push(_CoreUI_Markup_buildMetaModal_(filteredUi));
+    parts.push(_CoreUI_Markup_buildEditModal_(filteredUi));
+    parts.push(_CoreUI_Markup_buildGoLivesModal_(filteredUi));
+    parts.push(_CoreUI_Markup_buildConfirmModal_(filteredUi));
+    parts.push(_CoreUI_Markup_buildAuditDetailModal_(filteredUi));
+  }
 
   return parts.join('\n');
 }
@@ -171,8 +197,11 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
   if (showEm) headers.push('<th>EM</th>');
   headers.push('<th>MTP Date</th>');
   if (!showEm) headers.push('<th>' + _CoreUI_Markup_esc_(ownerLabel) + '</th>');
-  headers.push('<th>Actions</th>');
-  headers.push('<th>Meta Info</th>');
+  // Stage 1: hide Actions and Meta Info columns for read-only users.
+  if (!ui._isReadOnly) {
+    headers.push('<th>Actions</th>');
+    headers.push('<th>Meta Info</th>');
+  }
 
   return [
     '<div id="deployments-tab" class="tab-content active">',
@@ -254,7 +283,10 @@ function _CoreUI_Markup_buildGoLivesTab_(ui) {
   if (showIndustry) headers.push('<th>Industry</th>');
   headers.push('<th id="golives-product-header">Product / Deployment</th>');
   headers.push('<th>Partner</th>');
-  headers.push('<th>Actions</th>');
+  // Stage 1: hide Actions column for read-only users.
+  if (!ui._isReadOnly) {
+    headers.push('<th>Actions</th>');
+  }
 
   return [
     '<div id="golives-tab" class="tab-content">',
@@ -499,7 +531,7 @@ function _CoreUI_Markup_buildPortfolioTab_(ui) {
     '  </div>',
     '  <div class="ph-toolbar no-export">',
     '    <button class="btn btn-secondary" onclick="loadPortfolioHealth()" style="margin-right: 8px;">🔄 Refresh</button>',
-    '    <button class="btn btn-primary" onclick="downloadPortfolioHealthPng()">⬇ Download PNG <span id="ph-spinner" class="spinner hidden"></span></button>',
+    (ui._isReadOnly ? '' : '    <button class="btn btn-primary" onclick="downloadPortfolioHealthPng()">⬇ Download PNG <span id="ph-spinner" class="spinner hidden"></span></button>'),
     '  </div>',
     '  <div id="ph-canvas" class="ph-canvas">',
     '    <div class="report-loading" id="ph-loading">',

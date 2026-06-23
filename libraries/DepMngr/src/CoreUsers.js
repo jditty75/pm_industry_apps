@@ -352,6 +352,95 @@ var CoreUsers = (function () {
   }
 
   // ---------------------------------------------------------------------------
+  // Access Control (Stage 1)
+  // ---------------------------------------------------------------------------
+
+  // Per-execution cache for access-resolution.
+  var _accessCache = null;
+
+  /**
+   * Returns the current user's access context for this app.
+   *
+   * Resolution flow:
+   *   1. Resolve email via Session APIs.
+   *   2. Validate domain (must end in @workday.com).
+   *   3. Look up Role in AppUsers (via existing getCurrentUser) and map to AccessRole:
+   *        Role = PM       -> 'ADMIN'
+   *        Role = DD, VP   -> 'POWER_USER'
+   *        anything else,
+   *        not in AppUsers -> 'READ_ONLY'
+   *
+   * canViewApp is false only when the email is missing OR not @workday.com.
+   * Anonymous and non-workday users see an access-denied screen.
+   * All other users (read-only included) get canViewApp = true.
+   *
+   * @param {AppConfig} config
+   * @return {{ email:string, role:('ADMIN'|'POWER_USER'|'READ_ONLY'), canViewApp:boolean }}
+   */
+  function getCurrentUserAccess(config) {
+    if (_accessCache !== null) return _accessCache;
+    var cfg = CoreConfig.withDefaults(config);
+
+    var email = '';
+    try { email = Session.getActiveUser().getEmail() || ''; }
+    catch (e) {
+      try { email = Session.getEffectiveUser().getEmail() || ''; } catch (e2) {}
+    }
+    email = String(email || '').trim().toLowerCase();
+
+    // Anonymous or non-workday domain -> access denied.
+    if (!email || !email.endsWith('@workday.com')) {
+      _accessCache = { email: email, role: 'READ_ONLY', canViewApp: false };
+      return _accessCache;
+    }
+
+    // Look up Role in AppUsers via existing getCurrentUser plumbing.
+    var user = getCurrentUser(cfg);
+    var sourceRole = (user && user.role) ? String(user.role).toUpperCase() : '';
+
+    var accessRole;
+    if (sourceRole === 'PM') {
+      accessRole = 'ADMIN';
+    } else if (sourceRole === 'DD' || sourceRole === 'VP') {
+      accessRole = 'POWER_USER';
+    } else {
+      accessRole = 'READ_ONLY';
+    }
+
+    _accessCache = { email: email, role: accessRole, canViewApp: true };
+    return _accessCache;
+  }
+
+  /**
+   * Convenience: returns true if the caller is ADMIN or POWER_USER.
+   *
+   * @param {AppConfig} config
+   * @return {boolean}
+   */
+  function isPowerUser(config) {
+    var access = getCurrentUserAccess(config);
+    return access.role === 'ADMIN' || access.role === 'POWER_USER';
+  }
+
+  /**
+   * Guard for mutation endpoints. Throws if the caller does not have
+   * power-user access. Called as the first statement in every mutation
+   * function in CoreData / CoreExecSummary.
+   *
+   * @param {AppConfig} config
+   * @throws {Error} if caller is READ_ONLY or cannot view the app
+   */
+  function requirePowerUser_(config) {
+    var access = getCurrentUserAccess(config);
+    if (!access.canViewApp || access.role === 'READ_ONLY') {
+      throw new Error(
+        'Access denied: this action requires power-user privileges. ' +
+        'User: ' + (access.email || 'unknown') + ', role: ' + access.role
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // INTERNAL HELPERS
   // ---------------------------------------------------------------------------
 
@@ -384,6 +473,10 @@ var CoreUsers = (function () {
     getAccountsOwnedBy:           getAccountsOwnedBy,
     filterRowsByAccountOwner:     filterRowsByAccountOwner,
     findAccountOrphanedRows:      findAccountOrphanedRows,
-    findAccountDDMismatchRows:    findAccountDDMismatchRows
+    findAccountDDMismatchRows:    findAccountDDMismatchRows,
+    // Stage 1: Access Control
+    getCurrentUserAccess:         getCurrentUserAccess,
+    isPowerUser:                  isPowerUser,
+    requirePowerUser_:            requirePowerUser_
   };
 })();

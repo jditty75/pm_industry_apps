@@ -69,7 +69,8 @@ const webCONFIG = {
 function getIdentityBoot() {
   return {
     user: CoreLib.CoreUsers.getCurrentUser(APP_CONFIG),
-    activeUsers: CoreLib.CoreUsers.getActiveUsers(APP_CONFIG)
+    activeUsers: CoreLib.CoreUsers.getActiveUsers(APP_CONFIG),
+    access: CoreLib.CoreUsers.getCurrentUserAccess(APP_CONFIG)
   };
 }
 

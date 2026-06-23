@@ -303,6 +303,53 @@ var CoreConfig = (function () {
       cfg.report.portfolioHealth.historyWindowMonths = 6;
 
     // -------------------------------------------------------------------------
+    // Notable (Part 1)
+    // -------------------------------------------------------------------------
+    cfg.notable = cfg.notable || {};
+    if (!cfg.notable.sheetId)
+      cfg.notable.sheetId = '1iZJgKhqGIli-n93hCDRxM2v5Yzwfzn0_3e2FI8HuKjQ';
+    if (!cfg.notable.tabName)
+      cfg.notable.tabName = 'FY27 MASTER_Curated';
+    if (cfg.notable.headerRow === undefined || cfg.notable.headerRow === null)
+      cfg.notable.headerRow = 4;
+    if (cfg.notable.dataStartRow === undefined || cfg.notable.dataStartRow === null)
+      cfg.notable.dataStartRow = 5;
+    if (!cfg.notable.deploymentIdHeader)
+      cfg.notable.deploymentIdHeader = 'Deployment ID';
+    if (!Array.isArray(cfg.notable.editableColumnHeaders)) {
+      cfg.notable.editableColumnHeaders = [
+        'Data Validation Status',
+        'Latest Update',
+        'Regional Owner or Delegate',
+        'Notability Trigger',
+        'Fit-for-Purpose',
+        'Scope (Human Summary)',
+        'Story Blurb / Executive Summary',
+        'Link(s) to Supporting Material',
+        'Business Outcomes / Scope',
+        'Standout Team Members'
+      ];
+    }
+    if (!Array.isArray(cfg.notable.validationStatusOptions)) {
+      cfg.notable.validationStatusOptions = [
+        'Raw/Unverified',
+        'Region Approved',
+        'Region Restricted'
+      ];
+    }
+    cfg.notable.notify = cfg.notable.notify || {};
+    if (!cfg.notable.notify.email)
+      cfg.notable.notify.email = 'mariah.maxie@workday.com';
+    if (!cfg.notable.notify.testEmail)
+      cfg.notable.notify.testEmail = 'jeffrey.ditty@workday.com';
+    if (cfg.notable.notify.useTestMode === undefined || cfg.notable.notify.useTestMode === null)
+      cfg.notable.notify.useTestMode = true;
+    if (cfg.notable.notify.slackWebhookUrl === undefined)
+      cfg.notable.notify.slackWebhookUrl = '';
+    if (cfg.notable.notify.slackWebhookUrlTest === undefined)
+      cfg.notable.notify.slackWebhookUrlTest = '';
+
+    // -------------------------------------------------------------------------
     // UI
     // -------------------------------------------------------------------------
     cfg.ui = cfg.ui || {};
@@ -370,7 +417,10 @@ var CoreConfig = (function () {
       cfg.ui.roleVisibility.READ_ONLY = ['deployments', 'golives', 'portfolio', 'trends'];
     }
     if (!Array.isArray(cfg.ui.roleVisibility.POWER_USER)) {
-      cfg.ui.roleVisibility.POWER_USER = ['deployments', 'golives', 'mgmPgl', 'execsummary', 'report', 'portfolio', 'overrides', 'trends'];
+      cfg.ui.roleVisibility.POWER_USER = [
+        'deployments', 'golives', 'mgmPgl', 'execsummary',
+        'report', 'portfolio', 'overrides', 'trends', 'notable'
+      ];
     }
     if (!Array.isArray(cfg.ui.roleVisibility.ADMIN)) {
       cfg.ui.roleVisibility.ADMIN = cfg.ui.roleVisibility.POWER_USER.slice();

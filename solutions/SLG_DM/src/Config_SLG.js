@@ -206,6 +206,16 @@ var APP_CONFIG = {
       welcomeMessageEnabled: true,
       showFullPortfolioIndicator: true
     }
+  },
+
+  notable: {
+    notify: {
+      email:               'mariah.maxie@workday.com',
+      testEmail:           'jeffrey.ditty@workday.com',
+      useTestMode:         true,
+      slackWebhookUrl:     '',
+      slackWebhookUrlTest: ''
+    }
   }
 };
 

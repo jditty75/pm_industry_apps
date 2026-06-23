@@ -22,6 +22,22 @@ function doGet(e) {
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
+// ==== IDENTITY BOOT ====
+
+/**
+ * Called once at WebApp page load. Returns the current user record (or null)
+ * plus the active users list and access context.
+ *
+ * @return {{ user: Object|null, activeUsers: Array, access: Object }}
+ */
+function getIdentityBoot() {
+  return {
+    user: CoreLib.CoreUsers.getCurrentUser(APP_CONFIG),
+    activeUsers: CoreLib.CoreUsers.getActiveUsers(APP_CONFIG),
+    access: CoreLib.CoreUsers.getCurrentUserAccess(APP_CONFIG)
+  };
+}
+
 // ==== (OPTIONAL) LOCAL WEB CONFIG FOR CLIENT-ONLY CONSTANTS ====
 //
 // If you still reference webCONFIG internally in this file (e.g. for

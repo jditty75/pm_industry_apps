@@ -72,7 +72,8 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     tabs: (ui.tabs || []).filter(function (t) { return _isTabAllowed(t.id); }),
     // Read-only flag for builders that need to hide in-tab controls.
     _accessRole: role,
-    _isReadOnly: isReadOnly
+    _isReadOnly: isReadOnly,
+    overviewTab: cfg.overviewTab || {}
   });
 
   var parts = [];
@@ -87,6 +88,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 
   var tabIds = filteredUi.tabs.map(function (t) { return t.id; });
 
+  if (filteredUi.overviewTab && filteredUi.overviewTab.enabled !== false) parts.push(_CoreUI_Markup_buildOverviewTab_());
   if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(filteredUi));
   if (tabIds.indexOf('golives') !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(filteredUi));
   if (tabIds.indexOf('mgmPgl') !== -1 && ui.mgmPglTab && ui.mgmPglTab.enabled) parts.push(_CoreUI_Markup_buildMgmPglTab_(filteredUi));
@@ -167,11 +169,14 @@ function _CoreUI_Markup_buildWelcomeBannerPlaceholder_() {
 
 function _CoreUI_Markup_buildTabBar_(ui) {
   var tabs = ui.tabs || [];
+  var hasOverview = ui.overviewTab && ui.overviewTab.enabled !== false;
   var html = ['<div class="tabs">'];
-  tabs.forEach(function (t, i) {
-    var cls = 'tab' + (i === 0 ? ' active' : '');
+  if (hasOverview) {
+    html.push('  <button class="tab active" onclick="switchTab(\'overview\')">Overview</button>');
+  }
+  tabs.forEach(function (t) {
     html.push(
-      '  <button class="' + cls + '" onclick="switchTab(\'' + _CoreUI_Markup_esc_(t.id) + '\')">' +
+      '  <button class="tab" onclick="switchTab(\'' + _CoreUI_Markup_esc_(t.id) + '\')">' +
       _CoreUI_Markup_esc_(t.label) +
       '</button>'
     );
@@ -210,7 +215,7 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
   }
 
   return [
-    '<div id="deployments-tab" class="tab-content active">',
+    '<div id="deployments-tab" class="tab-content">',
     '  <div class="info-banner">',
     '    📊 Review all deployments. Use filters below to narrow by health, partner, owner, stage, or industry.',
     '  </div>',
@@ -447,6 +452,36 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
     '  </div>',
 
     '</div>' // #mgmPgl-tab
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// TAB: OVERVIEW (App Enhancements Phase 1)
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildOverviewTab_() {
+  return [
+    '<div id="overview-tab" class="tab-content active">',
+    '  <div class="info-banner">',
+    '    📋 Portfolio snapshot — KPIs, upcoming Go-Lives, and at-risk deployments. Data loads in the background.',
+    '  </div>',
+    '  <div class="stats-grid" id="overview-kpi-strip"></div>',
+    '  <div class="stats-grid" id="overview-golives-strip" style="margin-top:var(--space-3);"></div>',
+    '  <div id="overview-lists" style="display:flex; gap:var(--space-4); margin-top:var(--space-4); flex-wrap:wrap;">',
+    '    <div style="flex:1; min-width:280px;">',
+    '      <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Top Red — Soonest MTP</h3>',
+    '      <div id="overview-top-red"></div>',
+    '    </div>',
+    '    <div style="flex:1; min-width:280px;">',
+    '      <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Upcoming Go-Lives (Next 30d)</h3>',
+    '      <div id="overview-upcoming"></div>',
+    '    </div>',
+    '  </div>',
+    '  <div style="margin-top:var(--space-4);">',
+    '    <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Deployments by Stage</h3>',
+    '    <div id="overview-stage-strip" style="display:flex; flex-wrap:wrap; gap:var(--space-2);"></div>',
+    '  </div>',
+    '</div>'
   ].join('\n');
 }
 

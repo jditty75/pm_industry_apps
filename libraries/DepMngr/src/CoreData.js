@@ -258,13 +258,6 @@ var CoreData = (function () {
         }
         // Append all chunks in one batch write.
         var firstRow = sheet.getLastRow() + 1;
-        var targetRow = firstRow + rows.length - 1;
-        if (targetRow > sheet.getMaxRows()) {
-          sheet.insertRowsAfter(
-            sheet.getMaxRows(),
-            targetRow - sheet.getMaxRows() + 50
-          );
-        }
         sheet.getRange(firstRow, 1, rows.length, 3).setValues(rows);
         Logger.log('CoreData._perfCacheWrite_: chunked key=' + key + ' into ' + chunkCount + ' rows.');
       } catch (err) {

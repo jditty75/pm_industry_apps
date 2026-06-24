@@ -259,11 +259,10 @@ function getGoLivesForNotablePicker() {
  */
 function getOverviewData() {
   try {
-    var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
-    var ss  = SpreadsheetApp.openById(cfg.spreadsheetId);
+    var ss  = SpreadsheetApp.openById(APP_CONFIG.spreadsheetId);
 
     // ── Read SFDC_Deployments ───────────────────────────────────────────
-    var depSheet = ss.getSheetByName(cfg.sheets.deployments || 'SFDC_Deployments');
+    var depSheet = ss.getSheetByName((APP_CONFIG.sheets && APP_CONFIG.sheets.deployments) || 'SFDC_Deployments');
     var depData  = (depSheet && depSheet.getLastRow() > 1)
       ? depSheet.getRange(2, 1, depSheet.getLastRow() - 1,
                           depSheet.getLastColumn()).getValues()
@@ -348,7 +347,7 @@ function getOverviewData() {
     });
 
     // ── Read SFDC_Wellness — count executive watch deployments ──────────
-    var wellnessSheet = ss.getSheetByName(cfg.sheets.wellness || 'SFDC_Wellness');
+    var wellnessSheet = ss.getSheetByName((APP_CONFIG.sheets && APP_CONFIG.sheets.wellness) || 'SFDC_Wellness');
     var wellnessAccountIds = {};
     if (wellnessSheet && wellnessSheet.getLastRow() > 1) {
       wellnessSheet.getRange(2, 1, wellnessSheet.getLastRow() - 1, 2)

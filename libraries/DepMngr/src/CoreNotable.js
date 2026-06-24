@@ -54,16 +54,49 @@ var CoreNotable = (function () {
    * @return {Array<Object>}
    */
   function getNotableForApp(config) {
-    var cfg = CoreConfig.withDefaults(config);
-    Logger.log('CoreNotable.getNotableForApp: reading peer sheet for app ' + cfg.appId);
+  var cfg = CoreConfig.withDefaults(config);
+  Logger.log('CoreNotable.getNotableForApp: reading peer sheet for app ' + cfg.appId);
 
-    var peerRows = readPeerSheet_(cfg);
-    var localDeployments = CoreData.getAllEffectiveDeployments(cfg);
-    Logger.log('CoreNotable.getNotableForApp: peerRows=' + peerRows.length +
-               ', localDeployments=' + localDeployments.length);
+  var peerRows = readPeerSheet_(cfg);
+  var localDeployments = CoreData.getAllEffectiveDeployments(cfg);
+  Logger.log('CoreNotable.getNotableForApp: peerRows=' + peerRows.length +
+             ', localDeployments=' + localDeployments.length);
 
-    return joinAndSort_(peerRows, localDeployments, cfg);
-  }
+  var raw = joinAndSort_(peerRows, localDeployments, cfg);
+
+  // Map raw peer-sheet-keyed objects to camelCase shape expected by client.
+  // google.script.run cannot reliably serialize keys with spaces/parens/slashes.
+  return raw.map(function(r) {
+    var latestUpdate = '';
+    var lu = r['Latest Update [MM/DD/Year]'];
+    if (lu instanceof Date) {
+      latestUpdate = Utilities.formatDate(lu, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    } else if (lu) {
+      latestUpdate = String(lu);
+    }
+
+    return {
+      deploymentId:        String(r['Deployment ID']                    || ''),
+      accountNumber:       String(r['Account Customer Number']          || ''),
+      accountName:         String(r['Customer (Account) Name']          || (r.local && r.local.accountName) || ''),
+      industry:            String(r['Industry']                         || (r.local && r.local.industry)    || ''),
+      validationStatus:    String(r['Data Validation Status']           || ''),
+      latestUpdate:        latestUpdate,
+      regionalOwner:       String(r['Regional Owner or Delegate']       || ''),
+      notabilityTrigger:   String(r['Notability Trigger']               || ''),
+      fitForPurpose:       String(r['Fit-for-Purpose']                  || ''),
+      scopeSummary:        String(r['Scope (Human Summary)']            || ''),
+      storyBlurb:          String(r['Story Blurb / Executive Summary']  || ''),
+      supportingLinks:     String(r['Link(s) to Supporting Material']   || ''),
+      businessOutcomes:    String(r['Business Outcomes / Scope']        || ''),
+      standoutTeamMembers: String(r['Standout Team Members']            || ''),
+      goLiveQuarter:       String(r['Go-Live Quarter']                  || ''),
+      deploymentType:      String(r['Deployment Type']                  || ''),
+      peerRowIndex:        r._rowIndex || 0,
+      local:               r.local || {}
+    };
+  });
+}
 
   /**
    * Updates the 10 editable fields on an existing notable peer row.

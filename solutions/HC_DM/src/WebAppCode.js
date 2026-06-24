@@ -246,3 +246,20 @@ function getGoLivesForNotablePicker() {
 
   return results;
 }
+function _debugSfdcColumns() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetNames = ['SFDC_Deployments', 'SFDC_Wellness'];
+
+  sheetNames.forEach(function(sheetName) {
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      Logger.log('--- ' + sheetName + ': NOT FOUND ---');
+      return;
+    }
+    Logger.log('--- ' + sheetName + ' ---');
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    headers.forEach(function(h, i) {
+      Logger.log('Col ' + (i + 1) + ' (index ' + i + '): ' + h);
+    });
+  });
+}

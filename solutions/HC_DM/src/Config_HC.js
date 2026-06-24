@@ -56,15 +56,15 @@ var APP_CONFIG = {
       DEPLOYMENT_PHASE: 10,          // Deployment_Phase__c
       DEPLOYMENT_STAGE: 11,          // Deployment_Stage__c
       DEPLOYMENT_HEALTH: 12,         // Overall_Health__c
-      PARTNER: 14,                   // Deployment_Partner_Name__c (col 14 in HC, not 16)
+      PARTNER: 15,                   // Deployment_Partner_Name__c (col 14 in HC, not 16)
       // Fields not present in HC SFDC_Deployments — unused but declared
       // for shape compatibility with CoreConfig defaults.
       SERVICES_APPROACH: 10,         // alias of DEPLOYMENT_PHASE
       PROF_SERVICES_LOCS: 0,
       PROF_SERVICES_DETAILS: 0,
       DAM_FULL_NAME: 0,
-      WD_ENG_MANAGER: 0,
-      CURRENT_DEPLOYMENT_UPDATE: 0
+      WD_ENG_MANAGER: 14,
+      CURRENT_DEPLOYMENT_UPDATE: 16
     },
     goLives: {
       ACCOUNT_NAME: 1,
@@ -134,11 +134,12 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
+      { id: 'mgmPgl',      label: 'MGM / PGL' },
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' }
     ],
 
-    mgmPglTab: { enabled: false },
+    mgmPglTab: { enabled: true },
 
     deploymentsTable: {
       showIndustry:           false,

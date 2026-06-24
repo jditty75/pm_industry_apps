@@ -313,7 +313,7 @@ var CoreData = (function () {
       var sheet = _getPerfCacheSheet_();
       var lastRow = sheet.getLastRow();
       if (lastRow > 1) {
-        sheet.getRange(2, 1, lastRow - 1, 3).clearContent();
+        sheet.deleteRows(2, lastRow - 1);
       }
     } catch (err) {
       Logger.log('CoreData._perfCacheClearAll_: ' + err);

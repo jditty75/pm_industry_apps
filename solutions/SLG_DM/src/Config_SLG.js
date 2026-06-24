@@ -55,21 +55,21 @@ var APP_CONFIG = {
 
   columns: {
   deployments: {
-    ACCOUNT_NAME: 1,              // A: Customer__r.Name
-    INDUSTRY: 2,                  // B: Customer__r.Industry
-    SUB_REGION: 3,                // C: Customer__r.PS_Sub_Region__c
+    ACCOUNT_NAME: 3,              // A: Customer__r.Name
+    INDUSTRY: 4,                  // B: Customer__r.Industry
+    SUB_REGION: 19,                // C: Customer__r.PS_Sub_Region__c
     // 4: Customer__r.Consultant_Location_Restriction_Details__c (unused)
     // 5: Customer__r.Restriction_on_Consultant_Location__c       (unused)
-    DEPLOYMENT_NAME: 6,           // F: Name
-    DEPLOYMENT_PHASE: 7,          // G: Deployment_Phase__c (if used)
-    PARTNER: 8,                   // H: Deployment_Partner_Name__c
-    DEPLOYMENT_STAGE: 9,          // I: Deployment_Stage__c
-    DEPLOYMENT_HEALTH: 10,        // J: Overall_Health__c
-    CURRENT_MTP_DATE: 11,         // K: Current_MTP_Date__c
+    DEPLOYMENT_NAME: 2,           // F: Name
+    DEPLOYMENT_PHASE: 9,          // G: Deployment_Phase__c (if used)
+    PARTNER: 17,                   // H: Deployment_Partner_Name__c
+    DEPLOYMENT_STAGE: 11,          // I: Deployment_Stage__c
+    DEPLOYMENT_HEALTH: 12,        // J: Overall_Health__c
+    CURRENT_MTP_DATE: 7,         // K: Current_MTP_Date__c
     // 12: Delivery_Assurance_Manager__r (DAM) — optional, not currently wired
-    WD_ENG_MANAGER: 13,           // M: Workday_Engagement_Manager__r.Name
-    CURRENT_DEPLOYMENT_UPDATE: 14,// N: Deployment_Summary__c
-    DEPLOYMENT_ID: 15             // O: Id (full SF Id)
+    WD_ENG_MANAGER: 14,           // M: Workday_Engagement_Manager__r.Name
+    CURRENT_DEPLOYMENT_UPDATE: 18,// N: Deployment_Summary__c
+    DEPLOYMENT_ID: 1             // O: Id (full SF Id)
     },
     goLives: {
       ACCOUNT_NAME: 1,  // A
@@ -241,4 +241,14 @@ function _test_phase3a_SLG() {
   } else {
     Logger.log('No phased deployments found in this enrichment map.');
   }
+}
+
+function _debugSfdcColumns() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('SFDC_Deployments');
+  if (!sheet) { Logger.log('SFDC_Deployments sheet not found'); return; }
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  headers.forEach(function(h, i) {
+    Logger.log('Col ' + (i + 1) + ' (index ' + i + '): ' + h);
+  });
 }

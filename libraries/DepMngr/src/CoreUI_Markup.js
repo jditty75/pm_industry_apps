@@ -101,6 +101,9 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 
   parts.push('</div>'); // .container
 
+  // Executive Watch modal — informational, available to all roles.
+  parts.push(_CoreUI_Markup_buildExecWatchModal_());
+
   // Modals — only included for power users (read-only never opens them).
   if (!isReadOnly) {
     parts.push(_CoreUI_Markup_buildMetaModal_(filteredUi));
@@ -235,6 +238,7 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
     '      <div class="filter-group" id="health-chip-group">',
     // Health chips are rendered/wired by JS so the active set reflects defaultHealthFilter.
     '      </div>',
+    '      <button id="exec-watch-chip" class="filter-chip" onclick="toggleExecWatchFilter()">&#x26A0; Executive Watch</button>',
     '      <span class="filter-label" style="margin-left: var(--space-3);">Owner:</span>',
     '      <select id="owner-filter" class="filter-select" onchange="onDeploymentFilterChange()"></select>',
     '      <button class="filter-drawer-toggle" id="filter-drawer-toggle" onclick="toggleFilterDrawer()">',
@@ -777,6 +781,34 @@ function _CoreUI_Markup_buildOverridesTab_(ui) {
     activeOverridesSection,
     bulkActionsSection,
     auditTrailSection,
+    '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// MODAL: EXECUTIVE WATCH (App Enhancements Phase 1)
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildExecWatchModal_() {
+  return [
+    '<div id="exec-watch-modal" class="modal-overlay">',
+    '  <div class="modal-card" style="max-width:480px;">',
+    '    <div class="modal-header">',
+    '      <span class="modal-title">&#x26A0; Executive Watch</span>',
+    '      <button class="modal-close" onclick="closeExecWatchModal()">&#x2715;</button>',
+    '    </div>',
+    '    <div class="modal-body">',
+    '      <div class="modal-field-group">',
+    '        <label class="modal-label">CX Leader</label>',
+    '        <div id="exec-watch-cx-leader" class="modal-value"></div>',
+    '      </div>',
+    '      <div class="modal-field-group" style="margin-top:var(--space-3);">',
+    '        <label class="modal-label">Executive Summary</label>',
+    '        <div id="exec-watch-summary" class="modal-value"',
+    '             style="white-space:pre-wrap;"></div>',
+    '      </div>',
+    '    </div>',
+    '  </div>',
     '</div>'
   ].join('\n');
 }

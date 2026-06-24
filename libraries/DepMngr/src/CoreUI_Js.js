@@ -2715,7 +2715,7 @@ function _CoreUI_Js_getJsBundle() {
   '      _syncMgmPglTypeChips_();',
   '      var searchEl = document.getElementById(\'mgmpgl-search\');',
   '      if (searchEl) searchEl.value = \'\';',
-  '      renderMgmPglTable_();',
+  '      setMgmPglFilterType(mgmPglFilter ? mgmPglFilter.type : \'all\');',
   '      renderMgmPglExceptions_();',
   '      if (loadInd) loadInd.classList.add(\'hidden\');',
   '      var _winKeyLabels = { next30: \'Next 30 days\', thisMonth: \'This Month\', nextMonth: \'Next Month\', thisQuarter: \'This Quarter\', nextQuarter: \'Next Quarter\' };',

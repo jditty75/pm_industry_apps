@@ -24,6 +24,11 @@
  *                   Health Trajectory + By-Partner stacked bars, Health by DD
  *                   table, Time-in-Stage / Time-to-Go-Live cards, and Go-Live
  *                   Outcome Patterns. Rendered entirely by JS after data fetch.
+ *   Notable (Part 3): Notable Deployments tab added — tab shell, edit modal
+ *                   (two-column layout with read-only context pane + editable
+ *                   form), and add-picker modal. Modals rendered inside
+ *                   buildNotableTab_ and gated by roleVisibility (POWER_USER
+ *                   only). Registered in getAppShell after portfolio tab.
  *
  * Approved by Jeff in Phase 2 Design Brief 7joemhuqDkrv on 2026-06-09 14:07 EDT.
  *
@@ -88,6 +93,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if (tabIds.indexOf('execsummary') !== -1) parts.push(_CoreUI_Markup_buildExecSummaryTab_(filteredUi));
   if (tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportTab_(filteredUi, cfg));
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi));
+  if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi));
   if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
   if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi));
 
@@ -1262,6 +1268,277 @@ function _CoreUI_Markup_buildTrendsTab_(ui) {
     '  </div>',
     '',
     '</div>'  // #trends-tab
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// TAB: NOTABLE DEPLOYMENTS (Part 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the Notable Deployments tab shell plus its two modals (edit and
+ * add-picker). Modals are appended at the end of the returned HTML so they
+ * are included only when the notable tab is rendered (power users only).
+ *
+ * @param {Object} ui  cfg.ui (already filtered)
+ * @return {string}
+ */
+function _CoreUI_Markup_buildNotableTab_(ui) {
+  var tab = [
+    '<div id="notable-tab" class="tab-content">',
+    '  <div class="info-banner">',
+    '    &#11088; <strong>Notable Deployments</strong> &mdash; strategic customer go-lives for the global company report.',
+    '    Power users can edit existing entries and add new ones sourced from recent or upcoming go-lives.',
+    '  </div>',
+    '  <div class="control-bar">',
+    '    <div class="control-row" style="justify-content: space-between; align-items: center;">',
+    '      <span id="notable-count" style="font-size: 13px; color: var(--color-text-muted);"></span>',
+    '      <div class="filter-group">',
+    '        <button class="btn btn-secondary" onclick="loadNotableTab()">&#x1F504; Refresh</button>',
+    '        <button class="btn btn-primary" onclick="openNotableAddPicker()">+ Add Notable Deployment</button>',
+    '      </div>',
+    '    </div>',
+    '  </div>',
+    '  <div class="table-container">',
+    '    <div class="table-wrapper">',
+    '      <table id="notable-table">',
+    '        <thead><tr>',
+    '          <th>Health</th>',
+    '          <th>Account Name</th>',
+    '          <th>Deployment Name</th>',
+    '          <th>Notability Trigger</th>',
+    '          <th>Validation Status</th>',
+    '          <th>Latest Update</th>',
+    '          <th>Regional Owner</th>',
+    '          <th>Actions</th>',
+    '        </tr></thead>',
+    '        <tbody id="notable-tbody"></tbody>',
+    '      </table>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+
+  return tab + '\n' +
+    _CoreUI_Markup_buildNotableEditModal_(ui) + '\n' +
+    _CoreUI_Markup_buildNotableAddPickerModal_(ui);
+}
+
+/**
+ * Builds the Notable Deployment edit modal (shared for edit and add modes).
+ * Two-column layout: left pane shows read-only app context; right pane has
+ * four editable sections plus a footer notes field.
+ *
+ * @param {Object} ui  cfg.ui (already filtered)
+ * @return {string}
+ */
+function _CoreUI_Markup_buildNotableEditModal_(ui) {
+  return [
+    '<div id="notable-edit-modal" class="modal-overlay">',
+    '  <div class="modal modal-wide">',
+    '    <div class="modal-header">',
+    '      <h2 id="notable-edit-modal-title">Edit Notable Deployment</h2>',
+    '      <button class="modal-close" onclick="closeNotableEditModal()">&times;</button>',
+    '    </div>',
+    '    <div class="modal-body">',
+    '      <div class="notable-edit-columns">',
+
+    '        <!-- Left pane: read-only context from local app -->',
+    '        <div class="notable-edit-left">',
+    '          <div class="notable-section-caption">From your app</div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Account Name</label>',
+    '            <strong id="notable-ctx-account" class="form-value"></strong>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Deployment Name</label>',
+    '            <span id="notable-ctx-deployment" class="form-value"></span>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Industry</label>',
+    '            <span id="notable-ctx-industry" class="form-value"></span>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Account Number</label>',
+    '            <span id="notable-ctx-accountnum" class="form-value"></span>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Partner</label>',
+    '            <span id="notable-ctx-partner" class="form-value"></span>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Health</label>',
+    '            <span id="notable-ctx-health" class="form-value"></span>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Stage</label>',
+    '            <span id="notable-ctx-stage" class="form-value"></span>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">MTP Date</label>',
+    '            <span id="notable-ctx-mtp" class="form-value"></span>',
+    '          </div>',
+    '          <div class="form-group">',
+    '            <label class="form-label">Deployment ID</label>',
+    '            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">',
+    '              <code id="notable-ctx-id" style="font-size:11px;word-break:break-all;"></code>',
+    '              <button class="btn btn-secondary"',
+    '                      style="padding:2px 8px;font-size:11px;flex-shrink:0;"',
+    '                      onclick="copyNotableId()">Copy</button>',
+    '            </div>',
+    '          </div>',
+    '        </div>',
+
+    '        <!-- Right pane: editable fields -->',
+    '        <div class="notable-edit-right">',
+
+    '          <!-- Section 1: Status & Ownership -->',
+    '          <div class="notable-form-section">',
+    '            <div class="notable-section-caption">Status &amp; Ownership</div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">Data Validation Status</label>',
+    '              <select id="notable-validation-status" class="form-select">',
+    '                <option value="Raw/Unverified">Raw/Unverified</option>',
+    '                <option value="Region Approved">Region Approved</option>',
+    '                <option value="Region Restricted">Region Restricted</option>',
+    '              </select>',
+    '            </div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">Latest Update</label>',
+    '              <input type="date" id="notable-latest-update" class="form-input">',
+    '            </div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">Regional Owner or Delegate</label>',
+    '              <input type="text" id="notable-regional-owner" class="form-input"',
+    '                     placeholder="Enter name">',
+    '            </div>',
+    '          </div>',
+
+    '          <!-- Section 2: Notability -->',
+    '          <div class="notable-form-section">',
+    '            <div class="notable-section-caption">Notability</div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">',
+    '                Notability Trigger',
+    '                <span style="color:var(--color-danger,#ef4444);">*</span>',
+    '              </label>',
+    '              <input type="text" id="notable-trigger" class="form-input"',
+    '                     list="notable-trigger-suggestions"',
+    '                     placeholder="e.g. First in Industry, Strategic Win">',
+    '              <datalist id="notable-trigger-suggestions"></datalist>',
+    '            </div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">Fit-for-Purpose</label>',
+    '              <input type="text" id="notable-fit" class="form-input"',
+    '                     placeholder="e.g. Marquee, Reference-able">',
+    '            </div>',
+    '          </div>',
+
+    '          <!-- Section 3: Story -->',
+    '          <div class="notable-form-section">',
+    '            <div class="notable-section-caption">Story</div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">Scope (Human Summary)</label>',
+    '              <textarea id="notable-scope" class="form-textarea" rows="3"',
+    '                        placeholder="Brief scope summary\u2026"></textarea>',
+    '            </div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">Story Blurb / Executive Summary</label>',
+    '              <textarea id="notable-story" class="form-textarea" rows="3"',
+    '                        placeholder="Executive-level story\u2026"></textarea>',
+    '            </div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">Business Outcomes / Scope</label>',
+    '              <textarea id="notable-outcomes" class="form-textarea" rows="3"',
+    '                        placeholder="Key business outcomes\u2026"></textarea>',
+    '            </div>',
+    '          </div>',
+
+    '          <!-- Section 4: Supporting Material -->',
+    '          <div class="notable-form-section">',
+    '            <div class="notable-section-caption">Supporting Material</div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">',
+    '                Link(s) to Supporting Material',
+    '                <span style="font-weight:400;color:var(--color-text-muted);">(one URL per line)</span>',
+    '              </label>',
+    '              <textarea id="notable-links" class="form-textarea" rows="3"',
+    '                        placeholder="https://\u2026"></textarea>',
+    '            </div>',
+    '            <div class="form-group">',
+    '              <label class="form-label">',
+    '                Standout Team Members',
+    '                <span style="font-weight:400;color:var(--color-text-muted);">(comma-separated)</span>',
+    '              </label>',
+    '              <input type="text" id="notable-team" class="form-input"',
+    '                     placeholder="e.g. Jane Smith, John Doe">',
+    '            </div>',
+    '          </div>',
+
+    '          <!-- Footer notes field -->',
+    '          <div class="form-group" style="margin-top:var(--space-3);">',
+    '            <label class="form-label">',
+    '              Reason for this update',
+    '              <span style="font-weight:400;color:var(--color-text-muted);">(optional)</span>',
+    '            </label>',
+    '            <input type="text" id="notable-notes" class="form-input"',
+    '                   placeholder="Why is this being updated?">',
+    '          </div>',
+
+    '        </div>', // .notable-edit-right
+    '      </div>', // .notable-edit-columns
+    '    </div>', // .modal-body
+    '    <div class="modal-footer">',
+    '      <button class="btn btn-secondary" onclick="closeNotableEditModal()">Cancel</button>',
+    '      <button class="btn btn-primary" id="notable-save-btn" onclick="saveNotableDeployment()">',
+    '        <span id="notable-save-btn-text">Save Changes</span>',
+    '        <span id="notable-save-spinner" class="spinner hidden"></span>',
+    '      </button>',
+    '    </div>',
+    '  </div>', // .modal
+    '</div>'    // #notable-edit-modal
+  ].join('\n');
+}
+
+/**
+ * Builds the Notable Deployment add-picker modal. Displays recent and upcoming
+ * go-lives as searchable, clickable candidates. Selecting one opens the edit
+ * modal in add mode.
+ *
+ * @param {Object} ui  cfg.ui (already filtered)
+ * @return {string}
+ */
+function _CoreUI_Markup_buildNotableAddPickerModal_(ui) {
+  return [
+    '<div id="notable-add-picker-modal" class="modal-overlay">',
+    '  <div class="modal">',
+    '    <div class="modal-header">',
+    '      <h2>Add Notable Deployment</h2>',
+    '      <button class="modal-close" onclick="closeNotableAddPicker()">&times;</button>',
+    '    </div>',
+    '    <div class="modal-body">',
+    '      <p style="margin:0 0 var(--space-3) 0;font-size:13px;color:var(--color-text-muted);">',
+    '        Choose a deployment from recent or upcoming go-lives to nominate as notable.',
+    '        Use the search box to filter by account or deployment name.',
+    '      </p>',
+    '      <div class="control-row" style="margin-bottom:var(--space-3);">',
+    '        <div class="search-box">',
+    '          <span class="search-icon">&#x1F50D;</span>',
+    '          <input type="text" id="notable-picker-search"',
+    '                 placeholder="Search by account or deployment&hellip;"',
+    '                 onkeyup="filterNotablePicker()">',
+    '        </div>',
+    '      </div>',
+    '      <div id="notable-picker-list"',
+    '           style="max-height:360px;overflow-y:auto;border:1px solid var(--color-border);border-radius:var(--radius-md);padding:var(--space-2);">',
+    '        <!-- JS populates clickable candidate rows -->',
+    '      </div>',
+    '    </div>',
+    '    <div class="modal-footer">',
+    '      <button class="btn btn-secondary" onclick="closeNotableAddPicker()">Cancel</button>',
+    '    </div>',
+    '  </div>',
+    '</div>'
   ].join('\n');
 }
 

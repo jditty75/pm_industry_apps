@@ -14,6 +14,7 @@
  *  - Config-driven per app via cfg.notable (see CoreConfig.withDefaults).
  *
  * Part 1 scope: server-side only. No WebApp endpoints or UI.
+ * Part 5 scope: _warmNotable(cfg) pre-warm hook for 5-minute trigger.
  *
  * Sheets consumed:
  *  - Peer sheet: SpreadsheetApp.openById(cfg.notable.sheetId),
@@ -606,6 +607,40 @@ var CoreNotable = (function () {
   }
 
   // ---------------------------------------------------------------------------
+  // PRE-WARM
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Pre-warms the in-memory cache for this app's notable deployments.
+   * Clears the current cache, reads the peer sheet raw rows, then builds
+   * the joined view so the next user-triggered endpoint hits warm data.
+   * Called by CoreSalesforce._warmCaches on every 5-minute background run.
+   *
+   * @param {AppConfig} config
+   * @return {{ ok: boolean, peerRows: number, matched: number }}
+   */
+  function _warmNotable(config) {
+    try {
+      var cfg = CoreConfig.withDefaults(config);
+      // Reset in-memory cache to force a fresh read from the peer sheet.
+      _cache.peerRows  = null;
+      _cache.headerMap = null;
+      // Populate raw peer sheet rows (also fills _cache.peerRows).
+      var peerRows = readPeerSheet_(cfg);
+      // Build and return the joined view for this app's portfolio.
+      var joined = getNotableForApp(cfg);
+      var n = peerRows.length;
+      var m = joined.length;
+      Logger.log('CoreNotable._warmNotable(' + cfg.appId + '): ' + n +
+                 ' peer rows, ' + m + ' matched for this app.');
+      return { ok: true, peerRows: n, matched: m };
+    } catch (err) {
+      Logger.log('CoreNotable._warmNotable: error: ' + err);
+      return { ok: false };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // EXPORTS
   // ---------------------------------------------------------------------------
 
@@ -613,7 +648,8 @@ var CoreNotable = (function () {
     getNotableForApp:        getNotableForApp,
     updateNotableDeployment: updateNotableDeployment,
     addNotableDeployment:    addNotableDeployment,
-    _clearNotableCache:      _clearNotableCache
+    _clearNotableCache:      _clearNotableCache,
+    _warmNotable:            _warmNotable
   };
 
 })();

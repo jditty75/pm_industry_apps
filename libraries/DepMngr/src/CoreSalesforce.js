@@ -34,6 +34,8 @@
  *   Phase 3a (v11): introduced as part of the Salesforce two-query join.
  *   Phase 3i: extended with recentDates + lastGoLiveDate from Actual move dates;
  *             isPhased now considers the union of all upcoming + recent dates.
+ *   Phase 5 (Notable): _warmCaches now calls CoreNotable._warmNotable so the
+ *             5-minute time-based trigger also pre-warms Notable peer-sheet data.
  */
 
 // ===========================================================================
@@ -279,6 +281,12 @@ function _warmCaches(config) {
     rowCount = (CoreData._getCachedSfdcRowCount && CoreData._getCachedSfdcRowCount()) || 0;
   } catch (err) {
     Logger.log('CoreSalesforce._warmCaches: SFDC warm failed: ' + err);
+  }
+  // Notable Deployments: warm the peer-sheet join for this app.
+  try {
+    CoreNotable._warmNotable(cfg);
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: Notable warm failed: ' + err);
   }
   var elapsed = Date.now() - start;
   Logger.log('CoreSalesforce._warmCaches(' + cfg.appId + '): ' + elapsed + 'ms, ' +

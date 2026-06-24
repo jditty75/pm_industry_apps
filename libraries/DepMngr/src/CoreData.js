@@ -312,9 +312,8 @@ var CoreData = (function () {
     try {
       var sheet = _getPerfCacheSheet_();
       var lastRow = sheet.getLastRow();
-      if (lastRow > 1) {
-        sheet.deleteRows(2, lastRow - 1);
-      }
+      if (lastRow < 2) return;
+      sheet.deleteRows(2, lastRow - 1);
     } catch (err) {
       Logger.log('CoreData._perfCacheClearAll_: ' + err);
     }
@@ -704,9 +703,10 @@ var CoreData = (function () {
    */
   function buildWellnessMap_(cfg) {
     try {
-      var ss = SpreadsheetApp.openById(cfg.spreadsheetId);
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
       var sheet = ss.getSheetByName(cfg.sheets.wellness || 'SFDC_Wellness');
       if (!sheet || sheet.getLastRow() < 2) return {};
+      if (sheet.getLastColumn() === 0) return {};
       var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1,
                                 sheet.getLastColumn()).getValues();
       var map = {};

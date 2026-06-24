@@ -474,9 +474,24 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
 function _CoreUI_Markup_buildOverviewTab_() {
   return [
     '<div id="overview-tab" class="tab-content active">',
-    '  <div style="text-align:center; padding:3rem;">',
-    '    <div class="spinner-large"></div>',
-    '    <p style="margin-top:1rem;">Loading overview...</p>',
+    '  <div class="info-banner">',
+    '    📋 Portfolio snapshot — KPIs, upcoming Go-Lives, and at-risk deployments. Data loads in the background.',
+    '  </div>',
+    '  <div class="stats-grid" id="overview-kpi-strip"></div>',
+    '  <div class="stats-grid" id="overview-golives-strip" style="margin-top:var(--space-3);"></div>',
+    '  <div id="overview-lists" style="display:flex; gap:var(--space-4); margin-top:var(--space-4); flex-wrap:wrap;">',
+    '    <div style="flex:1; min-width:280px;">',
+    '      <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Top Red — Soonest MTP</h3>',
+    '      <div id="overview-top-red"></div>',
+    '    </div>',
+    '    <div style="flex:1; min-width:280px;">',
+    '      <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Upcoming Go-Lives (Next 30d)</h3>',
+    '      <div id="overview-upcoming"></div>',
+    '    </div>',
+    '  </div>',
+    '  <div style="margin-top:var(--space-4);">',
+    '    <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Deployments by Stage</h3>',
+    '    <div id="overview-stage-strip" style="display:flex; flex-wrap:wrap; gap:var(--space-2);"></div>',
     '  </div>',
     '</div>'
   ].join('\n');

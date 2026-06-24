@@ -92,8 +92,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(filteredUi));
   if (tabIds.indexOf('golives') !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(filteredUi));
   if (tabIds.indexOf('mgmPgl') !== -1 && ui.mgmPglTab && ui.mgmPglTab.enabled) parts.push(_CoreUI_Markup_buildMgmPglTab_(filteredUi));
-  if (tabIds.indexOf('execsummary') !== -1) parts.push(_CoreUI_Markup_buildExecSummaryTab_(filteredUi));
-  if (tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportTab_(filteredUi, cfg));
+  if (tabIds.indexOf('execsummary') !== -1 || tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportingTab_(filteredUi, cfg));
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi));
   if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi));
   if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
@@ -177,7 +176,16 @@ function _CoreUI_Markup_buildTabBar_(ui) {
   if (hasOverview) {
     html.push('  <button class="tab active" onclick="switchTab(\'overview\')">Overview</button>');
   }
+  var reportingInjected = false;
   tabs.forEach(function (t) {
+    // Merge the standalone execsummary + report tabs into one Reporting button.
+    if (t.id === 'execsummary' || t.id === 'report') {
+      if (!reportingInjected) {
+        html.push('  <button class="tab" onclick="switchTab(\'reporting\')">Reporting</button>');
+        reportingInjected = true;
+      }
+      return;
+    }
     html.push(
       '  <button class="tab" onclick="switchTab(\'' + _CoreUI_Markup_esc_(t.id) + '\')">' +
       _CoreUI_Markup_esc_(t.label) +
@@ -552,6 +560,75 @@ function _CoreUI_Markup_buildReportTab_(ui, cfg) {
     '    <div id="report-preview-container" style="padding: 24px; min-height: 400px;">',
     '      <div style="text-align: center; padding: 48px 24px; color: var(--color-text-subtle);">',
     '        <p>Click \u201cRefresh Report\u201d to load the monthly report preview</p>',
+    '      </div>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// TAB: REPORTING — consolidated Executive Summary + Monthly Report Preview
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildReportingTab_(ui, cfg) {
+  var reportTitle = (cfg.report && cfg.report.title) || 'Deployment Health Status Report';
+  var showIndicator = ui.personalization && ui.personalization.enabled &&
+                      ui.personalization.showFullPortfolioIndicator !== false;
+  return [
+    '<div id="reporting-tab" class="tab-content">',
+    '  <div class="seg-control" style="margin-bottom: var(--space-3);">',
+    '    <button class="seg-control-btn active" data-reporting-view="execsummary"',
+    '            onclick="switchReportingView(\'execsummary\')">Executive Summary</button>',
+    '    <button class="seg-control-btn" data-reporting-view="report"',
+    '            onclick="switchReportingView(\'report\')">Monthly Report</button>',
+    '  </div>',
+    '  <div id="reporting-execsummary-section">',
+    '    <div class="info-banner">',
+    '      \uD83D\uDCDD Use this editor to draft or paste the monthly <strong>Executive Summary</strong>. The styled content is saved and included at the top of the Monthly HTML Report.',
+    '    </div>',
+    '    <div class="control-bar" style="align-items: flex-start;">',
+    '      <div style="flex: 1; min-width: 250px;">',
+    '        <p style="margin: 0 0 0.5rem 0; color: var(--color-text-muted); font-size: 12px;">',
+    '          Paste or type formatted text below (headings, bold, lists, etc.).',
+    '        </p>',
+    '        <div id="exec-editor" contenteditable="true" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); min-height: 200px; padding: 12px; font-size: 14px; line-height: 1.5; overflow-y: auto;"></div>',
+    '      </div>',
+    '      <div class="filter-group" style="flex-direction: column; align-items: flex-end; gap: 8px;">',
+    '        <button class="btn btn-secondary" onclick="loadExecSummaryFromServer()">\u2B07 Load Saved</button>',
+    '        <button class="btn btn-primary" onclick="saveExecSummaryToServer()">\uD83D\uDCBE Save Executive Summary</button>',
+    '      </div>',
+    '    </div>',
+    '    <p style="font-size: 12px; color: var(--color-text-subtle); margin-top: 8px;">',
+    '      Tip: You can paste formatted content from Docs/Word; most basic formatting (bold, italics, lists) will be preserved.',
+    '    </p>',
+    '  </div>',
+    '  <div id="reporting-report-section" style="display:none;">',
+    (showIndicator
+      ? '    <div class="full-portfolio-indicator">\u2139\uFE0F This view always reflects the full team \u2014 used for external communication.</div>'
+      : ''),
+    '    <div class="info-banner">',
+    '      \uD83D\uDCC4 Preview of the monthly <strong>' + _CoreUI_Markup_esc_(reportTitle) + '</strong> \u2013 same HTML as the menu-based preview.',
+    '    </div>',
+    '    <div class="control-bar">',
+    '      <div class="control-row" style="justify-content: space-between; align-items: center;">',
+    '        <div class="seg-control" id="report-view-toggle" role="group" aria-label="Report view format">',
+    '          <button class="seg-control-btn active" data-report-view="outlook" onclick="switchReportView(\'outlook\')">Outlook View</button>',
+    '          <button class="seg-control-btn" data-report-view="inline" onclick="switchReportView(\'inline\')">Inline View</button>',
+    '        </div>',
+    '        <button class="btn btn-primary" onclick="loadReportPreview()">\uD83D\uDD04 Refresh Report</button>',
+    '      </div>',
+    '      <div class="control-row">',
+    '        <p style="margin: 0; color: var(--color-text-muted); font-size: 13px;">',
+    '          <strong>Outlook View</strong> is optimized for email clients. <strong>Inline View</strong> uses modern HTML for browser reading.',
+    '        </p>',
+    '      </div>',
+    '    </div>',
+    '    <div class="table-container" style="padding: 0;">',
+    '      <div id="report-preview-container" style="padding: 24px; min-height: 400px;">',
+    '        <div style="text-align: center; padding: 48px 24px; color: var(--color-text-subtle);">',
+    '          <p>Click \u201cRefresh Report\u201d to load the monthly report preview</p>',
+    '        </div>',
     '      </div>',
     '    </div>',
     '  </div>',

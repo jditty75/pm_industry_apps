@@ -259,7 +259,7 @@ function getGoLivesForNotablePicker() {
  */
 function getOverviewData() {
   try {
-    var ss  = SpreadsheetApp.openById(APP_CONFIG.spreadsheetId);
+    var ss  = SpreadsheetApp.getActiveSpreadsheet();
 
     // ── Read SFDC_Deployments ───────────────────────────────────────────
     var depSheet = ss.getSheetByName((APP_CONFIG.sheets && APP_CONFIG.sheets.deployments) || 'SFDC_Deployments');

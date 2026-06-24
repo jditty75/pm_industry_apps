@@ -462,6 +462,144 @@ function getGoLivesForNotablePicker() {
 
   return results;
 }
+// ============================================================================
+// OVERVIEW TAB DATA
+// ============================================================================
+
+/**
+ * Returns aggregated KPI data for the Overview tab.
+ * Reads directly from SFDC_Deployments and SFDC_Wellness sheets using
+ * 0-based confirmed column indices from the 24-col standard layout.
+ *
+ * @return {Object}  { deployments, goLives, executiveWatch } | { error }
+ */
+function getOverviewData() {
+  try {
+    var ss  = SpreadsheetApp.getActiveSpreadsheet();
+
+    // ── Read SFDC_Deployments ───────────────────────────────────────────
+    var depSheet = ss.getSheetByName((APP_CONFIG.sheets && APP_CONFIG.sheets.deployments) || 'SFDC_Deployments');
+    var depData  = (depSheet && depSheet.getLastRow() > 1)
+      ? depSheet.getRange(2, 1, depSheet.getLastRow() - 1,
+                          depSheet.getLastColumn()).getValues()
+      : [];
+
+    // 0-based confirmed column indices
+    var C_ID         = 0;
+    var C_NAME       = 1;
+    var C_ACCOUNT_ID = 2;
+    var C_ACCOUNT    = 3;
+    var C_MTP        = 11;
+    var C_FIRST_MTP  = 12;
+    var C_STATUS     = 13;
+    var C_STAGE      = 15;
+    var C_HEALTH     = 16;
+    var C_PARTNER    = 22;
+
+    var now             = new Date();
+    var thirtyDaysAgo   = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    var thirtyDaysAhead = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    var totalActive = 0, red = 0, yellow = 0, green = 0;
+    var recentGoLives = 0, upcomingGoLives = 0;
+    var stageMap = {};
+    var topRedRows = [], upcomingRows = [];
+
+    depData.forEach(function(r) {
+      var status = (r[C_STATUS] || '').toString().trim();
+      var health = (r[C_HEALTH] || '').toString().trim();
+
+      if (status === 'Active') {
+        totalActive++;
+        if      (health === 'Red')    red++;
+        else if (health === 'Yellow') yellow++;
+        else if (health === 'Green')  green++;
+
+        var stage = (r[C_STAGE] || 'Unknown').toString().trim();
+        stageMap[stage] = (stageMap[stage] || 0) + 1;
+
+        var mtp = r[C_MTP] ? new Date(r[C_MTP]) : null;
+        if (mtp && !isNaN(mtp) && mtp >= now && mtp <= thirtyDaysAhead) {
+          upcomingGoLives++;
+          upcomingRows.push({
+            accountName:    (r[C_ACCOUNT] || '').toString(),
+            deploymentName: (r[C_NAME]    || '').toString(),
+            mtpDate:        r[C_MTP] ? r[C_MTP].toString() : ''
+          });
+        }
+
+        if (health === 'Red') {
+          topRedRows.push({
+            accountName:    (r[C_ACCOUNT] || '').toString(),
+            deploymentName: (r[C_NAME]    || '').toString(),
+            partner:        (r[C_PARTNER] || '').toString(),
+            mtpDate:        r[C_MTP] ? r[C_MTP].toString() : ''
+          });
+        }
+      }
+
+      if (status === 'Complete') {
+        var firstMtp = r[C_FIRST_MTP] ? new Date(r[C_FIRST_MTP]) : null;
+        if (firstMtp && !isNaN(firstMtp) &&
+            firstMtp >= thirtyDaysAgo && firstMtp <= now) {
+          recentGoLives++;
+        }
+      }
+    });
+
+    // Sort and trim lists
+    topRedRows.sort(function(a, b) {
+      return new Date(a.mtpDate || 0) - new Date(b.mtpDate || 0);
+    });
+    topRedRows = topRedRows.slice(0, 5);
+
+    upcomingRows.sort(function(a, b) {
+      return new Date(a.mtpDate || 0) - new Date(b.mtpDate || 0);
+    });
+    upcomingRows = upcomingRows.slice(0, 5);
+
+    var byStage = Object.keys(stageMap).sort().map(function(s) {
+      return { stage: s, count: stageMap[s] };
+    });
+
+    // ── Read SFDC_Wellness — count executive watch deployments ──────────
+    var wellnessSheet = ss.getSheetByName((APP_CONFIG.sheets && APP_CONFIG.sheets.wellness) || 'SFDC_Wellness');
+    var wellnessAccountIds = {};
+    if (wellnessSheet && wellnessSheet.getLastRow() > 1) {
+      wellnessSheet.getRange(2, 1, wellnessSheet.getLastRow() - 1, 2)
+        .getValues().forEach(function(r) {
+          var aid = (r[1] || '').toString().slice(0, 15);
+          if (aid) wellnessAccountIds[aid] = true;
+        });
+    }
+    var executiveWatchCount = 0;
+    depData.forEach(function(r) {
+      if ((r[C_STATUS] || '').toString().trim() !== 'Active') return;
+      var aid = (r[C_ACCOUNT_ID] || '').toString().slice(0, 15);
+      if (wellnessAccountIds[aid]) executiveWatchCount++;
+    });
+
+    return {
+      deployments: {
+        total:   totalActive,
+        red:     red,
+        yellow:  yellow,
+        green:   green,
+        byStage: byStage,
+        topRed:  topRedRows
+      },
+      goLives: {
+        recentCount:   recentGoLives,
+        upcomingCount: upcomingGoLives,
+        upcomingList:  upcomingRows
+      },
+      executiveWatch: { count: executiveWatchCount }
+    };
+  } catch(e) {
+    return { error: e.toString() };
+  }
+}
+
 function _debugSfdcColumns() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetNames = ['SFDC_Deployments', 'SFDC_Wellness'];

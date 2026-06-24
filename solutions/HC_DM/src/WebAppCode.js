@@ -151,3 +151,98 @@ function _runValidation() {
 function _warmCaches() {
   return CoreLib.CoreSalesforce._warmCaches(APP_CONFIG);
 }
+
+// ============================================================================
+// NOTABLE DEPLOYMENTS (Part 2)
+// ============================================================================
+
+/**
+ * Returns the list of notable deployments for this app, joined with local
+ * effective deployments. Delegates to CoreLib.CoreNotable.getNotableForApp.
+ *
+ * @return {Array<Object>}
+ */
+function getNotableData() {
+  return CoreLib.CoreNotable.getNotableForApp(APP_CONFIG);
+}
+
+/**
+ * Updates editable fields on an existing notable peer row.
+ * Errors (including access-denied) propagate unchanged to the client.
+ *
+ * @param {string} deploymentId  Full or 15-char-prefix SFDC Deployment ID.
+ * @param {Object} fieldUpdates  Map of editable header name -> new value.
+ * @param {string=} notes        Optional change notes.
+ * @return {{ success: boolean, rowIndex: number }}
+ */
+function updateNotable(deploymentId, fieldUpdates, notes) {
+  return CoreLib.CoreNotable.updateNotableDeployment(
+    APP_CONFIG,
+    deploymentId,
+    fieldUpdates,
+    notes
+  );
+}
+
+/**
+ * Adds a new notable row for a deployment in this app's effective deployments.
+ * Errors propagate unchanged to the client. If a peer row already exists,
+ * CoreNotable throws an error whose message starts with "DUPLICATE:" — the
+ * client can detect this prefix and redirect to edit instead of add.
+ *
+ * @param {string} deploymentId  Full or 15-char-prefix SFDC Deployment ID.
+ * @param {Object} fieldUpdates  Field overrides; must include 'Notability Trigger'.
+ * @param {string=} notes        Optional change notes.
+ * @return {{ success: boolean, rowIndex: number }}
+ */
+function addNotable(deploymentId, fieldUpdates, notes) {
+  return CoreLib.CoreNotable.addNotableDeployment(
+    APP_CONFIG,
+    deploymentId,
+    fieldUpdates,
+    notes
+  );
+}
+
+/**
+ * Returns a combined array of recent and upcoming go-live deployments for the
+ * Notable Deployment picker. Each entry is a lightweight object suitable for
+ * client-side rendering. Does not filter out deployments already in the notable
+ * list — the client can overlay that if needed.
+ *
+ * @return {Array<{deploymentId:string, accountName:string, deploymentName:string,
+ *                 industry:string, mtpDate:string|null, goLiveDate:string|null,
+ *                 view:string}>}
+ */
+function getGoLivesForNotablePicker() {
+  var recent = CoreLib.CoreData.getRecentGoLives(APP_CONFIG, {}) || [];
+  var upcoming = CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, {}) || [];
+
+  var results = [];
+
+  recent.forEach(function (row) {
+    results.push({
+      deploymentId:   row.deploymentId   || '',
+      accountName:    row.accountName    || '',
+      deploymentName: row.deploymentName || '',
+      industry:       row.industry       || '',
+      mtpDate:        null,
+      goLiveDate:     row.lastGoLiveDate || null,
+      view:           'recent'
+    });
+  });
+
+  upcoming.forEach(function (row) {
+    results.push({
+      deploymentId:   row.deploymentId              || '',
+      accountName:    row.accountName               || '',
+      deploymentName: row.deploymentName            || '',
+      industry:       row.industry                  || '',
+      mtpDate:        row.nextGoLiveDate || row.mtpDate || null,
+      goLiveDate:     null,
+      view:           'upcoming'
+    });
+  });
+
+  return results;
+}

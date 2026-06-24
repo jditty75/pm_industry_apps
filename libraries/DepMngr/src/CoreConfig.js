@@ -224,6 +224,8 @@ var CoreConfig = (function () {
     // MGM/PGL patch: contacts sheet
     if (!cfg.sheets.deploymentContacts)
       cfg.sheets.deploymentContacts = 'SFDC_DeploymentContacts';
+    if (!cfg.sheets.wellness)
+      cfg.sheets.wellness = 'SFDC_Wellness';
 
     // -------------------------------------------------------------------------
     // Salesforce (Phase 3a, extended Phase 3i)
@@ -263,6 +265,15 @@ var CoreConfig = (function () {
       PARTNER: 5, DEPLOYMENT_NAME: 6, SERVICES_APPROACH: 7, PRODUCT_AREA: 8,
       GO_LIVE_DATE_ACTUAL: 9, IN_PRODUCTION: 10
     };
+
+    // -------------------------------------------------------------------------
+    // Overview tab
+    // -------------------------------------------------------------------------
+    cfg.overviewTab = cfg.overviewTab || {};
+    if (cfg.overviewTab.enabled === undefined)              cfg.overviewTab.enabled             = true;
+    if (cfg.overviewTab.topRedCount === undefined)          cfg.overviewTab.topRedCount         = 5;
+    if (cfg.overviewTab.upcomingGoLiveDays === undefined)   cfg.overviewTab.upcomingGoLiveDays  = 30;
+    if (cfg.overviewTab.recentGoLiveDays === undefined)     cfg.overviewTab.recentGoLiveDays    = 30;
 
     // -------------------------------------------------------------------------
     // Report

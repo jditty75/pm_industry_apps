@@ -691,6 +691,41 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
+  // WELLNESS MAP
+  // ===========================================================================
+
+  /**
+   * Builds a map of accountId (15-char) → { cxLeaderName, executiveSummary }
+   * from the SFDC_Wellness sheet. Returns {} if the sheet is absent or empty.
+   *
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @return {Object}
+   * @private
+   */
+  function buildWellnessMap_(cfg) {
+    try {
+      var ss = SpreadsheetApp.openById(cfg.spreadsheetId);
+      var sheet = ss.getSheetByName(cfg.sheets.wellness || 'SFDC_Wellness');
+      if (!sheet || sheet.getLastRow() < 2) return {};
+      var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1,
+                                sheet.getLastColumn()).getValues();
+      var map = {};
+      rows.forEach(function(r) {
+        var accountId = (r[1] || '').toString().slice(0, 15); // Account__c col 2
+        if (!accountId) return;
+        map[accountId] = {
+          cxLeaderName:     (r[3] || '').toString(), // CX_Leader_Assignment__r.Name col 4
+          executiveSummary: (r[4] || '').toString()  // Executive_Summary__c col 5
+        };
+      });
+      return map;
+    } catch(e) {
+      Logger.log('buildWellnessMap_ error: ' + e);
+      return {};
+    }
+  }
+
+  // ===========================================================================
   // PHASE 3i: SFDC_DEPLOYMENTS READER (Active + Complete unified source)
   // ===========================================================================
 
@@ -788,6 +823,7 @@ var CoreData = (function () {
     }
 
     var tz = Session.getScriptTimeZone();
+    var _wellnessMap = buildWellnessMap_(cfg);
 
     var rows = [];
     for (var r = 1; r < allValues.length; r++) {
@@ -806,7 +842,7 @@ var CoreData = (function () {
       var deploymentId = cellStr_(colId);
       if (!deploymentId) continue; // skip rows with no SF Id
 
-      rows.push({
+      var rowObj = {
         deploymentId:        deploymentId,
         deploymentName:      cellStr_(colName),
         accountId:           cellStr_(colAccountId),
@@ -831,7 +867,12 @@ var CoreData = (function () {
         implPartner:         cellStr_(colImplPartner),
         partner:             cellStr_(colPartner),
         currentUpdate:       cellStr_(colSummary)
-      });
+      };
+      var _wKey = (rowObj.accountId || '').slice(0, 15);
+      var _wellness = _wellnessMap[_wKey] || null;
+      rowObj.isExecutiveWatch = !!_wellness;
+      rowObj.wellnessData     = _wellness;
+      rows.push(rowObj);
     }
 
     Logger.log('CoreData.readSfdcDeploymentsRaw_: read ' + rows.length +

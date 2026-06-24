@@ -44,27 +44,30 @@ var APP_CONFIG = {
 
   columns: {
     deployments: {
-      // HC SFDC_Deployments column positions (14 cols, not 16).
-      // Header detection in CoreData.readSfdcDeploymentsRaw_ is primary;
-      // these positional values are fallback only.
-      DEPLOYMENT_ID: 1,             // Id
-      DEPLOYMENT_NAME: 2,            // Name
-      ACCOUNT_NAME: 3,               // Customer__r.Name
-      INDUSTRY: 4,                   // Customer__r.Industry
-      SUB_REGION: 5,                 // Customer__r.PS_Region_New__c
-      CURRENT_MTP_DATE: 7,           // Current_MTP_Date__c
-      DEPLOYMENT_PHASE: 10,          // Deployment_Phase__c
-      DEPLOYMENT_STAGE: 11,          // Deployment_Stage__c
-      DEPLOYMENT_HEALTH: 12,         // Overall_Health__c
-      PARTNER: 15,                   // Deployment_Partner_Name__c (col 14 in HC, not 16)
-      // Fields not present in HC SFDC_Deployments — unused but declared
-      // for shape compatibility with CoreConfig defaults.
-      SERVICES_APPROACH: 10,         // alias of DEPLOYMENT_PHASE
-      PROF_SERVICES_LOCS: 0,
-      PROF_SERVICES_DETAILS: 0,
-      DAM_FULL_NAME: 0,
-      WD_ENG_MANAGER: 14,
-      CURRENT_DEPLOYMENT_UPDATE: 16
+      DEPLOYMENT_ID:              1,
+      DEPLOYMENT_NAME:            2,
+      ACCOUNT_ID:                 3,
+      ACCOUNT_NAME:               4,
+      INDUSTRY:                   5,
+      REGION:                     6,
+      SUB_REGION:                 7,
+      SUB_REGION_ALT:             8,
+      BILLING_STATE:              9,
+      BILLING_CITY:              10,
+      DEPLOYMENT_START_DATE:     11,
+      CURRENT_MTP_DATE:          12,
+      FIRST_MTP_DATE:            13,
+      OVERALL_STATUS:            14,
+      DEPLOYMENT_PHASE:          15,
+      DEPLOYMENT_STAGE:          16,
+      DEPLOYMENT_HEALTH:         17,
+      COMPLETION_DATE:           18,
+      WD_ENG_MANAGER:            19,
+      DAM_FULL_NAME:             20,
+      PRIMING_PARTNER:           21,
+      IMPL_PARTNER:              22,
+      PARTNER:                   23,
+      CURRENT_DEPLOYMENT_UPDATE: 24
     },
     goLives: {
       ACCOUNT_NAME: 1,

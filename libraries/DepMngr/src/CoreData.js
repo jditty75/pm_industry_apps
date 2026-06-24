@@ -748,41 +748,35 @@ var CoreData = (function () {
       return -1;
     }
 
-    // Distinguish the bare 'id' column (deploymentId) from all others.
-    var colId = -1;
-    for (var i = 0; i < lowerH.length; i++) {
-      if (lowerH[i] === 'id') { colId = i; break; }
-    }
-    // Fall back: find last column whose lower header is exactly 'id' or ends with '.id'
-    if (colId < 0) {
-      for (var i = lowerH.length - 1; i >= 0; i--) {
-        if (lowerH[i] === 'id' || lowerH[i].match(/\.id$/)) { colId = i; break; }
-      }
-    }
-
-    var colAccountName    = detect_(['customer__r.name', 'customername'],          0);
-    var colIndustry       = detect_(['customer__r.industry', "customer__r.industry"], 1);
-    var colSubRegion      = detect_(['ps_sub_region', 'sub_region'],               2);
-    var colDepName        = detect_(['name'],                                       5); // 'Name' alone (deployment name)
-    var colPhase          = detect_(['deployment_phase'],                           6);
-    var colPartner        = detect_(['partner_name', 'deployment_partner'],         7);
-    var colStage          = detect_(['deployment_stage'],                           8);
-    var colHealth         = detect_(['overall_health'],                             9);
-    var colMtpDate        = detect_(['current_mtp_date'],                          10);
-    var colDam            = detect_(['delivery_assurance_manager', 'dam_full_name'], 11);
-    var colWdEm           = detect_(['engagement_manager'],                        12);
-    var colCurrentUpdate  = detect_(['deployment_summary'],                        -1);
-    var colStatus           = detect_(['overall_status'],                            -1); // Phase 3i — new
-    var colFirstMtpActual   = detect_(['first_move_to_production_date_actual', 'first_move_actual'], -1); // Phase 3i — new
-    var colDeploymentStart  = detect_(['deployment_start_date', 'start_date__c'],   -1); // MGM/PGL — new
-
-    // colDepName may have matched 'customer__r.name' — disambiguate: look for
-    // a header that is exactly (case-insensitively) 'name' with no dots.
-    var colDepNameExact = -1;
-    for (var i = 0; i < lowerH.length; i++) {
-      if (lowerH[i] === 'name') { colDepNameExact = i; break; }
-    }
-    if (colDepNameExact >= 0) colDepName = colDepNameExact;
+    // ── Column detection — 24-col standard layout (confirmed 2026-06-24) ──────
+    var colId             = detect_(['id'],                                                    0);
+    var colName           = detect_(['name'],                                                  1);
+    var colAccountId      = detect_(['customer__c'],                                           2);
+    var colAccountName    = detect_(['customer__r.name', 'customer__r'],                       3);
+    var colIndustry       = detect_(['customer__r.industry', 'industry'],                      4);
+    var colRegion         = detect_(['ps_region_new', 'region_new', 'region'],                 5);
+    var colSubRegion      = detect_(['ps_sub_region__c', 'ps_sub_region', 'sub_region'],       6);
+    var colSubRegionAlt   = detect_(['subregion__c', 'subregion'],                             7);
+    var colBillingState   = detect_(['billingstate', 'billing_state'],                         8);
+    var colBillingCity    = detect_(['billingcity', 'billing_city'],                           9);
+    var colStartDate      = detect_(['deployment_start_date'],                                10);
+    var colMtpDate        = detect_(['current_mtp_date'],                                     11);
+    var colFirstMtp       = detect_(['first_move_to_production', 'first_mtp'],                12);
+    var colStatus         = detect_(['overall_status'],                                       13);
+    var colPhase          = detect_(['deployment_phase'],                                     14);
+    var colStage          = detect_(['deployment_stage'],                                     15);
+    var colHealth         = detect_(['overall_health'],                                       16);
+    var colCompletionDate = detect_(['deployment_completion_date', 'completion_date'],        17);
+    var colEM             = detect_(['workday_engagement_manager__r.full_name__c',
+                                     'workday_engagement_manager__r',
+                                     'engagement_manager', 'wdengmanager'],                   18);
+    var colDAM            = detect_(['delivery_assurance_manager__r.full_name__c',
+                                     'delivery_assurance_manager__r',
+                                     'delivery_assurance', 'dam'],                            19);
+    var colPrimingPartner = detect_(['priming_partner'],                                      20);
+    var colImplPartner    = detect_(['implementation_partner'],                               21);
+    var colPartner        = detect_(['deployment_partner_name', 'partner'],                   22);
+    var colSummary        = detect_(['deployment_summary'],                                   23);
 
     if (colStatus < 0) {
       Logger.log('CoreData.readSfdcDeploymentsRaw_: WARNING — Overall_Status__c column not ' +
@@ -813,22 +807,30 @@ var CoreData = (function () {
       if (!deploymentId) continue; // skip rows with no SF Id
 
       rows.push({
-        deploymentId:       deploymentId,
-        accountName:        cellStr_(colAccountName),
-        deploymentName:     cellStr_(colDepName),
-        servicesApproach:   cellStr_(colPhase),
-        industry:           cellStr_(colIndustry),
-        subRegion:          cellStr_(colSubRegion),
-        partner:            cellStr_(colPartner),
-        stage:              cellStr_(colStage),
-        health:             cellStr_(colHealth),
-        mtpDate:            cellDate_(colMtpDate),
-        dam:                cellStr_(colDam),
-        wdEngManager:       cellStr_(colWdEm),
-        currentUpdate:      cellStr_(colCurrentUpdate),
-        status:             cellStr_(colStatus),
-        firstMtpDateActual: cellDate_(colFirstMtpActual),
-        deploymentStart:    cellDate_(colDeploymentStart)   // MGM/PGL — new
+        deploymentId:        deploymentId,
+        deploymentName:      cellStr_(colName),
+        accountId:           cellStr_(colAccountId),
+        accountName:         cellStr_(colAccountName),
+        industry:            cellStr_(colIndustry),
+        region:              cellStr_(colRegion),
+        subRegion:           cellStr_(colSubRegion),
+        subRegionAlt:        cellStr_(colSubRegionAlt),
+        billingState:        cellStr_(colBillingState),
+        billingCity:         cellStr_(colBillingCity),
+        deploymentStartDate: cellStr_(colStartDate),
+        mtpDate:             cellStr_(colMtpDate),
+        firstMtpDate:        cellStr_(colFirstMtp),
+        overallStatus:       cellStr_(colStatus),
+        phase:               cellStr_(colPhase),
+        stage:               cellStr_(colStage),
+        health:              cellStr_(colHealth),
+        completionDate:      cellStr_(colCompletionDate),
+        wdEngManager:        cellStr_(colEM),
+        damFullName:         cellStr_(colDAM),
+        primingPartner:      cellStr_(colPrimingPartner),
+        implPartner:         cellStr_(colImplPartner),
+        partner:             cellStr_(colPartner),
+        currentUpdate:       cellStr_(colSummary)
       });
     }
 

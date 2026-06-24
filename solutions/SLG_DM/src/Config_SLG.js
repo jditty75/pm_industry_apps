@@ -54,22 +54,31 @@ var APP_CONFIG = {
   },
 
   columns: {
-  deployments: {
-    ACCOUNT_NAME: 3,              // A: Customer__r.Name
-    INDUSTRY: 4,                  // B: Customer__r.Industry
-    SUB_REGION: 19,                // C: Customer__r.PS_Sub_Region__c
-    // 4: Customer__r.Consultant_Location_Restriction_Details__c (unused)
-    // 5: Customer__r.Restriction_on_Consultant_Location__c       (unused)
-    DEPLOYMENT_NAME: 2,           // F: Name
-    DEPLOYMENT_PHASE: 9,          // G: Deployment_Phase__c (if used)
-    PARTNER: 17,                   // H: Deployment_Partner_Name__c
-    DEPLOYMENT_STAGE: 11,          // I: Deployment_Stage__c
-    DEPLOYMENT_HEALTH: 12,        // J: Overall_Health__c
-    CURRENT_MTP_DATE: 7,         // K: Current_MTP_Date__c
-    // 12: Delivery_Assurance_Manager__r (DAM) — optional, not currently wired
-    WD_ENG_MANAGER: 14,           // M: Workday_Engagement_Manager__r.Name
-    CURRENT_DEPLOYMENT_UPDATE: 18,// N: Deployment_Summary__c
-    DEPLOYMENT_ID: 1             // O: Id (full SF Id)
+    deployments: {
+      DEPLOYMENT_ID:              1,
+      DEPLOYMENT_NAME:            2,
+      ACCOUNT_ID:                 3,
+      ACCOUNT_NAME:               4,
+      INDUSTRY:                   5,
+      REGION:                     6,
+      SUB_REGION:                 7,
+      SUB_REGION_ALT:             8,
+      BILLING_STATE:              9,
+      BILLING_CITY:              10,
+      DEPLOYMENT_START_DATE:     11,
+      CURRENT_MTP_DATE:          12,
+      FIRST_MTP_DATE:            13,
+      OVERALL_STATUS:            14,
+      DEPLOYMENT_PHASE:          15,
+      DEPLOYMENT_STAGE:          16,
+      DEPLOYMENT_HEALTH:         17,
+      COMPLETION_DATE:           18,
+      WD_ENG_MANAGER:            19,
+      DAM_FULL_NAME:             20,
+      PRIMING_PARTNER:           21,
+      IMPL_PARTNER:              22,
+      PARTNER:                   23,
+      CURRENT_DEPLOYMENT_UPDATE: 24
     },
     goLives: {
       ACCOUNT_NAME: 1,  // A

@@ -149,6 +149,7 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
+      { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' }
     ],
 
@@ -205,6 +206,16 @@ var APP_CONFIG = {
       affectsTabs: ['deployments', 'golives', 'mgmPgl', 'overrides'],
       welcomeMessageEnabled: true,
       showFullPortfolioIndicator: true
+    }
+  },
+
+  notable: {
+    notify: {
+      email:               'mariah.maxie@workday.com',
+      testEmail:           'jeffrey.ditty@workday.com',
+      useTestMode:         true,
+      slackWebhookUrl:     '',
+      slackWebhookUrlTest: ''
     }
   }
 };

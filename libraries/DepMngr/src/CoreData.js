@@ -552,6 +552,9 @@ var CoreData = (function () {
       Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: readSfdcDeploymentsRaw_ failed: ' + err);
       return [];
     }
+    sfdcRows = sfdcRows.filter(function(r) {
+      return !r.overallStatus || r.overallStatus === 'Active';
+    });
     if (!sfdcRows || sfdcRows.length === 0) return [];
 
     var activeRaw = sfdcRows.filter(function (r) {
@@ -1044,6 +1047,9 @@ var CoreData = (function () {
       Logger.log('CoreData.getAllDeployments: readSfdcDeploymentsRaw_ failed — ' +
                  'falling back to ActiveDeployments. Error: ' + err);
     }
+    sfdcRows = sfdcRows.filter(function(r) {
+      return !r.overallStatus || r.overallStatus === 'Active';
+    });
 
     var allEffective;
     if (sfdcRows.length > 0) {

@@ -54,7 +54,8 @@
     rpExpandedAccounts: null,
     rpDiagnosticsOpen: false,
     rpActiveDrill: null,
-    charts: {}
+    charts: {},
+    projectAllocation: null  // { resource, monthKey } when Project Allocation card is open
   };
 
   // ============================================================
@@ -170,6 +171,110 @@
       button.textContent = button.dataset.originalText || originalText;
       delete button.dataset.originalText;
     }
+  }
+
+  // ============================================================
+  // Issue 1: Generic confirm modal helper.
+  // Replaces all synchronous window.confirm() call sites.
+  // ============================================================
+  let _confirmModalOpen = false;
+
+  /**
+   * Show a confirmation modal that blocks until the user decides.
+   * If asyncHandler is provided, runs it on confirm with proper button-disable + spinner.
+   *
+   * @param {Object} opts
+   * @param {string} opts.title            - Modal title
+   * @param {string} opts.body             - Modal body text (plain text; will be escaped)
+   * @param {string} [opts.confirmLabel]   - Confirm button label. Default: 'Confirm'
+   * @param {string} [opts.cancelLabel]    - Cancel button label. Default: 'Cancel'
+   * @param {'primary'|'danger'} [opts.confirmStyle] - Default: 'primary'
+   * @param {Function} [opts.asyncHandler] - async () => any. Runs on confirm.
+   *                                          If it throws, error is shown inline, modal stays open.
+   * @returns {Promise<boolean>} true if confirmed (and handler resolved), false if canceled
+   */
+  function confirmAction_(opts) {
+    if (_confirmModalOpen) throw new Error('confirmAction_: a confirm modal is already open');
+    opts = opts || {};
+    const title        = opts.title        || 'Confirm';
+    const bodyText     = opts.body         || '';
+    const confirmLabel = opts.confirmLabel || 'Confirm';
+    const cancelLabel  = opts.cancelLabel  || 'Cancel';
+    const confirmStyle = opts.confirmStyle || 'primary';
+    const asyncHandler = opts.asyncHandler || null;
+
+    return new Promise(function(resolve) {
+      _confirmModalOpen = true;
+      const modal      = $('#confirmModal');
+      const titleEl    = $('#confirmModalTitle');
+      const bodyEl     = $('#confirmModalBody');
+      const errorEl    = $('#confirmModalError');
+      const confirmBtn = $('#confirmModalConfirm');
+      const cancelBtn  = $('#confirmModalCancel');
+
+      titleEl.textContent   = title;
+      bodyEl.textContent    = bodyText;
+      errorEl.textContent   = '';
+      errorEl.hidden        = true;
+      confirmBtn.textContent = confirmLabel;
+      confirmBtn.className  = 'btn-primary' + (confirmStyle === 'danger' ? ' danger' : '');
+      cancelBtn.textContent = cancelLabel;
+      confirmBtn.disabled   = false;
+      cancelBtn.disabled    = false;
+      modal.hidden          = false;
+
+      let inflight = false;
+
+      function closeModal(result) {
+        modal.hidden = true;
+        _confirmModalOpen = false;
+        modal.removeEventListener('click', onModalClick);
+        document.removeEventListener('keydown', onKeyDown);
+        resolve(result);
+      }
+
+      function onModalClick(e) {
+        if (inflight) return;
+        if (e.target.dataset && e.target.dataset.confirmClose !== undefined) closeModal(false);
+      }
+
+      function onKeyDown(e) {
+        if (inflight) return;
+        if (e.key === 'Escape') closeModal(false);
+      }
+
+      cancelBtn.onclick = function() {
+        if (inflight) return;
+        closeModal(false);
+      };
+
+      confirmBtn.onclick = async function() {
+        if (inflight) return;
+        if (!asyncHandler) { closeModal(true); return; }
+        inflight = true;
+        confirmBtn.disabled = true;
+        cancelBtn.disabled  = true;
+        confirmBtn.classList.add('is-loading');
+        confirmBtn.textContent = 'Working\u2026';
+        errorEl.hidden = true;
+        try {
+          await asyncHandler();
+          inflight = false;
+          closeModal(true);
+        } catch (err) {
+          inflight = false;
+          confirmBtn.disabled = false;
+          cancelBtn.disabled  = false;
+          confirmBtn.classList.remove('is-loading');
+          confirmBtn.textContent = confirmLabel;
+          errorEl.textContent = (err && err.message) ? err.message : String(err);
+          errorEl.hidden = false;
+        }
+      };
+
+      modal.addEventListener('click', onModalClick);
+      document.addEventListener('keydown', onKeyDown);
+    });
   }
 
   // ============================================================
@@ -2320,6 +2425,8 @@
         $$('#resourceList .resource-item').forEach(x => x.classList.remove('active'));
         el.classList.add('active');
         State.selectedResource = el.dataset.resource;
+        State.projectAllocation = null;
+        $('#projectAllocationCard').hidden = true;
         loadResourceDetail_(State.selectedResource);
       });
     });
@@ -2333,8 +2440,11 @@
     if (card) card.hidden = true;
     const sumCard = $('#utilizationSummaryCard');
     if (sumCard) sumCard.hidden = true;
+    const allocCard = $('#projectAllocationCard');
+    if (allocCard) allocCard.hidden = true;
     State.workerPlanning = null;
     State.selectedResource = null;
+    State.projectAllocation = null;
   }
 
   /**
@@ -2520,14 +2630,89 @@
       data: { labels: months.map(m => fmtMonth(m.monthKey)), datasets },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: { legend: { position: 'bottom' } },
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { mode: 'index' }
+        },
         scales: {
           x: { stacked: true, grid: { display: false } },
           y: { stacked: true, beginAtZero: false }
+        },
+        onClick: function(event, elements) {
+          if (!elements || elements.length === 0) return;
+          const el = elements[0];
+          const dataset = this.data.datasets[el.datasetIndex];
+          if (!dataset || dataset.label !== 'Billable') return;
+          const rawValue = dataset.data[el.index];
+          if (!rawValue || rawValue <= 0) return;
+          const monthKey = months[el.index].monthKey;
+          if (
+            State.projectAllocation &&
+            State.projectAllocation.resource === name &&
+            State.projectAllocation.monthKey === monthKey
+          ) {
+            State.projectAllocation = null;
+            $('#projectAllocationCard').hidden = true;
+            return;
+          }
+          State.projectAllocation = { resource: name, monthKey: monthKey };
+          showProjectAllocationCard_(name, monthKey);
         }
       }
     });
+
+    const canvas = $('#resourceChart');
+    canvas.addEventListener('mousemove', function(e) {
+      const chart = State.charts.resource;
+      if (!chart) return;
+      const els = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
+      if (els.length > 0 && chart.data.datasets[els[0].datasetIndex].label === 'Billable') {
+        canvas.style.cursor = 'pointer';
+      } else {
+        canvas.style.cursor = '';
+      }
+    });
+    canvas.addEventListener('mouseleave', function() {
+      canvas.style.cursor = '';
+    });
   }
+
+  async function showProjectAllocationCard_(resourceName, monthKey) {
+    const card  = $('#projectAllocationCard');
+    const title = $('#projectAllocationTitle');
+    const sub   = $('#projectAllocationSub');
+    const body  = $('#projectAllocationBody');
+    const total = $('#projectAllocationTotal');
+
+    title.textContent = 'Project Allocation \u2014 ' + fmtMonth(monthKey);
+    sub.textContent   = 'Billable hours \u00b7 ' + resourceName;
+    body.innerHTML    = '<tr><td colspan="2" class="muted" style="padding:12px">Loading\u2026</td></tr>';
+    total.textContent = '\u2014';
+    card.hidden = false;
+
+    try {
+      const result = await call('api_getWorkerBillableByAccount', {
+        resource_name: resourceName,
+        monthKey: monthKey
+      });
+      if (!result.rows || result.rows.length === 0) {
+        body.innerHTML = '<tr><td colspan="2" class="muted" style="padding:12px">No billable allocations.</td></tr>';
+        total.textContent = '0h';
+      } else {
+        body.innerHTML = result.rows.map(r =>
+          '<tr><td>' + escapeHtml_(r.account_name) + '</td><td class="num">' + fmtHours(r.hours) + 'h</td></tr>'
+        ).join('');
+        total.textContent = fmtHours(result.totalHours) + 'h';
+      }
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="2" class="muted" style="padding:12px">Failed to load.</td></tr>';
+    }
+  }
+
+  $('#projectAllocationClose')?.addEventListener('click', function() {
+    State.projectAllocation = null;
+    $('#projectAllocationCard').hidden = true;
+  });
 </script>
 
 <script>
@@ -2662,26 +2847,143 @@
   async function loadScenarios() {
     await loadScenariosList();
     const list = $('#scenarioList');
-    list.innerHTML = State.scenarios.map(s => `
-      <div class="scenario-item ${s.scenario_id === State.selectedScenario ? 'active' : ''}" data-id="${s.scenario_id}">
-        <div>
-          <div class="resource-name">${escapeHtml_(s.name)}</div>
-          <div class="resource-meta">${escapeHtml_(s.status)} · ${fmtDate(s.modified_at)}</div>
-        </div>
-      </div>
-    `).join('');
+    const active   = (State.scenarios || []).filter(s => s.status !== 'Archived');
+    const archived = (State.scenarios || []).filter(s => s.status === 'Archived');
 
-    $$('#scenarioList .scenario-item').forEach(el => {
+    const sections = [];
+
+    sections.push('<div class="scenario-section">');
+    sections.push('<div class="scenario-section-head">Active Scenarios</div>');
+    if (!active.length) {
+      sections.push('<div class="muted" style="padding:12px;">No active scenarios.</div>');
+    } else {
+      active.forEach(s => {
+        const isSel = s.scenario_id === State.selectedScenario;
+        sections.push(`
+          <div class="scenario-item ${isSel ? 'active' : ''}" data-id="${s.scenario_id}">
+            <div class="scenario-item-info">
+              <div class="resource-name">${escapeHtml_(s.name)}</div>
+              <div class="resource-meta">${escapeHtml_(s.status)} · ${fmtDate(s.modified_at)}</div>
+            </div>
+            <div class="scenario-row-actions">
+              <button class="btn-ghost row-btn" data-scenario-edit="${escapeHtml_(s.scenario_id)}">Edit</button>
+              <button class="btn-ghost row-btn" data-scenario-commit="${escapeHtml_(s.scenario_id)}">Commit</button>
+              <button class="btn-ghost row-btn danger" data-scenario-archive="${escapeHtml_(s.scenario_id)}">Archive</button>
+            </div>
+          </div>`);
+      });
+    }
+    sections.push('</div>');
+
+    if (archived.length) {
+      sections.push('<div class="scenario-section scenario-section-archived">');
+      sections.push('<div class="scenario-section-head">Archived Scenarios</div>');
+      archived.forEach(s => {
+        sections.push(`
+          <div class="scenario-item scenario-item-archived" data-id="${s.scenario_id}">
+            <div class="scenario-item-info">
+              <div class="resource-name">${escapeHtml_(s.name)}</div>
+              <div class="resource-meta">Archived · ${fmtDate(s.modified_at)}</div>
+            </div>
+            <div class="scenario-row-actions">
+              <button class="btn-ghost row-btn" data-scenario-restore="${escapeHtml_(s.scenario_id)}">Restore</button>
+            </div>
+          </div>`);
+      });
+      sections.push('</div>');
+    }
+
+    list.innerHTML = sections.join('');
+
+    $$('#scenarioList .scenario-item-info').forEach(el => {
       el.addEventListener('click', () => {
-        State.selectedScenario = el.dataset.id;
+        const item = el.closest('.scenario-item');
+        if (!item) return;
+        State.selectedScenario = item.dataset.id;
         loadScenarios();
-        loadScenarioAssignments_(el.dataset.id);
+        loadScenarioAssignments_(item.dataset.id);
+      });
+    });
+
+    $$('#scenarioList [data-scenario-edit]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const s = (State.scenarios || []).find(x => x.scenario_id === b.dataset.scenarioEdit);
+        if (s) openScenarioModal_(s);
+      });
+    });
+    $$('#scenarioList [data-scenario-commit]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        commitScenarioById_(b.dataset.scenarioCommit);
+      });
+    });
+    $$('#scenarioList [data-scenario-archive]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        archiveScenarioById_(b.dataset.scenarioArchive);
+      });
+    });
+    $$('#scenarioList [data-scenario-restore]').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        restoreScenarioById_(b.dataset.scenarioRestore);
       });
     });
 
     $('#newScenarioBtn')?.addEventListener('click', () => openScenarioModal_());
     $('#commitScenarioBtn')?.addEventListener('click', () => commitSelectedScenario_());
     $('#archiveScenarioBtn')?.addEventListener('click', () => archiveSelectedScenario_());
+  }
+
+  async function commitScenarioById_(scenarioId) {
+    const s = (State.scenarios || []).find(x => x.scenario_id === scenarioId);
+    if (!s) return;
+    const ok = await confirmAction_({
+      title: 'Commit scenario?',
+      body: 'Commit all modeled assignments in "' + s.name + '"?',
+      confirmLabel: 'Commit',
+      confirmStyle: 'primary',
+      asyncHandler: async () => { await call('api_commitScenario', scenarioId); }
+    });
+    if (ok) {
+      toast('Scenario committed', 'ok');
+      await loadScenarios();
+      if (State.currentView === 'dashboard') loadDashboard();
+    }
+  }
+
+  async function archiveScenarioById_(scenarioId) {
+    const s = (State.scenarios || []).find(x => x.scenario_id === scenarioId);
+    if (!s) return;
+    const ok = await confirmAction_({
+      title: 'Archive scenario?',
+      body: 'Archive "' + s.name + '"? You can restore it later.',
+      confirmLabel: 'Archive',
+      confirmStyle: 'danger',
+      asyncHandler: async () => { await call('api_archiveScenario', scenarioId); }
+    });
+    if (ok) {
+      toast('Scenario archived', 'ok');
+      if (State.selectedScenario === scenarioId) State.selectedScenario = null;
+      await loadScenarios();
+    }
+  }
+
+  async function restoreScenarioById_(scenarioId) {
+    const s = (State.scenarios || []).find(x => x.scenario_id === scenarioId);
+    if (!s) return;
+    const ok = await confirmAction_({
+      title: 'Restore scenario?',
+      body: 'Restore "' + s.name + '" to active status?',
+      confirmLabel: 'Restore',
+      confirmStyle: 'primary',
+      asyncHandler: async () => { await call('api_restoreScenario', scenarioId); }
+    });
+    if (ok) {
+      toast('Scenario restored', 'ok');
+      await loadScenarios();
+    }
   }
 
     async function loadScenarioAssignments_(scenarioId) {
@@ -2781,20 +3083,34 @@
 
   async function commitSelectedScenario_() {
     if (!State.selectedScenario) return;
-    if (!confirm('Commit all modeled assignments in this scenario?')) return;
-    await call('api_commitScenario', State.selectedScenario);
-    toast('Scenario committed', 'ok');
-    await loadScenarios();
-    if (State.currentView === 'dashboard') loadDashboard();
+    const ok = await confirmAction_({
+      title: 'Commit scenario?',
+      body: 'Commit all modeled assignments in this scenario?',
+      confirmLabel: 'Commit',
+      confirmStyle: 'primary',
+      asyncHandler: async () => { await call('api_commitScenario', State.selectedScenario); }
+    });
+    if (ok) {
+      toast('Scenario committed', 'ok');
+      await loadScenarios();
+      if (State.currentView === 'dashboard') loadDashboard();
+    }
   }
 
   async function archiveSelectedScenario_() {
     if (!State.selectedScenario) return;
-    if (!confirm('Archive this scenario?')) return;
-    await call('api_archiveScenario', State.selectedScenario);
-    toast('Scenario archived', 'ok');
-    State.selectedScenario = null;
-    await loadScenarios();
+    const ok = await confirmAction_({
+      title: 'Archive scenario?',
+      body: 'This will archive the scenario along with any modeled assignments. You can restore it later.',
+      confirmLabel: 'Archive',
+      confirmStyle: 'danger',
+      asyncHandler: async () => { await call('api_archiveScenario', State.selectedScenario); }
+    });
+    if (ok) {
+      toast('Scenario archived', 'ok');
+      State.selectedScenario = null;
+      await loadScenarios();
+    }
   }
 </script>
 
@@ -3645,23 +3961,37 @@
   }
 
   async function _planningCommit_(id, type) {
-    if (!confirm(`Commit this ${type}? It will become part of the committed baseline.`)) return;
-    try {
-      if (type === 'assignment') await call('api_commitAssignment', id);
-      else await call('api_commitCapacityAdjustment', id);
+    const ok = await confirmAction_({
+      title: 'Commit ' + type + '?',
+      body: 'Commit this ' + type + '? It will become part of the committed baseline.',
+      confirmLabel: 'Commit',
+      confirmStyle: 'primary',
+      asyncHandler: async () => {
+        if (type === 'assignment') await call('api_commitAssignment', id);
+        else await call('api_commitCapacityAdjustment', id);
+      }
+    });
+    if (ok) {
       toast('Committed', 'ok');
       await loadWorkerPlanning_(State.selectedResource);
-    } catch (err) { toast('Commit failed: ' + err.message, 'err'); }
+    }
   }
 
   async function _planningRevert_(id, type) {
-    if (!confirm(`Revert to Modeled? This removes it from the committed baseline.`)) return;
-    try {
-      if (type === 'assignment') await call('api_revertAssignmentToModeled', id);
-      else await call('api_revertCapacityAdjustmentToModeled', id);
+    const ok = await confirmAction_({
+      title: 'Revert to Modeled?',
+      body: 'Revert to Modeled? This removes it from the committed baseline.',
+      confirmLabel: 'Revert',
+      confirmStyle: 'primary',
+      asyncHandler: async () => {
+        if (type === 'assignment') await call('api_revertAssignmentToModeled', id);
+        else await call('api_revertCapacityAdjustmentToModeled', id);
+      }
+    });
+    if (ok) {
       toast('Reverted to Modeled', 'ok');
       await loadWorkerPlanning_(State.selectedResource);
-    } catch (err) { toast('Revert failed: ' + err.message, 'err'); }
+    }
   }
 
   async function _planningDelete_(id, type, skipConfirm) {
@@ -3674,7 +4004,13 @@
         await loadWorkerPlanning_(State.selectedResource);
       } catch (err) { toast('Archive failed: ' + err.message, 'err'); }
     } else {
-      if (!skipConfirm && !confirm('Delete this reduction? This cannot be undone.')) return;
+      const delOk = skipConfirm ? true : await confirmAction_({
+        title: 'Delete reduction?',
+        body: 'Delete this reduction? This cannot be undone.',
+        confirmLabel: 'Delete',
+        confirmStyle: 'danger'
+      });
+      if (!delOk) return;
       try {
         await call('api_deleteCapacityAdjustment', id);
         toast('Reduction deleted', 'ok');
@@ -5082,7 +5418,13 @@
         const matrix = _parseCsv_(text);
         if (matrix.length < 2) { toast('CSV has no data rows', 'err'); return; }
         const dataRows = matrix.length - 1;
-        if (!confirm('Import ' + dataRows + ' row(s) as new overrides?')) return;
+        const importOk = await confirmAction_({
+          title: 'Import overrides?',
+          body: 'Import ' + dataRows + ' row(s) as new overrides?',
+          confirmLabel: 'Import',
+          confirmStyle: 'primary'
+        });
+        if (!importOk) return;
         const result = await call('api_importOverridesCsv', matrix);
         if (result.skipped && result.skipped.length > 0) {
           toast('Imported ' + result.created + ', skipped ' + result.skipped.length, 'err');

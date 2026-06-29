@@ -15,7 +15,7 @@
       <img class="brand-logo" src="https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg?c=1bxid64Mup7aczewSAYMX&t=1761286530298" alt="SLG Logo">
       <div class="brand-text">
         <div class="brand-title">SLG Capacity Planner</div>
-        <div class="brand-sub">v1.8</div>
+        <div class="brand-sub">v1.9</div>
       </div>
     </div>
     <nav class="nav">
@@ -225,6 +225,36 @@
             </div>
             <div class="util-components" id="utilComponents"></div>
             <div class="util-status" id="utilStatus" hidden></div>
+          </div>
+
+          <!-- Project Allocation card — appears when a billable bar is clicked -->
+          <div class="card" id="projectAllocationCard" hidden>
+            <div class="card-header">
+              <div>
+                <div class="card-title" id="projectAllocationTitle">Project Allocation</div>
+                <div class="muted" id="projectAllocationSub">—</div>
+              </div>
+              <button class="icon-btn" id="projectAllocationClose" aria-label="Close">✕</button>
+            </div>
+            <div class="table-wrap" style="max-height:280px;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Account Name</th>
+                    <th class="num">Hours</th>
+                  </tr>
+                </thead>
+                <tbody id="projectAllocationBody">
+                  <tr><td colspan="2" class="muted" style="padding:12px">Loading…</td></tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td><strong>Total</strong></td>
+                    <td class="num"><strong id="projectAllocationTotal">—</strong></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
 
           <!-- Planning Detail card — hidden until worker selected -->
@@ -1243,6 +1273,25 @@
       </form>
     </div>
   </aside>
+
+  <!-- ============ Confirm Modal ============ -->
+  <div class="modal" id="confirmModal" hidden>
+    <div class="modal-backdrop" data-confirm-close></div>
+    <div class="modal-panel" style="width:420px;max-width:92vw;">
+      <header class="modal-header">
+        <div class="drawer-title" id="confirmModalTitle">Confirm</div>
+        <button class="icon-btn" data-confirm-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body" style="padding:16px 20px;">
+        <p id="confirmModalBody" style="margin:0 0 8px;"></p>
+        <p id="confirmModalError" style="margin:0;color:var(--thumbtack);font-size:13px;" hidden></p>
+      </div>
+      <div class="drawer-actions" style="padding:12px 20px;border-top:1px solid var(--business-card);">
+        <button type="button" class="btn-ghost" id="confirmModalCancel">Cancel</button>
+        <button type="button" class="btn-primary" id="confirmModalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ============ Scenario Modal ============ -->
   <div class="modal" id="scenarioModal" hidden>

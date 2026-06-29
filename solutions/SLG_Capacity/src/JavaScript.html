@@ -5484,124 +5484,229 @@
       loadOvAudit_();
     });
 
-  // ============================================================
-  // Deployment Hour Override Drawer (Doc B)
-  // ============================================================
+  });
 
-  let _dhoDeploymentId = '';
-  let _dhoWorkerName   = '';
-  let _dhoMonthKey     = '';
+// ============================================================
+// Deployment Hour Override Drawer (Doc B)
+// ============================================================
 
-  /**
-   * Open the Deployment Hour Override drawer.
-   * @param {string} deploymentId - Deployment ID (required)
-   * @param {string} [workerName] - Pre-fills worker context
-   * @param {string} [monthKey]   - Pre-fills month context ('YYYY-MM')
-   */
-  async function openDepHourOvDrawer_(deploymentId, workerName, monthKey) {
-    if (!deploymentId) return;
-    _dhoDeploymentId = deploymentId;
-    _dhoWorkerName   = workerName || '';
-    _dhoMonthKey     = monthKey   || '';
+let _dhoDeploymentId = '';
+let _dhoWorkerName   = '';
+let _dhoMonthKey     = '';
 
-    const dep = (State.deployments || []).find(function(d) { return d.deployment_id === deploymentId; });
-    const depLabel = dep ? (dep.deployment_name || dep.account_name || deploymentId) : deploymentId;
+/**
+ * Open the Deployment Hour Override drawer.
+ * @param {string} deploymentId - Deployment ID (required)
+ * @param {string} [workerName] - Pre-fills worker context
+ * @param {string} [monthKey]   - Pre-fills month context ('YYYY-MM')
+ */
+async function openDepHourOvDrawer_(deploymentId, workerName, monthKey) {
+  if (!deploymentId) return;
+  _dhoDeploymentId = deploymentId;
+  _dhoWorkerName   = workerName || '';
+  _dhoMonthKey     = monthKey   || '';
 
-    // Populate context labels
-    $('#depHourOvDrawerTitle').textContent   = 'Override Deployment Hours';
-    $('#depHourOvDrawerSub').textContent     = depLabel;
-    $('#dhoWorkerLabel').textContent         = workerName   || '(not pre-selected)';
-    $('#dhoDeploymentLabel').textContent     = depLabel;
-    $('#dhoMonthLabel').textContent          = monthKey ? fmtMonth(monthKey) : '(not pre-selected)';
+  const dep = (State.deployments || []).find(function(d) { return d.deployment_id === deploymentId; });
+  const depLabel = dep ? (dep.deployment_name || dep.account_name || deploymentId) : deploymentId;
 
-    // Reset form
-    $('#dhoOverrideId').value  = '';
-    $('#dhoModifiedAt').value  = '';
-    $('#dhoPsaHours').value    = '';
-    $('#dhoOverrideHours').value = '';
-    $('#dhoReason').value      = '';
-    $('#dhoExpiresAt').value   = '';
-    const errEl = $('#dhoError');
-    if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
-    // Default to single mode
-    $('#dhoModeSingle').checked = true;
-    toggleDhoMode_('single');
+  // Populate context labels
+  $('#depHourOvDrawerTitle').textContent   = 'Override Deployment Hours';
+  $('#depHourOvDrawerSub').textContent     = depLabel;
+  $('#dhoWorkerLabel').textContent         = workerName   || '(not pre-selected)';
+  $('#dhoDeploymentLabel').textContent     = depLabel;
+  $('#dhoMonthLabel').textContent          = monthKey ? fmtMonth(monthKey) : '(not pre-selected)';
 
-    // Check for an existing active override for this combo
-    if (workerName && monthKey) {
+  // Reset form
+  $('#dhoOverrideId').value  = '';
+  $('#dhoModifiedAt').value  = '';
+  $('#dhoPsaHours').value    = '';
+  $('#dhoOverrideHours').value = '';
+  $('#dhoReason').value      = '';
+  $('#dhoExpiresAt').value   = '';
+  const errEl = $('#dhoError');
+  if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
+  // Default to single mode
+  $('#dhoModeSingle').checked = true;
+  toggleDhoMode_('single');
+
+  // Check for an existing active override for this combo
+  if (workerName && monthKey) {
+    try {
+      const existing = await call('api_listDeploymentHourOverrides', {
+        deployment_id: deploymentId, resource_name: workerName, status: 'Active'
+      });
+      const mk = monthKey.length === 7 ? monthKey : (monthKey.slice(0, 7));
+      const match = (existing || []).find(function(r) {
+        return r.period_start && r.period_start.slice(0, 7) === mk;
+      });
+      if (match) {
+        $('#dhoOverrideId').value   = match.override_id;
+        $('#dhoModifiedAt').value   = match.modified_at || '';
+        $('#dhoPsaHours').value     = match.psa_original_hours;
+        $('#dhoOverrideHours').value = match.override_hours;
+        $('#dhoReason').value       = match.reason;
+        $('#dhoExpiresAt').value    = match.expires_at ? match.expires_at.slice(0, 10) : '';
+      } else {
+        // Fetch live PSA hours
+        try {
+          const psaResult = await call('api_capturePsaHours', {
+            resource_name: workerName,
+            deployment_id: deploymentId,
+            period_start:  monthKey + '-01'
+          });
+          $('#dhoPsaHours').value = psaResult.psa_original_hours || 0;
+        } catch (e) { /* non-critical */ }
+      }
+    } catch (e) { /* non-critical */ }
+  }
+
+  $('#depHourOvDrawer').hidden = false;
+  document.body.classList.add('drawer-open');
+}
+
+function closeDepHourOvDrawer_() {
+  $('#depHourOvDrawer').hidden = true;
+  document.body.classList.remove('drawer-open');
+}
+
+function toggleDhoMode_(mode) {
+  const isSingle = mode === 'single';
+  const sf = $('#dhoSingleFields');
+  const rf = $('#dhoRangeFields');
+  if (sf) sf.hidden = !isSingle;
+  if (rf) rf.hidden = isSingle;
+}
+
+// ============================================================
+// Deployment Hour Overrides Admin Panel (Doc B)
+// ============================================================
+
+let _depHourOvAllRows = [];
+
+async function loadDepHourOvAdmin_() {
+  await Promise.all([loadDepHourOvHygiene_(), loadDepHourOvTable_()]);
+}
+
+async function loadDepHourOvHygiene_() {
+  try {
+    const h = await call('api_getDeploymentHourOverrideHygiene');
+    const setText = function(id, val) {
+      const el = $('#' + id);
+      if (el) el.textContent = String(val);
+    };
+    setText('depHourOvHygActive',   h.activeTotal   || 0);
+    setText('depHourOvHygExpiring', h.expiringSoon  || 0);
+    setText('depHourOvHygLongRun',  h.longRunning   || 0);
+    setText('depHourOvHygStale',    h.stale         || 0);
+    const count = (h.expiringSoon || 0) + (h.stale || 0);
+    const badge = $('#adminTabBadgeDepHourOv');
+    if (badge) { badge.textContent = String(count); badge.hidden = count === 0; }
+  } catch (err) {
+    toast('Dep. hour override hygiene load failed: ' + err.message, 'err');
+  }
+}
+
+async function loadDepHourOvTable_() {
+  const body = $('#depHourOvTableBody');
+  if (!body) return;
+  body.innerHTML = '<tr><td colspan="9" class="muted" style="padding:12px;">Loading…</td></tr>';
+  try {
+    const statusFilter = $('#depHourOvStatusFilter')?.value || 'Active';
+    const filter = statusFilter ? { status: statusFilter } : {};
+    _depHourOvAllRows = await call('api_listDeploymentHourOverrides', filter);
+    State.depHourOverrides = _depHourOvAllRows;
+    renderDepHourOvTable_();
+  } catch (err) {
+    body.innerHTML = '<tr><td colspan="9" class="muted" style="padding:12px;">Load failed: ' + escapeHtml_(err.message) + '</td></tr>';
+  }
+}
+
+function renderDepHourOvTable_() {
+  const body = $('#depHourOvTableBody');
+  if (!body) return;
+  const q = ($('#depHourOvSearch')?.value || '').toLowerCase().trim();
+  const filtered = q ? _depHourOvAllRows.filter(function(r) {
+    return (String(r.resource_name || '') + ' ' + String(r.deployment_id || '') + ' ' + String(r.reason || '')).toLowerCase().includes(q);
+  }) : _depHourOvAllRows;
+
+  if (!filtered.length) {
+    body.innerHTML = '<tr><td colspan="9" class="muted" style="padding:12px;">No overrides found.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = filtered.map(function(r) {
+    const dep = (State.deployments || []).find(function(d) { return d.deployment_id === r.deployment_id; });
+    const depLabel = dep ? escapeHtml_(dep.deployment_name || r.deployment_id) : escapeHtml_(r.deployment_id);
+    const mk = r.period_start ? String(r.period_start).slice(0, 7) : '—';
+    const expires = r.expires_at ? String(r.expires_at).slice(0, 10) : '—';
+    const isActive = r.status === 'Active';
+    const deleteBtn = isActive
+      ? '<button class="btn-ghost row-btn danger" data-dho-delete="' + escapeHtml_(r.override_id) + '" style="font-size:11px;">Remove</button>'
+      : '';
+    return '<tr>' +
+      '<td>' + escapeHtml_(r.resource_name || '') + '</td>' +
+      '<td title="' + escapeHtml_(r.deployment_id) + '">' + depLabel + '</td>' +
+      '<td>' + escapeHtml_(mk) + '</td>' +
+      '<td class="num">' + fmtHours(r.psa_original_hours) + '</td>' +
+      '<td class="num">' + fmtHours(r.override_hours) + '</td>' +
+      '<td class="ov-cell-wide" title="' + escapeHtml_(r.reason || '') + '">' + escapeHtml_(r.reason || '') + '</td>' +
+      '<td>' + expires + '</td>' +
+      '<td>' + escapeHtml_(r.created_by || '') + '</td>' +
+      '<td>' + deleteBtn + '</td>' +
+      '</tr>';
+  }).join('');
+
+  // Wire delete buttons
+  $$('#depHourOvTableBody button[data-dho-delete]').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      const ok = await confirmAction_({
+        title: 'Remove Override?',
+        body:  'This will soft-delete the override. The original PSA hours will be used in calculations again.',
+        confirmLabel: 'Remove',
+        confirmStyle: 'danger'
+      });
+      if (!ok) return;
       try {
-        const existing = await call('api_listDeploymentHourOverrides', {
-          deployment_id: deploymentId, resource_name: workerName, status: 'Active'
-        });
-        const mk = monthKey.length === 7 ? monthKey : (monthKey.slice(0, 7));
-        const match = (existing || []).find(function(r) {
-          return r.period_start && r.period_start.slice(0, 7) === mk;
-        });
-        if (match) {
-          $('#dhoOverrideId').value   = match.override_id;
-          $('#dhoModifiedAt').value   = match.modified_at || '';
-          $('#dhoPsaHours').value     = match.psa_original_hours;
-          $('#dhoOverrideHours').value = match.override_hours;
-          $('#dhoReason').value       = match.reason;
-          $('#dhoExpiresAt').value    = match.expires_at ? match.expires_at.slice(0, 10) : '';
-        } else {
-          // Fetch live PSA hours
-          try {
-            const psaResult = await call('api_capturePsaHours', {
-              resource_name: workerName,
-              deployment_id: deploymentId,
-              period_start:  monthKey + '-01'
-            });
-            $('#dhoPsaHours').value = psaResult.psa_original_hours || 0;
-          } catch (e) { /* non-critical */ }
-        }
-      } catch (e) { /* non-critical */ }
-    }
+        await call('api_deleteDeploymentHourOverride', { override_id: btn.dataset.dhoDelete });
+        toast('Override removed.', 'ok');
+        await Promise.all([loadDepHourOvTable_(), loadDepHourOvHygiene_()]);
+        State.deployments = await call('api_listDeployments');
+        renderDeployments_();
+      } catch (err) {
+        toast('Remove failed: ' + err.message, 'err');
+      }
+    });
+  });
+}
 
-    $('#depHourOvDrawer').hidden = false;
-    document.body.classList.add('drawer-open');
-  }
-
-  function closeDepHourOvDrawer_() {
-    $('#depHourOvDrawer').hidden = true;
-    document.body.classList.remove('drawer-open');
-  }
-
-  function toggleDhoMode_(mode) {
-    const isSingle = mode === 'single';
-    const sf = $('#dhoSingleFields');
-    const rf = $('#dhoRangeFields');
-    if (sf) sf.hidden = !isSingle;
-    if (rf) rf.hidden = isSingle;
-  }
-
+document.addEventListener('DOMContentLoaded', function() {
   $$('[data-dho-close]').forEach(function(el) {
     el.addEventListener('click', closeDepHourOvDrawer_);
   });
-
+  
   $$('[name="dhoMode"]').forEach(function(radio) {
     radio.addEventListener('change', function() { toggleDhoMode_(this.value); });
   });
-
+  
   $('#dhoSaveBtn')?.addEventListener('click', async function() {
     const errEl = $('#dhoError');
     if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
-
+  
     const mode        = $('#dhoModeSingle').checked ? 'single' : 'range';
     const reason      = ($('#dhoReason')?.value || '').trim();
     const expiresAt   = $('#dhoExpiresAt')?.value || '';
     const overrideId  = $('#dhoOverrideId')?.value || '';
     const modifiedAt  = $('#dhoModifiedAt')?.value || '';
-
+  
     if (!reason) {
       if (errEl) { errEl.textContent = 'Reason is required.'; errEl.hidden = false; }
       return;
     }
-
+  
     let payload = { mode: mode, deployment_id: _dhoDeploymentId, reason: reason };
     if (expiresAt) payload.expires_at = expiresAt;
     if (overrideId) { payload.override_id = overrideId; payload.modified_at = modifiedAt; }
-
+  
     if (mode === 'single') {
       const ovHours = parseFloat($('#dhoOverrideHours')?.value);
       if (isNaN(ovHours) || ovHours < 0) {
@@ -5641,7 +5746,7 @@
       payload.total_hours   = totalHours;
       payload.distribution  = $('#dhoDistribution')?.value || 'Even';
     }
-
+  
     const btn = $('#dhoSaveBtn');
     if (btn) btn.disabled = true;
     try {
@@ -5658,112 +5763,9 @@
     }
   });
 
-  // ============================================================
-  // Deployment Hour Overrides Admin Panel (Doc B)
-  // ============================================================
-
-  let _depHourOvAllRows = [];
-
-  async function loadDepHourOvAdmin_() {
-    await Promise.all([loadDepHourOvHygiene_(), loadDepHourOvTable_()]);
-  }
-
-  async function loadDepHourOvHygiene_() {
-    try {
-      const h = await call('api_getDeploymentHourOverrideHygiene');
-      const setText = function(id, val) {
-        const el = $('#' + id);
-        if (el) el.textContent = String(val);
-      };
-      setText('depHourOvHygActive',   h.activeTotal   || 0);
-      setText('depHourOvHygExpiring', h.expiringSoon  || 0);
-      setText('depHourOvHygLongRun',  h.longRunning   || 0);
-      setText('depHourOvHygStale',    h.stale         || 0);
-      const count = (h.expiringSoon || 0) + (h.stale || 0);
-      const badge = $('#adminTabBadgeDepHourOv');
-      if (badge) { badge.textContent = String(count); badge.hidden = count === 0; }
-    } catch (err) {
-      toast('Dep. hour override hygiene load failed: ' + err.message, 'err');
-    }
-  }
-
-  async function loadDepHourOvTable_() {
-    const body = $('#depHourOvTableBody');
-    if (!body) return;
-    body.innerHTML = '<tr><td colspan="9" class="muted" style="padding:12px;">Loading…</td></tr>';
-    try {
-      const statusFilter = $('#depHourOvStatusFilter')?.value || 'Active';
-      const filter = statusFilter ? { status: statusFilter } : {};
-      _depHourOvAllRows = await call('api_listDeploymentHourOverrides', filter);
-      State.depHourOverrides = _depHourOvAllRows;
-      renderDepHourOvTable_();
-    } catch (err) {
-      body.innerHTML = '<tr><td colspan="9" class="muted" style="padding:12px;">Load failed: ' + escapeHtml_(err.message) + '</td></tr>';
-    }
-  }
-
-  function renderDepHourOvTable_() {
-    const body = $('#depHourOvTableBody');
-    if (!body) return;
-    const q = ($('#depHourOvSearch')?.value || '').toLowerCase().trim();
-    const filtered = q ? _depHourOvAllRows.filter(function(r) {
-      return (String(r.resource_name || '') + ' ' + String(r.deployment_id || '') + ' ' + String(r.reason || '')).toLowerCase().includes(q);
-    }) : _depHourOvAllRows;
-
-    if (!filtered.length) {
-      body.innerHTML = '<tr><td colspan="9" class="muted" style="padding:12px;">No overrides found.</td></tr>';
-      return;
-    }
-
-    body.innerHTML = filtered.map(function(r) {
-      const dep = (State.deployments || []).find(function(d) { return d.deployment_id === r.deployment_id; });
-      const depLabel = dep ? escapeHtml_(dep.deployment_name || r.deployment_id) : escapeHtml_(r.deployment_id);
-      const mk = r.period_start ? String(r.period_start).slice(0, 7) : '—';
-      const expires = r.expires_at ? String(r.expires_at).slice(0, 10) : '—';
-      const isActive = r.status === 'Active';
-      const deleteBtn = isActive
-        ? '<button class="btn-ghost row-btn danger" data-dho-delete="' + escapeHtml_(r.override_id) + '" style="font-size:11px;">Remove</button>'
-        : '';
-      return '<tr>' +
-        '<td>' + escapeHtml_(r.resource_name || '') + '</td>' +
-        '<td title="' + escapeHtml_(r.deployment_id) + '">' + depLabel + '</td>' +
-        '<td>' + escapeHtml_(mk) + '</td>' +
-        '<td class="num">' + fmtHours(r.psa_original_hours) + '</td>' +
-        '<td class="num">' + fmtHours(r.override_hours) + '</td>' +
-        '<td class="ov-cell-wide" title="' + escapeHtml_(r.reason || '') + '">' + escapeHtml_(r.reason || '') + '</td>' +
-        '<td>' + expires + '</td>' +
-        '<td>' + escapeHtml_(r.created_by || '') + '</td>' +
-        '<td>' + deleteBtn + '</td>' +
-        '</tr>';
-    }).join('');
-
-    // Wire delete buttons
-    $$('#depHourOvTableBody button[data-dho-delete]').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        const ok = await confirmAction_({
-          title: 'Remove Override?',
-          body:  'This will soft-delete the override. The original PSA hours will be used in calculations again.',
-          confirmLabel: 'Remove',
-          confirmStyle: 'danger'
-        });
-        if (!ok) return;
-        try {
-          await call('api_deleteDeploymentHourOverride', { override_id: btn.dataset.dhoDelete });
-          toast('Override removed.', 'ok');
-          await Promise.all([loadDepHourOvTable_(), loadDepHourOvHygiene_()]);
-          State.deployments = await call('api_listDeployments');
-          renderDeployments_();
-        } catch (err) {
-          toast('Remove failed: ' + err.message, 'err');
-        }
-      });
-    });
-  }
-
   $('#depHourOvHygieneRefreshBtn')?.addEventListener('click', loadDepHourOvHygiene_);
   $('#depHourOvLoadBtn')?.addEventListener('click', loadDepHourOvTable_);
   $('#depHourOvSearch')?.addEventListener('input', debounce_(renderDepHourOvTable_, 200));
   $('#depHourOvStatusFilter')?.addEventListener('change', loadDepHourOvTable_);
-
-  });
+});
 </script>

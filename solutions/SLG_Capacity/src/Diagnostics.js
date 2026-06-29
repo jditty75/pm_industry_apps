@@ -21,18 +21,55 @@
 // ============================================================
 
 /**
- * Throws if the calling user is not the spreadsheet owner.
- * Diagnostics are restricted to admins (the script owner) to prevent
- * accidental invocation via google.script.run.
+ * Throws if the calling user is not authorized as a diagnostics admin.
+ *
+ * Authorization sources (any match grants access):
+ *   1. Spreadsheet owner (works on personal Drive, fails on Shared Drives
+ *      because Shared Drive files have no individual owner)
+ *   2. Config_Settings.admin_emails (comma-separated list — works
+ *      everywhere, recommended for Shared Drive setups)
+ *
+ * The dual-path check mirrors the production access gate in
+ * AccessControl.gs::isAuthorized_ which uses the same admin_emails setting.
  */
 function _dbg_requireAdmin_() {
   try {
-    const owner = SpreadsheetApp.getActive().getOwner();
-    const ownerEmail = owner ? owner.getEmail() : '';
     const userEmail = Session.getActiveUser().getEmail();
-    if (!ownerEmail || !userEmail || ownerEmail !== userEmail) {
-      throw new Error('Diagnostics restricted to spreadsheet owner.');
+    if (!userEmail) {
+      throw new Error('Could not resolve active user — re-authorize the script.');
     }
+    const userLc = String(userEmail).toLowerCase().trim();
+
+    // Path 1: spreadsheet owner (personal Drive)
+    try {
+      const owner = SpreadsheetApp.getActive().getOwner();
+      const ownerEmail = owner ? owner.getEmail() : '';
+      if (ownerEmail && String(ownerEmail).toLowerCase().trim() === userLc) {
+        return;
+      }
+    } catch (e) {
+      // Fall through to admin_emails check
+    }
+
+    // Path 2: Config_Settings.admin_emails (Shared Drive friendly)
+    let settings = {};
+    try {
+      settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    } catch (e) {
+      settings = {};
+    }
+    const raw = String(settings.admin_emails || '');
+    if (raw) {
+      const entries = raw.split(',').map(function (e) {
+        return String(e || '').toLowerCase().trim();
+      });
+      if (entries.indexOf(userLc) >= 0) {
+        return;
+      }
+    }
+
+    throw new Error('Diagnostics restricted to spreadsheet owner or admin_emails. ' +
+      'Add ' + userEmail + ' to Config_Settings.admin_emails to grant access.');
   } catch (e) {
     throw new Error('Diagnostics access denied: ' + e.message);
   }
@@ -1408,4 +1445,15 @@ function _dbg_deploymentHourOverrideHygiene() {
   } catch (e) {
     Logger.log('_dbg_deploymentHourOverrideHygiene ERROR: ' + e);
   }
+}
+
+function _dbg_verifyDocBServerSide() {
+  _dbg_requireAdmin_();
+  ['api_listDeploymentHourOverrides', 'api_saveDeploymentHourOverride',
+   'api_deleteDeploymentHourOverride', 'api_deleteDeploymentHourOverrideGroup',
+   'api_getDeploymentHourOverrideHygiene', 'api_capturePsaHours',
+   'readActiveDeploymentHourOverrides_', 'saveDeploymentHourOverride_'].forEach(n => {
+    Logger.log(n + ': ' + typeof this[n]);
+  });
+  Logger.log('list result: ' + JSON.stringify(api_listDeploymentHourOverrides({})));
 }

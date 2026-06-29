@@ -1490,6 +1490,54 @@ function api_saveScenario(s) {
 function api_commitScenario(id) { _requireAuthorized_(); return commitScenario_(id); }
 function api_archiveScenario(id) { _requireAuthorized_(); return archiveScenario_(id); }
 
+function api_restoreScenario(id) {
+  _requireAuthorized_();
+  const out = restoreScenario_(id);
+  return { scenario_id: String(out.scenario_id || ''), status: String(out.status || '') };
+}
+
+/**
+ * Return per-account billable hours for a single worker × single month.
+ * Reads from Allocations_Normalized where allocation_type='Billable'.
+ *
+ * @param {Object} params
+ * @param {string} params.resource_name  - Worker name (required)
+ * @param {string} params.monthKey       - 'YYYY-MM' (required)
+ * @returns {Object} { resource_name, monthKey, totalHours, rows: [{ account_name, hours }] }
+ *                   rows sorted by hours descending. Account names with no
+ *                   value are reported as '(No account)'.
+ */
+function api_getWorkerBillableByAccount(params) {
+  _requireAuthorized_();
+  params = params || {};
+  const resourceName = String(params.resource_name || '');
+  const monthKey = String(params.monthKey || '');
+  if (!resourceName || !monthKey) return { resource_name: resourceName, monthKey: monthKey, totalHours: 0, rows: [] };
+
+  const alloc = cachedRead_(ALLOC_NORM);
+  const byAccount = {};
+  var total = 0;
+  alloc.forEach(function(a) {
+    if (a.resource_name !== resourceName) return;
+    if (String(a.allocation_type || '') !== 'Billable') return;
+    if (monthKey_(a.period_start) !== monthKey) return;
+    var hrs = Number(a.hours) || 0;
+    if (!hrs) return;
+    var acct = String(a.account_name || '') || '(No account)';
+    byAccount[acct] = (byAccount[acct] || 0) + hrs;
+    total += hrs;
+  });
+  var rows = Object.keys(byAccount)
+    .map(function(k) { return { account_name: k, hours: byAccount[k] }; })
+    .sort(function(a, b) { return b.hours - a.hours; });
+  return {
+    resource_name: resourceName,
+    monthKey: monthKey,
+    totalHours: total,
+    rows: rows
+  };
+}
+
 function api_saveIcp(rows) {
   _requireAuthorized_();
   writeTable_(CFG_ICP, ICP_HEADERS, rows);

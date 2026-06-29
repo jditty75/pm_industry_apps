@@ -56,3 +56,21 @@ function archiveScenario_(scenario_id) {
   invalidateCache_(SCENARIOS);
   return { scenario_id: scenario_id, status: 'Archived' };
 }
+
+/**
+ * Restore an archived scenario back to Active.
+ * Does NOT un-archive child rows — only the scenario itself.
+ *
+ * @param {string} scenario_id
+ * @returns {{ scenario_id: string, status: string }}
+ */
+function restoreScenario_(scenario_id) {
+  const user = getUserEmail_();
+  updateRow_(SCENARIOS, 'scenario_id', scenario_id, {
+    status: 'Active',
+    modified_by: user,
+    modified_at: now_()
+  }, SCENARIO_HEADERS);
+  invalidateCache_(SCENARIOS);
+  return { scenario_id: scenario_id, status: 'Active' };
+}

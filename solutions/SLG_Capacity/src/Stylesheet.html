@@ -501,6 +501,14 @@ textarea.input {
   background: #f6faff;
 }
 .btn-ghost.danger { color: var(--thumbtack); }
+.btn-primary.danger {
+  background: var(--thumbtack);
+  border-color: var(--thumbtack);
+}
+.btn-primary.danger:hover {
+  background: #b32d18;
+  border-color: #b32d18;
+}
 .btn-ghost.danger:hover {
   border-color: var(--thumbtack);
   background: #fff5f3;
@@ -801,6 +809,22 @@ textarea.input {
   flex-direction: column;
   gap: 6px;
 }
+.scenario-item:hover { border-color: var(--ballpoint); }
+.scenario-item.active {
+  border-color: var(--ballpoint);
+  background: #f6faff;
+}
+.scenario-section + .scenario-section { margin-top: 16px; }
+.scenario-section-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--staple);
+  text-transform: uppercase;
+  letter-spacing: .7px;
+  margin: 0 0 8px;
+  padding: 0 2px;
+}
+.scenario-section-archived .scenario-section-head { color: var(--desk); }
 .scenario-item {
   padding: 12px;
   border: 1px solid var(--business-card);
@@ -809,12 +833,28 @@ textarea.input {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }
-.scenario-item:hover { border-color: var(--ballpoint); }
-.scenario-item.active {
-  border-color: var(--ballpoint);
-  background: #f6faff;
+.scenario-item-info {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
 }
+.scenario-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.scenario-row-actions .row-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+.scenario-item-archived {
+  opacity: .65;
+  background: var(--paper);
+}
+.scenario-item-archived .resource-name { color: var(--laptop); }
+.scenario-item-archived:hover { opacity: .9; border-color: var(--desk); }
 
 /* ============================================================
    Drawer + Modal
@@ -928,6 +968,13 @@ textarea.input {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+.modal-panel .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--business-card);
 }
 
 /* ------------------------------------------------------------

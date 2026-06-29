@@ -1406,10 +1406,121 @@ function api_listDeployments() {
     Logger.log('api_listDeployments: psa_worker_count failed — ' + e);
   }
 
+  // Doc B: tally active deployment hour overrides per deployment_id
+  try {
+    const activeOvMap = readActiveDeploymentHourOverrides_();
+    const ovCounts = {};
+    Object.keys(activeOvMap).forEach(function(k) {
+      const depId = k.split('|')[1];
+      ovCounts[depId] = (ovCounts[depId] || 0) + 1;
+    });
+    out.forEach(function(dep) {
+      dep.override_count = ovCounts[dep.deployment_id] || 0;
+    });
+  } catch (e) {
+    Logger.log('api_listDeployments: override_count failed — ' + e);
+    out.forEach(function(dep) { dep.override_count = 0; });
+  }
+
   return out;
 }
 
-// Sanitize an assignment record for google.script.run transport.
+// Sanitize a deployment hour override row for wire transport.
+function _sanitizeDeploymentHourOverrideForWire_(r) {
+  if (!r) return null;
+  return {
+    override_id:        String(r.override_id        || ''),
+    deployment_id:      String(r.deployment_id      || ''),
+    resource_name:      String(r.resource_name      || ''),
+    period_start:       _toIso_(r.period_start),
+    psa_original_hours: Number(r.psa_original_hours) || 0,
+    override_hours:     Number(r.override_hours)     || 0,
+    reason:             String(r.reason              || ''),
+    status:             String(r.status              || ''),
+    expires_at:         r.expires_at ? String(r.expires_at).slice(0, 10) : null,
+    created_by:         String(r.created_by          || ''),
+    created_at:         _toIso_(r.created_at),
+    modified_by:        String(r.modified_by         || ''),
+    modified_at:        _toIso_(r.modified_at),
+    group_id:           String(r.group_id            || '')
+  };
+}
+
+/**
+ * List deployment hour overrides.
+ * Accepts optional filter: { deployment_id?, resource_name?, status?, group_id? }
+ */
+function api_listDeploymentHourOverrides(params) {
+  _requireAuthorized_();
+  params = params || {};
+  const rows = listDeploymentHourOverrides_(params);
+  return rows.map(_sanitizeDeploymentHourOverrideForWire_);
+}
+
+/**
+ * Save a deployment hour override (create or update).
+ * Accepts the same payload shape as saveDeploymentHourOverride_.
+ */
+function api_saveDeploymentHourOverride(payload) {
+  _requireAuthorized_();
+  const saved = saveDeploymentHourOverride_(payload);
+  return saved.map(_sanitizeDeploymentHourOverrideForWire_);
+}
+
+/**
+ * Soft-delete a single deployment hour override.
+ * @param {Object} params - { override_id, reason? }
+ */
+function api_deleteDeploymentHourOverride(params) {
+  _requireAuthorized_();
+  params = params || {};
+  if (!params.override_id) throw new Error('override_id is required');
+  return deleteDeploymentHourOverride_(String(params.override_id), String(params.reason || ''));
+}
+
+/**
+ * Soft-delete all overrides sharing a group_id.
+ * @param {Object} params - { group_id, reason? }
+ */
+function api_deleteDeploymentHourOverrideGroup(params) {
+  _requireAuthorized_();
+  params = params || {};
+  if (!params.group_id) throw new Error('group_id is required');
+  return deleteDeploymentHourOverrideGroup_(String(params.group_id), String(params.reason || ''));
+}
+
+/**
+ * Return deployment hour override hygiene summary for the admin panel.
+ */
+function api_getDeploymentHourOverrideHygiene() {
+  _requireAuthorized_();
+  const hygiene = getDeploymentHourOverrideHygiene_();
+  return {
+    activeTotal:  Number(hygiene.activeTotal)  || 0,
+    expiringSoon: Number(hygiene.expiringSoon) || 0,
+    longRunning:  Number(hygiene.longRunning)  || 0,
+    stale:        Number(hygiene.stale)        || 0
+  };
+}
+
+/**
+ * Capture current PSA billable hours for (resource, deployment, month).
+ * Useful for the drawer's "PSA Hours" pre-fill.
+ * @param {Object} params - { resource_name, deployment_id, period_start }
+ */
+function api_capturePsaHours(params) {
+  _requireAuthorized_();
+  params = params || {};
+  if (!params.resource_name)  throw new Error('resource_name is required');
+  if (!params.deployment_id)  throw new Error('deployment_id is required');
+  if (!params.period_start)   throw new Error('period_start is required');
+  const hrs = _capturePsaOriginalHours_(
+    String(params.resource_name),
+    String(params.deployment_id),
+    params.period_start
+  );
+  return { psa_original_hours: Number(hrs) || 0 };
+}
 // Date fields (start_date, end_date, created_at, modified_at) convert to
 // ISO strings so the client bridge doesn't silently return null.
 // Mirrors _sanitizeScenarioForWire_ — same root-cause class.

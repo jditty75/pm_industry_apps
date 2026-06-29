@@ -1311,3 +1311,101 @@ function _dbg_checkResourceTypeForDelivery() {
   });
   Logger.log('Direct rtMap["Delivery"]: ' + rtMap['Delivery']);
 }
+
+// ============================================================
+// Section 5 — Doc B: Deployment Hour Overrides diagnostics
+// ============================================================
+
+/**
+ * Dump all active deployment hour overrides to Logger.
+ * Run from the Apps Script editor.
+ */
+function _dbg_listActiveDeploymentHourOverrides() {
+  _dbg_requireAdmin_();
+  try {
+    const rows = listDeploymentHourOverrides_({ status: 'Active' });
+    Logger.log('_dbg_listActiveDeploymentHourOverrides: ' + rows.length + ' active override(s)');
+    rows.forEach(function(r) {
+      Logger.log(JSON.stringify({
+        override_id: r.override_id,
+        deployment_id: r.deployment_id,
+        resource_name: r.resource_name,
+        period_start: String(r.period_start).slice(0, 10),
+        psa_original_hours: r.psa_original_hours,
+        override_hours: r.override_hours,
+        reason: r.reason,
+        expires_at: r.expires_at ? String(r.expires_at).slice(0, 10) : null
+      }));
+    });
+  } catch (e) {
+    Logger.log('_dbg_listActiveDeploymentHourOverrides ERROR: ' + e);
+  }
+}
+
+/**
+ * Show deployment match index — useful for verifying two-tier matching.
+ * Logs normalized project names and account names mapped to deployment IDs.
+ */
+function _dbg_deploymentMatchIndex() {
+  _dbg_requireAdmin_();
+  try {
+    const idx = _buildDeploymentMatchIndexes_();
+    Logger.log('_dbg_deploymentMatchIndex: byNormProject keys: ' + Object.keys(idx.byNormProject).length);
+    Logger.log('_dbg_deploymentMatchIndex: byAccount keys: ' + Object.keys(idx.byAccount).length);
+    Object.keys(idx.byNormProject).slice(0, 20).forEach(function(k) {
+      Logger.log('  project "' + k + '" -> [' + idx.byNormProject[k].join(', ') + ']');
+    });
+    Object.keys(idx.byAccount).slice(0, 20).forEach(function(k) {
+      Logger.log('  account "' + k + '" -> [' + idx.byAccount[k].join(', ') + ']');
+    });
+  } catch (e) {
+    Logger.log('_dbg_deploymentMatchIndex ERROR: ' + e);
+  }
+}
+
+/**
+ * Simulate what computeResourceDetail returns for overrides on a specific worker.
+ * Edit WORKER_NAME before running.
+ */
+function _dbg_computeResourceDetailOverrides() {
+  _dbg_requireAdmin_();
+  const WORKER_NAME = 'Edit Me';
+  try {
+    const result = computeResourceDetail({ resource: WORKER_NAME, viewMode: 'Committed' });
+    Logger.log('_dbg_computeResourceDetailOverrides: ' + WORKER_NAME);
+    Logger.log('overrides: ' + JSON.stringify(result.overrides || []));
+    (result.months || []).forEach(function(m) {
+      if (m.overrideDelta) {
+        Logger.log('  ' + m.monthKey + ' billable=' + m.billable + ' overrideDelta=' + m.overrideDelta);
+      }
+    });
+  } catch (e) {
+    Logger.log('_dbg_computeResourceDetailOverrides ERROR: ' + e);
+  }
+}
+
+/**
+ * Run expiry maintenance manually and report results.
+ */
+function _dbg_runDeploymentHourOverrideMaintenance() {
+  _dbg_requireAdmin_();
+  try {
+    const result = runDailyDeploymentHourOverrideMaintenance_();
+    Logger.log('_dbg_runDeploymentHourOverrideMaintenance: ' + JSON.stringify(result));
+  } catch (e) {
+    Logger.log('_dbg_runDeploymentHourOverrideMaintenance ERROR: ' + e);
+  }
+}
+
+/**
+ * Print hygiene summary used by the admin tile.
+ */
+function _dbg_deploymentHourOverrideHygiene() {
+  _dbg_requireAdmin_();
+  try {
+    const h = getDeploymentHourOverrideHygiene_();
+    Logger.log('_dbg_deploymentHourOverrideHygiene: ' + JSON.stringify(h));
+  } catch (e) {
+    Logger.log('_dbg_deploymentHourOverrideHygiene ERROR: ' + e);
+  }
+}

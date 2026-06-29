@@ -231,6 +231,43 @@ const DEFAULT_OVERRIDABLE_FIELDS = [
   ['Deployments',  'current_update',      'Current Update',      'text',     '', 'Yes', '']
 ];
 
+// --- Doc B: Deployment Hour Overrides schema ---
+
+const DEPLOYMENT_HOUR_OVERRIDES_SHEET               = 'Deployment_Hour_Overrides';
+const DEPLOYMENT_HOUR_OVERRIDES_AUDIT_SHEET         = 'Deployment_Hour_Overrides_Audit';
+const DEPLOYMENT_HOUR_OVERRIDES_AUDIT_ARCHIVE_SHEET = 'Deployment_Hour_Overrides_Audit_Archive';
+
+const DEPLOYMENT_HOUR_OVERRIDE_HEADERS = [
+  'override_id',
+  'deployment_id',
+  'resource_name',
+  'period_start',
+  'psa_original_hours',
+  'override_hours',
+  'reason',
+  'status',
+  'expires_at',
+  'created_by',
+  'created_at',
+  'modified_by',
+  'modified_at',
+  'group_id'
+];
+
+const DEPLOYMENT_HOUR_OVERRIDE_AUDIT_HEADERS = [
+  'audit_id',
+  'timestamp',
+  'actor',
+  'action',
+  'override_id',
+  'deployment_id',
+  'resource_name',
+  'period_start',
+  'before_json',
+  'after_json',
+  'notes'
+];
+
 // --- Workday brand palette (exposed to client via api_getReference) ---
 const WORKDAY_PALETTE = {
   // Core

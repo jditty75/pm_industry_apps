@@ -637,6 +637,39 @@ function computeUtilization(params) {
     }
   });
 
+  // 1.5) Deployment Hour Overrides — Doc B
+  // For each active override, compute the delta between what PSA reports for
+  // that (resource, deployment, month) and the override value, then adjust the
+  // bucket's billable and committed totals accordingly.
+  try {
+    const _ovMap = readActiveDeploymentHourOverrides_();
+    if (Object.keys(_ovMap).length > 0) {
+      const _depIdx = _buildDeploymentMatchIndexes_();
+      const _psaByDep = {};
+      alloc.forEach(function(a) {
+        if (String(a.allocation_type || '') !== 'Billable') return;
+        const mk = monthKey_(a.period_start);
+        const depId = _matchDeploymentForAllocRow_(a, _depIdx);
+        if (!depId) return;
+        const k = String(a.resource_name || '') + '|' + depId + '|' + mk;
+        _psaByDep[k] = (_psaByDep[k] || 0) + (Number(a.hours) || 0);
+      });
+      Object.keys(_ovMap).forEach(function(ovKey) {
+        const parts = ovKey.split('|');
+        const bKey  = parts[0] + '|' + parts[2]; // resource|monthKey
+        if (!buckets[bKey]) return;
+        const ov     = _ovMap[ovKey];
+        const delta  = ov.override_hours - (_psaByDep[ovKey] || 0);
+        if (!delta) return;
+        const b = buckets[bKey];
+        b.billable  += delta;
+        b.committed += delta;
+      });
+    }
+  } catch (e) {
+    Logger.log('computeUtilization: override pass failed: ' + e);
+  }
+
   // 2) Assignments
   if (viewMode !== 'Actual') {
     assigns.forEach(a => {
@@ -1020,6 +1053,49 @@ function computeResourceDetail(params) {
     else if (a.allocation_type === 'PTO_Holiday') months[k].pto += h;
   });
 
+  // Doc B: Deployment Hour Overrides — apply delta to billable
+  const _rdOverrides = [];
+  try {
+    const _rdOvMap  = readActiveDeploymentHourOverrides_();
+    const _rdDepIdx = _buildDeploymentMatchIndexes_();
+    const _rdPsaByDep = {};
+    alloc.forEach(function(a) {
+      if (String(a.allocation_type || '') !== 'Billable') return;
+      const mk = monthKey_(a.period_start);
+      const depId = _matchDeploymentForAllocRow_(a, _rdDepIdx);
+      if (!depId) return;
+      const k = resource + '|' + depId + '|' + mk;
+      _rdPsaByDep[k] = (_rdPsaByDep[k] || 0) + (Number(a.hours) || 0);
+    });
+    Object.keys(_rdOvMap).forEach(function(ovKey) {
+      const parts = ovKey.split('|');
+      if (parts[0] !== resource) return;
+      const depId = parts[1];
+      const mk    = parts[2];
+      ensureMonth_(mk);
+      const ov    = _rdOvMap[ovKey];
+      const psaH  = _rdPsaByDep[ovKey] || 0;
+      const delta = ov.override_hours - psaH;
+      if (delta) {
+        months[mk].billable += delta;
+        if (!months[mk].overrideDelta) months[mk].overrideDelta = 0;
+        months[mk].overrideDelta += delta;
+      }
+      _rdOverrides.push({
+        monthKey:           mk,
+        deployment_id:      depId,
+        override_id:        ov.override_id,
+        override_hours:     ov.override_hours,
+        psa_original_hours: psaH,
+        reason:             ov.reason,
+        created_by:         ov.created_by,
+        expires_at:         ov.expires_at ? String(ov.expires_at).slice(0, 10) : null
+      });
+    });
+  } catch (e) {
+    Logger.log('computeResourceDetail: override pass failed: ' + e);
+  }
+
   if (viewMode !== 'Actual') {
     assigns.forEach(a => {
       const isCommitted = (a.status === 'Committed');
@@ -1106,6 +1182,13 @@ function computeResourceDetail(params) {
     else if (a.allocation_type === 'Internal')  _sm[k].psaInternal  += h;
     else if (a.allocation_type === 'Education') _sm[k].psaEducation += h;
     else if (a.allocation_type === 'PTO_Holiday') _sm[k].psaPto    += h;
+  });
+
+  // Apply override deltas to the _sm summary buckets as well
+  _rdOverrides.forEach(function(ov) {
+    _ensureSm_(ov.monthKey);
+    const delta = ov.override_hours - ov.psa_original_hours;
+    if (delta) _sm[ov.monthKey].psaBillable += delta;
   });
 
   // Include ALL assignments (Committed + Modeled) regardless of viewMode.
@@ -1209,5 +1292,5 @@ function computeResourceDetail(params) {
     }
   };
 
-  return { months: monthsArr, summary: summary };
+  return { months: monthsArr, summary: summary, overrides: _rdOverrides };
 }

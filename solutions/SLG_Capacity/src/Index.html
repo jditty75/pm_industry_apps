@@ -15,7 +15,7 @@
       <img class="brand-logo" src="https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg?c=1bxid64Mup7aczewSAYMX&t=1761286530298" alt="SLG Logo">
       <div class="brand-text">
         <div class="brand-title">SLG Capacity Planner</div>
-        <div class="brand-sub">v1.9</div>
+        <div class="brand-sub">v2.0</div>
       </div>
     </div>
     <nav class="nav">
@@ -766,6 +766,10 @@
           Source Overrides
           <span class="admin-tab-badge" id="adminTabBadgeOverrides" hidden>0</span>
         </button>
+        <button class="admin-tab" data-admin-tab="dep-hour-overrides" role="tab" aria-selected="false">
+          Deployment Hour Overrides
+          <span class="admin-tab-badge" id="adminTabBadgeDepHourOv" hidden>0</span>
+        </button>
       </nav>
 
       <!-- Operations panel -->
@@ -1067,9 +1071,179 @@
 
       </div>
 
+      <!-- Deployment Hour Overrides admin panel (Doc B) -->
+      <div class="admin-panel" data-admin-panel="dep-hour-overrides" hidden>
+
+        <!-- Card 1: Hygiene -->
+        <div class="card" id="depHourOvHygieneCard">
+          <div class="card-header">
+            <div class="card-title">Deployment Hour Override Hygiene</div>
+            <button class="btn-ghost" id="depHourOvHygieneRefreshBtn">Refresh</button>
+          </div>
+          <div class="card-body">
+            <div class="hygiene-tiles">
+              <div class="hygiene-tile">
+                <div class="hygiene-label">Active</div>
+                <div class="hygiene-value" id="depHourOvHygActive">—</div>
+              </div>
+              <div class="hygiene-tile">
+                <div class="hygiene-label">Expiring ≤30d</div>
+                <div class="hygiene-value" id="depHourOvHygExpiring">—</div>
+              </div>
+              <div class="hygiene-tile">
+                <div class="hygiene-label">Long-running</div>
+                <div class="hygiene-value" id="depHourOvHygLongRun">—</div>
+              </div>
+              <div class="hygiene-tile warn">
+                <div class="hygiene-label">Stale (PSA now matches)</div>
+                <div class="hygiene-value" id="depHourOvHygStale">—</div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer muted" style="font-size:12px;">
+            "Long-running" = active with no expiry set, created &gt;90 days ago.
+            "Stale" = PSA billable hours now within 0.5h of override value; override may be removable.
+          </div>
+        </div>
+
+        <!-- Card 2: Overrides list -->
+        <div class="card" id="depHourOvManagerCard">
+          <div class="card-header">
+            <div class="card-title">Active Deployment Hour Overrides</div>
+            <button class="btn-ghost" id="depHourOvLoadBtn">Load</button>
+          </div>
+          <div class="card-tools" style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 20px;border-bottom:1px solid var(--business-card);">
+            <input type="text" id="depHourOvSearch" class="input" placeholder="Filter by worker, deployment, reason…" style="flex:1;min-width:180px;">
+            <select id="depHourOvStatusFilter" class="input" style="width:130px;">
+              <option value="Active" selected>Active</option>
+              <option value="Expired">Expired</option>
+              <option value="Removed">Removed</option>
+              <option value="">All statuses</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Deployment ID</th>
+                  <th>Month</th>
+                  <th class="num">PSA Hrs</th>
+                  <th class="num">Override Hrs</th>
+                  <th>Reason</th>
+                  <th>Expires</th>
+                  <th>Created By</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="depHourOvTableBody">
+                <tr><td colspan="9" class="muted" style="padding:12px;">Click Load to fetch overrides.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
     </section>
 
   </main>
+
+  <!-- ============ Deployment Hour Override Drawer (Doc B) ============ -->
+  <aside class="drawer" id="depHourOvDrawer" hidden>
+    <div class="drawer-backdrop" data-dho-close></div>
+    <div class="drawer-panel">
+      <header class="drawer-header">
+        <div>
+          <div class="drawer-title" id="depHourOvDrawerTitle">Override Deployment Hours</div>
+          <div class="muted" id="depHourOvDrawerSub" style="font-size:12px;">—</div>
+        </div>
+        <button class="icon-btn" data-dho-close aria-label="Close">✕</button>
+      </header>
+      <div class="drawer-body" style="padding:20px;">
+
+        <input type="hidden" id="dhoOverrideId">
+        <input type="hidden" id="dhoModifiedAt">
+
+        <!-- Context row -->
+        <div class="form-row" style="margin-bottom:16px;padding:12px;background:var(--paper);border-radius:6px;font-size:13px;">
+          <div><span class="muted">Worker:</span> <strong id="dhoWorkerLabel">—</strong></div>
+          <div style="margin-top:4px;"><span class="muted">Deployment:</span> <strong id="dhoDeploymentLabel">—</strong></div>
+          <div style="margin-top:4px;"><span class="muted">Month:</span> <strong id="dhoMonthLabel">—</strong></div>
+        </div>
+
+        <!-- Mode selector -->
+        <div class="form-row" style="margin-bottom:16px;">
+          <label class="form-label">Override Mode</label>
+          <div style="display:flex;gap:12px;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+              <input type="radio" name="dhoMode" value="single" id="dhoModeSingle" checked> Single Month
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+              <input type="radio" name="dhoMode" value="range" id="dhoModeRange"> Date Range
+            </label>
+          </div>
+        </div>
+
+        <!-- Single-month fields -->
+        <div id="dhoSingleFields">
+          <div class="form-row" style="margin-bottom:14px;">
+            <label class="form-label" for="dhoPsaHours">Current PSA Billable Hours</label>
+            <input class="input" id="dhoPsaHours" type="number" step="0.5" readonly
+                   style="background:var(--paper);color:var(--staple);">
+            <div class="form-hint muted">Read-only — fetched live from PSA data.</div>
+          </div>
+          <div class="form-row" style="margin-bottom:14px;">
+            <label class="form-label" for="dhoOverrideHours">Override Hours <span style="color:var(--thumbtack)">*</span></label>
+            <input class="input" id="dhoOverrideHours" type="number" step="0.5" min="0" placeholder="e.g. 120">
+          </div>
+        </div>
+
+        <!-- Date-range fields (hidden by default) -->
+        <div id="dhoRangeFields" hidden>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+            <div class="form-row">
+              <label class="form-label" for="dhoStartDate">Start Date <span style="color:var(--thumbtack)">*</span></label>
+              <input class="input" id="dhoStartDate" type="date">
+            </div>
+            <div class="form-row">
+              <label class="form-label" for="dhoEndDate">End Date <span style="color:var(--thumbtack)">*</span></label>
+              <input class="input" id="dhoEndDate" type="date">
+            </div>
+          </div>
+          <div class="form-row" style="margin-bottom:14px;">
+            <label class="form-label" for="dhoTotalHours">Total Hours for Range <span style="color:var(--thumbtack)">*</span></label>
+            <input class="input" id="dhoTotalHours" type="number" step="1" min="0" placeholder="e.g. 480">
+          </div>
+          <div class="form-row" style="margin-bottom:14px;">
+            <label class="form-label" for="dhoDistribution">Distribution</label>
+            <select class="input" id="dhoDistribution">
+              <option value="Even">Even (equal per month)</option>
+              <option value="FrontLoad">Front-loaded</option>
+              <option value="BackLoad">Back-loaded</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Common fields -->
+        <div class="form-row" style="margin-bottom:14px;">
+          <label class="form-label" for="dhoReason">Reason <span style="color:var(--thumbtack)">*</span></label>
+          <textarea class="input" id="dhoReason" rows="3" placeholder="Explain why PSA hours are being overridden…" style="resize:vertical;"></textarea>
+        </div>
+        <div class="form-row" style="margin-bottom:14px;">
+          <label class="form-label" for="dhoExpiresAt">Expiry Date (optional)</label>
+          <input class="input" id="dhoExpiresAt" type="date">
+          <div class="form-hint muted">Override auto-expires at midnight on this date.</div>
+        </div>
+
+        <p id="dhoError" style="color:var(--thumbtack);font-size:13px;margin:0 0 12px;" hidden></p>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" data-dho-close>Cancel</button>
+        <button type="button" class="btn-primary" id="dhoSaveBtn">Save Override</button>
+      </div>
+    </div>
+  </aside>
 
   <!-- ============ Filters Drawer ============ -->
   <aside class="drawer filters-drawer" id="filtersDrawer" hidden>

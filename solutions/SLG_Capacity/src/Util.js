@@ -246,7 +246,11 @@ function invalidateAllCaches_() {
     CFG_PRACTICE_MGRS,                     // NEW: practice -> manager ownership
     'Config_Worker_Exclusions',
     'Config_Resource_Type', 'Config_ResourceType_Map',
-    'Config_Ingest_Filters'
+    'Config_Ingest_Filters',
+    // Doc B: Deployment Hour Overrides
+    DEPLOYMENT_HOUR_OVERRIDES_SHEET,
+    DEPLOYMENT_HOUR_OVERRIDES_AUDIT_SHEET,
+    DEPLOYMENT_HOUR_OVERRIDES_AUDIT_ARCHIVE_SHEET
   ];
   keys.forEach(function (k) { invalidateCache_(k); });
 

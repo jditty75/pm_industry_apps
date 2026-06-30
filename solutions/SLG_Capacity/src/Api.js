@@ -2511,3 +2511,35 @@ function api_revertCapacityAdjustmentToModeled(adjustment_id) {
   _requireAuthorized_();
   return setAdjustmentStatus_(adjustment_id, 'Modeled');
 }
+
+/**
+ * List Capacity_Adjustments_Audit rows, newest first.
+ * Optional filter: adjustment_id, resource_name, actor, action, limit.
+ * @param {{ adjustment_id?: string, resource_name?: string, actor?: string, action?: string, limit?: number }} filter
+ * @return {Object[]}
+ */
+function api_listCapacityAdjustmentAudit(filter) {
+  _requireAuthorized_();
+  filter = filter || {};
+  let rows = readTable_(CAPACITY_ADJUSTMENTS_AUDIT_SHEET);
+  if (filter.adjustment_id) rows = rows.filter(function (r) { return String(r.adjustment_id) === String(filter.adjustment_id); });
+  if (filter.resource_name) rows = rows.filter(function (r) { return r.resource_name === filter.resource_name; });
+  if (filter.actor)         rows = rows.filter(function (r) { return r.actor === filter.actor; });
+  if (filter.action)        rows = rows.filter(function (r) { return r.action === filter.action; });
+  rows.sort(function (a, b) { return new Date(b.timestamp || 0) - new Date(a.timestamp || 0); });
+  if (filter.limit) rows = rows.slice(0, Number(filter.limit) || 100);
+  return rows.map(function (r) {
+    return {
+      audit_id:      String(r.audit_id      || ''),
+      timestamp:     _toIso_(r.timestamp),
+      actor:         String(r.actor         || ''),
+      action:        String(r.action        || ''),
+      adjustment_id: String(r.adjustment_id || ''),
+      resource_name: String(r.resource_name || ''),
+      deployment_id: String(r.deployment_id || ''),
+      before_json:   r.before_json || null,
+      after_json:    r.after_json  || null,
+      notes:         String(r.notes         || '')
+    };
+  });
+}

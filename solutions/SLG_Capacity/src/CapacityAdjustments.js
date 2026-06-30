@@ -159,6 +159,52 @@ function expandAdjustmentToMonthly_(adj, calendar) {
   }));
 }
 
+// ============================================================
+// Doc B: Migration — backfill direction on existing rows
+// ============================================================
+
+/**
+ * One-time migration: backfill direction='reduce' on existing Capacity_Adjustments
+ * rows that have a blank direction column. Idempotent — rows already having a
+ * direction value are skipped.
+ * @return {number} count of rows backfilled
+ */
+function _migrateExistingAdjustmentsAddDirection_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(CAPACITY_ADJUSTMENTS_SHEET);
+  if (!sh) return 0;
+  const values = sh.getDataRange().getValues();
+  if (values.length < 2) return 0;
+  const header = values[0];
+  const iDir = header.indexOf('direction');
+  const iHrs = header.indexOf('hours_reduction');
+  if (iDir < 0 || iHrs < 0) return 0;
+  let backfilled = 0;
+  for (let r = 1; r < values.length; r++) {
+    if (!values[r][iDir]) {
+      const h = Number(values[r][iHrs]) || 0;
+      values[r][iDir] = h >= 0 ? 'reduce' : 'add';
+      backfilled++;
+    }
+  }
+  if (backfilled > 0) {
+    sh.getRange(1, 1, values.length, header.length).setValues(values);
+    invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
+    Logger.log('_migrateExistingAdjustmentsAddDirection_: backfilled ' + backfilled + ' rows');
+  }
+  return backfilled;
+}
+
+/**
+ * Public-named wrapper so Jeff can run this from the Apps Script editor dropdown
+ * after the first deploy. The editor hides functions ending with _, so this
+ * wrapper must NOT end with an underscore.
+ */
+function runDocBMigration() {
+  _dbg_requireAdmin_();
+  const n = _migrateExistingAdjustmentsAddDirection_();
+  Logger.log('Doc B migration complete. Backfilled: ' + n + ' rows.');
+}
+
 /**
  * Flip a single adjustment's status. Used by commitScenario_ and the
  * "Commit Now" drawer action.

@@ -3808,65 +3808,65 @@
 </script>
 
 <script>
-  // ============================================================
-  // Quick Adjust Modal — scoped to (worker, account, month)
-  // ============================================================
+// ============================================================
+// Quick Adjust Modal — scoped to (worker, account, month)
+// ============================================================
 
-  /**
-   * Open the quick-adjust modal for an Edit button click from the
-   * Project Allocation card.
-   * @param {{ workerName: string, accountName: string, monthKey: string, deployments: Object[] }} ctx
-   */
-  function openQuickAdjustModal_(ctx) {
-    State.qaCtx = ctx;
-    const modal = $('#quickAdjustModal');
-    if (!modal) return;
+/**
+ * Open the quick-adjust modal for an Edit button click from the
+ * Project Allocation card.
+ * @param {{ workerName: string, accountName: string, monthKey: string, deployments: Object[] }} ctx
+ */
+function openQuickAdjustModal_(ctx) {
+  State.qaCtx = ctx;
+  const modal = $('#quickAdjustModal');
+  if (!modal) return;
 
-    // Context line
-    const ctxEl = $('#qaContext');
-    if (ctxEl) ctxEl.textContent = ctx.workerName + ' \u00b7 ' + ctx.accountName + ' \u00b7 ' + fmtMonth(ctx.monthKey);
+  // Context line
+  const ctxEl = $('#qaContext');
+  if (ctxEl) ctxEl.textContent = ctx.workerName + ' \u00b7 ' + ctx.accountName + ' \u00b7 ' + fmtMonth(ctx.monthKey);
 
-    // Deployment dropdown — show only when multiple
-    const depField = $('#qaDeploymentField');
-    const depSel   = $('#qaDeployment');
-    if (depField && depSel) {
-      depSel.innerHTML = (ctx.deployments || []).map(function (d) {
-        return '<option value="' + escapeHtml_(d.deployment_id) + '">' + escapeHtml_(d.deployment_name) + '</option>';
-      }).join('');
-      depField.hidden = (ctx.deployments || []).length <= 1;
-    }
-
-    // Scenario dropdown
-    const scSel = $('#qaScenario');
-    if (scSel) {
-      scSel.innerHTML = '<option value="">— No scenario —</option>' +
-        (State.scenarios || []).filter(function (s) { return s.status !== 'Archived'; })
-          .map(function (s) { return '<option value="' + escapeHtml_(s.scenario_id) + '">' + escapeHtml_(s.name) + '</option>'; }).join('');
-    }
-
-    // Reset form
-    const hoursEl = $('#qaHours');
-    const reasonEl = $('#qaReason');
-    const errEl   = $('#qaError');
-    if (hoursEl)  hoursEl.value = '';
-    if (reasonEl) reasonEl.value = '';
-    if (errEl)    errEl.textContent = '';
-
-    // Default direction to 'reduce'
-    $$('#qaDirection button').forEach(function (b) { b.classList.toggle('on', b.dataset.val === 'reduce'); });
-    const labEl = $('#qaHoursLabel');
-    if (labEl) labEl.textContent = 'Hours to reduce';
-
-    modal.hidden = false;
-
-    // Populate PSA hours for the first deployment
-    _qaRefreshPsaHours_();
+  // Deployment dropdown — show only when multiple
+  const depField = $('#qaDeploymentField');
+  const depSel   = $('#qaDeployment');
+  if (depField && depSel) {
+    depSel.innerHTML = (ctx.deployments || []).map(function (d) {
+      return '<option value="' + escapeHtml_(d.deployment_id) + '">' + escapeHtml_(d.deployment_name) + '</option>';
+    }).join('');
+    depField.hidden = (ctx.deployments || []).length <= 1;
   }
 
-  /**
-   * Fetch and display PSA hours in the modal's read-only field.
-   */
-  async function _qaRefreshPsaHours_() {
+  // Scenario dropdown
+  const scSel = $('#qaScenario');
+  if (scSel) {
+    scSel.innerHTML = '<option value="">— No scenario —</option>' +
+      (State.scenarios || []).filter(function (s) { return s.status !== 'Archived'; })
+        .map(function (s) { return '<option value="' + escapeHtml_(s.scenario_id) + '">' + escapeHtml_(s.name) + '</option>'; }).join('');
+  }
+
+  // Reset form
+  const hoursEl = $('#qaHours');
+  const reasonEl = $('#qaReason');
+  const errEl   = $('#qaError');
+  if (hoursEl)  hoursEl.value = '';
+  if (reasonEl) reasonEl.value = '';
+  if (errEl)    errEl.textContent = '';
+
+  // Default direction to 'reduce'
+  $$('#qaDirection button').forEach(function (b) { b.classList.toggle('on', b.dataset.val === 'reduce'); });
+  const labEl = $('#qaHoursLabel');
+  if (labEl) labEl.textContent = 'Hours to reduce';
+
+  modal.hidden = false;
+
+  // Populate PSA hours for the first deployment
+  _qaRefreshPsaHours_();
+}
+
+/**
+ * Fetch and display PSA hours in the modal's read-only field.
+ */
+async function _qaRefreshPsaHours_() {
     const ctx = State.qaCtx;
     if (!ctx) return;
     const depSel = $('#qaDeployment');

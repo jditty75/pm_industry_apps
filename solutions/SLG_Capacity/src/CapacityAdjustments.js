@@ -1,9 +1,11 @@
 // ============================================================
 // CapacityAdjustments.gs — CRUD + monthly expansion for worker-
-// scoped hour reductions modeled against the PSA baseline.
+// scoped hour adjustments (add or reduce) modeled against the
+// PSA baseline.
 //
 // Pattern mirrors Assignments.gs.
-//   - hours_reduction is always stored as a positive number.
+//   - hours_reduction is SIGNED: positive = reduce, negative = add.
+//   - direction column is denormalized for human readability.
 //   - The engine handles the sign at compute time.
 //   - status: 'Modeled' | 'Committed' | 'Archived'
 // ============================================================
@@ -24,7 +26,9 @@ function listCapacityAdjustments_(filter) {
 
 /**
  * Create or update a Capacity_Adjustments row.
- * Required: resource_name, start_date, end_date, hours_reduction > 0.
+ * Required: resource_name, start_date, end_date, hours_reduction magnitude > 0.
+ * direction: 'add' | 'reduce' (defaults to 'reduce' for backward compat).
+ * hours_reduction is stored as signed: positive = reduce, negative = add.
  * @param {Object} adj
  * @return {Object} saved adjustment
  */
@@ -32,8 +36,14 @@ function saveCapacityAdjustment_(adj) {
   const user = getUserEmail_();
   const ts = now_();
 
-  adj.hours_reduction = Number(adj.hours_reduction) || 0;
-  if (adj.hours_reduction <= 0) throw new Error('hours_reduction must be > 0');
+  // Direction handling — default to 'reduce' for backward compatibility.
+  adj.direction = adj.direction || 'reduce';
+  if (adj.direction !== 'add' && adj.direction !== 'reduce') {
+    throw new Error('direction must be "add" or "reduce"');
+  }
+  const magnitude = Math.abs(Number(adj.hours_reduction) || 0);
+  if (magnitude <= 0) throw new Error('hours_reduction magnitude must be > 0');
+  adj.hours_reduction = adj.direction === 'add' ? -magnitude : magnitude;
 
   adj.distribution  = adj.distribution  || 'Even';
   adj.status        = adj.status        || 'Modeled';
@@ -72,10 +82,16 @@ function saveCapacityAdjustment_(adj) {
     adj.modified_at   = ts;
     getOrCreateSheet_(CAPACITY_ADJUSTMENTS_SHEET, ADJUSTMENT_HEADERS);
     appendRow_(CAPACITY_ADJUSTMENTS_SHEET, adj, ADJUSTMENT_HEADERS);
+    appendCapacityAdjustmentAudit_('create', null, adj, '');
   } else {
+    // Capture before-state for audit.
+    const _before = listCapacityAdjustments_({}).find(function (r) {
+      return String(r.adjustment_id) === String(adj.adjustment_id);
+    }) || null;
     adj.modified_by = user;
     adj.modified_at = ts;
     updateRow_(CAPACITY_ADJUSTMENTS_SHEET, 'adjustment_id', adj.adjustment_id, adj, ADJUSTMENT_HEADERS);
+    appendCapacityAdjustmentAudit_('update', _before, adj, '');
   }
 
   invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
@@ -86,6 +102,7 @@ function saveCapacityAdjustment_(adj) {
 /**
  * Hard-delete a Capacity_Adjustments row by adjustment_id.
  * Consistent with how assignments are deleted (deleteAssignment_ pattern).
+ * Appends a 'delete' audit row before removal.
  * @param {string} adjustment_id
  * @return {{ deleted: boolean }}
  */
@@ -98,6 +115,10 @@ function deleteCapacityAdjustment_(adjustment_id) {
   if (idCol < 0) return { deleted: false };
   for (let r = values.length - 1; r >= 1; r--) {
     if (values[r][idCol] === adjustment_id) {
+      // Capture the before-state for audit before deleting the row.
+      const before = {};
+      header.forEach(function (h, i) { before[h] = values[r][i]; });
+      appendCapacityAdjustmentAudit_('delete', before, null, '');
       sh.deleteRow(r + 1);
       invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
       if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
@@ -207,17 +228,135 @@ function runDocBMigration() {
 
 /**
  * Flip a single adjustment's status. Used by commitScenario_ and the
- * "Commit Now" drawer action.
+ * "Commit Now" drawer action. Appends a 'commit' or 'archive' audit row.
  * @param {string} adjustment_id
  * @param {string} status  'Committed' | 'Archived'
  * @return {{ adjustment_id: string, status: string }}
  */
 function setAdjustmentStatus_(adjustment_id, status) {
   const user = getUserEmail_();
-  updateRow_(CAPACITY_ADJUSTMENTS_SHEET, 'adjustment_id', adjustment_id, {
-    status: status, modified_by: user, modified_at: now_()
-  }, ADJUSTMENT_HEADERS);
+  // Capture before-state for audit.
+  const _before = listCapacityAdjustments_({}).find(function (r) {
+    return String(r.adjustment_id) === String(adjustment_id);
+  }) || null;
+  const patch = { status: status, modified_by: user, modified_at: now_() };
+  updateRow_(CAPACITY_ADJUSTMENTS_SHEET, 'adjustment_id', adjustment_id, patch, ADJUSTMENT_HEADERS);
+  const _after = _before ? Object.assign({}, _before, patch) : { adjustment_id: adjustment_id, status: status };
+  const auditAction = (status === 'Committed') ? 'commit' : 'archive';
+  appendCapacityAdjustmentAudit_(auditAction, _before, _after, '');
   invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   return { adjustment_id: adjustment_id, status: status };
+}
+
+// ============================================================
+// Doc B: Audit helper
+// ============================================================
+
+/**
+ * Append one row to Capacity_Adjustments_Audit. Mirrors appendOverrideAudit_.
+ * before is null on 'create'; after is null on 'delete'.
+ * @param {string} action  'create' | 'update' | 'commit' | 'archive' | 'delete'
+ * @param {Object|null} before
+ * @param {Object|null} after
+ * @param {string} notes
+ */
+function appendCapacityAdjustmentAudit_(action, before, after, notes) {
+  const row = {
+    audit_id:      uuid_(),
+    timestamp:     new Date(),
+    actor:         getUserEmail_(),
+    action:        String(action || ''),
+    adjustment_id: after ? String(after.adjustment_id || '') : (before ? String(before.adjustment_id || '') : ''),
+    resource_name: after ? String(after.resource_name || '') : (before ? String(before.resource_name || '') : ''),
+    deployment_id: after ? String(after.deployment_id || '') : (before ? String(before.deployment_id || '') : ''),
+    before_json:   before ? JSON.stringify(before) : null,
+    after_json:    after  ? JSON.stringify(after)  : null,
+    notes:         String(notes || '')
+  };
+  appendRow_(CAPACITY_ADJUSTMENTS_AUDIT_SHEET, row, CAPACITY_ADJUSTMENT_AUDIT_HEADERS);
+}
+
+// ============================================================
+// Doc B: Daily audit archive (mirrors archiveOverrideAudit_ pattern)
+// ============================================================
+
+/**
+ * Archive Capacity_Adjustments_Audit rows older than 365 days to
+ * Capacity_Adjustments_Audit_Archive. Rewrites the live table with
+ * kept rows only. Idempotent. Returns count archived.
+ */
+function archiveCapacityAdjustmentAudit_() {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 365);
+  cutoff.setHours(0, 0, 0, 0);
+
+  const rows = readTable_(CAPACITY_ADJUSTMENTS_AUDIT_SHEET);
+  const keep = [];
+  const archive = [];
+  rows.forEach(function (r) {
+    const ts = r.timestamp ? new Date(r.timestamp) : null;
+    if (!ts || isNaN(ts.getTime()) || ts >= cutoff) {
+      keep.push(r);
+    } else {
+      archive.push(r);
+    }
+  });
+
+  if (!archive.length) return 0;
+
+  archive.forEach(function (r) {
+    appendRow_(CAPACITY_ADJUSTMENTS_AUDIT_ARCHIVE_SHEET, r, CAPACITY_ADJUSTMENT_AUDIT_HEADERS);
+  });
+
+  const keepMatrix = keep.map(function (r) {
+    return CAPACITY_ADJUSTMENT_AUDIT_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  });
+  writeTable_(CAPACITY_ADJUSTMENTS_AUDIT_SHEET, CAPACITY_ADJUSTMENT_AUDIT_HEADERS, keepMatrix);
+
+  Logger.log('archiveCapacityAdjustmentAudit_: archived ' + archive.length + ' rows');
+  return archive.length;
+}
+
+/**
+ * Daily maintenance entry point for capacity adjustment audit archival.
+ * Called by the time-based trigger installed via setupCapacityAdjustmentAuditTrigger.
+ */
+function runDailyCapacityAdjustmentMaintenance_() {
+  Logger.log('runDailyCapacityAdjustmentMaintenance_: starting');
+  const archived = archiveCapacityAdjustmentAudit_();
+  Logger.log('runDailyCapacityAdjustmentMaintenance_: archived=' + archived);
+  return { archived: archived, ranAt: new Date().toISOString() };
+}
+
+/**
+ * Idempotent trigger installer. Returns true if a new trigger was created.
+ */
+function ensureCapacityAdjustmentAuditTrigger_() {
+  const FN = 'runDailyCapacityAdjustmentMaintenance_';
+  const existing = ScriptApp.getProjectTriggers().filter(function (t) {
+    return t.getHandlerFunction() === FN;
+  });
+  if (existing.length > 0) {
+    Logger.log('ensureCapacityAdjustmentAuditTrigger_: trigger already exists');
+    return false;
+  }
+  ScriptApp.newTrigger(FN)
+    .timeBased()
+    .everyDays(1)
+    .atHour(4)
+    .create();
+  Logger.log('ensureCapacityAdjustmentAuditTrigger_: trigger created (daily at 4 AM)');
+  return true;
+}
+
+/**
+ * Public-named wrapper so Jeff can run this from the Apps Script editor dropdown
+ * after the first deploy. The editor hides functions ending with _, so this
+ * wrapper must NOT end with an underscore.
+ */
+function setupCapacityAdjustmentAuditTrigger() {
+  _dbg_requireAdmin_();
+  const created = ensureCapacityAdjustmentAuditTrigger_();
+  Logger.log('Trigger installed: ' + created);
 }

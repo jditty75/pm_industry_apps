@@ -1064,6 +1064,52 @@
           </div>
         </div>
 
+        <!-- Adjustment Audit Log card -->
+        <div class="card" id="cadjAuditCard" style="margin-top:12px;">
+          <div class="card-header card-header-collapsible" id="cadjAuditHeader" style="cursor:pointer;user-select:none;">
+            <span class="collapse-chev" id="cadjAuditChev">▶</span>
+            <div class="card-title" style="margin-left:6px;">Adjustment Audit Log</div>
+            <span class="muted" id="cadjAuditSummary" style="font-size:12px;margin-left:8px;"></span>
+          </div>
+          <div id="cadjAuditBody" hidden>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 20px;border-bottom:1px solid var(--business-card);">
+              <input type="text" id="cadjAuditFilterWorker" class="input" placeholder="Worker name…" style="width:200px;">
+              <select id="cadjAuditFilterAction" class="input" style="width:160px;">
+                <option value="">All actions</option>
+                <option value="create">create</option>
+                <option value="update">update</option>
+                <option value="commit">commit</option>
+                <option value="archive">archive</option>
+                <option value="delete">delete</option>
+              </select>
+              <input type="text" id="cadjAuditFilterActor" class="input" placeholder="Actor email…" style="width:200px;">
+              <button class="btn-ghost" id="cadjAuditApplyBtn">Apply</button>
+            </div>
+            <div class="table-wrap" style="max-height:320px;">
+              <table class="data-table" id="cadjAuditTable">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Worker</th>
+                    <th>Deployment</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody id="cadjAuditTableBody">
+                  <tr><td colspan="6" class="muted" style="padding:12px;">Expand to load…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-footer muted" style="font-size:12px;">
+              Showing the most recent <span id="cadjAuditLimit">—</span> of
+              <span id="cadjAuditTotal">—</span> live audit rows.
+              Older entries (&gt;1 year) are archived to Capacity_Adjustments_Audit_Archive.
+            </div>
+          </div>
+        </div>
+
         <!-- Hidden file input for CSV import -->
         <input type="file" id="ovImportFile" accept=".csv,text/csv" hidden>
 

@@ -1311,3 +1311,58 @@ function _dbg_checkResourceTypeForDelivery() {
   });
   Logger.log('Direct rtMap["Delivery"]: ' + rtMap['Delivery']);
 }
+
+// ============================================================
+// Doc B: Capacity Adjustment diagnostics
+// ============================================================
+
+/**
+ * Log the 20 most recently modified Capacity_Adjustments rows.
+ */
+function _dbg_recentCapacityAdjustments() {
+  _dbg_requireAdmin_();
+  const rows = readTable_(CAPACITY_ADJUSTMENTS_SHEET);
+  rows.sort(function (a, b) { return new Date(b.modified_at || 0) - new Date(a.modified_at || 0); });
+  rows.slice(0, 20).forEach(function (r) {
+    Logger.log(JSON.stringify({
+      adjustment_id: r.adjustment_id,
+      resource_name: r.resource_name,
+      direction:     r.direction,
+      hours_reduction: r.hours_reduction,
+      deployment_id: r.deployment_id,
+      status:        r.status,
+      modified_at:   r.modified_at
+    }));
+  });
+}
+
+/**
+ * Log the 20 most recent Capacity_Adjustments_Audit rows.
+ */
+function _dbg_recentCapacityAdjustmentAudit() {
+  _dbg_requireAdmin_();
+  const rows = readTable_(CAPACITY_ADJUSTMENTS_AUDIT_SHEET);
+  rows.sort(function (a, b) { return new Date(b.timestamp || 0) - new Date(a.timestamp || 0); });
+  rows.slice(0, 20).forEach(function (r) { Logger.log(JSON.stringify(r)); });
+}
+
+/**
+ * Log all Capacity_Adjustments rows for a given worker.
+ * @param {string} resourceName
+ */
+function _dbg_findAdjustmentsByWorker(resourceName) {
+  _dbg_requireAdmin_();
+  const rows = readTable_(CAPACITY_ADJUSTMENTS_SHEET).filter(function (r) { return r.resource_name === resourceName; });
+  Logger.log('Count: ' + rows.length);
+  rows.forEach(function (r) {
+    Logger.log(JSON.stringify({
+      adjustment_id: r.adjustment_id,
+      direction:     r.direction,
+      hours_reduction: r.hours_reduction,
+      start_date:    r.start_date,
+      end_date:      r.end_date,
+      deployment_id: r.deployment_id,
+      status:        r.status
+    }));
+  });
+}

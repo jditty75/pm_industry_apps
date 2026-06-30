@@ -5688,5 +5688,71 @@
       _ovAuditLoaded = true;
       loadOvAudit_();
     });
+
+    // ---- Adjustment Audit Log collapsible ----
+    let _cadjAuditOpen   = false;
+    let _cadjAuditLoaded = false;
+
+    const cadjAuditHeader = $('#cadjAuditHeader');
+    if (cadjAuditHeader) {
+      cadjAuditHeader.addEventListener('click', function () {
+        _cadjAuditOpen = !_cadjAuditOpen;
+        const body = $('#cadjAuditBody');
+        const chev = $('#cadjAuditChev');
+        if (body) body.hidden = !_cadjAuditOpen;
+        if (chev) chev.classList.toggle('open', _cadjAuditOpen);
+        if (_cadjAuditOpen && !_cadjAuditLoaded) {
+          _cadjAuditLoaded = true;
+          loadCadjAudit_();
+        }
+      });
+    }
+
+    $('#cadjAuditApplyBtn')?.addEventListener('click', function () {
+      _cadjAuditLoaded = true;
+      loadCadjAudit_();
+    });
   });
+
+  async function loadCadjAudit_() {
+    const body = $('#cadjAuditTableBody');
+    if (!body) return;
+    body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:12px;">Loading\u2026</td></tr>';
+    try {
+      const filter = {};
+      const worker = ($('#cadjAuditFilterWorker')?.value || '').trim();
+      const action = ($('#cadjAuditFilterAction')?.value || '').trim();
+      const actor  = ($('#cadjAuditFilterActor')?.value  || '').trim();
+      if (worker) filter.resource_name = worker;
+      if (action) filter.action        = action;
+      if (actor)  filter.actor         = actor;
+      filter.limit = 100;
+      const rows = await call('api_listCapacityAdjustmentAudit', filter);
+
+      const limitEl = $('#cadjAuditLimit');
+      const totalEl = $('#cadjAuditTotal');
+      const summEl  = $('#cadjAuditSummary');
+      if (limitEl) limitEl.textContent = String(rows.length);
+      if (totalEl) totalEl.textContent = String(rows.length);
+      if (summEl)  summEl.textContent  = rows.length > 0 ? '(' + rows.length + ')' : '';
+
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:12px;">No audit rows match the filter.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(function (r) {
+        const when = r.timestamp ? String(r.timestamp).slice(0, 16).replace('T', ' ') : '\u2014';
+        return '<tr>' +
+          '<td>' + escapeHtml_(when) + '</td>' +
+          '<td>' + escapeHtml_(r.actor || '') + '</td>' +
+          '<td>' + escapeHtml_(r.action || '') + '</td>' +
+          '<td>' + escapeHtml_(r.resource_name || '') + '</td>' +
+          '<td>' + escapeHtml_(r.deployment_id || '') + '</td>' +
+          '<td>' + escapeHtml_(r.notes || '') + '</td>' +
+          '</tr>';
+      }).join('');
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:12px;">Load failed: ' + escapeHtml_(err.message) + '</td></tr>';
+    }
+  }
 </script>

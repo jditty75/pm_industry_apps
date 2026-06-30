@@ -1514,9 +1514,9 @@ function api_getWorkerBillableByAccount(params) {
   const monthKey = String(params.monthKey || '');
   if (!resourceName || !monthKey) return { resource_name: resourceName, monthKey: monthKey, totalHours: 0, rows: [] };
 
+  // PSA hours by account for this worker × month.
   const alloc = cachedRead_(ALLOC_NORM);
-  const byAccount = {};
-  var total = 0;
+  const psaByAccount = {};
   alloc.forEach(function(a) {
     if (a.resource_name !== resourceName) return;
     if (String(a.allocation_type || '') !== 'Billable') return;
@@ -1524,18 +1524,185 @@ function api_getWorkerBillableByAccount(params) {
     var hrs = Number(a.hours) || 0;
     if (!hrs) return;
     var acct = String(a.account_name || '') || '(No account)';
-    byAccount[acct] = (byAccount[acct] || 0) + hrs;
-    total += hrs;
+    psaByAccount[acct] = (psaByAccount[acct] || 0) + hrs;
   });
-  var rows = Object.keys(byAccount)
-    .map(function(k) { return { account_name: k, hours: byAccount[k] }; })
-    .sort(function(a, b) { return b.hours - a.hours; });
+
+  // Active adjustments for this worker — accumulate signed hours_reduction per account.
+  // adjMeta tracks reason and adjustment_ids per account for the badge tooltip.
+  var adjByAccount = {};   // account → signed hours_reduction sum
+  var adjMeta     = {};    // account → { reasons: Set, adjustment_ids: [], direction_last }
+  try {
+    var calendar = readCalendar_();
+    var adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET).filter(function (adj) {
+      if (adj.resource_name !== resourceName) return false;
+      if (!adj.deployment_id) return false;
+      var s = String(adj.status || 'Modeled');
+      return s === 'Modeled' || s === 'Committed';
+    });
+    adjRows.forEach(function (adj) {
+      var ref = _resolveDeploymentRef_(String(adj.deployment_id));
+      if (!ref) return;
+      var acct = ref.account_name || '(No account)';
+      var months = expandAdjustmentToMonthly_(adj, calendar);
+      months.forEach(function (m) {
+        if (monthKey_(m.period_start) !== monthKey) return;
+        var hrs = Number(m.hours_reduction) || 0;
+        adjByAccount[acct] = (adjByAccount[acct] || 0) + hrs;
+        if (!adjMeta[acct]) adjMeta[acct] = { reasons: [], adjustment_ids: [] };
+        var reason = String(adj.reason || '');
+        if (reason && adjMeta[acct].reasons.indexOf(reason) < 0) adjMeta[acct].reasons.push(reason);
+        var aid = String(adj.adjustment_id || '');
+        if (aid && adjMeta[acct].adjustment_ids.indexOf(aid) < 0) adjMeta[acct].adjustment_ids.push(aid);
+      });
+    });
+  } catch (e) {
+    Logger.log('api_getWorkerBillableByAccount: adjustment join error — ' + e);
+  }
+
+  // Build unified account list (PSA accounts + any adjustment-only accounts).
+  var allAccounts = Object.keys(psaByAccount);
+  Object.keys(adjByAccount).forEach(function (a) {
+    if (allAccounts.indexOf(a) < 0) allAccounts.push(a);
+  });
+
+  var totalHours = 0;
+  var rows = allAccounts.map(function (acct) {
+    var psa = psaByAccount[acct] || 0;
+    var signedAdj = adjByAccount[acct] || 0;
+    // working = psa - signedAdj: subtracting positive reduces, subtracting negative adds.
+    var working = psa - signedAdj;
+    totalHours += working;
+    var adjInfo = null;
+    if (signedAdj !== 0) {
+      var meta = adjMeta[acct] || { reasons: [], adjustment_ids: [] };
+      adjInfo = {
+        signed_hours:    signedAdj,
+        direction:       signedAdj > 0 ? 'reduce' : 'add',
+        magnitude:       Math.abs(signedAdj),
+        reason:          meta.reasons.join(', '),
+        adjustment_ids:  meta.adjustment_ids
+      };
+    }
+    return {
+      account_name: acct,
+      hours:        working,
+      psa_hours:    psa,
+      adjustment:   adjInfo
+    };
+  }).sort(function (a, b) { return b.hours - a.hours; });
+
   return {
     resource_name: resourceName,
-    monthKey: monthKey,
-    totalHours: total,
-    rows: rows
+    monthKey:      monthKey,
+    totalHours:    totalHours,
+    rows:          rows
   };
+}
+
+/**
+ * For the quick-adjust Edit button: given (worker, account, month), return all
+ * deployments where this worker has active PSA allocations.
+ * Tier 1: match Deployments rows whose PSA Project Name is in the worker's project set.
+ * Tier 2 fallback: if Tier 1 returns zero hits, return ALL deployments for the account.
+ * @param {{ resource_name: string, account_name: string, monthKey: string }} params
+ * @return {{ deployment_id: string, deployment_name: string, account_name: string, match_type: string }[]}
+ */
+function api_getDeploymentsForWorkerAccount(params) {
+  _requireAuthorized_();
+  params = params || {};
+  const resourceName = String(params.resource_name || '');
+  const accountName  = String(params.account_name  || '');
+  const monthKey     = String(params.monthKey       || '');
+  if (!resourceName || !accountName || !monthKey) return [];
+
+  // Build set of project_name values from ALLOC_NORM for this worker × account × month.
+  const projectSet = {};
+  try {
+    cachedRead_(ALLOC_NORM).forEach(function (a) {
+      if (a.resource_name !== resourceName) return;
+      if (String(a.account_name || '') !== accountName) return;
+      if (monthKey_(a.period_start) !== monthKey) return;
+      var hrs = Number(a.hours) || 0;
+      if (!hrs) return;
+      var proj = String(a.project_name || '').trim();
+      if (proj) projectSet[proj] = true;
+    });
+  } catch (e) {
+    Logger.log('api_getDeploymentsForWorkerAccount: alloc read error — ' + e);
+  }
+
+  // Read Deployments sheet.
+  var tier1 = [];
+  var tier2 = [];
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(DEPLOYMENTS_SHEET);
+    if (sh) {
+      var vals = sh.getDataRange().getValues();
+      var hdr  = vals[0];
+      var hIdx = {};
+      hdr.forEach(function (h, i) { hIdx[String(h).trim()] = i; });
+      function vd(row, name) { var i = hIdx[name]; return i >= 0 ? String(row[i] || '').trim() : ''; }
+      for (var ri = 1; ri < vals.length; ri++) {
+        var row = vals[ri];
+        var acct    = vd(row, 'Account Name');
+        var depName = vd(row, 'Deployment Name');
+        var depId   = vd(row, 'Deployment ID');
+        var psaProj = vd(row, 'PSA Project Name');
+        if (!acct && !depName) continue;
+        if (acct !== accountName) continue;
+        var result = { deployment_id: depId, deployment_name: depName, account_name: acct, match_type: 'account' };
+        if (psaProj && projectSet[psaProj]) {
+          result.match_type = 'project';
+          tier1.push(result);
+        } else {
+          tier2.push(result);
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('api_getDeploymentsForWorkerAccount: deployments read error — ' + e);
+  }
+
+  return tier1.length ? tier1 : tier2;
+}
+
+/**
+ * For the quick-adjust modal PSA field: return PSA hours for a worker × deployment × month.
+ * Tier 1: match ALLOC_NORM rows by project_name = deployment's psa_project_name.
+ * Tier 2: when psa_project_name blank, match by account_name.
+ * @param {{ resource_name: string, deployment_id: string, monthKey: string }} params
+ * @return {{ psa_hours: number }}
+ */
+function api_getPsaHoursForWorkerDeploymentMonth(params) {
+  _requireAuthorized_();
+  params = params || {};
+  const resourceName  = String(params.resource_name  || '');
+  const deploymentId  = String(params.deployment_id  || '');
+  const monthKey      = String(params.monthKey        || '');
+  if (!resourceName || !deploymentId || !monthKey) return { psa_hours: 0 };
+
+  var ref = _resolveDeploymentRef_(deploymentId);
+  if (!ref) return { psa_hours: 0 };
+  var psaProject = String(ref.psa_project_name || '').trim();
+  var accountName = String(ref.account_name    || '').trim();
+
+  var total = 0;
+  try {
+    cachedRead_(ALLOC_NORM).forEach(function (a) {
+      if (a.resource_name !== resourceName) return;
+      if (String(a.allocation_type || '') !== 'Billable') return;
+      if (monthKey_(a.period_start) !== monthKey) return;
+      var proj = String(a.project_name  || '').trim();
+      var acct = String(a.account_name  || '').trim();
+      // Tier 1: match by PSA project name; Tier 2: match by account when psa_project_name is blank.
+      var matches = psaProject ? (proj === psaProject) : (acct === accountName);
+      if (!matches) return;
+      total += Number(a.hours) || 0;
+    });
+  } catch (e) {
+    Logger.log('api_getPsaHoursForWorkerDeploymentMonth: ' + e);
+  }
+  return { psa_hours: total };
 }
 
 function api_saveIcp(rows) {

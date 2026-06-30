@@ -194,7 +194,7 @@
                 <div class="card-title" id="resourceTitle">Select a resource</div>
                 <div class="muted" id="resourceSub"></div>
               </div>
-              <button class="btn-ghost" id="reduceHoursBtn" hidden>Reduce hours</button>
+              <button class="btn-ghost" id="adjustHoursBtn" hidden>Adjust hours</button>
             </div>
             <div style="position:relative;height:320px;width:100%">
               <canvas id="resourceChart"></canvas>
@@ -242,15 +242,17 @@
                   <tr>
                     <th>Account Name</th>
                     <th class="num">Hours</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="projectAllocationBody">
-                  <tr><td colspan="2" class="muted" style="padding:12px">Loading…</td></tr>
+                  <tr><td colspan="3" class="muted" style="padding:12px">Loading…</td></tr>
                 </tbody>
                 <tfoot>
                   <tr>
                     <td><strong>Total</strong></td>
                     <td class="num"><strong id="projectAllocationTotal">—</strong></td>
+                    <td></td>
                   </tr>
                 </tfoot>
               </table>
@@ -1485,14 +1487,14 @@
     </div>
   </aside>
 
-  <!-- ============ Reduction Drawer ============ -->
+  <!-- ============ Adjust Hours Drawer (was: Reduction Drawer) ============ -->
   <aside class="drawer" id="reductionDrawer" hidden>
     <div class="drawer-backdrop" data-close></div>
     <div class="drawer-panel">
       <header class="drawer-header">
         <div>
           <div class="muted" id="reductionDrawerContext">Workforce Modeling</div>
-          <div class="drawer-title" id="reductionDrawerTitle">Reduce Worker Capacity</div>
+          <div class="drawer-title" id="reductionDrawerTitle">Adjust Worker Capacity</div>
           <div class="muted" id="reductionDrawerWorkerSub" style="margin-top:2px;font-size:12px;"></div>
         </div>
         <button class="icon-btn" data-close aria-label="Close">✕</button>
@@ -1500,6 +1502,14 @@
       <div class="drawer-spinner">Saving...</div>
       <form class="drawer-form" id="reductionForm">
         <input type="hidden" id="r_adjustment_id">
+
+        <label class="field">
+          <span>Direction</span>
+          <div class="seg" id="r_direction">
+            <button type="button" data-val="reduce" class="on">Reduce hours</button>
+            <button type="button" data-val="add">Add hours</button>
+          </div>
+        </label>
 
         <label class="field">
           <span>Worker <span style="color:var(--thumbtack);">*</span></span>
@@ -1518,7 +1528,7 @@
         </div>
 
         <label class="field">
-          <span>Hours to reduce <span style="color:var(--thumbtack);">*</span></span>
+          <span id="r_hoursLabel">Hours to reduce <span style="color:var(--thumbtack);">*</span></span>
           <input type="number" min="1" step="1" id="r_hours" class="input" required>
         </label>
 
@@ -1601,6 +1611,57 @@
       </form>
     </div>
   </aside>
+
+  <!-- ============ Quick Adjust Modal ============ -->
+  <div class="modal" id="quickAdjustModal" hidden>
+    <div class="modal-backdrop" data-qa-close></div>
+    <div class="modal-panel" style="width:480px;max-width:92vw;">
+      <header class="modal-header">
+        <div>
+          <div class="drawer-title">Adjust Allocation</div>
+          <div class="muted" id="qaContext" style="margin-top:4px;font-size:12px;">—</div>
+        </div>
+        <button class="icon-btn" data-qa-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body" style="padding:16px 20px;">
+        <div class="field" id="qaDeploymentField" hidden>
+          <span>Deployment <span class="muted">(this account has multiple)</span></span>
+          <select class="select" id="qaDeployment"></select>
+        </div>
+        <div class="field">
+          <span>Direction</span>
+          <div class="seg" id="qaDirection">
+            <button type="button" data-val="reduce" class="on">Reduce</button>
+            <button type="button" data-val="add">Add</button>
+          </div>
+        </div>
+        <div class="field">
+          <span>PSA reported hours</span>
+          <input type="text" class="input" id="qaPsaHours" readonly disabled>
+        </div>
+        <div class="field">
+          <span id="qaHoursLabel">Hours to reduce</span>
+          <input type="number" class="input" id="qaHours" min="1" step="1" required>
+        </div>
+        <div class="field">
+          <span>Reason</span>
+          <textarea class="input" id="qaReason" rows="2"
+                    placeholder="Required — explain why this adjustment is being modeled"></textarea>
+        </div>
+        <div class="field">
+          <span>Scenario <span class="muted">(optional)</span></span>
+          <select class="select" id="qaScenario">
+            <option value="">— No scenario —</option>
+          </select>
+        </div>
+        <div class="muted" id="qaError" style="color:var(--thumbtack);font-size:12px;margin-top:4px;"></div>
+      </div>
+      <div class="modal-actions" style="padding:12px 20px;border-top:1px solid var(--business-card);">
+        <button type="button" class="btn-ghost" data-qa-close>Cancel</button>
+        <button type="button" class="btn-primary" id="qaSaveBtn">Save Adjustment</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ============ Toasts ============ -->
   <div class="toast-stack" id="toastStack"></div>

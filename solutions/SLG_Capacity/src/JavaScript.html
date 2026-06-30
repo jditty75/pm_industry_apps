@@ -2704,13 +2704,27 @@
           const badge  = hasAdj
             ? '<span class="badge amber" title="' + escapeHtml_(r.adjustment.reason) + '" style="margin-left:6px;font-size:10px;">adjusted</span>'
             : '';
+          const adjIdsJson = hasAdj ? escapeHtml_(JSON.stringify(r.adjustment.adjustment_ids || [])) : '[]';
+          const clearBtn = hasAdj
+            ? '<button class="btn-ghost row-btn danger" data-pa-clear' +
+                ' data-account="' + escapeHtml_(r.account_name) + '"' +
+                ' data-worker="' + escapeHtml_(resourceName) + '"' +
+                ' data-month="' + escapeHtml_(monthKey) + '"' +
+                ' data-direction="' + escapeHtml_(r.adjustment.direction || 'reduce') + '"' +
+                ' data-magnitude="' + escapeHtml_(String(Math.round(r.adjustment.magnitude || 0))) + '"' +
+                ' data-adjustment-ids="' + adjIdsJson + '"' +
+                ' style="margin-left:4px;">Clear</button>'
+            : '';
           return '<tr>' +
             '<td>' + escapeHtml_(r.account_name) + badge + '</td>' +
             '<td class="num">' + fmtHours(r.hours) + 'h</td>' +
-            '<td><button class="btn-ghost row-btn" data-pa-edit' +
-              ' data-account="' + escapeHtml_(r.account_name) + '"' +
-              ' data-worker="' + escapeHtml_(resourceName) + '"' +
-              ' data-month="' + escapeHtml_(monthKey) + '">Edit</button></td>' +
+            '<td>' +
+              '<button class="btn-ghost row-btn" data-pa-edit' +
+                ' data-account="' + escapeHtml_(r.account_name) + '"' +
+                ' data-worker="' + escapeHtml_(resourceName) + '"' +
+                ' data-month="' + escapeHtml_(monthKey) + '">Edit</button>' +
+              clearBtn +
+            '</td>' +
             '</tr>';
         }).join('');
         total.textContent = fmtHours(result.totalHours) + 'h';
@@ -2735,6 +2749,40 @@
               openQuickAdjustModal_({ workerName: workerName, accountName: accountName, monthKey: mk, deployments: deployments });
             } catch (err) {
               toast('Failed to load deployments: ' + err.message, 'err');
+            }
+          });
+        });
+
+        // Wire Clear button click handlers
+        $$('#projectAllocationBody [data-pa-clear]').forEach(function (btn) {
+          btn.addEventListener('click', async function (e) {
+            e.stopPropagation();
+            const accountName   = btn.dataset.account;
+            const workerName    = btn.dataset.worker;
+            const mk            = btn.dataset.month;
+            const direction     = btn.dataset.direction || 'reduce';
+            const magnitude     = Number(btn.dataset.magnitude) || 0;
+            const adjIds        = JSON.parse(btn.dataset.adjustmentIds || '[]');
+
+            const verb = direction === 'add' ? 'added' : 'reduced';
+            const bodyText = 'This will remove the adjustment of ' + magnitude + 'h ' + verb +
+              ' for ' + workerName + ' on ' + accountName + ' in ' + fmtMonth(mk) +
+              '. The Project Allocation will revert to PSA\u2019s reported value.';
+
+            const ok = await confirmAction_({
+              title:        'Clear adjustment?',
+              body:         bodyText,
+              confirmLabel: 'Clear',
+              confirmStyle: 'danger',
+              asyncHandler: async function () {
+                for (var i = 0; i < adjIds.length; i++) {
+                  await call('api_deleteCapacityAdjustment', adjIds[i]);
+                }
+              }
+            });
+            if (ok) {
+              toast('Adjustment cleared', 'ok');
+              refreshExplorerSurfaces_(workerName);
             }
           });
         });
@@ -3788,9 +3836,7 @@
       if (State.currentView === 'scenarios' && State.selectedScenario) {
         await loadScenarioAssignments_(State.selectedScenario);
       }
-      if (State.currentView === 'explorer' && State.selectedResource) {
-        loadResourceDetail_(State.selectedResource);
-      }
+      refreshExplorerSurfaces_(resource);
     } catch (err) {
       toast('Save failed: ' + err.message, 'err');
     } finally {
@@ -3808,6 +3854,25 @@
 </script>
 
 <script>
+// ============================================================
+// Capacity Explorer — unified three-surface refresh
+// ============================================================
+
+/**
+ * Refresh all three Capacity Explorer surfaces for a given worker.
+ * Guards on both State.currentView and State.selectedResource so
+ * saves from other views don't trigger wasted fetches.
+ * @param {string} workerName
+ */
+function refreshExplorerSurfaces_(workerName) {
+  if (State.currentView === 'explorer' && State.selectedResource === workerName) {
+    loadResourceDetail_(workerName);
+  }
+  if (State.projectAllocation && State.projectAllocation.resource === workerName) {
+    loadProjectAllocationCard_(State.projectAllocation.resource, State.projectAllocation.monthKey);
+  }
+}
+
 // ============================================================
 // Quick Adjust Modal — scoped to (worker, account, month)
 // ============================================================
@@ -3953,10 +4018,7 @@ async function _qaRefreshPsaHours_() {
       await call('api_saveCapacityAdjustment', payload);
       $('#quickAdjustModal').hidden = true;
       toast('Adjustment saved as Modeled', 'ok');
-      // Refresh the Project Allocation card
-      if (State.projectAllocation) {
-        loadProjectAllocationCard_(State.projectAllocation.resource, State.projectAllocation.monthKey);
-      }
+      refreshExplorerSurfaces_(ctx.workerName);
     }, { label: 'Saving...' });
   });
 </script>

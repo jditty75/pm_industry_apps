@@ -50,6 +50,9 @@
 // Performance Layer 1: per-execution cache for enrichment map.
 var _enrichmentCache = null;
 
+// D1: per-execution cache for DD-from-Contacts map.
+var _ddContactsCache = null;
+
 /**
  * Clears the enrichment cache. Currently not called by anything in CoreSalesforce
  * because the underlying SFDC_DeploymentProductFunctions sheet is read-only
@@ -309,6 +312,139 @@ function _warmCaches(config) {
   Logger.log('CoreSalesforce._warmCaches(' + cfg.appId + '): ' + elapsed + 'ms, ' +
              rowCount + ' SFDC rows, ' + deploymentCount + ' enriched deployments.');
   return { ok: true, durationMs: elapsed, rows: rowCount, enrichmentDeployments: deploymentCount };
+}
+
+// ===========================================================================
+// D1: DD ASSIGNMENTS FROM SFDC_Contacts
+// ---------------------------------------------------------------------------
+// Reads SFDC_Contacts and produces a Map<deploymentId, Array<{email,name}>>
+// for all contacts where Contact_Role__c === 'Deployment Sponsor'.
+// Cached tier-1 (in-memory per execution) + tier-2 (sheet-tab, 5-min TTL).
+// ===========================================================================
+
+/**
+ * Returns a plain-object map keyed by Deployment__c → Array<{email,name}>
+ * for contacts where Contact_Role__c === 'Deployment Sponsor'.
+ * Cached via _PerfCache with 5-min TTL, keyed by appId.
+ *
+ * @param {AppConfig} config
+ * @return {Object}  { '<deploymentId>': [{email:string, name:string}, ...], ... }
+ */
+function getDdAssignmentsFromContacts_(config) {
+  var cfg = CoreConfig.withDefaults(config);
+  var cacheKey = 'ddFromContacts:' + (cfg.appId || 'default');
+
+  // Tier 1: in-memory.
+  if (_ddContactsCache !== null) return _ddContactsCache;
+
+  // Tier 2: sheet-tab cache.
+  var cached = _perfCacheReadS_(cacheKey);
+  if (cached !== null) {
+    _ddContactsCache = cached;
+    return cached;
+  }
+
+  var sheetName = (cfg.sheets && cfg.sheets.sfdcContacts) || 'SFDC_Contacts';
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    Logger.log('getDdAssignmentsFromContacts_: sheet "' + sheetName + '" not found — returning empty map.');
+    _ddContactsCache = {};
+    return {};
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('getDdAssignmentsFromContacts_: sheet "' + sheetName + '" has no data rows.');
+    _ddContactsCache = {};
+    return {};
+  }
+
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    Logger.log('getDdAssignmentsFromContacts_: sheet "' + sheetName + '" has no columns.');
+    _ddContactsCache = {};
+    return {};
+  }
+
+  var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = allValues[0].map(function(h) { return String(h || '').trim(); });
+
+  // Resolve column indices.
+  var colRole     = CoreSalesforce._findCol_(headers, ['contact_role__c', 'contact_role'], -1);
+  var colDepId    = CoreSalesforce._findDeploymentFkCol_(headers, -1);
+  var colEmail    = CoreSalesforce._findCol_(headers, ['contact__r.email', 'contact.email', 'email'], -1);
+  var colName     = CoreSalesforce._findCol_(headers, ['contact__r.name', 'contact.name', 'name'], -1);
+
+  if (colRole < 0) {
+    Logger.log('getDdAssignmentsFromContacts_: Contact_Role__c column not found in "' + sheetName + '".');
+    _ddContactsCache = {};
+    return {};
+  }
+  if (colDepId < 0) {
+    Logger.log('getDdAssignmentsFromContacts_: Deployment__c column not found in "' + sheetName + '".');
+    _ddContactsCache = {};
+    return {};
+  }
+  if (colEmail < 0) {
+    Logger.log('getDdAssignmentsFromContacts_: Contact__r.Email column not found in "' + sheetName + '".');
+    _ddContactsCache = {};
+    return {};
+  }
+
+  var map = {};
+  var included = 0;
+  var skipped  = 0;
+
+  for (var r = 1; r < allValues.length; r++) {
+    var row = allValues[r];
+
+    var role  = String(row[colRole]  || '').trim();
+    var depId = String(row[colDepId] || '').trim();
+    var email = String(colEmail >= 0 ? (row[colEmail] || '') : '').trim();
+    var name  = String(colName  >= 0 ? (row[colName]  || '') : '').trim();
+
+    if (role !== 'Deployment Sponsor') { skipped++; continue; }
+    if (!depId)  { skipped++; continue; }
+    if (!email)  { skipped++; continue; }  // no email → skip; source cleanup needed
+
+    if (!map[depId]) map[depId] = [];
+    map[depId].push({ email: email, name: name });
+    included++;
+  }
+
+  Logger.log('getDdAssignmentsFromContacts_(' + (cfg.appId || '?') + '): ' +
+             included + ' included, ' + skipped + ' skipped, ' +
+             Object.keys(map).length + ' unique deployments.');
+
+  // Write both tiers.
+  _ddContactsCache = map;
+  _perfCacheWriteS_(cacheKey, map);
+  return map;
+}
+
+/**
+ * Clears the D1 DD-from-Contacts in-memory + sheet-tab cache.
+ * Called alongside _clearEnrichmentSheetCache when sheet data changes.
+ */
+function _clearDdContactsCache() {
+  _ddContactsCache = null;
+  try {
+    var sheet = _getPerfCacheSheet_S_();
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = data.length - 1; i >= 0; i--) {
+        var k = String(data[i][0] || '');
+        if (k.indexOf('ddFromContacts:') === 0) {
+          sheet.deleteRow(i + 2);
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log('_clearDdContactsCache: ' + err);
+  }
 }
 
 var CoreSalesforce = {
@@ -605,7 +741,11 @@ var CoreSalesforce = {
 
   // Performance Layer 2 exports
   _clearEnrichmentSheetCache: _clearEnrichmentSheetCache,
-  _warmCaches: _warmCaches
+  _warmCaches: _warmCaches,
+
+  // D1: DD-from-Contacts
+  getDdAssignmentsFromContacts_: getDdAssignmentsFromContacts_,
+  _clearDdContactsCache:        _clearDdContactsCache
 };
 
 // ---------------------------------------------------------------------------

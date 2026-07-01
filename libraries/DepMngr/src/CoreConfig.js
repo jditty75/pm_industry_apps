@@ -224,6 +224,9 @@ var CoreConfig = (function () {
     // MGM/PGL patch: contacts sheet
     if (!cfg.sheets.deploymentContacts)
       cfg.sheets.deploymentContacts = 'SFDC_DeploymentContacts';
+    // D1: Delivery Director from SFDC_Contacts
+    if (!cfg.sheets.sfdcContacts)
+      cfg.sheets.sfdcContacts = 'SFDC_Contacts';
     if (!cfg.sheets.wellness)
       cfg.sheets.wellness = 'SFDC_Wellness';
 

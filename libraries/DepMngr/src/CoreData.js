@@ -617,15 +617,42 @@ var CoreData = (function () {
       Logger.log('CoreData.getAllEffectiveDeployments: SFDC path threw, falling back. Error: ' + err);
       effective = [];
     }
-    if (effective && effective.length) {
-      return effective;
+    if (!effective || !effective.length) {
+      try {
+        effective = getAllEffectiveDeploymentsLegacy_(cfg);
+      } catch (err) {
+        Logger.log('CoreData.getAllEffectiveDeployments: legacy fallback also failed: ' + err);
+        effective = [];
+      }
     }
+
+    // D1: attach ddContacts / ddFromContacts from SFDC_Contacts.
+    // Gracefully degrades: if the sheet is absent or the call throws, rows are
+    // returned unchanged (ddContacts=[], ddFromContacts=null) so HENP/HC are safe.
+    var contactsDdMap = {};
     try {
-      return getAllEffectiveDeploymentsLegacy_(cfg);
-    } catch (err) {
-      Logger.log('CoreData.getAllEffectiveDeployments: legacy fallback also failed: ' + err);
-      return [];
+      contactsDdMap = CoreSalesforce.getDdAssignmentsFromContacts_(cfg) || {};
+    } catch (e) {
+      Logger.log('getAllEffectiveDeployments: getDdAssignmentsFromContacts_ failed: ' + e);
     }
+    effective.forEach(function(r) {
+      var assignments = contactsDdMap[r.deploymentId] || [];
+      r.ddContacts = assignments;
+
+      r.ddFromContacts = null;
+      if (assignments.length === 1) {
+        var c = assignments[0];
+        r.ddFromContacts = (c.name && c.email)
+          ? c.name + ' <' + c.email + '>'
+          : (c.name || c.email || null);
+      } else if (assignments.length > 1) {
+        r.ddFromContacts = assignments.map(function(c) {
+          return c.name || c.email || '';
+        }).filter(Boolean).join(', ');
+      }
+    });
+
+    return effective;
   }
 
   /**
@@ -701,6 +728,52 @@ var CoreData = (function () {
       onlyInSfdc: onlyInSfdc.length,
       onlyInLegacy: onlyInLegacy.length
     };
+  }
+
+  /**
+   * D1 Diagnostic: logs deployments with 0 or >1 Delivery Directors from SFDC_Contacts.
+   * Run manually from the Apps Script editor. Not surfaced in UI.
+   *
+   * @param {AppConfig} config
+   */
+  function _debugDdFromContacts_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var ddMap = {};
+    try {
+      ddMap = CoreSalesforce.getDdAssignmentsFromContacts_(cfg) || {};
+    } catch (e) {
+      Logger.log('_debugDdFromContacts_: getDdAssignmentsFromContacts_ failed: ' + e);
+    }
+    var eff = [];
+    try {
+      eff = getAllEffectiveDeployments(cfg) || [];
+    } catch (e) {
+      Logger.log('_debugDdFromContacts_: getAllEffectiveDeployments failed: ' + e);
+    }
+
+    var zero  = [];
+    var multi = [];
+    eff.forEach(function(r) {
+      var list = ddMap[r.deploymentId] || [];
+      if (list.length === 0)      zero.push(r);
+      else if (list.length > 1)  multi.push(r);
+    });
+
+    Logger.log('DD-from-Contacts diagnostic (' + (cfg.appId || '?') + '): ' +
+               'zero=' + zero.length + ', multi=' + multi.length +
+               ', total effective deployments=' + eff.length);
+
+    zero.slice(0, 20).forEach(function(r) {
+      Logger.log('[ZERO]  ' + (r.accountName || '') + ' | ' +
+                 (r.deploymentName || '') + ' | ' + r.deploymentId);
+    });
+    multi.slice(0, 20).forEach(function(r) {
+      Logger.log('[MULTI] ' + (r.accountName || '') + ' | ' +
+                 (r.deploymentName || '') + ' | ' + r.deploymentId +
+                 ' → ' + JSON.stringify((ddMap[r.deploymentId] || []).map(function(c) {
+                   return c.email || c.name;
+                 })));
+    });
   }
 
   // ===========================================================================
@@ -3512,6 +3585,7 @@ var CoreData = (function () {
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
     _validateEffectiveDeployments:       _validateEffectiveDeployments,
+    _debugDdFromContacts_:               _debugDdFromContacts_,
     getGoLives:                          getGoLives,
     getUpcomingGoLives:                  getUpcomingGoLives,
     updateDeploymentMeta:                updateDeploymentMeta,

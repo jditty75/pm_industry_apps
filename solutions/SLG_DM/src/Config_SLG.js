@@ -206,6 +206,8 @@ var APP_CONFIG = {
       ownerOptions: ['Steve Rogers', 'Roman Cortes', 'Lakshmi Visvanathan']
     },
 
+    enableAccountLinks: true,
+
     // Phase 2: personalization activated
     personalization: {
       enabled: true,

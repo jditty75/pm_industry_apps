@@ -146,6 +146,9 @@ var APP_CONFIG = {
     headerTitle:    'SLG Deployment Health Manager',
     headerSubtitle: 'Review and manage deployment data across all stages',
 
+    // L1: enable Salesforce Account links in Deployments and Go Lives tables.
+    enableAccountLinks: true,
+
     // Phase 2 canonical tab structure. Note: 'upcoming' tab removed (merged
     // into 'golives'); 'overrides' tab added at end.
     // MGM/PGL tab added (feature/mgm-pgl).

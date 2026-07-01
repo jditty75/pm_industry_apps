@@ -1310,6 +1310,7 @@ var CoreData = (function () {
       results.push({
         rowIndex:          dep.rowIndex,
         deploymentId:      dep.deploymentId,
+        accountId:         dep.accountId,
         accountName:       dep.accountName,
         deploymentName:    dep.deploymentName,
         servicesApproach:  dep.servicesApproach,
@@ -1355,6 +1356,7 @@ var CoreData = (function () {
       results.push({
         rowIndex:          dep.rowIndex,
         deploymentId:      dep.deploymentId,
+        accountId:         dep.accountId,
         accountName:       dep.accountName,
         deploymentName:    dep.deploymentName,
         servicesApproach:  dep.servicesApproach,
@@ -1496,6 +1498,7 @@ var CoreData = (function () {
 
       results.push({
         deploymentId:   dep.deploymentId,
+        accountId:      dep.accountId,
         accountName:    dep.accountName,
         deploymentName: dep.deploymentName,
         partner:        dep.partner,

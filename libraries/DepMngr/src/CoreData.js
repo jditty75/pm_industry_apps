@@ -642,9 +642,7 @@ var CoreData = (function () {
       r.ddFromContacts = null;
       if (assignments.length === 1) {
         var c = assignments[0];
-        r.ddFromContacts = (c.name && c.email)
-          ? c.name + ' <' + c.email + '>'
-          : (c.name || c.email || null);
+        r.ddFromContacts = c.name || c.email || null;
       } else if (assignments.length > 1) {
         r.ddFromContacts = assignments.map(function(c) {
           return c.name || c.email || '';

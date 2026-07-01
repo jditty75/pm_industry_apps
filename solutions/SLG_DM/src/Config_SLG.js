@@ -48,7 +48,7 @@ var APP_CONFIG = {
     // MGM/PGL patch: contacts from SFDC
     deploymentContacts: 'SFDC_DeploymentContacts',
     // D1: Delivery Director from SFDC_Contacts
-    sfdcContacts: 'SFDC_Contacts'
+    sfdcContacts: 'SFDC_DeploymentContacts'
   },
 
   namedRanges: {

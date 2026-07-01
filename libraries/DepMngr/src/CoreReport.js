@@ -852,8 +852,9 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
     var tbodyHtml = result.rows.map(function (row, ri) {
       var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
-      var barHtml = renderBarFromPctWithStyle_(row.pct * 100, barCfg, null,
-        (row.pct * 100).toFixed(1) + '%');
+      // C13: use largest-remainder integer displayPct for label so all rows sum to 100%.
+      var displayLabel = (row.displayPct !== undefined ? row.displayPct : (row.pct * 100).toFixed(1)) + '%';
+      var barHtml = renderBarFromPctWithStyle_(row.pct * 100, barCfg, null, displayLabel);
       return '<tr>' +
         '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
           CoreUtils.escapeHtml(row.approach) + '</td>' +
@@ -1108,59 +1109,79 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * Phase 3i: Renders the Recent Go Lives table using CoreData.getRecentGoLives()
-   * (SFDC_Deployments + product-function Actual dates). Supersedes the legacy
-   * CoreReportHelpers.getEffectiveRecentGoLivesForExport_ path that read from
-   * the frozen 'Go Lives' sheet.
+   * C13: Renders the Recent Go Lives table.
    *
-   * Date column rendering:
-   *   - Single date (recentDates.length === 1): "Jul 15, 2026 — HCM, Payroll"
-   *   - Multiple dates (recentDates.length > 1): one <div> per date (phased pattern)
-   *
-   * Column structure unchanged: Go Live Date | Account Name | [Industry] | Product Areas | Partner
+   * Source: CoreData.getRecentGoLives(cfg, null) — 60-day window.
+   * Columns: Date | Account | Deployment | Partner.
+   * Sort: ascending by earliest in-window date (oldest go-live first).
+   * Date cell: single date only when recentDates.length === 1;
+   *   <br>-separated lines when multiple waves, products shown only on lines
+   *   where the wave date differs from the deployment's parent MTP.
    */
   function buildRecentGoLivesHtmlTableFromEffectiveData_(config, tableCfg) {
     var cfg  = CoreConfig.withDefaults(config);
 
-    // Phase 3i: use SOQL-backed getRecentGoLives instead of legacy getGoLives.
-    var rows = CoreData.getRecentGoLives(cfg) || [];
+    var rows = CoreData.getRecentGoLives(cfg, null) || [];
     if (!rows || !rows.length) {
       return '<p style="font-size:11px; font-family:Arial,sans-serif;">(No recent go lives in report)</p>';
     }
 
+    // Build effectiveByDeploymentId for parentMtp lookup.
+    var effectiveByDeploymentId = {};
+    CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+      if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
+    });
+
+    // Re-sort ascending by earliest in-window date; ties broken by account name.
+    function _earliestRecentDate_(r) {
+      if (!r.recentDates || r.recentDates.length === 0) return '';
+      return r.recentDates.reduce(function (min, d) {
+        return (!min || d.date < min) ? d.date : min;
+      }, '');
+    }
+    rows = rows.slice().sort(function (a, b) {
+      var ad = _earliestRecentDate_(a);
+      var bd = _earliestRecentDate_(b);
+      if (ad < bd) return -1;
+      if (ad > bd) return 1;
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
+
+    // C13.3: table-layout:fixed forces the browser to honor explicit column
+    // widths declared via <colgroup>. Under the default table-layout:auto,
+    // width declarations on <th>/<td> are advisory only and get overridden by
+    // cell content. This is the only reliable cross-Outlook way to lock the
+    // Date column width.
     var TABLE_STYLE =
       'border-collapse:collapse; width:100%; max-width:960px; ' +
+      'table-layout:fixed; ' +
       'font-size:11px; font-family:Arial,sans-serif;';
     var TH_STYLE =
       'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; ' +
-      'padding:6px 8px; text-align:left; white-space:nowrap; font-size:11px;';
+      'padding:6px 8px; text-align:left; font-size:11px;';
     var TD_STYLE =
       'border:1px solid #dddddd; padding:5px 8px; ' +
-      'text-align:left; font-size:11px;';
+      'text-align:left; font-size:11px; ' +
+      'word-wrap:break-word; overflow-wrap:break-word;';
     var TD_VALIGN_STYLE = TD_STYLE + ' vertical-align:top;';
 
-    var includeIndustry = !!cfg.report.includeIndustryGoLives;
+    // <colgroup> forces width allocation under table-layout:fixed.
+    // 110px for Date; remaining width distributes across the other 3 columns.
+    var colgroupHtml =
+      '<colgroup>' +
+      '<col style="width:110px;">' +
+      '<col>' +
+      '<col>' +
+      '<col>' +
+      '</colgroup>';
 
-    var theadParts = [
-      '<th style="' + TH_STYLE + '">Go Live Date</th>',
-      '<th style="' + TH_STYLE + '">Account Name</th>'
-    ];
-    if (includeIndustry) {
-      theadParts.push('<th style="' + TH_STYLE + '">Industry</th>');
-    }
-    theadParts.push(
-      '<th style="' + TH_STYLE + '">Product Areas</th>',
-      '<th style="' + TH_STYLE + '">Partner</th>'
-    );
+    var theadHtml =
+      '<th style="' + TH_STYLE + '">Date</th>' +
+      '<th style="' + TH_STYLE + '">Account</th>' +
+      '<th style="' + TH_STYLE + '">Deployment</th>' +
+      '<th style="' + TH_STYLE + '">Partner</th>';
 
-    var theadHtml = theadParts.join('');
-
-    /**
-     * Format a YYYY-MM-DD date string as "Jul 15, 2026".
-     * @param {string} dateStr
-     * @return {string}
-     */
-    function formatRecentDate_(dateStr) {
+    function _fmtReportDate_(dateStr) {
       if (!dateStr) return '';
       var d = new Date(dateStr);
       if (isNaN(d.getTime())) return dateStr;
@@ -1169,195 +1190,184 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       });
     }
 
-    var tbodyHtml = rows
-      .map(function (row, ri) {
-        var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
+    var tbodyHtml = rows.map(function (row, ri) {
+      var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
 
-        function td(content) {
-          return (
-            '<td style="' + TD_STYLE + ' background-color:' + defaultBg + ';">' +
-            CoreUtils.escapeHtml(content || '') +
-            '</td>'
-          );
-        }
-        function tdRaw(html) {
-          return (
-            '<td style="' + TD_VALIGN_STYLE + ' background-color:' + defaultBg + ';">' +
-            html +
-            '</td>'
-          );
-        }
+      function td_(content) {
+        return '<td style="' + TD_STYLE + ' background-color:' + defaultBg + ';">' +
+          CoreUtils.escapeHtml(content || '') + '</td>';
+      }
+      function tdRaw_(html) {
+        return '<td style="' + TD_VALIGN_STYLE + ' background-color:' + defaultBg + ';">' +
+          html + '</td>';
+      }
 
-        var recentDates  = row.recentDates  || [];
-        var lastGoLiveDate = row.lastGoLiveDate || '';
+      var recentDates = row.recentDates || [];
+      var effective   = effectiveByDeploymentId[row.deploymentId];
+      var parentMtp   = (effective && effective.mtpDate) || '';
 
-        // --- Date cell ---
-        var dateCellHtml;
-        if (recentDates.length <= 1) {
-          // Single date: "Jul 15, 2026 — HCM, Payroll"
-          var dateLabel    = formatRecentDate_(lastGoLiveDate);
-          var products0    = (recentDates.length === 1 && recentDates[0].products)
-                             ? recentDates[0].products.join(', ')
-                             : '';
-          var singleLine   = products0
-                             ? CoreUtils.escapeHtml(dateLabel) + ' \u2014 ' + CoreUtils.escapeHtml(products0)
-                             : CoreUtils.escapeHtml(dateLabel);
-          dateCellHtml = singleLine;
-        } else {
-          // Multiple dates: one <div> per date (phased pattern, matching Upcoming Go Lives).
-          var divLines = recentDates.map(function (rd) {
-            var dl = formatRecentDate_(rd.date || '');
-            var pl = (rd.products && rd.products.length) ? rd.products.join(', ') : '';
-            return (
-              '<div style="margin-bottom:2px;">' +
-              '<strong style="font-weight:600;">' + CoreUtils.escapeHtml(dl) + '</strong>' +
-              (pl ? ('<span style="color:#555555;"> \u2014 ' + CoreUtils.escapeHtml(pl) + '</span>') : '') +
-              '</div>'
-            );
-          }).join('');
-          dateCellHtml = divLines;
-        }
-
-        // --- Product Areas cell: flat list of all products across all recent dates ---
-        var allProducts = {};
-        recentDates.forEach(function (rd) {
-          (rd.products || []).forEach(function (p) { allProducts[p] = true; });
+      // Date cell per C13 §3.5.
+      var dateCellHtml;
+      if (recentDates.length === 0) {
+        dateCellHtml = CoreUtils.escapeHtml('\u2014');
+      } else if (recentDates.length === 1) {
+        // Single date — show date only; no products.
+        dateCellHtml = CoreUtils.escapeHtml(_fmtReportDate_(recentDates[0].date));
+      } else {
+        // Multiple distinct in-window dates: one line per date.
+        // Show "date — products" only when the wave date differs from parent MTP
+        // AND the wave has products.
+        var lines = recentDates.map(function (d) {
+          var dateStr           = _fmtReportDate_(d.date);
+          var differsFromParent = (d.date !== parentMtp);
+          var hasProducts       = d.products && d.products.length > 0;
+          if (differsFromParent && hasProducts) {
+            return CoreUtils.escapeHtml(dateStr + ' \u2014 ' + d.products.join(', '));
+          }
+          return CoreUtils.escapeHtml(dateStr);
         });
-        var productAreaStr = Object.keys(allProducts).sort().join(', ');
+        dateCellHtml = lines.join('<br>');
+      }
 
-        var tds = [
-          tdRaw(dateCellHtml),
-          td(row.accountName)
-        ];
-        if (includeIndustry) {
-          tds.push(td(row.industry || ''));
-        }
-        tds.push(
-          td(productAreaStr),
-          td(row.partner)
-        );
+      return '<tr>' +
+        tdRaw_(dateCellHtml) +
+        td_(row.accountName) +
+        td_(row.deploymentName) +
+        td_(row.partner) +
+        '</tr>';
+    }).join('');
 
-        return '<tr>' + tds.join('') + '</tr>';
-      })
-      .join('');
-
-    return (
-      '<table style="' + TABLE_STYLE + '">' +
+    return '<table style="' + TABLE_STYLE + '">' +
+      colgroupHtml +
       '<thead><tr>' + theadHtml + '</tr></thead>' +
       '<tbody>' + tbodyHtml + '</tbody>' +
-      '</table>'
-    );
+      '</table>';
   }
 
   /**
-   * Phase 3a: Renders the Upcoming Go Lives table.
+   * C13: Renders the Upcoming Go Lives table.
    *
-   * For phased rows (isPhased = true):
-   *   The MTP Date cell shows each upcoming date on its own line,
-   *   followed by the product list: "Jun 15, 2026: HCM, Payroll"
-   *
-   * For non-phased rows (legacy or fallback):
-   *   Single date rendered as before; deployment name in the Deployment Names cell.
+   * Source: CoreData.getUpcomingGoLives(cfg, null) — 90-day window.
+   * Columns: Date | Account | Deployment | Partner (matches Recent Go Lives).
+   * Sort: ascending by earliest in-window date.
+   * Date cell: same logic as Recent (§3.5) — single date only when
+   *   upcomingDates.length === 1; <br>-separated lines for multi-wave,
+   *   products shown only on lines where the wave date differs from parent MTP.
    */
   function buildFutureGoLivesHtmlTableFromEffectiveData_(config, tableCfg) {
-    var cfg  = CoreConfig.withDefaults(config);
-    var rows = CoreReportHelpers.getEffectiveFutureGoLivesForExport_(cfg);
-    if (!rows || !rows.length) {
-      return '<p style="font-size:11px; font-family:Arial,sans-serif;">(No upcoming go lives in report)</p>';
-    }
+  var cfg  = CoreConfig.withDefaults(config);
+  var rows = CoreData.getUpcomingGoLives(cfg, null) || [];
+  rows = rows.filter(function (row) { return !row.excludeFromReport; });
 
-    var TABLE_STYLE =
-      'border-collapse:collapse; width:100%; max-width:960px; ' +
-      'font-size:11px; font-family:Arial,sans-serif;';
-    var TH_STYLE =
-      'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; ' +
-      'padding:6px 8px; text-align:left; white-space:nowrap; font-size:11px;';
-    var TD_STYLE =
-      'border:1px solid #dddddd; padding:5px 8px; ' +
-      'text-align:left; font-size:11px; vertical-align:top;';
-
-    var includeIndustry = !!cfg.report.includeIndustryGoLives;
-
-    var theadParts = [
-      '<th style="' + TH_STYLE + '">MTP Date</th>',
-      '<th style="' + TH_STYLE + '">Account Name</th>'
-    ];
-    if (includeIndustry) {
-      theadParts.push('<th style="' + TH_STYLE + '">Industry</th>');
-    }
-    theadParts.push(
-      '<th style="' + TH_STYLE + '">Deployment Names</th>',
-      '<th style="' + TH_STYLE + '">Partner</th>'
-    );
-
-    var theadHtml = theadParts.join('');
-
-    var tbodyHtml = rows
-      .map(function (row, ri) {
-        var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
-
-        function td(innerHtml, rawText) {
-          var content = (rawText !== undefined)
-            ? CoreUtils.escapeHtml(rawText || '')
-            : innerHtml;
-          return (
-            '<td style="' + TD_STYLE + ' background-color:' + defaultBg + ';">' +
-            content +
-            '</td>'
-          );
-        }
-
-        function fmtDate(isoStr) {
-          if (!isoStr) return '';
-          var d = new Date(isoStr);
-          if (isNaN(d.getTime())) return isoStr;
-          return d.toLocaleDateString('en-US', {
-            year: 'numeric', month: 'short', day: 'numeric'
-          });
-        }
-
-        var dateCellHtml;
-        if (row.isPhased && row.upcomingDates && row.upcomingDates.length > 1) {
-          // Multi-date phased: each date gets its own block element for Outlook compatibility
-          var lines = row.upcomingDates.map(function (ud) {
-            var dateLabel = fmtDate(ud.date);
-            var productLabel = (ud.products && ud.products.length)
-              ? ': ' + ud.products.join(', ')
-              : '';
-            return '<div style="padding:2px 0;">' +
-                   CoreUtils.escapeHtml(dateLabel + productLabel) +
-                   '</div>';
-          });
-          dateCellHtml = td(lines.join(''));
-        } else {
-          // Single date (non-phased or fallback)
-          var singleDate = row.nextGoLiveDate || row.mtpDate || '';
-          dateCellHtml = td(null, fmtDate(singleDate));
-        }
-
-        var tds = [
-          dateCellHtml,
-          td(null, row.accountName)
-        ];
-        if (includeIndustry) {
-          tds.push(td(null, row.industry || ''));
-        }
-        tds.push(
-          td(null, row.deploymentName),
-          td(null, row.partner)
-        );
-
-        return '<tr>' + tds.join('') + '</tr>';
-      })
-      .join('');
-
-    return (
-      '<table style="' + TABLE_STYLE + '">' +
-      '<thead><tr>' + theadHtml + '</tr></thead>' +
-      '<tbody>' + tbodyHtml + '</tbody>' +
-      '</table>'
-    );
+  if (!rows || !rows.length) {
+    return '<p style="font-size:11px; font-family:Arial,sans-serif;">(No upcoming go lives in report)</p>';
   }
+
+  // Build effectiveByDeploymentId for parentMtp lookup.
+  var effectiveByDeploymentId = {};
+  CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+    if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
+  });
+
+  // Sort ascending by earliest in-window date.
+  rows = rows.slice().sort(function (a, b) {
+    var ad = a.nextGoLiveDate || a.mtpDate || '';
+    var bd = b.nextGoLiveDate || b.mtpDate || '';
+    if (ad < bd) return -1;
+    if (ad > bd) return 1;
+    return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+  });
+
+  // C13.3: table-layout:fixed is the only reliable way to force a column to
+  // honor a width constraint in HTML email and modern browsers. Combined with
+  // explicit colgroup widths, this guarantees the Date column stays at 110px
+  // regardless of cell content.
+  var TABLE_STYLE =
+    'border-collapse:collapse; width:100%; max-width:960px; ' +
+    'table-layout:fixed; ' +
+    'font-size:11px; font-family:Arial,sans-serif;';
+  var TH_STYLE =
+    'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; ' +
+    'padding:6px 8px; text-align:left; font-size:11px;';
+  var TD_STYLE =
+    'border:1px solid #dddddd; padding:5px 8px; ' +
+    'text-align:left; font-size:11px; vertical-align:top; ' +
+    'word-wrap:break-word; overflow-wrap:break-word;';
+
+  // colgroup forces width allocation under table-layout:fixed.
+  // 110px for Date; remaining width distributes across the other 3 columns.
+  var colgroupHtml =
+    '<colgroup>' +
+    '<col style="width:110px;">' +
+    '<col>' +
+    '<col>' +
+    '<col>' +
+    '</colgroup>';
+
+  var theadHtml =
+    '<th style="' + TH_STYLE + '">Date</th>' +
+    '<th style="' + TH_STYLE + '">Account</th>' +
+    '<th style="' + TH_STYLE + '">Deployment</th>' +
+    '<th style="' + TH_STYLE + '">Partner</th>';
+
+  function _fmtReportDate_(dateStr) {
+    if (!dateStr) return '';
+    var d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric'
+    });
+  }
+
+  var tbodyHtml = rows.map(function (row, ri) {
+    var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
+
+    function td_(content) {
+      return '<td style="' + TD_STYLE + ' background-color:' + defaultBg + ';">' +
+        CoreUtils.escapeHtml(content || '') + '</td>';
+    }
+    function tdRaw_(html) {
+      return '<td style="' + TD_STYLE + ' background-color:' + defaultBg + ';">' +
+        html + '</td>';
+    }
+
+    var upcomingDates = row.upcomingDates || [];
+    var effective     = effectiveByDeploymentId[row.deploymentId];
+    var parentMtp     = (effective && effective.mtpDate) || '';
+
+    var dateCellHtml;
+    if (upcomingDates.length === 0) {
+      var singleDate = row.nextGoLiveDate || row.mtpDate || '';
+      dateCellHtml = CoreUtils.escapeHtml(_fmtReportDate_(singleDate));
+    } else if (upcomingDates.length === 1) {
+      dateCellHtml = CoreUtils.escapeHtml(_fmtReportDate_(upcomingDates[0].date));
+    } else {
+      var lines = upcomingDates.map(function (d) {
+        var dateStr           = _fmtReportDate_(d.date);
+        var differsFromParent = (d.date !== parentMtp);
+        var hasProducts       = d.products && d.products.length > 0;
+        if (differsFromParent && hasProducts) {
+          return CoreUtils.escapeHtml(dateStr + ' \u2014 ' + d.products.join(', '));
+        }
+        return CoreUtils.escapeHtml(dateStr);
+      });
+      dateCellHtml = lines.join('<br>');
+    }
+
+    return '<tr>' +
+      tdRaw_(dateCellHtml) +
+      td_(row.accountName) +
+      td_(row.deploymentName) +
+      td_(row.partner) +
+      '</tr>';
+  }).join('');
+
+  return '<table style="' + TABLE_STYLE + '">' +
+    colgroupHtml +
+    '<thead><tr>' + theadHtml + '</tr></thead>' +
+    '<tbody>' + tbodyHtml + '</tbody>' +
+    '</table>';
+}
 
   // --- EFFECTIVE-VIEW WRAPPERS USED BY TABLE BUILDERS -----------------------
 

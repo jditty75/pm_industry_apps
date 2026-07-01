@@ -419,6 +419,13 @@ var CoreConfig = (function () {
     if (!cfg.ui.goLivesTab.recentWindowDays)   cfg.ui.goLivesTab.recentWindowDays = 60;
     if (!cfg.ui.goLivesTab.upcomingWindowDays) cfg.ui.goLivesTab.upcomingWindowDays = 90;
 
+    // MDS/PGL tab defaults (MDS-PGL Redesign 2026-06)
+    cfg.ui.mgmPglTab = cfg.ui.mgmPglTab || {};
+    if (cfg.ui.mgmPglTab.enabled === undefined) cfg.ui.mgmPglTab.enabled = true;
+    if (!cfg.ui.mgmPglTab.defaultHorizon) cfg.ui.mgmPglTab.defaultHorizon = 3;
+    if (!Array.isArray(cfg.ui.mgmPglTab.horizonOptions))
+      cfg.ui.mgmPglTab.horizonOptions = [3, 6];
+
     // Stage 1: Role-based tab visibility.
     // Maps access role -> list of tab IDs the user is allowed to see.
     // CoreUI_Markup uses this to render only allowed tabs server-side.

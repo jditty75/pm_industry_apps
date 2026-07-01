@@ -837,39 +837,67 @@ var CoreAnalytics = (function () {
    */
   function getApproachBreakdown(config) {
     var cfg = CoreConfig.withDefaults(config);
-    var rows = CoreData.getAllEffectiveDeployments(cfg);
-    var totalDeployments = rows.length;
+    var effectiveRows = CoreData.getAllEffectiveDeployments(cfg);
+    // C13: filter to Active only; SFDC path already returns Active-only, but
+    // the legacy path may include non-Active rows — be explicit.
+    var activeRows = effectiveRows.filter(function (r) {
+      return r.overallStatus === 'Active';
+    });
+    var total = activeRows.length;
 
-    var approachCounts = {};
-    var unassignedCount = 0;
-    rows.forEach(function (row) {
-      var approach = String(row.servicesApproach || '').trim();
-      if (!approach) {
-        unassignedCount++;
-      } else {
-        approachCounts[approach] = (approachCounts[approach] || 0) + 1;
-      }
+    // C13: read phase from SFDC path (r.phase) with fallback to legacy path
+    // (r.servicesApproach). Both map to Deployment_Phase__c.
+    var countsByPhase = {};
+    activeRows.forEach(function (row) {
+      var phase = String(row.phase || row.servicesApproach || '').trim();
+      if (!phase) phase = 'Unassigned';
+      countsByPhase[phase] = (countsByPhase[phase] || 0) + 1;
     });
 
-    var resultRows = Object.keys(approachCounts).map(function (a) {
-      return {
-        approach: a,
-        count:    approachCounts[a],
-        pct:      totalDeployments > 0 ? approachCounts[a] / totalDeployments : 0
-      };
-    }).sort(function (a, b) { return b.count - a.count; });
-
+    // Sort named entries by count desc, ties broken alphabetically.
+    // Keep Unassigned at the end.
+    var unassignedCount = countsByPhase['Unassigned'] || 0;
+    var namedEntries = [];
+    Object.keys(countsByPhase).forEach(function (k) {
+      if (k !== 'Unassigned') namedEntries.push({ approach: k, count: countsByPhase[k] });
+    });
+    namedEntries.sort(function (a, b) {
+      if (b.count !== a.count) return b.count - a.count;
+      return String(a.approach).localeCompare(String(b.approach));
+    });
+    var allEntries = namedEntries.slice();
     if (unassignedCount > 0) {
-      resultRows.push({
-        approach: '(Unassigned)',
-        count:    unassignedCount,
-        pct:      totalDeployments > 0 ? unassignedCount / totalDeployments : 0
-      });
+      allEntries.push({ approach: 'Unassigned', count: unassignedCount });
     }
+
+    // C13: largest-remainder percentage allocation so percentages sum to exactly 100.
+    var rawPcts    = allEntries.map(function (e) { return total > 0 ? (e.count / total) * 100 : 0; });
+    var flooredPcts = rawPcts.map(function (p) { return Math.floor(p); });
+    var remainders  = rawPcts.map(function (p, i) { return p - flooredPcts[i]; });
+    var flooredSum  = flooredPcts.reduce(function (s, v) { return s + v; }, 0);
+    var leftover    = 100 - flooredSum;
+    var idxByRemainder = remainders.map(function (_, i) { return i; });
+    idxByRemainder.sort(function (a, b) {
+      if (remainders[b] !== remainders[a]) return remainders[b] - remainders[a];
+      return a - b;
+    });
+    var displayPcts = flooredPcts.slice();
+    for (var j = 0; j < leftover; j++) {
+      displayPcts[idxByRemainder[j]]++;
+    }
+
+    var resultRows = allEntries.map(function (e, i) {
+      return {
+        approach:   e.approach,
+        count:      e.count,
+        pct:        total > 0 ? e.count / total : 0,
+        displayPct: displayPcts[i]
+      };
+    });
 
     return {
       rows:             resultRows,
-      totalDeployments: totalDeployments,
+      totalDeployments: total,
       dataIntegrity: {
         unassignedCount: unassignedCount,
         showDisclaimer:  unassignedCount > 0

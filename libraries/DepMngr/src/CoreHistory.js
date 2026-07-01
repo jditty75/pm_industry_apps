@@ -7,6 +7,63 @@
  *
  * Phase 3g design: Phase 3g Cursor Handoff Spec (canvas ts5cdwoV178e).
  *
+ * C13.2 (2026-06): Constrain Date column width in Recent/Upcoming Go Lives tables. Width:110px applied
+ *   to both <th> and <td> so the column actually honors the constraint under table-layout:auto. Removes
+ *   lingering white-space:nowrap that was inflating the column.
+ *
+ * C13.1 (2026-06): Monthly Report Date column no longer wraps mid-date in Recent/Upcoming Go Lives
+ *   tables. Inline white-space:nowrap on the date <td> for Outlook compatibility.
+ *
+ * C13 (2026-06): Monthly Report fixes — Approach Breakdown reads Deployment_Phase__c via Effective View
+ *   with largest-remainder percentage allocation. Recent and Upcoming Go Lives tables now use
+ *   Deployment Name (not Product Name) with multi-line date cells for multi-wave deployments,
+ *   showing product names only on lines where the date differs from parent MTP. Portfolio Health
+ *   KPI relabeled "Multiple Go Lives".
+ *
+ * C12 (2026-06): Overview upcoming card now delegates to getUpcomingGoLives for parity with
+ *   the Go Lives tab (phased deployments, override exclusions). Next High Risk sorted by
+ *   ascending MTP date only (Red/Yellow interleave freely). Canonical .report-loading spinner
+ *   pattern adopted by Overview and MDS/PGL tabs; .overview-spinner-container removed.
+ *   overviewData cache key bumped to v2 to flush stale pre-C12 cached payloads.
+ *
+ * Phase Overview-Redesign (2026-06):
+ * - C11a: Spinner / render-order fixes.
+ *   - MDS/PGL Account column hard-wraps at 280px; horizontal blow-out fixed.
+ *   - MDS/PGL spinner shows immediately on tab load.
+ *   - Overview spinner renders inline in markup so it appears the moment
+ *     the page shell paints (no more "Loading overview..." text flash).
+ * - C11b: Overview tab redesigned as a three-band morning briefing.
+ *   - Band 1: 5 KPI tiles (Total Active, Red, Yellow, Green, Executive Watch)
+ *     with status-colored left borders.
+ *   - Band 2: "Next High Risk Go Lives" (top 5 Red+Yellow by Current MTP)
+ *     side-by-side with "Upcoming Go Lives (Next 30 Days)" with total count
+ *     and "View all" link.
+ *   - Band 3: "Deployment Lifecycle" 3-segment bar (Starting / Building /
+ *     Landing) replacing the seven-tile Active Deployments by Stage strip.
+ *     "Other" segment renders only when count > 0.
+ * - getOverviewData server payload reshaped: topHighRisk replaces topRed;
+ *   lifecycleBuckets replaces the granular stage count list. Caching moved
+ *   into CoreData.getOverviewSnapshot with _PerfCache 5-min TTL. Pre-warmed
+ *   by CoreSalesforce._warmCaches.
+ * - Click-through: rows in both Band 2 cards jump to Deployments or Go Lives
+ *   tab with a search filter / view preset.
+ *
+ * C10 (2026-06): Tightened MDS/PGL row layout. Removed Products/Event Date/1/3 Point/Start columns.
+ *   Added Type pill (MDS/PGL) with hover tooltip showing 1/3 Point or Target Event date.
+ *   Added Deployment Partner column. Defaulted to WPS-only with "Show all partners" toggle.
+ *   Unified MDS+PGL into single _buildMdsPglRowHtml row builder. All dates m/d/yyyy.
+ *
+ * Phase MDS-PGL Redesign (2026-06):
+ * - Replaced the legacy MGM/PGL tab with a month-grouped survey schedule view.
+ * - Added CoreSurveySchedule.gs (FY27 constant + first-full-week-Wednesday projector for FY28+).
+ * - Added CoreData.getMdsPglBatchView with canonical go-live event de-duplication
+ *   (one row per distinct date; "Multiple GoLives" pill only when distinct dates > 1).
+ * - Removed the legacy day-window control in favor of a 3/6 month horizon toggle.
+ * - Exceptions list logic lifted verbatim from the previous getUpcomingSurveys —
+ *   the Bellingham false-positive issue is locked at the data layer via the new
+ *   date-deduplication rule.
+ * - Tab remains POWER_USER / ADMIN only; not part of the monthly report.
+ *
  * Sheet: SFDC_DeploymentHistory
  *   Row 1 headers: Id, ParentId, Field, OldValue, NewValue, CreatedDate, CreatedById
  *   Rows pre-sorted by ParentId ASC, CreatedDate ASC (per Jeff's manual setup).

@@ -53,10 +53,12 @@ var CoreData = (function () {
   // execution because Apps Script tears down the V8 runtime between calls.
   // ===========================================================================
   var _cache = {
-    sfdcRows: null,       // result of readSfdcDeploymentsRaw_
-    metaMap: null,        // result of getDeploymentsMetaMap_
-    overridesMap: null,   // result of getDeploymentOverridesMap_
-    goLivesOverridesMap: null  // result of getGoLivesOverridesMap_
+    sfdcRows: null,           // result of readSfdcDeploymentsRaw_
+    metaMap: null,            // result of getDeploymentsMetaMap_
+    overridesMap: null,       // result of getDeploymentOverridesMap_
+    goLivesOverridesMap: null, // result of getGoLivesOverridesMap_
+    mdsPglBatchView: {},       // { '<windowMonths>': payload } — tier 1 for getMdsPglBatchView
+    overviewSnapshot: null     // tier 1 for getOverviewSnapshot
   };
 
   /**
@@ -73,7 +75,9 @@ var CoreData = (function () {
     _cache.metaMap = null;
     _cache.overridesMap = null;
     _cache.goLivesOverridesMap = null;
-    // Tier 2: sheet-tab cache. Layer 2.
+    _cache.mdsPglBatchView = {};
+    _cache.overviewSnapshot = null;
+    // Tier 2: sheet-tab cache. Layer 2. Clears all rows including mdsPglBatchView:* and overviewData:* keys.
     _perfCacheClearAll_();
     // Also clear the enrichment cache in CoreSalesforce (cross-module).
     try { CoreSalesforce._clearEnrichmentSheetCache(); } catch (e) {}
@@ -2486,7 +2490,514 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
-  // MGM / PGL: UPCOMING SURVEYS
+  // MDS / PGL: MONTH-BATCH VIEW (redesign — replaces getUpcomingSurveys)
+  // ===========================================================================
+
+  /**
+   * Formats a YYYY-MM key as a long month label ('March 2026').
+   * @param {string} ym  'YYYY-MM'
+   * @return {string}
+   * @private
+   */
+  function _formatMonthLabel_(ym) {
+    var monthNames = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December'];
+    var parts = ym.split('-');
+    return monthNames[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+  }
+
+  /**
+   * Computes the one-third point between a deployment start and a target date.
+   * @param {string} start  'YYYY-MM-DD'
+   * @param {string} end    'YYYY-MM-DD'
+   * @return {string|null}  'YYYY-MM-DD' or null if inputs are invalid.
+   * @private
+   */
+  function _computeOneThird_(start, end) {
+    if (!start || !end) return null;
+    var sd = new Date(start);
+    var ed = new Date(end);
+    if (isNaN(sd.getTime()) || isNaN(ed.getTime()) || ed < sd) return null;
+    var ms = sd.getTime() + (ed.getTime() - sd.getTime()) / 3;
+    return Utilities.formatDate(new Date(ms), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  /**
+   * Deduplicates an events array — merges product lists for events with the
+   * same (kind, eventDate) key.
+   * @param {Array} events
+   * @return {Array}
+   * @private
+   */
+  function _dedupeEvents_(events) {
+    var seen = {};
+    var out  = [];
+    for (var i = 0; i < events.length; i++) {
+      var e   = events[i];
+      var key = e.kind + '|' + e.eventDate;
+      if (seen[key]) {
+        // Merge products (union, sort).
+        var merged = {};
+        (seen[key].products || []).forEach(function (p) { merged[p] = true; });
+        (e.products || []).forEach(function (p) { merged[p] = true; });
+        seen[key].products = Object.keys(merged).sort();
+      } else {
+        seen[key] = e;
+        out.push(e);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Builds the go-live events for one Active deployment.
+   * Returns one MDS event per distinct target date + one PGL event per distinct
+   * actual date (falling back to MTP when no actuals exist).
+   *
+   * @param {Object} deploymentRow  Raw row from readSfdcDeploymentsRaw_.
+   * @param {Array}  productRows    Array from readSfdcProductFunctionsRaw_ for this dep (may be undefined/empty).
+   * @return {Array<{ kind:'MDS'|'PGL', eventDate:string, oneThirdPoint:string|null, products:string[] }>}
+   * @private
+   */
+  function _buildGoLiveEvents_(deploymentRow, productRows) {
+    var events = [];
+    var pr = productRows || [];
+
+    // ── MDS (target dates) ──────────────────────────────────────────────────
+    if (pr.length > 0) {
+      var targetMap = {}; // 'YYYY-MM-DD' -> { productArea: true }
+      for (var i = 0; i < pr.length; i++) {
+        var d = pr[i].targetGoLive || '';
+        if (!d) continue;
+        if (!targetMap[d]) targetMap[d] = {};
+        if (pr[i].productArea) targetMap[d][pr[i].productArea] = true;
+      }
+      var targetDates = Object.keys(targetMap);
+      for (var ti = 0; ti < targetDates.length; ti++) {
+        var T = targetDates[ti];
+        var products = Object.keys(targetMap[T]).sort();
+        var oneThird = _computeOneThird_(deploymentRow.deploymentStartDate, T);
+        if (oneThird) {
+          events.push({ kind: 'MDS', eventDate: T, oneThirdPoint: oneThird, products: products });
+        }
+      }
+    } else {
+      if (deploymentRow.deploymentStartDate && deploymentRow.mtpDate) {
+        var oneThird2 = _computeOneThird_(deploymentRow.deploymentStartDate, deploymentRow.mtpDate);
+        if (oneThird2) {
+          events.push({
+            kind: 'MDS',
+            eventDate: deploymentRow.mtpDate,
+            oneThirdPoint: oneThird2,
+            products: []
+          });
+        }
+      }
+    }
+
+    // ── PGL (actual dates; fall back to MTP) ────────────────────────────────
+    if (pr.length > 0) {
+      var actualMap = {}; // 'YYYY-MM-DD' -> { productArea: true }
+      for (var j = 0; j < pr.length; j++) {
+        var da = pr[j].actualGoLive || '';
+        if (!da) continue;
+        if (!actualMap[da]) actualMap[da] = {};
+        if (pr[j].productArea) actualMap[da][pr[j].productArea] = true;
+      }
+      var actualDates = Object.keys(actualMap);
+      if (actualDates.length > 0) {
+        for (var ai = 0; ai < actualDates.length; ai++) {
+          var A = actualDates[ai];
+          var aProducts = Object.keys(actualMap[A]).sort();
+          events.push({ kind: 'PGL', eventDate: A, oneThirdPoint: null, products: aProducts });
+        }
+      } else {
+        // No actuals — fall back to MTP
+        if (deploymentRow.mtpDate) {
+          events.push({ kind: 'PGL', eventDate: deploymentRow.mtpDate, oneThirdPoint: null, products: [] });
+        }
+      }
+    } else {
+      if (deploymentRow.mtpDate) {
+        events.push({ kind: 'PGL', eventDate: deploymentRow.mtpDate, oneThirdPoint: null, products: [] });
+      }
+    }
+
+    return _dedupeEvents_(events);
+  }
+
+  /**
+   * Builds the exceptions list for Active deployments that are missing dates
+   * required to schedule surveys. Logic lifted verbatim from the prior
+   * getUpcomingSurveys implementation — do not modify.
+   *
+   * @param {AppConfig} cfg
+   * @param {Array}     activeRows        Active rows from readSfdcDeploymentsRaw_.
+   * @param {Object}    productRowsByDep  Map: deploymentId -> Array of pfRows.
+   * @return {Array<ExceptionRow>}
+   */
+  function _buildMgmPglExceptions_(cfg, activeRows, productRowsByDep) {
+    var exceptionRows = [];
+    var exceptionSeen = {};
+
+    activeRows.forEach(function (r) {
+      // Only Workday PS deployments are surveyed.
+      if (r.partner !== 'Workday Professional Services') return;
+
+      var depId    = r.deploymentId;
+      var depStart = r.deploymentStartDate || '';
+      var depEnd   = r.mtpDate             || '';
+      var products = productRowsByDep[depId] || [];
+
+      function pushException_(missingType, hasProducts) {
+        if (exceptionSeen[depId]) return;
+        exceptionSeen[depId] = true;
+        exceptionRows.push({
+          deploymentId:        depId,
+          accountName:         r.accountName,
+          deploymentName:      r.deploymentName,
+          deploymentStartDate: depStart || null,
+          missingType:         missingType,
+          hasProducts:         hasProducts,
+          deliveryDirector:    r.damFullName || null
+        });
+      }
+
+      if (products.length > 0) {
+        var anyMissingTarget = false;
+        products.forEach(function (pf) {
+          if (!(pf.targetGoLive || '')) anyMissingTarget = true;
+        });
+        if (anyMissingTarget) pushException_('ProductTargets', true);
+      } else {
+        if (depStart && !depEnd) {
+          pushException_('DeploymentTargetEnd', false);
+        }
+      }
+    });
+
+    return exceptionRows;
+  }
+
+  /**
+   * Returns Active-only MDS and PGL survey rows grouped by batch month for the
+   * requested horizon. Date-deduped per spec (one row per distinct go-live date).
+   *
+   * @param {AppConfig} config
+   * @param {Object=}   viewModeOpts  { viewMode:'my'|'all', ddDisplayName:string }
+   * @param {number=}   windowMonths  3 or 6. Default 3.
+   * @return {{
+   *   horizonMonths: number,
+   *   today: string,
+   *   asOf: string,
+   *   groups: Array<{
+   *     yearMonth: string,
+   *     monthLabel: string,
+   *     schedule: Object,
+   *     mdsRows: Array,
+   *     pglRows: Array,
+   *     counts: { mds: number, pgl: number }
+   *   }>,
+   *   exceptions: Array
+   * }}
+   */
+  function getMdsPglBatchView(config, viewModeOpts, windowMonths) {
+    var cfg = CoreConfig.withDefaults(config);
+    var horizonMonths = (windowMonths === 6) ? 6 : 3;
+
+    // Tier 1 cache check.
+    var t1Key = String(horizonMonths);
+    if (_cache.mdsPglBatchView[t1Key]) {
+      Logger.log('CoreData.getMdsPglBatchView: tier 1 hit for window=' + horizonMonths);
+      var cached1 = _cache.mdsPglBatchView[t1Key];
+      return _applyViewModeFilterToPayload_(cfg, cached1, viewModeOpts, horizonMonths);
+    }
+
+    // Tier 2 (_PerfCache) check.
+    var t2Key = 'mdsPglBatchView:' + cfg.appId + ':' + horizonMonths;
+    var cached2 = _perfCacheRead_(t2Key);
+    if (cached2) {
+      Logger.log('CoreData.getMdsPglBatchView: tier 2 hit for window=' + horizonMonths);
+      _cache.mdsPglBatchView[t1Key] = cached2;
+      return _applyViewModeFilterToPayload_(cfg, cached2, viewModeOpts, horizonMonths);
+    }
+
+    // ── Build ──────────────────────────────────────────────────────────────
+    Logger.log('CoreData.getMdsPglBatchView: computing for appId=' + cfg.appId +
+               ', horizonMonths=' + horizonMonths);
+
+    var tz  = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+
+    // Build month keys: [current YYYY-MM, +1, +2, …] up to horizonMonths entries.
+    var monthKeys = [];
+    for (var mi = 0; mi < horizonMonths; mi++) {
+      var md = new Date(now.getFullYear(), now.getMonth() + mi, 1);
+      monthKeys.push(Utilities.formatDate(md, tz, 'yyyy-MM'));
+    }
+
+    var scheduleByMonth = monthKeys.map(function (ym) {
+      return CoreSurveySchedule.resolve(ym);
+    });
+
+    // Active deployments (raw, Active-only).
+    var activeRows = [];
+    try {
+      var rawRows = readSfdcDeploymentsRaw_(cfg);
+      activeRows = rawRows.filter(function (r) {
+        return r.overallStatus === 'Active';
+      });
+    } catch (e) {
+      Logger.log('CoreData.getMdsPglBatchView: readSfdcDeploymentsRaw_ failed: ' + e);
+    }
+
+    // Product-function rows grouped by deploymentFk.
+    var productRowsByDep = {};
+    try {
+      var pfRows = readSfdcProductFunctionsRaw_(cfg);
+      pfRows.forEach(function (pf) {
+        if (!pf.deploymentFk) return;
+        if (!productRowsByDep[pf.deploymentFk]) productRowsByDep[pf.deploymentFk] = [];
+        productRowsByDep[pf.deploymentFk].push(pf);
+      });
+    } catch (e) {
+      Logger.log('CoreData.getMdsPglBatchView: readSfdcProductFunctionsRaw_ failed: ' + e);
+    }
+
+    // Contacts map.
+    var contactsMap = {};
+    try {
+      contactsMap = getDeploymentContactsMap_(cfg);
+    } catch (e) {
+      Logger.log('CoreData.getMdsPglBatchView: getDeploymentContactsMap_ failed: ' + e);
+    }
+
+    // Exceptions list (verbatim logic from prior getUpcomingSurveys).
+    var exceptions = _buildMgmPglExceptions_(cfg, activeRows, productRowsByDep);
+
+    // Build all rows.
+    var allRows = [];
+    activeRows.forEach(function (r) {
+      var depId    = r.deploymentId;
+      var prRows   = productRowsByDep[depId];
+      var events   = _buildGoLiveEvents_(r, prRows);
+
+      var mdsCount         = 0;
+      var pglCount         = 0;
+      for (var ei = 0; ei < events.length; ei++) {
+        if (events[ei].kind === 'MDS') mdsCount++;
+        else pglCount++;
+      }
+      var isMultipleGoLives = (mdsCount > 1) || (pglCount > 1);
+
+      for (var evi = 0; evi < events.length; evi++) {
+        var ev = events[evi];
+
+        // Determine the date that drives batch-month assignment.
+        var targetDate = (ev.kind === 'MDS') ? ev.oneThirdPoint : ev.eventDate;
+        if (!targetDate) continue;
+
+        // Find the matching schedule entry.
+        var scheduleEntry = null;
+        for (var si = 0; si < scheduleByMonth.length; si++) {
+          var s   = scheduleByMonth[si];
+          var win = (ev.kind === 'MDS') ? s.mdsOneThirdWindow : s.pglFirstMtpWindow;
+          if (targetDate >= win.start && targetDate <= win.end) {
+            scheduleEntry = s;
+            break;
+          }
+        }
+        if (!scheduleEntry) continue; // outside horizon — skip silently
+
+        allRows.push({
+          deploymentId:     depId,
+          accountName:      r.accountName,
+          deploymentName:   r.deploymentName,
+          deliveryDirector: r.damFullName || '',
+          partner:          r.partner     || '',
+          isExecutiveWatch: !!r.isExecutiveWatch,
+          surveyType:       ev.kind,
+          eventDate:        ev.eventDate,
+          products:         ev.products,
+          isMultipleGoLives: isMultipleGoLives,
+          oneThirdPoint:    ev.oneThirdPoint || null,
+          startDate:        r.deploymentStartDate || null,
+          currentMtp:       r.mtpDate             || null,
+          contacts:         contactsMap[depId]    || null,
+          _batchYearMonth:  scheduleEntry.yearMonth
+        });
+      }
+    });
+
+    // ── Group by month ────────────────────────────────────────────────────
+    function byAccountName_(a, b) {
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    }
+
+    var groups = monthKeys.map(function (ym) {
+      var sched = scheduleByMonth.filter(function (x) { return x.yearMonth === ym; })[0] || null;
+      var mds = allRows.filter(function (row) {
+        return row._batchYearMonth === ym && row.surveyType === 'MDS';
+      }).sort(byAccountName_);
+      var pgl = allRows.filter(function (row) {
+        return row._batchYearMonth === ym && row.surveyType === 'PGL';
+      }).sort(byAccountName_);
+      return {
+        yearMonth:  ym,
+        monthLabel: _formatMonthLabel_(ym),
+        schedule:   sched,
+        mdsRows:    mds,
+        pglRows:    pgl,
+        counts:     { mds: mds.length, pgl: pgl.length }
+      };
+    });
+
+    // Strip internal _batchYearMonth from row objects.
+    allRows.forEach(function (row) { delete row._batchYearMonth; });
+    groups.forEach(function (g) {
+      g.mdsRows.forEach(function (row) { delete row._batchYearMonth; });
+      g.pglRows.forEach(function (row) { delete row._batchYearMonth; });
+    });
+
+    var payload = {
+      horizonMonths: horizonMonths,
+      today:         todayKey,
+      asOf:          new Date().toISOString(),
+      groups:        groups,
+      exceptions:    exceptions
+    };
+
+    // Cache the un-filtered payload.
+    _cache.mdsPglBatchView[t1Key] = payload;
+    _perfCacheWrite_(t2Key, payload);
+
+    Logger.log('CoreData.getMdsPglBatchView: built ' + groups.length + ' month groups, ' +
+               allRows.length + ' total rows, ' + exceptions.length + ' exceptions.');
+
+    return _applyViewModeFilterToPayload_(cfg, payload, viewModeOpts, horizonMonths);
+  }
+
+  /**
+   * Applies viewMode filtering to a cached batch-view payload.
+   * Returns a shallow copy of the payload with filtered row arrays.
+   * @private
+   */
+  function _applyViewModeFilterToPayload_(cfg, payload, viewModeOpts, horizonMonths) {
+    if (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') {
+      return payload;
+    }
+
+    // Deep-copy groups and filter rows within each group.
+    var filteredGroups = payload.groups.map(function (g) {
+      // We need to apply the filter to the combined row pool, then re-split.
+      var combined = g.mdsRows.concat(g.pglRows);
+      var filtered = applyViewModeFilter_(cfg, combined, viewModeOpts);
+      return {
+        yearMonth:  g.yearMonth,
+        monthLabel: g.monthLabel,
+        schedule:   g.schedule,
+        mdsRows:    filtered.filter(function (r) { return r.surveyType === 'MDS'; }),
+        pglRows:    filtered.filter(function (r) { return r.surveyType === 'PGL'; }),
+        counts: {
+          mds: filtered.filter(function (r) { return r.surveyType === 'MDS'; }).length,
+          pgl: filtered.filter(function (r) { return r.surveyType === 'PGL'; }).length
+        }
+      };
+    });
+
+    return {
+      horizonMonths: payload.horizonMonths,
+      today:         payload.today,
+      asOf:          payload.asOf,
+      groups:        filteredGroups,
+      exceptions:    payload.exceptions
+    };
+  }
+
+  /**
+   * Diagnostic: logs the getMdsPglBatchView payload shape, per-month counts,
+   * and the first 3 rows of each section. Run manually in the Apps Script editor.
+   *
+   * @param {AppConfig} cfg
+   */
+  function _debugMdsPglBatchView_(cfg) {
+    Logger.log('=== _debugMdsPglBatchView ===');
+    var payload = getMdsPglBatchView(cfg, null, 3);
+    Logger.log('horizonMonths=' + payload.horizonMonths + ', today=' + payload.today);
+    Logger.log('groups: ' + payload.groups.length);
+    payload.groups.forEach(function (g) {
+      Logger.log('  ' + g.yearMonth + ' (' + g.monthLabel + '): MDS=' + g.counts.mds + ', PGL=' + g.counts.pgl);
+      g.mdsRows.slice(0, 3).forEach(function (r) {
+        Logger.log('    MDS: ' + r.accountName + ' | ' + r.deploymentName +
+                   ' | event=' + r.eventDate + ' | 1/3=' + r.oneThirdPoint +
+                   ' | multiGL=' + r.isMultipleGoLives);
+      });
+      g.pglRows.slice(0, 3).forEach(function (r) {
+        Logger.log('    PGL: ' + r.accountName + ' | ' + r.deploymentName +
+                   ' | event=' + r.eventDate + ' | multiGL=' + r.isMultipleGoLives);
+      });
+    });
+    Logger.log('exceptions: ' + payload.exceptions.length);
+    Logger.log('=== END ===');
+  }
+
+  /**
+   * Diagnostic: logs every deployment that would appear in exceptions with
+   * resolved start/MTP/product-presence flags. Validates Bellingham fix.
+   *
+   * @param {AppConfig} cfg
+   */
+  function _debugMdsPglExceptions_(cfg) {
+    Logger.log('=== _debugMdsPglExceptions ===');
+    var cfgD = CoreConfig.withDefaults(cfg);
+
+    var activeRows = [];
+    try {
+      activeRows = readSfdcDeploymentsRaw_(cfgD).filter(function (r) {
+        return r.overallStatus === 'Active';
+      });
+    } catch (e) {
+      Logger.log('readSfdcDeploymentsRaw_ error: ' + e);
+    }
+
+    var productRowsByDep = {};
+    try {
+      readSfdcProductFunctionsRaw_(cfgD).forEach(function (pf) {
+        if (!pf.deploymentFk) return;
+        if (!productRowsByDep[pf.deploymentFk]) productRowsByDep[pf.deploymentFk] = [];
+        productRowsByDep[pf.deploymentFk].push(pf);
+      });
+    } catch (e) {
+      Logger.log('readSfdcProductFunctionsRaw_ error: ' + e);
+    }
+
+    var excs = _buildMgmPglExceptions_(cfgD, activeRows, productRowsByDep);
+    Logger.log('Total exceptions: ' + excs.length);
+    excs.forEach(function (ex) {
+      var prRows = productRowsByDep[ex.deploymentId] || [];
+      Logger.log('  ' + ex.accountName + ' [' + ex.deploymentId + ']' +
+                 ' | start=' + ex.deploymentStartDate +
+                 ' | hasProducts=' + ex.hasProducts +
+                 ' | missing=' + ex.missingType +
+                 ' | pfCount=' + prRows.length);
+    });
+
+    // Validate: City of Bellingham should NOT appear if all its product dates match parent MTP.
+    var bellingham = excs.filter(function (ex) {
+      return (ex.accountName || '').toLowerCase().indexOf('bellingham') !== -1;
+    });
+    if (bellingham.length > 0) {
+      Logger.log('WARNING: Bellingham appears in exceptions — review product date data.');
+    } else {
+      Logger.log('OK: Bellingham not in exceptions (Bellingham fix confirmed).');
+    }
+    Logger.log('=== END ===');
+  }
+
+  // ===========================================================================
+  // MGM / PGL: UPCOMING SURVEYS (legacy — to be removed after C3 is deployed)
   // ===========================================================================
 
   /**
@@ -2790,6 +3301,209 @@ var CoreData = (function () {
 }
 
   // ===========================================================================
+  // OVERVIEW SNAPSHOT (C11b)
+  // ===========================================================================
+
+  /**
+   * Normalises a deployment stage value for bucket matching.
+   * @param {string} s
+   * @return {string}
+   * @private
+   */
+  function _normalizeStage_(s) {
+    return String(s || '')
+      .replace(/&/g, 'and')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * Maps a deployment stage to its lifecycle bucket.
+   * @param {string} stage
+   * @return {'starting'|'building'|'landing'|'other'}
+   * @private
+   */
+  function _bucketForStage_(stage) {
+    var s = _normalizeStage_(stage);
+    if (s === 'on-boarding' || s === 'plan') return 'starting';
+    if (s === 'architect and configure' || s === 'configure and prototype' || s === 'test') return 'building';
+    if (s === 'deploy' || s === 'post prod') return 'landing';
+    return 'other';
+  }
+
+  /**
+   * Adds N calendar days to a YYYY-MM-DD key string and returns a new key.
+   * @param {string} yearMonthDay 'YYYY-MM-DD'
+   * @param {number} days
+   * @return {string} 'YYYY-MM-DD'
+   * @private
+   */
+  function _addDaysToKey_(yearMonthDay, days) {
+    if (!yearMonthDay) return '';
+    var parts = String(yearMonthDay).split('-');
+    if (parts.length !== 3) return '';
+    var d = new Date(
+      parseInt(parts[0], 10),
+      parseInt(parts[1], 10) - 1,
+      parseInt(parts[2], 10)
+    );
+    d.setDate(d.getDate() + days);
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  /**
+   * Computes the overview snapshot payload from live SFDC rows.
+   * @param {AppConfig} cfg
+   * @return {Object}
+   * @private
+   */
+  function _computeOverviewSnapshot_(cfg) {
+    var tz = Session.getScriptTimeZone();
+    var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+    var allRows = readSfdcDeploymentsRaw_(cfg);
+    var activeRows = allRows.filter(function(r) { return r.overallStatus === 'Active'; });
+
+    // TOTALS
+    var totalActive    = activeRows.length;
+    var redCount       = activeRows.filter(function(r) { return r.health === 'Red'; }).length;
+    var yellowCount    = activeRows.filter(function(r) { return r.health === 'Yellow'; }).length;
+    var greenCount     = activeRows.filter(function(r) { return r.health === 'Green'; }).length;
+    var ewCount        = activeRows.filter(function(r) { return r.isExecutiveWatch; }).length;
+
+    // TOP HIGH RISK — sort MTP ascending only; Red/Yellow mix freely by date (C12 fix)
+    var highRiskCandidates = activeRows.filter(function(r) {
+      return (r.health === 'Red' || r.health === 'Yellow') && r.mtpDate && r.mtpDate >= todayKey;
+    });
+    highRiskCandidates.sort(function(a, b) {
+      if (a.mtpDate < b.mtpDate) return -1;
+      if (a.mtpDate > b.mtpDate) return 1;
+      var an = (a.accountName || '').toLowerCase();
+      var bn = (b.accountName || '').toLowerCase();
+      return an < bn ? -1 : an > bn ? 1 : 0;
+    });
+    var topHighRisk = highRiskCandidates.slice(0, 5).map(function(r) {
+      return {
+        deploymentId:   r.deploymentId,
+        accountName:    r.accountName,
+        deploymentName: r.deploymentName,
+        partner:        r.partner,
+        health:         r.health,
+        currentMtp:     r.mtpDate
+      };
+    });
+
+    // UPCOMING GO LIVES — delegate to getUpcomingGoLives for parity with the Go Lives tab (C12 fix).
+    // getUpcomingGoLives handles phased deployments (per-product target dates), override exclusions,
+    // and partner overrides — matching exactly what the Go Lives tab's upcoming view shows.
+    var upcomingGoLivesPayload = [];
+    try {
+      upcomingGoLivesPayload = getUpcomingGoLives(cfg, null) || [];
+    } catch (err) {
+      Logger.log('_computeOverviewSnapshot_: getUpcomingGoLives threw — upcoming card will render empty. Error: ' + err);
+    }
+    var thirtyAhead = _addDaysToKey_(todayKey, 30);
+    var upcomingIn30 = upcomingGoLivesPayload.filter(function(r) {
+      if (!r || !r.nextGoLiveDate) return false;
+      return r.nextGoLiveDate >= todayKey && r.nextGoLiveDate <= thirtyAhead;
+    });
+    upcomingIn30.sort(function(a, b) {
+      return a.nextGoLiveDate < b.nextGoLiveDate ? -1 : a.nextGoLiveDate > b.nextGoLiveDate ? 1 : 0;
+    });
+    var upcomingItems = upcomingIn30.slice(0, 5).map(function(r) {
+      return {
+        deploymentId:   r.deploymentId || '',
+        accountName:    r.accountName  || '',
+        deploymentName: r.deploymentName || '',
+        currentMtp:     r.nextGoLiveDate || ''
+      };
+    });
+    var upcomingGoLivesBlock = { total: upcomingIn30.length, items: upcomingItems };
+
+    // LIFECYCLE BUCKETS
+    var buckets = {
+      starting: { count: 0, stages: {} },
+      building: { count: 0, stages: {} },
+      landing:  { count: 0, stages: {} },
+      other:    { count: 0, stages: {} }
+    };
+    activeRows.forEach(function(r) {
+      var key = _bucketForStage_(r.stage);
+      buckets[key].count++;
+      if (r.stage) buckets[key].stages[r.stage] = true;
+    });
+    var lifecycleBuckets = {};
+    ['starting', 'building', 'landing', 'other'].forEach(function(key) {
+      var b = buckets[key];
+      lifecycleBuckets[key] = {
+        count:   b.count,
+        percent: totalActive > 0 ? Math.round(b.count / totalActive * 100) : 0,
+        stages:  Object.keys(b.stages).sort()
+      };
+    });
+
+    return {
+      totals: {
+        totalActive:    totalActive,
+        red:            redCount,
+        yellow:         yellowCount,
+        green:          greenCount,
+        executiveWatch: ewCount
+      },
+      topHighRisk:      topHighRisk,
+      upcomingGoLives:  upcomingGoLivesBlock,
+      lifecycleBuckets: lifecycleBuckets,
+      asOf:             new Date().toISOString()
+    };
+  }
+
+  /**
+   * Returns the Overview tab snapshot (totals, topHighRisk, upcomingGoLives,
+   * lifecycleBuckets). Two-tier cached: in-memory + _PerfCache (5-min TTL).
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function getOverviewSnapshot(config) {
+    var cfg      = CoreConfig.withDefaults(config);
+    var cacheKey = 'overviewData:v2:' + cfg.appId;
+
+    if (_cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
+
+    var cached = _perfCacheRead_(cacheKey);
+    if (cached !== null) {
+      _cache.overviewSnapshot = cached;
+      return cached;
+    }
+
+    var payload = _computeOverviewSnapshot_(cfg);
+    _cache.overviewSnapshot = payload;
+    _perfCacheWrite_(cacheKey, payload);
+    Logger.log('CoreData.getOverviewSnapshot(' + cfg.appId + '): computed fresh snapshot. totalActive=' +
+               (payload.totals && payload.totals.totalActive));
+    return payload;
+  }
+
+  /**
+   * Diagnostic: logs the overview snapshot payload shape.
+   * @param {AppConfig} config
+   */
+  function _debugOverviewSnapshot_(config) {
+    var cfg     = CoreConfig.withDefaults(config);
+    var payload = getOverviewSnapshot(cfg);
+    Logger.log('=== _debugOverviewSnapshot ===');
+    Logger.log('asOf: ' + payload.asOf);
+    Logger.log('totals: ' + JSON.stringify(payload.totals));
+    Logger.log('topHighRisk count: ' + payload.topHighRisk.length);
+    payload.topHighRisk.forEach(function(r, i) {
+      Logger.log('  ' + (i + 1) + '. ' + r.health + ' | ' + r.accountName + ' | ' + r.currentMtp);
+    });
+    Logger.log('upcomingGoLives total: ' + payload.upcomingGoLives.total);
+    Logger.log('lifecycleBuckets: ' + JSON.stringify(payload.lifecycleBuckets));
+  }
+
+  // ===========================================================================
   // EXPORTS
   // ===========================================================================
 
@@ -2819,9 +3533,14 @@ var CoreData = (function () {
     // Phase 3i additions
     getRecentGoLives:            getRecentGoLives,
 
-    // MGM / PGL additions
-    getUpcomingSurveys:          getUpcomingSurveys,
-    _resolveMgmPglWindow:        resolveMgmPglWindow_,
+    // MDS / PGL redesign (2026-06) — replaces getUpcomingSurveys
+    getMdsPglBatchView:          getMdsPglBatchView,
+    _debugMdsPglBatchView:       _debugMdsPglBatchView_,
+    _debugMdsPglExceptions:      _debugMdsPglExceptions_,
+
+    // Overview Snapshot (C11b)
+    getOverviewSnapshot:         getOverviewSnapshot,
+    _debugOverviewSnapshot:      _debugOverviewSnapshot_,
 
     // Performance Layer 2 additions
     _warmSfdcRows:               _warmSfdcRows,

@@ -343,14 +343,16 @@ function _CoreUI_Markup_buildGoLivesTab_(ui) {
 }
 
 // ---------------------------------------------------------------------------
-// TAB: MGM / PGL (feature/mgm-pgl)
+// TAB: MDS / PGL (redesign — month-grouped batch view)
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the MGM / PGL tab markup.
- * Two sections:
- *   1. Upcoming survey rows table (MGM + PGL within 30-day window).
- *   2. Exceptions table — Active deployments missing required target dates.
+ * Builds the MDS / PGL tab markup.
+ *
+ * Section 1: Month-group cards (populated by JS via renderMdsPglMonthGroups).
+ * Section 2: Exceptions table — unchanged structure.
+ *
+ * Phase MDS-PGL Redesign (2026-06)
  *
  * @param {Object} ui  cfg.ui
  * @return {string}
@@ -359,44 +361,33 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
   return [
     '<div id="mgmPgl-tab" class="tab-content">',
 
-    '  <!-- Info banner -->',
     '  <div class="info-banner">',
-    '    \uD83D\uDCCB MDS / PGL &mdash; upcoming Mid-Deployment and Post-Go-Live surveys for Active deployments.',
-    '    Toggle between <strong>My Portfolio</strong> and <strong>All</strong> using the control in the header.',
+    '    \uD83D\uDCCB MDS / PGL &mdash; projected survey schedule by month for Active deployments.',
+    '    Each row represents a distinct go-live event. Update Salesforce if any',
+    '    information is incorrect.',
     '  </div>',
 
-    '  <!-- Toolbar: refresh + loading indicator + as-of caption -->',
     '  <div class="trends-toolbar no-export">',
     '    <button class="btn btn-secondary" onclick="loadMgmPglTab()">&#x1F504; Refresh</button>',
-    '    <span id="mgmpgl-loading-indicator" class="trends-loading hidden">',
-    '      <span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span>',
-    '      Loading&hellip;',
-    '    </span>',
-    '    <span id="mgmpgl-as-of" style="margin-left:auto;font-size:12px;color:var(--color-text-muted);"></span>',
+    '    <span id="mgmpgl-as-of"',
+    '          style="margin-left:auto;font-size:12px;color:var(--color-text-muted);"></span>',
     '  </div>',
 
-    '  <!-- Time window segmented control -->',
+    '  <!-- Horizon toggle -->',
     '  <div class="control-bar" style="margin-bottom:0;">',
     '    <div class="control-row">',
-    '      <div class="seg-control" id="mgmPgl-window-toggle" role="group" aria-label="Time window">',
-    '        <button class="seg-control-btn active" data-mgmPgl-window="next30"',
-    '                onclick="setMgmPglWindow(\'next30\')">Next 30 days</button>',
-    '        <button class="seg-control-btn" data-mgmPgl-window="thisMonth"',
-    '                onclick="setMgmPglWindow(\'thisMonth\')">This Month</button>',
-    '        <button class="seg-control-btn" data-mgmPgl-window="nextMonth"',
-    '                onclick="setMgmPglWindow(\'nextMonth\')">Next Month</button>',
-    '        <button class="seg-control-btn" data-mgmPgl-window="thisQuarter"',
-    '                onclick="setMgmPglWindow(\'thisQuarter\')">This Quarter</button>',
-    '        <button class="seg-control-btn" data-mgmPgl-window="nextQuarter"',
-    '                onclick="setMgmPglWindow(\'nextQuarter\')">Next Quarter</button>',
+    '      <div class="seg-control" id="mgmPgl-horizon-toggle" role="group" aria-label="Horizon">',
+    '        <button class="seg-control-btn active" data-mdspgl-horizon="3"',
+    '                onclick="setMdsPglHorizon(3)">3 Months</button>',
+    '        <button class="seg-control-btn" data-mdspgl-horizon="6"',
+    '                onclick="setMdsPglHorizon(6)">6 Months</button>',
     '      </div>',
     '    </div>',
     '  </div>',
 
-    '  <!-- Filter bar: survey type + search -->',
+    '  <!-- Survey-type chip + partner toggle + search -->',
     '  <div class="control-bar">',
     '    <div class="control-row">',
-    '      <!-- Survey type segmented control -->',
     '      <div class="seg-control" role="group" aria-label="Survey type filter">',
     '        <button class="seg-control-btn active" data-mgmpgl-type="all"',
     '                onclick="setMgmPglFilterType(\'all\')">All</button>',
@@ -405,7 +396,11 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
     '        <button class="seg-control-btn" data-mgmpgl-type="PGL"',
     '                onclick="setMgmPglFilterType(\'PGL\')">PGL</button>',
     '      </div>',
-    '      <!-- Text search -->',
+    '      <label class="mdspgl-partner-toggle" title="Toggle to include non-WPS partners">',
+    '        <input type="checkbox" id="mgmpgl-show-all-partners"',
+    '               onchange="setMdsPglPartnerScope(this.checked)">',
+    '        <span class="mdspgl-partner-toggle-label">Show all partners</span>',
+    '      </label>',
     '      <div class="search-box">',
     '        <span class="search-icon">&#x1F50D;</span>',
     '        <input type="text" id="mgmpgl-search"',
@@ -416,37 +411,19 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
     '    </div>',
     '  </div>',
 
-    '  <!-- ================================================================ -->',
-    '  <!-- SECTION 1: Upcoming Survey Rows                                  -->',
-    '  <!-- ================================================================ -->',
-    '  <div class="table-container">',
-    '    <div class="table-wrapper">',
-    '      <table id="mgmpgl-table">',
-    '        <thead><tr>',
-    '          <th>Schedule</th>',
-    '          <th>In</th>',
-    '          <th>Account</th>',
-    '          <th>Deployment</th>',
-    '          <th>Start</th>',
-    '          <th>Target End</th>',
-    '          <th>Contacts</th>',
-    '        </tr></thead>',
-    '        <tbody id="mgmpgl-tbody"></tbody>',
-    '      </table>',
-    '    </div>',
-    '  </div>',
+    '  <!-- Section 1: month groups (populated by JS) -->',
+    '  <div id="mdspgl-month-groups" class="mdspgl-month-groups"></div>',
 
-    '  <!-- ================================================================ -->',
-    '  <!-- SECTION 2: Exceptions — Missing Target Dates                     -->',
-    '  <!-- ================================================================ -->',
-    '  <div class="trends-section" id="mgmpgl-exceptions-section" style="margin-top:var(--space-5);">',
+    '  <!-- Section 2: exceptions — unchanged structure -->',
+    '  <div class="trends-section" id="mgmpgl-exceptions-section"',
+    '       style="margin-top:var(--space-5);">',
     '    <div class="trends-section-header">',
     '      <span class="trends-section-title">Exceptions &mdash; Missing Target Dates</span>',
     '      <span class="trends-section-sub" id="mgmpgl-exceptions-sub"></span>',
     '    </div>',
     '    <p style="font-size:13px;color:var(--color-text-muted);margin:0 0 var(--space-3) 0;">',
-    '      Active deployments that are missing dates needed to schedule surveys.',
-    '      These records should be updated in Salesforce.',
+    '      Active deployments missing dates needed to schedule surveys. Update these',
+    '      records in Salesforce.',
     '    </p>',
     '    <div class="table-wrapper">',
     '      <table id="mgmpgl-exceptions-table">',
@@ -474,24 +451,51 @@ function _CoreUI_Markup_buildMgmPglTab_(ui) {
 function _CoreUI_Markup_buildOverviewTab_() {
   return [
     '<div id="overview-tab" class="tab-content active">',
-    '  <div class="info-banner">',
-    '    📋 Portfolio snapshot — KPIs, upcoming Go-Lives, and at-risk deployments. Data loads in the background.',
+
+    '  <!-- Inline spinner (canonical .report-loading) — visible the moment the shell paints -->',
+    '  <div id="overview-initial-spinner" class="report-loading">',
+    '    <div class="spinner-large"></div>',
+    '    <p>Loading portfolio overview\u2026</p>',
     '  </div>',
-    '  <div class="stats-grid" id="overview-kpi-strip"></div>',
-    '  <div class="stats-grid" id="overview-golives-strip" style="margin-top:var(--space-3);"></div>',
-    '  <div id="overview-lists" style="display:flex; gap:var(--space-4); margin-top:var(--space-4); flex-wrap:wrap;">',
-    '    <div style="flex:1; min-width:280px;">',
-    '      <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Top Red — Soonest MTP</h3>',
-    '      <div id="overview-top-red"></div>',
+
+    '  <!-- Content hidden until JS populates it -->',
+    '  <div id="overview-content" class="hidden">',
+
+    '    <!-- BAND 1: KPI strip -->',
+    '    <div class="overview-kpi-strip" id="overview-kpi-strip"></div>',
+
+    '    <!-- BAND 2: two side-by-side cards -->',
+    '    <div class="overview-band-2">',
+    '      <div class="overview-card" id="overview-next-high-risk">',
+    '        <div class="overview-card-header">',
+    '          <h3 class="overview-card-title">Next High Risk Go Lives</h3>',
+    '        </div>',
+    '        <div class="overview-card-body" id="overview-next-high-risk-body"></div>',
+    '      </div>',
+    '      <div class="overview-card" id="overview-upcoming">',
+    '        <div class="overview-card-header">',
+    '          <h3 class="overview-card-title">',
+    '            Upcoming Go Lives',
+    '            <span class="overview-card-subtitle">(Next 30 Days)</span>',
+    '            <span class="overview-card-count-pill" id="overview-upcoming-count">\u00B7 0</span>',
+    '          </h3>',
+    '        </div>',
+    '        <div class="overview-card-body" id="overview-upcoming-body"></div>',
+    '        <div class="overview-card-footer">',
+    '          <a href="javascript:void(0)" onclick="goToUpcomingGoLives()" class="overview-card-link">View all \u2192</a>',
+    '        </div>',
+    '      </div>',
     '    </div>',
-    '    <div style="flex:1; min-width:280px;">',
-    '      <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Upcoming Go-Lives (Next 30d)</h3>',
-    '      <div id="overview-upcoming"></div>',
+
+    '    <!-- BAND 3: Lifecycle Pipeline -->',
+    '    <div class="overview-card overview-band-3" id="overview-lifecycle">',
+    '      <div class="overview-card-header">',
+    '        <h3 class="overview-card-title">Deployment Lifecycle</h3>',
+    '        <p class="overview-card-subtitle" id="overview-lifecycle-subtitle"></p>',
+    '      </div>',
+    '      <div class="overview-card-body" id="overview-lifecycle-body"></div>',
     '    </div>',
-    '  </div>',
-    '  <div style="margin-top:var(--space-4);">',
-    '    <h3 style="margin:0 0 var(--space-2); font-size:0.875rem; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.05em;">Deployments by Stage</h3>',
-    '    <div id="overview-stage-strip" style="display:flex; flex-wrap:wrap; gap:var(--space-2);"></div>',
+
     '  </div>',
     '</div>'
   ].join('\n');
@@ -707,7 +711,7 @@ function _CoreUI_Markup_buildPortfolioTab_(ui) {
     '        </div>',
     // Phase 3a: Phased Go-Lives KPI tile
     '        <div class="ph-kpi phased" data-key="phased">',
-    '          <div class="ph-kpi-label">Phased Go-Lives</div>',
+    '          <div class="ph-kpi-label">Multiple Go Lives</div>',
     '          <div class="ph-kpi-row">',
     '            <div class="ph-kpi-value" id="ph-kpi-phased">&ndash;</div>',
     '          </div>',

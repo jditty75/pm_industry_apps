@@ -288,6 +288,23 @@ function _warmCaches(config) {
   } catch (err) {
     Logger.log('CoreSalesforce._warmCaches: Notable warm failed: ' + err);
   }
+  // MDS/PGL batch view: pre-warm both horizon windows so first user load is fast.
+  try {
+    CoreData.getMdsPglBatchView(cfg, null, 3);
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: MdsPgl 3-month warm failed: ' + err);
+  }
+  try {
+    CoreData.getMdsPglBatchView(cfg, null, 6);
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: MdsPgl 6-month warm failed: ' + err);
+  }
+  // Overview snapshot: pre-warm so first page load returns near-instantly.
+  try {
+    CoreData.getOverviewSnapshot(cfg);
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: Overview snapshot warm failed: ' + err);
+  }
   var elapsed = Date.now() - start;
   Logger.log('CoreSalesforce._warmCaches(' + cfg.appId + '): ' + elapsed + 'ms, ' +
              rowCount + ' SFDC rows, ' + deploymentCount + ' enriched deployments.');

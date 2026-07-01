@@ -53,8 +53,18 @@ function getUpcomingGoLivesData(viewModeOpts) {
   return CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, viewModeOpts);
 }
 
-function getUpcomingSurveysData(viewModeOpts) {
-  return CoreLib.CoreData.getUpcomingSurveys(APP_CONFIG, viewModeOpts || {});
+/**
+ * Returns the MDS/PGL month-grouped batch view for the requested horizon.
+ *
+ * @param {Object=} viewModeOpts  { viewMode:'my'|'all', ddDisplayName:string }
+ * @param {number=} windowMonths  3 or 6. Default 3.
+ */
+function getMdsPglBatchViewForUI(viewModeOpts, windowMonths) {
+  return CoreLib.CoreData.getMdsPglBatchView(
+    APP_CONFIG,
+    viewModeOpts || {},
+    (windowMonths === 6) ? 6 : 3
+  );
 }
 
 // ============================================================================
@@ -251,13 +261,16 @@ function getGoLivesForNotablePicker() {
 // ============================================================================
 
 /**
- * Returns aggregated KPI data for the Overview tab.
- * Reads directly from SFDC_Deployments and SFDC_Wellness sheets using
- * 0-based confirmed column indices from the 24-col standard layout.
+ * Returns the Overview tab snapshot (totals, topHighRisk, upcomingGoLives,
+ * lifecycleBuckets). Delegates to CoreLib with 5-min _PerfCache backing.
  *
- * @return {Object}  { deployments, goLives, executiveWatch } | { error }
+ * @return {Object}
  */
 function getOverviewData() {
+  return CoreLib.CoreData.getOverviewSnapshot(APP_CONFIG);
+}
+
+function _getOverviewData_legacy_() {
   try {
     var ss  = SpreadsheetApp.getActiveSpreadsheet();
 

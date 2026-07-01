@@ -452,3 +452,34 @@ function findTableDynamicDebug_(sheet, title) {
   }
   return sheet.getRange(startR, startC, numR, numC);
 }
+
+function fixExecSummaryBullets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('ExecSummary');
+  var cell = sheet.getRange('B2');
+  var html = cell.getValue();
+
+  if (!html) {
+    Logger.log('B2 is empty — nothing to fix');
+    return;
+  }
+
+  Logger.log('Before (first 500 chars): ' + html.substring(0, 500));
+
+  // Strip leading Word bullets from <li> content:
+  //   - After <li> opening tag: any whitespace/nbsp, then bullet char, then whitespace/nbsp
+  //   - Bullet chars: · • ◦ ▪ ● ○ – — - *
+  var bulletChars = '\u00B7\u2022\u25E6\u25AA\u25CF\u25CB\u2013\u2014\\-\\*';
+  var re = new RegExp('(<li[^>]*>)[\\s\\u00A0]*[' + bulletChars + '][\\s\\u00A0]+', 'gi');
+  var cleaned = html.replace(re, '$1');
+
+  // Also handle the case where the <li> immediately opens with <strong>
+  // and the bullet is sitting outside/before it (defensive)
+  var re2 = new RegExp('(<li[^>]*>)[\\s\\u00A0]*[' + bulletChars + '][\\s\\u00A0]*(<)', 'gi');
+  cleaned = cleaned.replace(re2, '$1$2');
+
+  Logger.log('After (first 500 chars): ' + cleaned.substring(0, 500));
+
+  cell.setValue(cleaned);
+  Logger.log('Done. B2 updated.');
+}

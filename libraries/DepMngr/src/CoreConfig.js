@@ -224,9 +224,9 @@ var CoreConfig = (function () {
     // MGM/PGL patch: contacts sheet
     if (!cfg.sheets.deploymentContacts)
       cfg.sheets.deploymentContacts = 'SFDC_DeploymentContacts';
-    // D1: Delivery Director from SFDC_Contacts
-    if (!cfg.sheets.sfdcContacts)
-      cfg.sheets.sfdcContacts = 'SFDC_Contacts';
+    // D1: cfg.sheets.sfdcContacts is intentionally NOT defaulted here.
+    // It must be set explicitly in the app config (e.g. Config_SLG).
+    // HENP/HC omit it; getDdAssignmentsFromContacts_ guards against a missing value.
     if (!cfg.sheets.wellness)
       cfg.sheets.wellness = 'SFDC_Wellness';
 

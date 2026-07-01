@@ -344,7 +344,14 @@ function getDdAssignmentsFromContacts_(config) {
     return cached;
   }
 
-  var sheetName = (cfg.sheets && cfg.sheets.sfdcContacts) || 'SFDC_DeploymentContacts';
+  var sheetName = (cfg.sheets && cfg.sheets.sfdcContacts) || null;
+
+  if (!sheetName) {
+    Logger.log('getDdAssignmentsFromContacts_: cfg.sheets.sfdcContacts not configured — returning empty map.');
+    _ddContactsCache = {};
+    return {};
+  }
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
 

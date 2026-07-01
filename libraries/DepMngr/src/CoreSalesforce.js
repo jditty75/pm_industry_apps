@@ -344,7 +344,7 @@ function getDdAssignmentsFromContacts_(config) {
     return cached;
   }
 
-  var sheetName = (cfg.sheets && cfg.sheets.sfdcContacts) || 'SFDC_Contacts';
+  var sheetName = (cfg.sheets && cfg.sheets.sfdcContacts) || 'SFDC_DeploymentContacts';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
 
@@ -354,65 +354,62 @@ function getDdAssignmentsFromContacts_(config) {
     return {};
   }
 
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) {
     Logger.log('getDdAssignmentsFromContacts_: sheet "' + sheetName + '" has no data rows.');
     _ddContactsCache = {};
     return {};
   }
 
-  var lastCol = sheet.getLastColumn();
-  if (lastCol < 1) {
-    Logger.log('getDdAssignmentsFromContacts_: sheet "' + sheetName + '" has no columns.');
-    _ddContactsCache = {};
-    return {};
+  var headers = values[0];
+  var rows    = values.slice(1);
+
+  function idx(name) {
+    var i = headers.indexOf(name);
+    return i >= 0 ? i : -1;
   }
 
-  var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-  var headers = allValues[0].map(function(h) { return String(h || '').trim(); });
+  var roleIdx  = idx('Contact_Role__c');
+  var depIdx   = idx('Deployment__c');
+  var emailIdx = idx('Contact__r.Email');
+  var nameIdx  = idx('Contact__r.Name');
 
-  // Resolve column indices.
-  var colRole     = CoreSalesforce._findCol_(headers, ['contact_role__c', 'contact_role'], -1);
-  var colDepId    = CoreSalesforce._findDeploymentFkCol_(headers, -1);
-  var colEmail    = CoreSalesforce._findCol_(headers, ['contact__r.email', 'contact.email', 'email'], -1);
-  var colName     = CoreSalesforce._findCol_(headers, ['contact__r.name', 'contact.name', 'name'], -1);
-
-  if (colRole < 0) {
+  if (roleIdx < 0) {
     Logger.log('getDdAssignmentsFromContacts_: Contact_Role__c column not found in "' + sheetName + '".');
     _ddContactsCache = {};
     return {};
   }
-  if (colDepId < 0) {
+  if (depIdx < 0) {
     Logger.log('getDdAssignmentsFromContacts_: Deployment__c column not found in "' + sheetName + '".');
     _ddContactsCache = {};
     return {};
   }
-  if (colEmail < 0) {
+  if (emailIdx < 0) {
     Logger.log('getDdAssignmentsFromContacts_: Contact__r.Email column not found in "' + sheetName + '".');
     _ddContactsCache = {};
     return {};
   }
 
-  var map = {};
+  var map      = {};
   var included = 0;
   var skipped  = 0;
 
-  for (var r = 1; r < allValues.length; r++) {
-    var row = allValues[r];
+  rows.forEach(function(r) {
+    var role  = String(r[roleIdx]  || '').trim();
+    if (role !== 'Deployment Sponsor') { skipped++; return; }
 
-    var role  = String(row[colRole]  || '').trim();
-    var depId = String(row[colDepId] || '').trim();
-    var email = String(colEmail >= 0 ? (row[colEmail] || '') : '').trim();
-    var name  = String(colName  >= 0 ? (row[colName]  || '') : '').trim();
+    var depId = String(r[depIdx]   || '').trim();
+    if (!depId) { skipped++; return; }
 
-    if (role !== 'Deployment Sponsor') { skipped++; continue; }
-    if (!depId)  { skipped++; continue; }
-    if (!email)  { skipped++; continue; }  // no email → skip; source cleanup needed
+    var email = String(r[emailIdx] || '').trim();
+    if (!email) { skipped++; return; }  // no email → skip; source cleanup required
+
+    var name  = (nameIdx >= 0 ? String(r[nameIdx] || '').trim() : '');
 
     if (!map[depId]) map[depId] = [];
     map[depId].push({ email: email, name: name });
     included++;
-  }
+  });
 
   Logger.log('getDdAssignmentsFromContacts_(' + (cfg.appId || '?') + '): ' +
              included + ' included, ' + skipped + ' skipped, ' +

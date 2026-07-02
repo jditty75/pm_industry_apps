@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><?= APP_CONFIG.ui.appTitle ?></title>
+  <style><?!= CoreLib.CoreUI.getStylesheet() ?></style>
+  <?!= CoreLib.CoreUI.getHeadScripts() ?>
+</head>
+<body>
+  <? var __userAccess = CoreLib.CoreUsers.getCurrentUserAccess(APP_CONFIG); ?>
+  <? if (!__userAccess.canViewApp) { ?>
+    <?!= CoreLib.CoreUI.getAccessDeniedShell() ?>
+  <? } else { ?>
+    <?!= CoreLib.CoreUI.getAppShell(APP_CONFIG, __userAccess) ?>
+    <script>
+      window.APP_UI_CONFIG = <?!= JSON.stringify(APP_CONFIG.ui) ?>;
+      window.__USER_ACCESS__ = <?!= JSON.stringify(__userAccess) ?>;
+    </script>
+    <script><?!= CoreLib.CoreUI.getJsBundle() ?></script>
+  <? } ?>
+</body>
+</html>

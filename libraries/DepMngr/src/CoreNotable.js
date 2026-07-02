@@ -59,6 +59,8 @@ var CoreNotable = (function () {
 
   var peerRows = readPeerSheet_(cfg);
   var localDeployments = CoreData.getAllEffectiveDeployments(cfg);
+  // S1: exclude Student deployments from Notable view (HENP only).
+  localDeployments = CoreData.filterDeploymentsByStudent_(localDeployments, 'exclude', cfg);
   Logger.log('CoreNotable.getNotableForApp: peerRows=' + peerRows.length +
              ', localDeployments=' + localDeployments.length);
 

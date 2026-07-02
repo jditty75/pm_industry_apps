@@ -46,6 +46,9 @@ var CorePortfolioHealth = (function () {
     var allEffective = CoreData.getAllEffectiveDeployments(cfg)
       .filter(function (r) { return !r.excludeFromReport; });
 
+    // S1: exclude Student deployments from Portfolio Health (HENP only).
+    allEffective = CoreData.filterDeploymentsByStudent_(allEffective, 'exclude', cfg);
+
     // ---- Health totals -------------------------------------------------------
     var green = 0, yellow = 0, red = 0;
     allEffective.forEach(function (r) {
@@ -112,6 +115,8 @@ var CorePortfolioHealth = (function () {
     var phasedDeployments = 0;
     try {
       var upcomingRows = CoreData.getUpcomingGoLives(cfg) || [];
+      // getUpcomingGoLives already filters Student out (S1); phasedDeployments
+      // count stays Student-exclusive automatically.
       phasedDeployments = upcomingRows.filter(function (r) {
         return !!r.isPhased && !r.excludeFromReport;
       }).length;

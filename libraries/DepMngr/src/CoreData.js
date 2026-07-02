@@ -1094,6 +1094,9 @@ var CoreData = (function () {
       });
     });
 
+    // S1: exclude Student deployments from the Deployments tab view (HENP only).
+    enriched = filterDeploymentsByStudent_(enriched, 'exclude', cfg);
+
     // Health-rank sort: Red -> Yellow -> Green -> other; tiebreak by accountName.
     var sorted = enriched.sort(function (a, b) {
       var rank = { 'Red': 0, 'Yellow': 1, 'Green': 2 };
@@ -1375,6 +1378,9 @@ var CoreData = (function () {
       return new Date(a.nextGoLiveDate) - new Date(b.nextGoLiveDate);
     });
 
+    // S1: exclude Student deployments from non-Student surfaces (HENP only).
+    results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+
     Logger.log('CoreData.getUpcomingGoLives: ' + results.length + ' upcoming rows ' +
                '(pass1=' + Object.keys(seenDeploymentIds).length + ', ' +
                'pass2=' + (results.length - Object.keys(seenDeploymentIds).length) + ').');
@@ -1506,6 +1512,9 @@ var CoreData = (function () {
       if (a.lastGoLiveDate > b.lastGoLiveDate) return  1;
       return String(a.accountName || '').localeCompare(String(b.accountName || ''));
     });
+
+    // S1: exclude Student deployments from non-Student surfaces (HENP only).
+    results = filterDeploymentsByStudent_(results, 'exclude', cfg);
 
     Logger.log('CoreData.getRecentGoLives: ' + results.length +
                ' deployments with in-window go-live dates (last ' +
@@ -2739,6 +2748,8 @@ var CoreData = (function () {
       activeRows = rawRows.filter(function (r) {
         return r.overallStatus === 'Active';
       });
+      // S1: exclude Student deployments from MDS/PGL batch view (HENP only).
+      activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
     } catch (e) {
       Logger.log('CoreData.getMdsPglBatchView: readSfdcDeploymentsRaw_ failed: ' + e);
     }
@@ -3353,6 +3364,8 @@ var CoreData = (function () {
     var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
 
     var allRows = readSfdcDeploymentsRaw_(cfg);
+    // S1: exclude Student deployments from Overview tab (HENP only).
+    allRows = filterDeploymentsByStudent_(allRows, 'exclude', cfg);
     var activeRows = allRows.filter(function(r) { return r.overallStatus === 'Active'; });
 
     // TOTALS

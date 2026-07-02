@@ -692,6 +692,8 @@ var CoreAnalytics = (function () {
 
     // Current counts from effective deployments
     var allEffective = CoreData.getAllEffectiveDeployments(cfg);
+    // S1: exclude Student deployments from health breakdown display (HENP only).
+    allEffective = CoreData.filterDeploymentsByStudent_(allEffective, 'exclude', cfg);
     var expectedTotal = allEffective.length;
     var counts = { Green: 0, Red: 0, Yellow: 0 };
     allEffective.forEach(function (row) {
@@ -788,6 +790,8 @@ var CoreAnalytics = (function () {
   function getPartnerBreakdown(config) {
     var cfg = CoreConfig.withDefaults(config);
     var rows = CoreData.getAllEffectiveDeployments(cfg);
+    // S1: exclude Student deployments from partner breakdown display (HENP only).
+    rows = CoreData.filterDeploymentsByStudent_(rows, 'exclude', cfg);
     var totalDeployments = rows.length;
 
     var partnerCounts = {};
@@ -838,6 +842,8 @@ var CoreAnalytics = (function () {
   function getApproachBreakdown(config) {
     var cfg = CoreConfig.withDefaults(config);
     var effectiveRows = CoreData.getAllEffectiveDeployments(cfg);
+    // S1: exclude Student deployments from approach breakdown display (HENP only).
+    effectiveRows = CoreData.filterDeploymentsByStudent_(effectiveRows, 'exclude', cfg);
     // C13: filter to Active only; SFDC path already returns Active-only, but
     // the legacy path may include non-Active rows — be explicit.
     var activeRows = effectiveRows.filter(function (r) {

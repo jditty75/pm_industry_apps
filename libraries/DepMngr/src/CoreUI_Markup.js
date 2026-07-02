@@ -1787,6 +1787,7 @@ function _CoreUI_Markup_buildStudentTab_(ui, cfg) {
     '  <div class="table-container">',
     '    <div class="report-loading" id="student-loading">',
     '      <div class="spinner-large"></div>',
+    '      <p>Loading Student\u2026</p>',
     '    </div>',
     '    <div class="table-wrapper" id="student-table-wrapper" style="display:none;">',
     '      <table id="student-table">',

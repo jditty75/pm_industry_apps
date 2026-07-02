@@ -720,6 +720,7 @@ function _CoreUI_Css_getStylesheet() {
     '.status-yellow { background: var(--color-status-yellow-bg); color: var(--color-status-yellow-fg); }',
     '.status-red    { background: var(--color-status-red-bg);    color: var(--color-status-red-fg); }',
     '.status-green  { background: var(--color-status-green-bg);  color: var(--color-status-green-fg); }',
+    '.status-blue   { background: var(--color-info-banner-bg);   color: var(--color-info-banner-text); }',
 
     // Action button (Phase 1)
     '.action-btn {',
@@ -1725,9 +1726,9 @@ function _CoreUI_Css_getStylesheet() {
     '.lifecycle-stage-list { flex: 1; font-size: 0.6875rem; color: var(--color-text-muted); padding: 0 var(--space-2); text-align: center; line-height: 1.4; }',
 
     /* S1: Student tab */
-    '.student-kpi-row { display: flex; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-4); }',
-    '.student-kpi-row .stat-card { flex: 1; min-width: 180px; }',
-    '.student-health-kpi { display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }',
+    '.student-health-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }',
+    '.student-health-chips .status-badge { font-size: 12px; padding: 3px var(--space-2); }',
+    '.student-health-chips .status-badge.chip-zero { opacity: 0.35; }',
     '.student-detail { padding: var(--space-3) var(--space-4); background: var(--color-bg-subtle, #f9fafb); border-left: 3px solid var(--color-primary, #0f4c81); font-size: 0.8125rem; line-height: 1.6; }',
     '.student-detail ul { margin: 4px 0 0 18px; padding: 0; }',
     '.student-banner { background: #e8f0fe; border-left: 4px solid #1a73e8; padding: 8px 14px; font-size: 12px; color: #174ea6; margin-bottom: 12px; border-radius: 4px; }',

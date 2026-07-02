@@ -628,23 +628,85 @@ var CoreData = (function () {
       }
     }
 
-    // D1: attach ddContacts and ddFromContacts to each effective row.
-    var _ddMap = {};
+    return _attachDdContactsToRows_(effective, cfg);
+  }
+
+  /**
+   * S1.6 refactor: extracts the D1 ddContacts/ddFromContacts attach loop into
+   * a shared helper so multiple effective-view builders can call it.
+   *
+   * @param {Array<Object>} rows
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function _attachDdContactsToRows_(rows, cfg) {
+    var ddMap = {};
     try {
-      _ddMap = getDdAssignmentsFromContacts_(cfg) || {};
+      ddMap = getDdAssignmentsFromContacts_(cfg) || {};
     } catch (e) {
-      Logger.log('CoreData.getAllEffectiveDeployments: getDdAssignmentsFromContacts_ failed: ' + e);
+      Logger.log('CoreData._attachDdContactsToRows_: getDdAssignmentsFromContacts_ failed: ' + e);
     }
-    for (var _di = 0; _di < effective.length; _di++) {
-      var _dr = effective[_di];
-      var _dc = (_ddMap[_dr.deploymentId] || []);
-      _dr.ddContacts = _dc;
-      _dr.ddFromContacts = _dc.length === 0 ? null
-        : _dc.length === 1 ? (_dc[0].name || _dc[0].email)
-        : _dc.map(function (c) { return c.name || c.email; }).filter(Boolean).join(', ');
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var contacts = ddMap[row.deploymentId] || [];
+      row.ddContacts = contacts;
+      row.ddFromContacts = contacts.length === 0 ? null
+        : contacts.length === 1 ? (contacts[0].name || contacts[0].email)
+        : contacts.map(function (c) { return c.name || c.email; }).filter(Boolean).join(', ');
+    }
+    return rows;
+  }
+
+  /**
+   * S1.6: Returns effective deployments including BOTH Active and Complete rows.
+   * Applies meta + overrides + D1 ddContacts/ddFromContacts attachment, matching
+   * the shape returned by getAllEffectiveDeployments() but without the Active-only
+   * status filter.
+   *
+   * Used exclusively by buildStudentTabData_ (Student tab needs the Complete slice).
+   * DO NOT use this from Deployments, Overview, Portfolio Health, Report, or any
+   * other Active-portfolio surface — those must remain Active-only.
+   *
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   */
+  function buildAllEffectiveDeploymentsIncludingComplete_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.buildAllEffectiveDeploymentsIncludingComplete_: SFDC read failed: ' + err);
+      return [];
+    }
+    if (!sfdcRows.length) {
+      Logger.log('CoreData.buildAllEffectiveDeploymentsIncludingComplete_: no SFDC rows.');
+      return [];
     }
 
-    return effective;
+    // NOTE: intentionally NO status filter here. Both Active and Complete rows are kept.
+    var metaMap = getDeploymentsMetaMap_(cfg);
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+
+    var effective = sfdcRows.map(function (r, index) {
+      var meta = metaMap[r.deploymentId] || {};
+      var base = Object.assign({}, r, {
+        rowIndex: index + 2,
+        deliveryDirector: meta.deliveryDirector || '',
+        ddNotes: meta.ddNotes || '',
+        metaUsername: meta.username || '',
+        metaTimestamp: meta.timestamp || ''
+      });
+      return buildEffectiveDeploymentRow_(base, overridesMap);
+    }).filter(function (r) {
+      return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
+    });
+
+    Logger.log('CoreData.buildAllEffectiveDeploymentsIncludingComplete_: ' +
+               effective.length + ' rows (Active + Complete).');
+
+    return _attachDdContactsToRows_(effective, cfg);
   }
 
   /**
@@ -3753,7 +3815,7 @@ var CoreData = (function () {
     var cfg = CoreConfig.withDefaults(config);
     if (!cfg.student || cfg.student.enabled !== true) return null;
 
-    var allEffective = getAllEffectiveDeployments(cfg);
+    var allEffective = buildAllEffectiveDeploymentsIncludingComplete_(cfg);
     var studentRows  = filterDeploymentsByStudent_(allEffective, 'only', cfg);
     var studentDataMap = readAllStudentData_(cfg);
     var pfMap = CoreSalesforce.getStudentProductFunctionsMap_(cfg) || {};

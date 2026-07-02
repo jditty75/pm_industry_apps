@@ -1061,56 +1061,21 @@ var CoreData = (function () {
    * of ActiveDeployments, while preserving Active-only default behavior and
    * full override/meta application. Falls back to ActiveDeployments if the
    * new sheet is unavailable, so Phase 2 callers continue to work unchanged.
+   *
+   * D1.1: Refactored to delegate the base row build to getAllEffectiveDeployments(),
+   * eliminating a parallel implementation. This ensures every derived field attached
+   * inside getAllEffectiveDeployments() (including D1's ddContacts / ddFromContacts)
+   * automatically flows through to the WebApp Deployments tab.
    */
   function getAllDeployments(config, viewModeOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
-    var activeStatus = statusValues.active || 'Active';
 
-    // Phase 3i: prefer SFDC_Deployments; fall back to the legacy ActiveDeployments
-    // reader if the new sheet is not yet available.
-    var sfdcRows = [];
-    try {
-      sfdcRows = readSfdcDeploymentsRaw_(cfg);
-    } catch (err) {
-      Logger.log('CoreData.getAllDeployments: readSfdcDeploymentsRaw_ failed — ' +
-                 'falling back to ActiveDeployments. Error: ' + err);
-    }
-    sfdcRows = sfdcRows.filter(function(r) {
-      return !r.overallStatus || r.overallStatus === 'Active';
-    });
+    // Base effective view — includes SFDC-vs-legacy fallback, Active-only filter,
+    // meta application, overrides application, and D1 ddContacts/ddFromContacts.
+    var allEffective = getAllEffectiveDeployments(cfg);
 
-    var allEffective;
-    if (sfdcRows.length > 0) {
-      // Filter to Active-only (preserve backward-compat default).
-      var activeRaw = sfdcRows.filter(function (r) {
-        // Rows without a status field (e.g. column not found) are treated as Active.
-        return !r.status || r.status === activeStatus;
-      });
-
-      // Apply meta + overrides to each Active row.
-      var metaMap      = getDeploymentsMetaMap_(cfg);
-      var overridesMap = getDeploymentOverridesMap_(cfg);
-
-      allEffective = activeRaw.map(function (r, index) {
-        var meta = metaMap[r.deploymentId] || {};
-        var base = Object.assign({}, r, {
-          rowIndex:         index + 2, // approximate; used for edit modal key
-          deliveryDirector: meta.deliveryDirector || '',
-          ddNotes:          meta.ddNotes || '',
-          metaUsername:     meta.username || '',
-          metaTimestamp:    meta.timestamp || ''
-        });
-        return buildEffectiveDeploymentRow_(base, overridesMap);
-      }).filter(function (r) {
-        return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
-      });
-    } else {
-      // Fallback: use the existing ActiveDeployments reader.
-      allEffective = getAllEffectiveDeployments(cfg);
-    }
-
-    // Phase 3a: enrich with isPhased. Degrade gracefully when sheet is absent.
+    // Phase 3a: enrich with isPhased, upcomingDates, nextGoLiveDate.
+    // Degrade gracefully when the enrichment sheet is absent.
     var enrichmentMap = {};
     try {
       enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
@@ -1119,14 +1084,17 @@ var CoreData = (function () {
                  'isPhased will default to false. Error: ' + err);
     }
 
-    var sorted = allEffective.map(function (row) {
+    var enriched = allEffective.map(function (row) {
       var enrichment = enrichmentMap[row.deploymentId];
       return Object.assign({}, row, {
         isPhased:       enrichment ? !!enrichment.isPhased : false,
         upcomingDates:  enrichment ? (enrichment.upcomingDates || []) : [],
         nextGoLiveDate: enrichment ? (enrichment.nextGoLiveDate || null) : null
       });
-    }).sort(function (a, b) {
+    });
+
+    // Health-rank sort: Red -> Yellow -> Green -> other; tiebreak by accountName.
+    var sorted = enriched.sort(function (a, b) {
       var rank = { 'Red': 0, 'Yellow': 1, 'Green': 2 };
       var ar = rank[a.health] !== undefined ? rank[a.health] : 99;
       var br = rank[b.health] !== undefined ? rank[b.health] : 99;

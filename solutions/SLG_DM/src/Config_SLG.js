@@ -46,7 +46,9 @@ var APP_CONFIG = {
     // Phase 3i: unified deployment source (Active + Complete deployments)
     deployments: 'SFDC_Deployments',
     // MGM/PGL patch: contacts from SFDC
-    deploymentContacts: 'SFDC_DeploymentContacts'
+    deploymentContacts: 'SFDC_DeploymentContacts',
+    // D1: Delivery Director from SFDC_Contacts
+    sfdcContacts: 'SFDC_DeploymentContacts'
   },
 
   namedRanges: {
@@ -164,7 +166,7 @@ var APP_CONFIG = {
     mgmPglTab: {
       enabled: true
     },
-
+    enableAccountLinks: true,
     deploymentsTable: {
       showIndustry: false,
       showEmColumn: false,
@@ -175,7 +177,9 @@ var APP_CONFIG = {
       // Phase 2 additions
       defaultHealthFilter: ['Red', 'Yellow'],
       showStageColumn: false,
-      expandableRows: true
+      expandableRows: true,
+      // D1: use SFDC_Contacts as DD source (SLG V1 only)
+      useDdFromContacts: true
     },
 
     // Phase 2: per-row visual config for the Go Lives table (preserves the

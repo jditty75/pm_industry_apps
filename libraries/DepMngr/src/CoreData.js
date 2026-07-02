@@ -82,6 +82,7 @@ var CoreData = (function () {
     // Cross-module cache clears.
     try { CoreSalesforce._clearEnrichmentSheetCache(); } catch (e) {}
     try { CoreSalesforce._clearDdContactsCache(); } catch (e) {}
+    try { CoreSalesforce._clearStudentCache_(); } catch (e) {}
   }
 
   /**
@@ -3565,6 +3566,279 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
+  // ===========================================================================
+  // S1: STUDENT DATA LAYER
+  // ===========================================================================
+
+  /**
+   * Filters a rows array by Student inclusion. Works on deployment rows,
+   * go-live rows, or any row shape with a `deploymentId` field.
+   *
+   * @param {Array<Object>} rows
+   * @param {'exclude'|'only'} mode
+   * @param {AppConfig} cfg
+   * @return {Array<Object>} Filtered array. Returns rows unchanged when
+   *   cfg.student?.enabled !== true (SLG/HC safety guarantee).
+   */
+  function filterDeploymentsByStudent_(rows, mode, cfg) {
+    if (!cfg || !cfg.student || cfg.student.enabled !== true) return rows;
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+    var studentIds = CoreSalesforce.getStudentDeploymentIds_(cfg) || {};
+    if (mode === 'only') {
+      return rows.filter(function (r) { return !!studentIds[r.deploymentId]; });
+    }
+    return rows.filter(function (r) { return !studentIds[r.deploymentId]; });
+  }
+
+  /**
+   * Ensures StudentDeploymentData sheet exists with the V1 column schema.
+   * Idempotent. Returns the Sheet object.
+   *
+   * Schema: A=Deployment_Id, B=Registration_Date, C=Notes,
+   *         D=LastEditedBy, E=LastEditedAt
+   *
+   * @param {AppConfig} cfg
+   * @return {GoogleAppsScript.Spreadsheet.Sheet}
+   * @private
+   */
+  function ensureStudentDataSheet_(cfg) {
+    var sheetName = (cfg.student && cfg.student.sheets && cfg.student.sheets.studentData) ||
+                   'StudentDeploymentData';
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      sheet.getRange(1, 1, 1, 5).setValues([[
+        'Deployment_Id', 'Registration_Date', 'Notes', 'LastEditedBy', 'LastEditedAt'
+      ]]);
+      sheet.setFrozenRows(1);
+      Logger.log('CoreData.ensureStudentDataSheet_: created sheet "' + sheetName + '"');
+    }
+    return sheet;
+  }
+
+  /**
+   * Reads a single Student data row by deploymentId.
+   *
+   * @param {string} deploymentId
+   * @param {AppConfig} cfg
+   * @return {?{deploymentId:string, registrationDate:string, notes:string,
+   *             lastEditedBy:string, lastEditedAt:string}}
+   * @private
+   */
+  function readStudentDataRow_(deploymentId, cfg) {
+    if (!deploymentId) return null;
+    var sheet = ensureStudentDataSheet_(cfg);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return null;
+    var values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+    for (var i = 0; i < values.length; i++) {
+      if (String(values[i][0] || '').trim() === deploymentId.trim()) {
+        return {
+          deploymentId:     String(values[i][0] || ''),
+          registrationDate: values[i][1] ? _formatStudentDate_(values[i][1]) : '',
+          notes:            String(values[i][2] || ''),
+          lastEditedBy:     String(values[i][3] || ''),
+          lastEditedAt:     String(values[i][4] || '')
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Reads all Student data rows as a map keyed by deploymentId.
+   *
+   * @param {AppConfig} cfg
+   * @return {Object<string, {deploymentId:string, registrationDate:string, notes:string,
+   *                          lastEditedBy:string, lastEditedAt:string}>}
+   * @private
+   */
+  function readAllStudentData_(cfg) {
+    var sheet = ensureStudentDataSheet_(cfg);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return {};
+    var values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+    var out = {};
+    for (var i = 0; i < values.length; i++) {
+      var did = String(values[i][0] || '').trim();
+      if (!did) continue;
+      out[did] = {
+        deploymentId:     did,
+        registrationDate: values[i][1] ? _formatStudentDate_(values[i][1]) : '',
+        notes:            String(values[i][2] || ''),
+        lastEditedBy:     String(values[i][3] || ''),
+        lastEditedAt:     String(values[i][4] || '')
+      };
+    }
+    return out;
+  }
+
+  /**
+   * Creates or updates a Student data row. Only touches fields present in patch.
+   * Stamps LastEditedBy and LastEditedAt on every save.
+   *
+   * @param {string} deploymentId
+   * @param {{registrationDate?:string, notes?:string}} patch
+   * @param {string} editorEmail
+   * @param {AppConfig} cfg
+   * @return {{deploymentId:string, registrationDate:string, notes:string,
+   *           lastEditedBy:string, lastEditedAt:string}}
+   */
+  function writeStudentDataRow_(deploymentId, patch, editorEmail, cfg) {
+    var sheet = ensureStudentDataSheet_(cfg);
+    var nowIso = new Date().toISOString();
+
+    var lastRow = sheet.getLastRow();
+    var existingRowNum = -1;
+    var existingData = ['', '', '', '', ''];
+    if (lastRow >= 2) {
+      var values = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+      for (var i = 0; i < values.length; i++) {
+        if (String(values[i][0] || '').trim() === deploymentId.trim()) {
+          existingRowNum = i + 2;
+          existingData = values[i];
+          break;
+        }
+      }
+    }
+
+    var regDate = (patch && patch.registrationDate !== undefined)
+      ? String(patch.registrationDate || '').trim()
+      : (existingData[1] ? _formatStudentDate_(existingData[1]) : '');
+    var notes = (patch && patch.notes !== undefined)
+      ? String(patch.notes || '').trim()
+      : String(existingData[2] || '');
+
+    var rowData = [deploymentId, regDate, notes, editorEmail || '', nowIso];
+
+    if (existingRowNum > 0) {
+      sheet.getRange(existingRowNum, 1, 1, 5).setValues([rowData]);
+    } else {
+      sheet.appendRow(rowData);
+    }
+
+    return {
+      deploymentId:     deploymentId,
+      registrationDate: regDate,
+      notes:            notes,
+      lastEditedBy:     editorEmail || '',
+      lastEditedAt:     nowIso
+    };
+  }
+
+  /**
+   * Builds the server-side data payload for the Student tab.
+   * Returns null when cfg.student?.enabled !== true.
+   *
+   * @param {AppConfig} config
+   * @return {?{deployments:Array<Object>, products:Object<string,Array>,
+   *            kpis:{total:number, totalActive:number, totalComplete:number,
+   *                  healthActive:{red:number,yellow:number,green:number,blue:number}}}}
+   */
+  function buildStudentTabData_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (!cfg.student || cfg.student.enabled !== true) return null;
+
+    var allEffective = getAllEffectiveDeployments(cfg);
+    var studentRows  = filterDeploymentsByStudent_(allEffective, 'only', cfg);
+    var studentDataMap = readAllStudentData_(cfg);
+    var pfMap = CoreSalesforce.getStudentProductFunctionsMap_(cfg) || {};
+
+    var deployments = studentRows.map(function (dep) {
+      var sd = studentDataMap[dep.deploymentId] || {};
+      return {
+        rowIndex:         dep.rowIndex,
+        deploymentId:     dep.deploymentId,
+        accountName:      dep.accountName,
+        deploymentName:   dep.deploymentName,
+        partner:          dep.partner,
+        overallStatus:    dep.overallStatus,
+        health:           dep.health,
+        phase:            dep.phase,
+        mtpDate:          dep.mtpDate,
+        registrationDate: sd.registrationDate || '',
+        notes:            sd.notes || ''
+      };
+    });
+
+    var totalActive   = deployments.filter(function (d) { return d.overallStatus === 'Active';   }).length;
+    var totalComplete = deployments.filter(function (d) { return d.overallStatus === 'Complete'; }).length;
+    var activeRows    = deployments.filter(function (d) { return d.overallStatus === 'Active'; });
+    var healthActive  = { red: 0, yellow: 0, green: 0, blue: 0 };
+    activeRows.forEach(function (d) {
+      var h = String(d.health || '').trim().toLowerCase();
+      if      (h === 'red')    healthActive.red++;
+      else if (h === 'yellow') healthActive.yellow++;
+      else if (h === 'green')  healthActive.green++;
+      else if (h === 'blue')   healthActive.blue++;
+    });
+
+    return {
+      deployments: deployments,
+      products:    pfMap,
+      kpis: {
+        total:         deployments.length,
+        totalActive:   totalActive,
+        totalComplete: totalComplete,
+        healthActive:  healthActive
+      }
+    };
+  }
+
+  /**
+   * Save handler for Student-specific fields. Requires POWER_USER or ADMIN.
+   * Validates notes length and date format. Stamps editor email + timestamp.
+   *
+   * @param {AppConfig} config
+   * @param {string} deploymentId
+   * @param {{registrationDate?:string, notes?:string}} patch
+   * @return {{ok:boolean, row:Object}}
+   */
+  function saveStudentDeploymentFields(config, deploymentId, patch) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (!cfg.student || cfg.student.enabled !== true) {
+      throw new Error('saveStudentDeploymentFields: Student is not enabled for this app.');
+    }
+    CoreUsers.requirePowerUser_(cfg);
+
+    var maxChars = (cfg.student.editModal && cfg.student.editModal.notesMaxChars) || 2000;
+    var notes = patch && patch.notes !== undefined ? String(patch.notes || '') : null;
+    if (notes !== null && notes.length > maxChars) {
+      throw new Error('Notes exceeds maximum length of ' + maxChars + ' characters.');
+    }
+
+    if (patch && patch.registrationDate !== undefined && patch.registrationDate !== '') {
+      var d = new Date(patch.registrationDate);
+      if (isNaN(d.getTime())) {
+        throw new Error('Invalid Registration Date: "' + patch.registrationDate + '".');
+      }
+    }
+
+    var editor = '';
+    try { editor = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail(); }
+    catch (e) {}
+
+    var row = writeStudentDataRow_(deploymentId, patch, editor, cfg);
+    return { ok: true, row: row };
+  }
+
+  /**
+   * Formats a date value (Date object or string) as 'M/D/YYYY' for display.
+   * Returns '' if the value is blank or invalid.
+   *
+   * @param {*} rawDate
+   * @return {string}
+   * @private
+   */
+  function _formatStudentDate_(rawDate) {
+    if (!rawDate) return '';
+    var d = rawDate instanceof Date ? rawDate : new Date(String(rawDate));
+    if (isNaN(d.getTime())) return String(rawDate);
+    return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+  }
+
+  // ===========================================================================
   // EXPORTS
   // ===========================================================================
 
@@ -3608,6 +3882,11 @@ var CoreData = (function () {
     _getCachedSfdcRowCount:      _getCachedSfdcRowCount,
 
     // D1 diagnostic
-    _debugDdFromContacts_:       _debugDdFromContacts_
+    _debugDdFromContacts_:       _debugDdFromContacts_,
+
+    // S1: Student data layer
+    filterDeploymentsByStudent_: filterDeploymentsByStudent_,
+    buildStudentTabData_:        buildStudentTabData_,
+    saveStudentDeploymentFields: saveStudentDeploymentFields
   };
 })();

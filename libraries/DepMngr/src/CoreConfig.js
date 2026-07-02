@@ -40,6 +40,21 @@
  */
 
 /**
+ * @typedef {Object} StudentConfig  S1
+ * @property {boolean}  enabled           true activates all Student behavior; absent = off
+ * @property {string}   productAreaMatch  Exact Product_Area__c value (e.g. 'Student')
+ * @property {{ studentData: string }}   sheets
+ * @property {{ id: string, label: string, insertAfter: string }} tab
+ * @property {{ defaultStatusFilter: string, defaultHealthFilter: ?string,
+ *              columns: Array<string>, searchPlaceholder: string,
+ *              expandableRows: boolean }} table
+ * @property {{ allowedRoles: Array<string>, notesMaxChars: number }} editModal
+ * @property {{ enabled: boolean, copy: string, showOnTabs: Array<string>,
+ *              linkToken: string }} banner
+ * @property {{ enabled: boolean, copy: string }} reportDisclosure
+ */
+
+/**
  * @typedef {Object} SalesforceConfig  (Phase 3a, extended in Phase 3i)
  * @property {number} upcomingWindowDays  Days ahead to consider for upcoming go-live dates.
  * @property {number} recentWindowDays    Phase 3i: Days back to consider for recent go-live dates.
@@ -188,6 +203,7 @@
  * @property {ReportConfig}          report
  * @property {SalesforceConfig}      [salesforce]  Phase 3a
  * @property {UIConfig}              [ui]
+ * @property {StudentConfig}         [student]     S1: HENP Student tab. Absent = off (SLG/HC safety guarantee).
  */
 
 var CoreConfig = (function () {

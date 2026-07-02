@@ -172,5 +172,39 @@ var APP_CONFIG = {
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
     }
+  },
+
+  student: {
+    enabled: true,
+    productAreaMatch: 'Student',
+    sheets: {
+      studentData: 'StudentDeploymentData'
+    },
+    tab: {
+      id: 'student',
+      label: 'Student',
+      insertAfter: 'deployments'
+    },
+    table: {
+      defaultStatusFilter: 'active',
+      defaultHealthFilter: null,
+      columns: ['account', 'partner', 'currentMtp', 'phase', 'health', 'registrationDate'],
+      searchPlaceholder: 'Search Student deployments\u2026',
+      expandableRows: true
+    },
+    editModal: {
+      allowedRoles: ['POWER_USER', 'ADMIN'],
+      notesMaxChars: 2000
+    },
+    banner: {
+      enabled: true,
+      copy: 'Student deployments are not included on this view. See the {Student} tab for all Student deployments and metrics.',
+      showOnTabs: ['overview', 'deployments', 'golives', 'reporting', 'portfolio', 'notable'],
+      linkToken: '{Student}'
+    },
+    reportDisclosure: {
+      enabled: true,
+      copy: 'This report covers HENP Platform deployments only. Student deployments are tracked and reported separately.'
+    }
   }
 };

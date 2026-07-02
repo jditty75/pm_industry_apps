@@ -53,6 +53,10 @@ var _enrichmentCache = null;
 // D1: per-execution cache for DD-from-Contacts map.
 var _ddContactsCache = null;
 
+// S1: per-execution caches for Student predicate maps.
+var _studentIdsCache = null;
+var _studentPFCache = null;
+
 /**
  * Clears the enrichment cache. Currently not called by anything in CoreSalesforce
  * because the underlying SFDC_DeploymentProductFunctions sheet is read-only
@@ -383,6 +387,193 @@ function _clearDdContactsCache() {
   }
 }
 
+// ===========================================================================
+// S1: STUDENT PREDICATE HELPERS
+// ---------------------------------------------------------------------------
+// Two-tier cached (tier-1 in-memory + tier-2 _PerfCache) maps built from
+// SFDC_DeploymentProductFunctions. Only active when cfg.student?.enabled === true.
+// SLG/HC see cfg.student = undefined → all helpers short-circuit to {}.
+// ===========================================================================
+
+/**
+ * Returns a plain object map keyed by Deployment_Id where at least one row
+ * in SFDC_DeploymentProductFunctions has Product_Area === cfg.student.productAreaMatch
+ * (exact match, trimmed, case-sensitive).
+ *
+ * Returns {} when cfg.student?.enabled !== true.
+ * Cached in-memory (tier 1) and via _PerfCache (tier 2, 5-min TTL).
+ *
+ * Key naming: 'studentDeploymentIds:<appId>'
+ *
+ * @param {AppConfig} config
+ * @return {Object<string, true>}
+ */
+function getStudentDeploymentIds_(config) {
+  var cfg = CoreConfig.withDefaults(config);
+  if (!cfg.student || cfg.student.enabled !== true) return {};
+  var appId = cfg.appId || 'default';
+
+  if (_studentIdsCache !== null) return _studentIdsCache;
+
+  var cacheKey = 'studentDeploymentIds:' + appId;
+  var cached = _perfCacheReadS_(cacheKey);
+  if (cached !== null) {
+    _studentIdsCache = cached;
+    return cached;
+  }
+
+  var sheetName = (cfg.sheets && cfg.sheets.sfdcDeploymentProductFunctions) ||
+                  'SFDC_DeploymentProductFunctions';
+  var productAreaMatch = (cfg.student && cfg.student.productAreaMatch) || 'Student';
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('CoreSalesforce.getStudentDeploymentIds_: sheet "' + sheetName +
+               '" not found or empty for app ' + appId);
+    _studentIdsCache = {};
+    _perfCacheWriteS_(cacheKey, {});
+    return {};
+  }
+
+  var allValues = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  var headerRow = allValues[0];
+
+  var colProductArea = -1;
+  var colDeploymentFk = CoreSalesforce._findDeploymentFkCol_(headerRow, 0);
+  for (var hi = 0; hi < headerRow.length; hi++) {
+    var h = String(headerRow[hi] || '').trim().toLowerCase();
+    if (h.indexOf('product_area') !== -1) colProductArea = hi;
+  }
+
+  if (colProductArea < 0 || colDeploymentFk < 0) {
+    Logger.log('CoreSalesforce.getStudentDeploymentIds_: missing Product_Area or Deployment FK ' +
+               'column in "' + sheetName + '"');
+    _studentIdsCache = {};
+    return {};
+  }
+
+  var idSet = {};
+  for (var r = 1; r < allValues.length; r++) {
+    var row = allValues[r];
+    var pa  = String(row[colProductArea] || '').trim();
+    var did = String(row[colDeploymentFk] || '').trim();
+    if (pa === productAreaMatch && did) {
+      idSet[did] = true;
+    }
+  }
+
+  Logger.log('CoreSalesforce.getStudentDeploymentIds_(' + appId + '): ' +
+             Object.keys(idSet).length + ' Student deployments.');
+  _studentIdsCache = idSet;
+  _perfCacheWriteS_(cacheKey, idSet);
+  return idSet;
+}
+
+/**
+ * Returns a map: { deploymentId: [{ function, targetGoLive, actualGoLive }, ...] }
+ * for Student rows only (Product_Area === cfg.student.productAreaMatch). Used by
+ * the Student tab expanded-row detail.
+ *
+ * Returns {} when cfg.student?.enabled !== true.
+ * Cached in-memory + _PerfCache. Key: 'studentProductFunctions:<appId>'
+ *
+ * @param {AppConfig} config
+ * @return {Object<string, Array<{function:string, targetGoLive:string, actualGoLive:string}>>}
+ */
+function getStudentProductFunctionsMap_(config) {
+  var cfg = CoreConfig.withDefaults(config);
+  if (!cfg.student || cfg.student.enabled !== true) return {};
+  var appId = cfg.appId || 'default';
+
+  if (_studentPFCache !== null) return _studentPFCache;
+
+  var cacheKey = 'studentProductFunctions:' + appId;
+  var cached = _perfCacheReadS_(cacheKey);
+  if (cached !== null) {
+    _studentPFCache = cached;
+    return cached;
+  }
+
+  var sheetName = (cfg.sheets && cfg.sheets.sfdcDeploymentProductFunctions) ||
+                  'SFDC_DeploymentProductFunctions';
+  var productAreaMatch = (cfg.student && cfg.student.productAreaMatch) || 'Student';
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) {
+    _studentPFCache = {};
+    _perfCacheWriteS_(cacheKey, {});
+    return {};
+  }
+
+  var allValues = sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+  var headerRow = allValues[0];
+  var tz = Session.getScriptTimeZone();
+
+  var colProductArea = -1;
+  var colDeploymentFk = CoreSalesforce._findDeploymentFkCol_(headerRow, 0);
+  var colFunction = -1, colTargetGoLive = -1, colActualGoLive = -1;
+
+  for (var hi = 0; hi < headerRow.length; hi++) {
+    var h = String(headerRow[hi] || '').trim().toLowerCase();
+    if (h.indexOf('product_area') !== -1) colProductArea = hi;
+    if (h.indexOf('function') !== -1 && h.indexOf('deployment') === -1) colFunction = hi;
+    if (h.indexOf('target') !== -1 && h.indexOf('date') !== -1) colTargetGoLive = hi;
+    if (h.indexOf('actual') !== -1 && h.indexOf('date') !== -1) colActualGoLive = hi;
+  }
+
+  if (colProductArea < 0 || colDeploymentFk < 0) {
+    _studentPFCache = {};
+    return {};
+  }
+
+  var pfMap = {};
+  for (var r = 1; r < allValues.length; r++) {
+    var row = allValues[r];
+    var pa  = String(row[colProductArea] || '').trim();
+    var did = String(row[colDeploymentFk] || '').trim();
+    if (pa !== productAreaMatch || !did) continue;
+    if (!pfMap[did]) pfMap[did] = [];
+    pfMap[did].push({
+      'function':    colFunction     >= 0 ? String(row[colFunction]     || '').trim() : '',
+      targetGoLive:  colTargetGoLive >= 0 ? (CoreSalesforce._normalizeDate_(row[colTargetGoLive], tz) || '') : '',
+      actualGoLive:  colActualGoLive >= 0 ? (CoreSalesforce._normalizeDate_(row[colActualGoLive], tz) || '') : ''
+    });
+  }
+
+  Logger.log('CoreSalesforce.getStudentProductFunctionsMap_(' + appId + '): ' +
+             Object.keys(pfMap).length + ' deployments with Student product rows.');
+  _studentPFCache = pfMap;
+  _perfCacheWriteS_(cacheKey, pfMap);
+  return pfMap;
+}
+
+/**
+ * Clears both cache tiers for the Student predicate maps.
+ * Called by CoreData._clearCache(cfg) as part of the unified cache invalidation.
+ */
+function _clearStudentCache_() {
+  _studentIdsCache = null;
+  _studentPFCache = null;
+  try {
+    var sheet = _getPerfCacheSheet_S_();
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = data.length - 1; i >= 0; i--) {
+        var k = String(data[i][0] || '');
+        if (k.indexOf('studentDeploymentIds:') === 0 ||
+            k.indexOf('studentProductFunctions:') === 0) {
+          sheet.deleteRow(i + 2);
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log('CoreSalesforce._clearStudentCache_: ' + err);
+  }
+}
+
 /**
  * Performance Layer 2: Pre-warm the sheet-tab cache for this app.
  * Called by an Apps Script time-based trigger in each app (every 4-5 min
@@ -424,6 +615,13 @@ function _warmCaches(config) {
     getDdAssignmentsFromContacts_(cfg);
   } catch (err) {
     Logger.log('CoreSalesforce._warmCaches: DD-from-Contacts warm failed: ' + err);
+  }
+  // S1: pre-warm Student maps (HENP-only; no-op elsewhere).
+  try {
+    getStudentDeploymentIds_(cfg);
+    getStudentProductFunctionsMap_(cfg);
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: Student warm failed: ' + err);
   }
   // Notable Deployments: warm the peer-sheet join for this app.
   try {
@@ -749,6 +947,9 @@ var CoreSalesforce = {
   // Performance Layer 2 exports
   _clearEnrichmentSheetCache: _clearEnrichmentSheetCache,
   _clearDdContactsCache: _clearDdContactsCache,
+  _clearStudentCache_: _clearStudentCache_,
+  getStudentDeploymentIds_: getStudentDeploymentIds_,
+  getStudentProductFunctionsMap_: getStudentProductFunctionsMap_,
   _warmCaches: _warmCaches
 };
 

@@ -137,6 +137,9 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     parts.push(_CoreUI_Markup_buildGoLivesModal_(filteredUi));
     parts.push(_CoreUI_Markup_buildConfirmModal_(filteredUi));
     parts.push(_CoreUI_Markup_buildAuditDetailModal_(filteredUi));
+    if (cfg && cfg.student && cfg.student.enabled === true) {
+      parts.push(_CoreUI_Markup_buildStudentEditModal_(filteredUi, cfg));
+    }
   }
 
   return parts.join('\n');
@@ -1672,6 +1675,50 @@ function _CoreUI_Markup_buildNotableAddPickerModal_(ui) {
     '    </div>',
     '    <div class="modal-footer">',
     '      <button class="btn btn-secondary" onclick="closeNotableAddPicker()">Cancel</button>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+/**
+ * Builds the Student edit modal markup (Registration Date + Notes).
+ * Only rendered for POWER_USER / ADMIN — not reachable by READ_ONLY users.
+ *
+ * @param {Object} ui  cfg.ui (already filtered)
+ * @param {AppConfig} cfg
+ * @return {string}
+ */
+function _CoreUI_Markup_buildStudentEditModal_(ui, cfg) {
+  var maxChars = (cfg && cfg.student && cfg.student.editModal && cfg.student.editModal.notesMaxChars) || 2000;
+  return [
+    '<div id="student-edit-modal" class="modal-overlay">',
+    '  <div class="modal" style="max-width:560px;width:92vw;">',
+    '    <div class="modal-header">',
+    '      <h2>Edit Student Deployment</h2>',
+    '      <button class="modal-close" onclick="closeStudentEditModal()">&times;</button>',
+    '    </div>',
+    '    <div class="modal-body">',
+    '      <div style="margin-bottom:12px;">',
+    '        <div class="form-label" style="font-weight:600;color:#0f4c81;" id="student-modal-account"></div>',
+    '        <div class="form-label" style="color:#555;font-size:12px;" id="student-modal-deployment"></div>',
+    '      </div>',
+    '      <div class="form-group">',
+    '        <label class="form-label" for="student-reg-date-input">Registration Date</label>',
+    '        <input type="date" id="student-reg-date-input" class="form-input" style="width:200px;">',
+    '      </div>',
+    '      <div class="form-group">',
+    '        <label class="form-label" for="student-notes-input">Notes <span id="student-notes-counter" style="font-size:11px;color:#888;font-weight:normal;">(0 / ' + maxChars + ')</span></label>',
+    '        <textarea id="student-notes-input" class="form-input" rows="5"',
+    '          style="width:100%;resize:vertical;"',
+    '          maxlength="' + maxChars + '"',
+    '          oninput="updateStudentNotesCounter()"></textarea>',
+    '      </div>',
+    '      <div id="student-modal-error" style="color:#c62828;font-size:12px;display:none;margin-top:4px;"></div>',
+    '    </div>',
+    '    <div class="modal-footer">',
+    '      <button class="btn btn-secondary" onclick="closeStudentEditModal()">Cancel</button>',
+    '      <button class="btn btn-primary" onclick="saveStudentEdit()">Save</button>',
     '    </div>',
     '  </div>',
     '</div>'

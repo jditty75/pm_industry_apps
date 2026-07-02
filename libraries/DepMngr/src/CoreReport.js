@@ -1505,6 +1505,12 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<body style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
       'max-width:1000px; margin:0 auto; padding:20px;">' +
       headerHtml +
+      (cfg.student && cfg.student.reportDisclosure && cfg.student.reportDisclosure.enabled === true
+        ? '<div style="font-family:Arial,sans-serif; font-size:11px; color:#4a628f; ' +
+          'padding:4px 12px; font-style:italic;">' +
+          CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') +
+          '</div>'
+        : '') +
       bodyContent +
       footerHtml +
       '</body></html>'
@@ -1615,6 +1621,12 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<table width="640" cellpadding="0" cellspacing="0" border="0" ' +
       'style="background-color:#ffffff; border-collapse:collapse; max-width:100%;">' +
       '<tr><td>' + headerInner + '</td></tr>' +
+      (cfg.student && cfg.student.reportDisclosure && cfg.student.reportDisclosure.enabled === true
+        ? '<tr><td style="padding:4px 18px;"><div style="font-family:Arial,sans-serif; ' +
+          'font-size:11px; color:#4a628f; font-style:italic;">' +
+          CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') +
+          '</div></td></tr>'
+        : '') +
       '<tr>' +
       '<td style="padding:16px 18px 6px 18px; font-size:14px; line-height:1.5;">' +
       bodyContent +

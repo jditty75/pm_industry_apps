@@ -112,6 +112,11 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 
   parts.push(_CoreUI_Markup_buildTabBar_(filteredUi));
 
+  // S1: cross-tab Student banner — shown on configured tabs, hidden on Student/Overrides.
+  if (cfg && cfg.student && cfg.student.enabled === true && cfg.student.banner && cfg.student.banner.enabled !== false) {
+    parts.push('<div id="student-cross-tab-banner" class="student-banner" style="display:none;"></div>');
+  }
+
   var tabIds = filteredUi.tabs.map(function (t) { return t.id; });
 
   if (filteredUi.overviewTab && filteredUi.overviewTab.enabled !== false) parts.push(_CoreUI_Markup_buildOverviewTab_());

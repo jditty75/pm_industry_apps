@@ -139,7 +139,7 @@ var APP_CONFIG = {
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' }
     ],
-
+    enableAccountLinks: true,
     mgmPglTab: { enabled: true },
 
     deploymentsTable: {

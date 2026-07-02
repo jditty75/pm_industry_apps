@@ -122,6 +122,7 @@ var APP_CONFIG = {
       { id: 'portfolio', label: 'Portfolio Health' },
       { id: 'overrides', label: 'Manage Overrides' }
     ],
+    enableAccountLinks: true,
     mgmPglTab: { enabled: false },
     notable: { enabled: false },
     deploymentsTable: {

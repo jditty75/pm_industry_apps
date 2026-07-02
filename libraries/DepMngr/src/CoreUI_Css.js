@@ -720,7 +720,6 @@ function _CoreUI_Css_getStylesheet() {
     '.status-yellow { background: var(--color-status-yellow-bg); color: var(--color-status-yellow-fg); }',
     '.status-red    { background: var(--color-status-red-bg);    color: var(--color-status-red-fg); }',
     '.status-green  { background: var(--color-status-green-bg);  color: var(--color-status-green-fg); }',
-    '.status-blue   { background: var(--color-info-banner-bg);   color: var(--color-info-banner-text); }',
 
     // Action button (Phase 1)
     '.action-btn {',

@@ -3809,7 +3809,7 @@ var CoreData = (function () {
    * @param {AppConfig} config
    * @return {?{deployments:Array<Object>, products:Object<string,Array>,
    *            kpis:{total:number, totalActive:number, totalComplete:number,
-   *                  healthActive:{red:number,yellow:number,green:number,blue:number}}}}
+   *                  healthActive:{red:number,yellow:number,green:number}}}}
    */
   function buildStudentTabData_(config) {
     var cfg = CoreConfig.withDefaults(config);
@@ -3840,13 +3840,12 @@ var CoreData = (function () {
     var totalActive   = deployments.filter(function (d) { return d.overallStatus === 'Active';   }).length;
     var totalComplete = deployments.filter(function (d) { return d.overallStatus === 'Complete'; }).length;
     var activeRows    = deployments.filter(function (d) { return d.overallStatus === 'Active'; });
-    var healthActive  = { red: 0, yellow: 0, green: 0, blue: 0 };
+    var healthActive  = { red: 0, yellow: 0, green: 0 };
     activeRows.forEach(function (d) {
       var h = String(d.health || '').trim().toLowerCase();
       if      (h === 'red')    healthActive.red++;
       else if (h === 'yellow') healthActive.yellow++;
       else if (h === 'green')  healthActive.green++;
-      else if (h === 'blue')   healthActive.blue++;
     });
 
     return {

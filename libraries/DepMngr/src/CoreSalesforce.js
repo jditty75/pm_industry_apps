@@ -50,6 +50,9 @@
 // Performance Layer 1: per-execution cache for enrichment map.
 var _enrichmentCache = null;
 
+// D1: per-execution cache for DD-from-Contacts map.
+var _ddContactsCache = null;
+
 /**
  * Clears the enrichment cache. Currently not called by anything in CoreSalesforce
  * because the underlying SFDC_DeploymentProductFunctions sheet is read-only
@@ -247,6 +250,140 @@ function _clearEnrichmentSheetCache() {
 }
 
 /**
+ * Returns a plain object map:
+ *   { deploymentId: [ { email, name }, ... ], ... }
+ * built from SFDC_DeploymentContacts rows where
+ *   Contact_Role__c === 'Deployment Sponsor'.
+ *
+ * Order within each deployment's array reflects sheet row order.
+ *
+ * Cached in-memory (tier 1) and via _PerfCache (tier 2, 5-min TTL).
+ * Returns {} and logs a warning if cfg.sheets.sfdcContacts is unset
+ * or the sheet does not exist.
+ *
+ * @param {AppConfig} config
+ * @return {Object<string, Array<{email:string, name:string}>>}
+ */
+function getDdAssignmentsFromContacts_(config) {
+  var cfg = CoreConfig.withDefaults(config);
+  var appId = cfg.appId || 'default';
+
+  // Guard: sfdcContacts must be configured by the app.
+  var sheetName = cfg.sheets && cfg.sheets.sfdcContacts;
+  if (!sheetName || !String(sheetName).trim()) {
+    Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_: sheets.sfdcContacts not configured ' +
+               'for app "' + appId + '"; returning empty map.');
+    return {};
+  }
+  sheetName = String(sheetName).trim();
+
+  // Tier 1: in-memory.
+  if (_ddContactsCache !== null) return _ddContactsCache;
+
+  // Tier 2: sheet-tab cache.
+  var cacheKey = 'ddContacts:' + appId;
+  var cached = _perfCacheReadS_(cacheKey);
+  if (cached !== null) {
+    _ddContactsCache = cached;
+    return cached;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_: sheet "' + sheetName +
+               '" not found; returning empty map.');
+    return {};
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_: sheet "' + sheetName +
+               '" has no data rows; returning empty map.');
+    _ddContactsCache = {};
+    _perfCacheWriteS_(cacheKey, {});
+    return {};
+  }
+
+  var lastCol = sheet.getLastColumn();
+  var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headerRow = allValues[0];
+
+  // Exact header-name lookup for the four required columns.
+  var colRole       = -1;
+  var colDeployment = -1;
+  var colEmail      = -1;
+  var colName       = -1;
+  for (var hi = 0; hi < headerRow.length; hi++) {
+    var h = String(headerRow[hi] || '').trim();
+    if (h === 'Contact_Role__c')    colRole       = hi;
+    if (h === 'Deployment__c')      colDeployment = hi;
+    if (h === 'Contact__r.Email')   colEmail      = hi;
+    if (h === 'Contact__r.Name')    colName       = hi;
+  }
+
+  var missingHeaders = [];
+  if (colRole       < 0) missingHeaders.push('Contact_Role__c');
+  if (colDeployment < 0) missingHeaders.push('Deployment__c');
+  if (colEmail      < 0) missingHeaders.push('Contact__r.Email');
+  if (colName       < 0) missingHeaders.push('Contact__r.Name');
+  if (missingHeaders.length > 0) {
+    Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_: missing required headers in "' +
+               sheetName + '": ' + missingHeaders.join(', ') + '; returning empty map.');
+    return {};
+  }
+
+  var ddMap = {};
+  for (var r = 1; r < allValues.length; r++) {
+    var row = allValues[r];
+    var role       = String(row[colRole]       || '').trim();
+    var deployId   = String(row[colDeployment] || '').trim();
+    var email      = String(row[colEmail]      || '').trim();
+    var name       = String(row[colName]       || '').trim();
+
+    // Skip rows that don't qualify.
+    if (!role || role !== 'Deployment Sponsor') continue;
+    if (!deployId) continue;
+    if (!email) continue;
+
+    if (!ddMap[deployId]) ddMap[deployId] = [];
+    ddMap[deployId].push({ email: email, name: name });
+  }
+
+  Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_(' + appId + '): built DD map for ' +
+             Object.keys(ddMap).length + ' deployments from "' + sheetName + '".');
+
+  // Tier 1.
+  _ddContactsCache = ddMap;
+  // Tier 2 (chunked at _PERF_CACHE_CHUNK_SIZE_S chars).
+  _perfCacheWriteS_(cacheKey, ddMap);
+  return ddMap;
+}
+
+/**
+ * Clears both cache tiers for getDdAssignmentsFromContacts_.
+ * Called by CoreData._clearCache(cfg) as part of the unified invalidation.
+ */
+function _clearDdContactsCache() {
+  _ddContactsCache = null;
+  try {
+    var sheet = _getPerfCacheSheet_S_();
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = data.length - 1; i >= 0; i--) {
+        var k = String(data[i][0] || '');
+        if (k.indexOf('ddContacts:') === 0) {
+          sheet.deleteRow(i + 2);
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log('CoreSalesforce._clearDdContactsCache: ' + err);
+  }
+}
+
+/**
  * Performance Layer 2: Pre-warm the sheet-tab cache for this app.
  * Called by an Apps Script time-based trigger in each app (every 4-5 min
  * during business hours). Computes SFDC raw rows and the enrichment map,
@@ -281,6 +418,12 @@ function _warmCaches(config) {
     rowCount = (CoreData._getCachedSfdcRowCount && CoreData._getCachedSfdcRowCount()) || 0;
   } catch (err) {
     Logger.log('CoreSalesforce._warmCaches: SFDC warm failed: ' + err);
+  }
+  // D1: pre-warm DD-from-Contacts map for this app.
+  try {
+    getDdAssignmentsFromContacts_(cfg);
+  } catch (err) {
+    Logger.log('CoreSalesforce._warmCaches: DD-from-Contacts warm failed: ' + err);
   }
   // Notable Deployments: warm the peer-sheet join for this app.
   try {
@@ -605,6 +748,7 @@ var CoreSalesforce = {
 
   // Performance Layer 2 exports
   _clearEnrichmentSheetCache: _clearEnrichmentSheetCache,
+  _clearDdContactsCache: _clearDdContactsCache,
   _warmCaches: _warmCaches
 };
 

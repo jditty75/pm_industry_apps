@@ -36,6 +36,7 @@
  * @property {string} sfdcDeploymentProductFunctions    Phase 3a: "SFDC_DeploymentProductFunctions"
  * @property {string} deployments                       Phase 3i: "SFDC_Deployments" (Active + Complete)
  * @property {string} deploymentContacts                MGM/PGL patch: "SFDC_DeploymentContacts"
+ * @property {string} [sfdcContacts]                    D1: "SFDC_DeploymentContacts" (SLG only; absent = D1 no-op)
  */
 
 /**

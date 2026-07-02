@@ -606,6 +606,13 @@ function _getOverviewData_legacy_() {
   }
 }
 
+/**
+ * D1 diagnostic passthrough. Run from the Apps Script editor.
+ */
+function _debugDdFromContacts_SLG() {
+  return CoreLib.CoreData._debugDdFromContacts_(APP_CONFIG);
+}
+
 function _debugSfdcColumns() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetNames = ['SFDC_Deployments', 'SFDC_Wellness'];

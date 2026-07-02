@@ -79,8 +79,9 @@ var CoreData = (function () {
     _cache.overviewSnapshot = null;
     // Tier 2: sheet-tab cache. Layer 2. Clears all rows including mdsPglBatchView:* and overviewData:* keys.
     _perfCacheClearAll_();
-    // Also clear the enrichment cache in CoreSalesforce (cross-module).
+    // Cross-module cache clears.
     try { CoreSalesforce._clearEnrichmentSheetCache(); } catch (e) {}
+    try { CoreSalesforce._clearDdContactsCache(); } catch (e) {}
   }
 
   /**
@@ -617,15 +618,32 @@ var CoreData = (function () {
       Logger.log('CoreData.getAllEffectiveDeployments: SFDC path threw, falling back. Error: ' + err);
       effective = [];
     }
-    if (effective && effective.length) {
-      return effective;
+    if (!effective || !effective.length) {
+      try {
+        effective = getAllEffectiveDeploymentsLegacy_(cfg);
+      } catch (err) {
+        Logger.log('CoreData.getAllEffectiveDeployments: legacy fallback also failed: ' + err);
+        effective = [];
+      }
     }
+
+    // D1: attach ddContacts and ddFromContacts to each effective row.
+    var _ddMap = {};
     try {
-      return getAllEffectiveDeploymentsLegacy_(cfg);
-    } catch (err) {
-      Logger.log('CoreData.getAllEffectiveDeployments: legacy fallback also failed: ' + err);
-      return [];
+      _ddMap = getDdAssignmentsFromContacts_(cfg) || {};
+    } catch (e) {
+      Logger.log('CoreData.getAllEffectiveDeployments: getDdAssignmentsFromContacts_ failed: ' + e);
     }
+    for (var _di = 0; _di < effective.length; _di++) {
+      var _dr = effective[_di];
+      var _dc = (_ddMap[_dr.deploymentId] || []);
+      _dr.ddContacts = _dc;
+      _dr.ddFromContacts = _dc.length === 0 ? null
+        : _dc.length === 1 ? (_dc[0].name || _dc[0].email)
+        : _dc.map(function (c) { return c.name || c.email; }).filter(Boolean).join(', ');
+    }
+
+    return effective;
   }
 
   /**
@@ -3507,6 +3525,78 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
+  // D1: DIAGNOSTIC HELPER
+  // ===========================================================================
+
+  /**
+   * Diagnostic helper. Logs deployments with 0 Deployment Sponsor contacts
+   * (potential data-quality gaps) and with >1 (multi-sponsor deployments,
+   * expected but worth surfacing).
+   *
+   * Reads live effective deployments and the DD-from-Contacts map.
+   * Prints:
+   *   - Total effective deployments
+   *   - Count with 0 contacts, sample of up to 20 (accountName, deploymentName, deploymentId)
+   *   - Count with >1 contacts, sample of up to 20 with resolved DD string
+   *   - Count with exactly 1 contact
+   *
+   * Runs on demand from the Apps Script editor. No UI surface. No sheet output.
+   *
+   * @param {AppConfig} config
+   */
+  function _debugDdFromContacts_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    Logger.log('=== _debugDdFromContacts_(' + (cfg.appId || '?') + ') ===');
+
+    var effective = [];
+    try { effective = getAllEffectiveDeployments(cfg); }
+    catch (e) { Logger.log('_debugDdFromContacts_: getAllEffectiveDeployments failed: ' + e); }
+
+    var ddMap = {};
+    try { ddMap = getDdAssignmentsFromContacts_(cfg) || {}; }
+    catch (e) { Logger.log('_debugDdFromContacts_: getDdAssignmentsFromContacts_ failed: ' + e); }
+
+    Logger.log('Total effective deployments: ' + effective.length);
+
+    var zero = [];
+    var multi = [];
+    var single = 0;
+
+    effective.forEach(function (r) {
+      var contacts = ddMap[r.deploymentId] || [];
+      if (contacts.length === 0) {
+        zero.push(r);
+      } else if (contacts.length === 1) {
+        single++;
+      } else {
+        multi.push({ row: r, contacts: contacts });
+      }
+    });
+
+    Logger.log('0-contact deployments: ' + zero.length);
+    zero.slice(0, 20).forEach(function (r, i) {
+      Logger.log('  zero[' + i + ']: accountName=' + (r.accountName || '') +
+                 ', deploymentName=' + (r.deploymentName || '') +
+                 ', deploymentId=' + (r.deploymentId || ''));
+    });
+
+    Logger.log('>1-contact deployments: ' + multi.length);
+    multi.slice(0, 20).forEach(function (m, i) {
+      var r = m.row;
+      var resolved = m.contacts.map(function (c) { return c.name || c.email; }).filter(Boolean).join(', ');
+      var emails = m.contacts.map(function (c) { return c.email; }).join(', ');
+      Logger.log('  multi[' + i + ']: accountName=' + (r.accountName || '') +
+                 ', deploymentName=' + (r.deploymentName || '') +
+                 ', deploymentId=' + (r.deploymentId || '') +
+                 ', resolvedDD="' + resolved + '"' +
+                 ', emails=[' + emails + ']');
+    });
+
+    Logger.log('1-contact deployments: ' + single);
+    Logger.log('=== end _debugDdFromContacts_ ===');
+  }
+
+  // ===========================================================================
   // EXPORTS
   // ===========================================================================
 
@@ -3547,6 +3637,9 @@ var CoreData = (function () {
 
     // Performance Layer 2 additions
     _warmSfdcRows:               _warmSfdcRows,
-    _getCachedSfdcRowCount:      _getCachedSfdcRowCount
+    _getCachedSfdcRowCount:      _getCachedSfdcRowCount,
+
+    // D1 diagnostic
+    _debugDdFromContacts_:       _debugDdFromContacts_
   };
 })();

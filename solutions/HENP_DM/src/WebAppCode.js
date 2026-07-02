@@ -143,6 +143,32 @@ function bulkClearAllOverridesForUI() {
 }
 
 // ============================================================================
+// STUDENT TAB
+// ============================================================================
+
+/**
+ * Returns the Student tab data payload (deployments, products, kpis).
+ * Delegates to CoreLib.CoreData.buildStudentTabData_.
+ *
+ * @return {?Object}
+ */
+function getStudentTabData() {
+  return CoreLib.CoreData.buildStudentTabData_(APP_CONFIG);
+}
+
+/**
+ * Saves Student-specific fields (Registration Date, Notes) for a deployment.
+ * Server-side enforces POWER_USER/ADMIN role, notes length, and date validity.
+ *
+ * @param {string} deploymentId
+ * @param {{registrationDate?:string, notes?:string}} patch
+ * @return {{ok:boolean, row:Object}}
+ */
+function saveStudentDeploymentFields(deploymentId, patch) {
+  return CoreLib.CoreData.saveStudentDeploymentFields(APP_CONFIG, deploymentId, patch);
+}
+
+// ============================================================================
 // DIAGNOSTICS
 // ============================================================================
 

@@ -76,6 +76,32 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     overviewTab: cfg.overviewTab || {}
   });
 
+  // S1: splice the Student tab into filteredUi.tabs dynamically based on
+  // cfg.student.tab.insertAfter. This avoids hardcoding the Student tab into
+  // any app's ui.tabs array literal.
+  if (cfg.student && cfg.student.enabled === true && cfg.student.tab) {
+    var studentTabDef = {
+      id:    cfg.student.tab.id    || 'student',
+      label: cfg.student.tab.label || 'Student'
+    };
+    var insertAfterId = cfg.student.tab.insertAfter || 'deployments';
+    var insertIdx = -1;
+    for (var si = 0; si < filteredUi.tabs.length; si++) {
+      if (filteredUi.tabs[si].id === insertAfterId) {
+        insertIdx = si;
+        break;
+      }
+    }
+    // Only splice if the anchor tab is visible; if anchor is filtered out, append.
+    if (insertIdx >= 0) {
+      filteredUi.tabs = filteredUi.tabs.slice(0, insertIdx + 1)
+        .concat([studentTabDef])
+        .concat(filteredUi.tabs.slice(insertIdx + 1));
+    } else {
+      filteredUi.tabs = filteredUi.tabs.concat([studentTabDef]);
+    }
+  }
+
   var parts = [];
 
   parts.push(_CoreUI_Markup_buildHeader_(filteredUi));
@@ -97,6 +123,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi));
   if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
   if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi));
+  if (tabIds.indexOf('student') !== -1) parts.push(_CoreUI_Markup_buildStudentTab_(filteredUi, cfg));
 
   parts.push('</div>'); // .container
 
@@ -1649,6 +1676,77 @@ function _CoreUI_Markup_buildNotableAddPickerModal_(ui) {
     '  </div>',
     '</div>'
   ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// TAB: STUDENT (S1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds the Student tab markup.
+ *
+ * @param {Object} ui  cfg.ui (already filtered + spliced)
+ * @param {AppConfig} cfg
+ * @return {string}
+ */
+function _CoreUI_Markup_buildStudentTab_(ui, cfg) {
+  var st = cfg && cfg.student && cfg.student.table || {};
+  var searchPh = st.searchPlaceholder || 'Search Student deployments\u2026';
+  var isReadOnly = ui._isReadOnly;
+
+  var parts = [
+    '<div id="student-tab" class="tab-content">',
+    '  <div class="info-banner" id="student-tab-banner" style="display:none;"></div>',
+    '  <div id="student-kpi-row" class="student-kpi-row"></div>',
+    '  <div class="control-bar">',
+    '    <div class="control-row">',
+    '      <div class="search-box">',
+    '        <span class="search-icon">\uD83D\uDD0D</span>',
+    '        <input type="text" id="student-search-input" placeholder="' + _CoreUI_Markup_attr_(searchPh) + '" onkeyup="filterStudentTable()">',
+    '      </div>',
+    '      <button class="btn btn-secondary" onclick="clearStudentFilters()">Clear</button>',
+    '    </div>',
+    '    <div class="control-row">',
+    '      <span class="filter-label">Status:</span>',
+    '      <div class="filter-group">',
+    '        <button class="filter-chip active" id="student-status-active" onclick="setStudentStatusFilter(\'active\')">Active</button>',
+    '        <button class="filter-chip" id="student-status-complete" onclick="setStudentStatusFilter(\'complete\')">Complete</button>',
+    '        <button class="filter-chip" id="student-status-all" onclick="setStudentStatusFilter(\'all\')">All</button>',
+    '      </div>',
+    '      <span class="filter-label" style="margin-left:12px;">Health:</span>',
+    '      <div class="filter-group" id="student-health-chip-group">',
+    '        <button class="filter-chip" id="student-health-all" onclick="setStudentHealthFilter(null)">All Health</button>',
+    '        <button class="filter-chip" id="student-health-red" onclick="setStudentHealthFilter(\'Red\')"><span class="health-chip health-red">Red</span></button>',
+    '        <button class="filter-chip" id="student-health-yellow" onclick="setStudentHealthFilter(\'Yellow\')"><span class="health-chip health-yellow">Yellow</span></button>',
+    '        <button class="filter-chip" id="student-health-green" onclick="setStudentHealthFilter(\'Green\')"><span class="health-chip health-green">Green</span></button>',
+    '      </div>',
+    '    </div>',
+    '  </div>',
+    '  <div class="table-container">',
+    '    <div class="report-loading" id="student-loading">',
+    '      <div class="spinner-large"></div>',
+    '    </div>',
+    '    <div class="table-wrapper" id="student-table-wrapper" style="display:none;">',
+    '      <table id="student-table">',
+    '        <thead><tr>',
+    '          <th style="width:24px;"></th>',
+    '          <th>Health</th>',
+    '          <th>Account Name</th>',
+    '          <th>Deployment Name</th>',
+    '          <th>Partner</th>',
+    '          <th>MTP Date</th>',
+    '          <th>Phase</th>',
+    '          <th>Reg. Date</th>',
+    (!isReadOnly ? '          <th>Actions</th>' : ''),
+    '        </tr></thead>',
+    '        <tbody id="student-tbody"></tbody>',
+    '      </table>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ];
+
+  return parts.filter(function (s) { return s !== ''; }).join('\n');
 }
 
 // ---------------------------------------------------------------------------

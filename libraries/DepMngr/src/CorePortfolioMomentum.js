@@ -173,6 +173,9 @@ var CorePortfolioMomentum = (function () {
       growthRates: growthRates,
       fastestGrowingPlatform: platforms[0] || null,
       platforms: platforms,
+      chartColors: (cfg.momentum && cfg.momentum.chart && cfg.momentum.chart.colors) || {},
+      inProgressOpacity: (cfg.momentum && cfg.momentum.chart && cfg.momentum.chart.inProgressOpacity != null)
+        ? cfg.momentum.chart.inProgressOpacity : 0.55,
       dataIntegrity: {
         totalRowsScanned: 0, rowsCounted: 0,
         rowsSkippedNoDate: 0, rowsSkippedUnmappedProductArea: 0
@@ -440,6 +443,10 @@ var CorePortfolioMomentum = (function () {
       growthRates: growthRates,
       fastestGrowingPlatform: fastestPlatform,
       platforms: platforms,
+      // Include chart config so client code doesn't need to re-read from APP_UI_CONFIG.
+      chartColors: (cfg.momentum.chart && cfg.momentum.chart.colors) || {},
+      inProgressOpacity: (cfg.momentum.chart && cfg.momentum.chart.inProgressOpacity != null)
+        ? cfg.momentum.chart.inProgressOpacity : 0.55,
       dataIntegrity: {
         totalRowsScanned:            statsTotal,
         rowsCounted:                  statsCounted,

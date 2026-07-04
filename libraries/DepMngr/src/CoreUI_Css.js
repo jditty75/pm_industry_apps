@@ -1731,7 +1731,40 @@ function _CoreUI_Css_getStylesheet() {
     '.student-detail { padding: var(--space-3) var(--space-4); background: var(--color-bg-subtle, #f9fafb); border-left: 3px solid var(--color-primary, #0f4c81); font-size: 0.8125rem; line-height: 1.6; }',
     '.student-detail ul { margin: 4px 0 0 18px; padding: 0; }',
     '.student-banner { background: #e8f0fe; border-left: 4px solid #1a73e8; padding: 8px 14px; font-size: 12px; color: #174ea6; margin-bottom: 12px; border-radius: 4px; }',
-    '.student-banner a { color: #1a73e8; font-weight: 600; }'
+    '.student-banner a { color: #1a73e8; font-weight: 600; }',
+
+    // =========================================================================
+    // P2: PORTFOLIO MOMENTUM SUB-VIEW
+    // =========================================================================
+    '.portfolio-subview-toggle { margin: 12px 0 16px; }',
+    '.momentum-header { margin-bottom: 16px; }',
+    '.momentum-title { font-size: 1.25rem; font-weight: 700; color: var(--color-text); margin: 0 0 4px; }',
+    '.momentum-meta { font-size: 12px; color: var(--color-text-muted); }',
+    '.momentum-kpi-strip { margin-bottom: 20px; }',
+    '.momentum-chart-container {',
+    '  background: var(--color-surface);',
+    '  border: 1px solid var(--color-border);',
+    '  border-radius: var(--radius-md);',
+    '  padding: 16px;',
+    '  margin-bottom: 16px;',
+    '  overflow-x: auto;',
+    '}',
+    '.momentum-growth-annotations {',
+    '  font-size: 12px;',
+    '  color: var(--color-text-muted);',
+    '  background: var(--color-surface);',
+    '  border: 1px solid var(--color-border);',
+    '  border-radius: var(--radius-md);',
+    '  padding: 12px 16px;',
+    '  margin-bottom: 12px;',
+    '}',
+    '.momentum-growth-annotations p { margin: 2px 0; }',
+    '.momentum-footer {',
+    '  font-size: 11px;',
+    '  font-style: italic;',
+    '  color: var(--color-text-subtle);',
+    '  margin-top: 4px;',
+    '}'
 
   ].join('\n');
 

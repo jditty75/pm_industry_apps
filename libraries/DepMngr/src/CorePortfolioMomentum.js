@@ -178,7 +178,8 @@ var CorePortfolioMomentum = (function () {
         ? cfg.momentum.chart.inProgressOpacity : 0.55,
       dataIntegrity: {
         totalRowsScanned: 0, rowsCounted: 0,
-        rowsSkippedNoDate: 0, rowsSkippedUnmappedProductArea: 0
+        rowsSkippedNoDate: 0, rowsSkippedUnmappedProductArea: 0,
+        rowsSkippedNoDeploymentId: 0, rawRowsInGroupBeforeDedup: 0, dedupedGoLiveCount: 0
       }
     };
   }
@@ -298,17 +299,22 @@ var CorePortfolioMomentum = (function () {
     var oldestAllowedFyYear = currentFyYear - historicalYears;
 
     // -----------------------------------------------------------------------
-    // 5. Scan all rows
+    // 5. Scan all rows — two-pass dedup by (Deployment__c, platform)
+    // P2.1-Fix: was a single-pass count-per-row (inflated HCM/FIN due to
+    // 1-to-many product-function fan-out). Now deduplicates to one count
+    // per (Deployment__c, canonical_platform) using the earliest actual date.
     // -----------------------------------------------------------------------
-    var historicalCounts = {}; // { 'FY22': { HCM: n, FIN: n, ... } }
-    var currentFyCounts  = {}; // { HCM: n, FIN: n, ... }
-    var currentFyAccountKeys = {}; // distinct account/deployment keys
-    platforms.forEach(function(p) { currentFyCounts[p] = 0; });
 
-    var statsTotal    = 0;
-    var statsCounted  = 0;
-    var statsNoDate   = 0;
-    var statsUnmapped = 0;
+    // Pass 1: build a groups map keyed by 'deploymentId|platform'.
+    //   Each group stores the earliest Production_Move_Date_Actual__c so we can
+    //   bucket by "when did we first go live on this platform for this deployment".
+    var groups = {}; // key = deploymentId + '|' + platform
+
+    var statsTotal        = 0;
+    var statsCounted      = 0;  // rows that passed all filters (= rawRowsInGroupBeforeDedup)
+    var statsNoDate       = 0;
+    var statsUnmapped     = 0;
+    var statsNoDeployId   = 0;
 
     for (var r = 1; r < allValues.length; r++) {
       statsTotal++;
@@ -332,39 +338,65 @@ var CorePortfolioMomentum = (function () {
         continue;
       }
 
-      // Determine Workday FY for this go-live date
-      var fyLabel = _fyLabelFromDateStr_(actualStr);
-      if (!fyLabel) {
-        statsNoDate++;
-        continue;
-      }
-      var fyYear = _fyYearFromLabel_(fyLabel);
-
-      // Collect deployment/account key for distinct-account count
+      // Require a non-empty deployment ID to form the dedup key
       var deploymentId = (colDeploymentFk >= 0)
         ? String(row[colDeploymentFk] || '').trim()
         : '';
+      if (!deploymentId) {
+        statsNoDeployId++;
+        continue;
+      }
+
+      // Account key for distinct-account tracking (carried through to Pass 2)
       var accountKey = useDeploymentAsAccount
         ? deploymentId
-        : (String(row[colAccount] || '').trim() || deploymentId);
+        : (String((colAccount >= 0 ? row[colAccount] : '') || '').trim() || deploymentId);
+
+      statsCounted++; // row fed into a group (= rawRowsInGroupBeforeDedup)
+
+      var groupKey = deploymentId + '|' + platformCode;
+      if (!groups[groupKey] || actualStr < groups[groupKey].earliestDate) {
+        // New group, or earlier date found for existing group — keep the earliest.
+        groups[groupKey] = {
+          platform:     platformCode,
+          earliestDate: actualStr,
+          accountKey:   accountKey
+        };
+      }
+      // Rows with a later date for the same (deployment, platform) are collapsed
+      // into the existing group; the earliest date is preserved.
+    }
+
+    // Pass 2: count one go-live per group in the FY of its earliest date.
+    var historicalCounts = {}; // { 'FY22': { HCM: n, FIN: n, ... } }
+    var currentFyCounts  = {}; // { HCM: n, FIN: n, ... }
+    var currentFyAccountKeys = {}; // distinct account/deployment keys for current FY
+    platforms.forEach(function(p) { currentFyCounts[p] = 0; });
+
+    var dedupedGoLiveCount = 0;
+
+    Object.keys(groups).forEach(function(groupKey) {
+      var g = groups[groupKey];
+
+      var fyLabel = _fyLabelFromDateStr_(g.earliestDate);
+      if (!fyLabel) return;
+      var fyYear = _fyYearFromLabel_(fyLabel);
+
+      dedupedGoLiveCount++;
 
       if (fyLabel === currentFyLabel) {
-        // Current FY running total
-        currentFyCounts[platformCode] = (currentFyCounts[platformCode] || 0) + 1;
-        if (accountKey) currentFyAccountKeys[accountKey] = true;
-        statsCounted++;
+        currentFyCounts[g.platform] = (currentFyCounts[g.platform] || 0) + 1;
+        if (g.accountKey) currentFyAccountKeys[g.accountKey] = true;
       } else if (fyYear >= oldestAllowedFyYear && fyYear < currentFyYear) {
-        // Historical FY within the configured window
         if (!historicalCounts[fyLabel]) {
           historicalCounts[fyLabel] = {};
           platforms.forEach(function(p) { historicalCounts[fyLabel][p] = 0; });
         }
-        historicalCounts[fyLabel][platformCode] =
-          (historicalCounts[fyLabel][platformCode] || 0) + 1;
-        statsCounted++;
+        historicalCounts[fyLabel][g.platform] =
+          (historicalCounts[fyLabel][g.platform] || 0) + 1;
       }
-      // Rows outside the window (too old or future) are silently skipped.
-    }
+      // Groups outside the window (too old or future) are silently skipped.
+    });
 
     // -----------------------------------------------------------------------
     // 6. Build sorted historical FYs array
@@ -448,10 +480,13 @@ var CorePortfolioMomentum = (function () {
       inProgressOpacity: (cfg.momentum.chart && cfg.momentum.chart.inProgressOpacity != null)
         ? cfg.momentum.chart.inProgressOpacity : 0.55,
       dataIntegrity: {
-        totalRowsScanned:            statsTotal,
-        rowsCounted:                  statsCounted,
-        rowsSkippedNoDate:            statsNoDate,
-        rowsSkippedUnmappedProductArea: statsUnmapped
+        totalRowsScanned:               statsTotal,
+        rowsCounted:                    statsCounted,
+        rowsSkippedNoDate:              statsNoDate,
+        rowsSkippedUnmappedProductArea: statsUnmapped,
+        rowsSkippedNoDeploymentId:      statsNoDeployId,
+        rawRowsInGroupBeforeDedup:      statsCounted,
+        dedupedGoLiveCount:             dedupedGoLiveCount
       }
     };
 
@@ -459,6 +494,8 @@ var CorePortfolioMomentum = (function () {
     Logger.log('CorePortfolioMomentum.getMomentumSnapshot: complete in ' + elapsed + 'ms.' +
                ' scanned=' + statsTotal + ', counted=' + statsCounted +
                ', skippedNoDate=' + statsNoDate + ', skippedUnmapped=' + statsUnmapped +
+               ', skippedNoDeployId=' + statsNoDeployId +
+               ', groups(raw)=' + statsCounted + ', groups(deduped)=' + dedupedGoLiveCount +
                ', historicalFys=' + historicalFys.length +
                ', currentFy=' + currentFyLabel + ' ' + half);
 

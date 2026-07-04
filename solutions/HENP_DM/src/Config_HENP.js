@@ -222,7 +222,7 @@ var APP_CONFIG = {
       PAY: ['Payroll'],
       STU: ['Student']
     },
-    historicalYears: 6,
+    historicalYears: 5,  // was 6 — reduced to drop FY21 (incomplete SOQL data)
     chart: {
       colors: {
         HCM: '#0F4C81',

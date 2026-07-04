@@ -295,7 +295,7 @@ var CorePortfolioMomentum = (function () {
     var inProgressBadge = currentFyLabel + ' ' + half +
                           ' running total as of ' + generatedDateLabel;
 
-    var historicalYears = (cfg.momentum && cfg.momentum.historicalYears) || 6;
+    var historicalYears = (cfg.momentum && cfg.momentum.historicalYears) || 5;
     var oldestAllowedFyYear = currentFyYear - historicalYears;
 
     // -----------------------------------------------------------------------
@@ -411,7 +411,10 @@ var CorePortfolioMomentum = (function () {
     });
 
     // -----------------------------------------------------------------------
-    // 7. Compute per-platform growth rates (historical FYs only)
+    // 7. Compute per-platform growth rates using CAGR (historical FYs only)
+    // P2.2-Fix: replaced simple mean of YoY rates with CAGR between the first
+    // and last historical FY. historicalFys is sorted ascending, so [0] is
+    // oldest and [length-1] is most recent complete FY.
     // -----------------------------------------------------------------------
     var growthRates = {};
     platforms.forEach(function(p) {
@@ -419,22 +422,21 @@ var CorePortfolioMomentum = (function () {
     });
 
     if (historicalFys.length >= 2) {
+      var yearGaps = historicalFys.length - 1;
       platforms.forEach(function(p) {
-        var yoyPcts = [];
-        for (var i = 1; i < historicalFys.length; i++) {
-          var prev = historicalFys[i - 1].counts[p] || 0;
-          var curr = historicalFys[i].counts[p] || 0;
-          if (prev > 0) {
-            yoyPcts.push((curr - prev) / prev);
-          }
+        var firstCount = historicalFys[0].counts[p] || 0;
+        var lastCount  = historicalFys[historicalFys.length - 1].counts[p] || 0;
+        if (firstCount === 0) {
+          // First-year baseline is zero; CAGR is undefined — leave at 0.
+          growthRates[p] = { avgYoyPct: 0, sampleFys: yearGaps };
+          return;
         }
-        if (yoyPcts.length > 0) {
-          var sum = yoyPcts.reduce(function(a, b) { return a + b; }, 0);
-          growthRates[p] = {
-            avgYoyPct: Math.round((sum / yoyPcts.length) * 1000) / 1000,
-            sampleFys: yoyPcts.length
-          };
-        }
+        // CAGR = (last / first)^(1 / years) - 1
+        var cagr = Math.pow(lastCount / firstCount, 1 / yearGaps) - 1;
+        growthRates[p] = {
+          avgYoyPct: Math.round(cagr * 10000) / 10000,
+          sampleFys: yearGaps
+        };
       });
     }
 

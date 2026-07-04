@@ -67,189 +67,176 @@ function _clearEnrichmentCache() {
 }
 
 // ===========================================================================
-// PERFORMANCE LAYER 2: SHEET-TAB CACHE for enrichment map
+// PERFORMANCE LAYER 2: CacheService (C1 — replaces sheet-based cache)
 // ---------------------------------------------------------------------------
-// Mirrors the pattern in CoreData. 5-minute TTL. Cleared by CoreData's
-// _clearCache(cfg) via the cross-module call CoreSalesforce._clearEnrichmentSheetCache.
+// Mirrors CoreData's CacheService pattern. 6-hour TTL. Warm-cache trigger
+// fires 4x/day. Cleared by CoreData._clearCache via _clearEnrichmentSheetCache.
 // ===========================================================================
 
-var _PERF_CACHE_SHEET_S = '_PerfCache';
-var _PERF_CACHE_TTL_SEC_S = 300; // 5 minutes
+var _PERF_CACHE_TTL_SEC_S = 21600;    // 6 hours, CacheService max
+var _PERF_CACHE_CHUNK_SIZE_S = 90000; // base64-encoded chars per chunk
 
-function _getPerfCacheSheet_S_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(_PERF_CACHE_SHEET_S);
-  if (!sheet) {
-    sheet = ss.insertSheet(_PERF_CACHE_SHEET_S);
-    sheet.getRange(1, 1, 1, 3).setValues([['Key', 'ValueJson', 'Timestamp']]);
-    sheet.setFrozenRows(1);
-    sheet.hideSheet();
-  }
-  return sheet;
+// Track keys written during this execution for invalidation.
+var _perfCacheKnownKeysS_ = {};
+
+/**
+ * Serializes and compresses a value for CacheService storage.
+ * @private
+ */
+function _perfCacheEncodeS_(value) {
+  var json = JSON.stringify(value);
+  var blob = Utilities.newBlob(json, 'application/json');
+  var compressed = Utilities.gzip(blob);
+  return Utilities.base64Encode(compressed.getBytes());
 }
 
-// Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
-var _PERF_CACHE_CHUNK_SIZE_S = 45000;
+/**
+ * Decodes and parses a CacheService payload.
+ * @private
+ */
+function _perfCacheDecodeS_(encoded) {
+  try {
+    var bytes = Utilities.base64Decode(encoded);
+    var blob = Utilities.newBlob(bytes, 'application/x-gzip');
+    var decompressed = Utilities.ungzip(blob);
+    return JSON.parse(decompressed.getDataAsString());
+  } catch (err) {
+    Logger.log('CoreSalesforce._perfCacheDecodeS_: failed to decode payload: ' + err);
+    return null;
+  }
+}
 
+/**
+ * Reads a value from CacheService. Returns null if missing or decode fails.
+ * @param {string} key
+ * @return {*} the parsed value or null
+ */
 function _perfCacheReadS_(key) {
   try {
-    var sheet = _getPerfCacheSheet_S_();
-    var lastRow = sheet.getLastRow();
-    if (lastRow < 2) return null;
-    var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    var cache = CacheService.getScriptCache();
+    var manifestKey = key + ':manifest';
+    var manifestRaw = cache.get(manifestKey);
 
-    var single = null;
-    var chunks = [];
-    var tsMs = null;
-    var chunkPrefix = key + ':chunk:';
-
-    for (var i = 0; i < values.length; i++) {
-      var rowKey = String(values[i][0]);
-      if (rowKey === key) {
-        single = String(values[i][1] || '');
-        var tc = values[i][2];
-        tsMs = (tc instanceof Date) ? tc.getTime() : Number(tc);
-      } else if (rowKey.indexOf(chunkPrefix) === 0) {
-        var idx = parseInt(rowKey.substring(chunkPrefix.length), 10);
-        if (!isNaN(idx)) {
-          chunks.push({ idx: idx, data: String(values[i][1] || '') });
-          if (tsMs === null) {
-            var tc2 = values[i][2];
-            tsMs = (tc2 instanceof Date) ? tc2.getTime() : Number(tc2);
-          }
-        }
-      }
-    }
-
-    // TTL check.
-    if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC_S * 1000) {
-      return null;
-    }
-
-    // Single-row entry path.
-    if (single !== null && chunks.length === 0) {
-      if (!single) return null;
+    if (manifestRaw) {
+      // Chunked path.
+      var manifest;
       try {
-        return JSON.parse(single);
+        manifest = JSON.parse(manifestRaw);
       } catch (parseErr) {
-        Logger.log('CoreSalesforce._perfCacheReadS_: malformed single-row JSON for key=' + key +
-                   '; treating as cache miss. Error: ' + parseErr);
+        Logger.log('CoreSalesforce._perfCacheReadS_: manifest parse failed for ' + key);
         return null;
       }
-    }
+      if (!manifest || !manifest.chunks || manifest.chunks < 1) return null;
 
-    // Chunked entry path.
-    if (chunks.length > 0) {
-      chunks.sort(function (a, b) { return a.idx - b.idx; });
-      for (var ci = 0; ci < chunks.length; ci++) {
-        if (chunks[ci].idx !== ci) {
-          Logger.log('CoreSalesforce._perfCacheReadS_: chunk gap at idx ' + ci +
-                     ' for key=' + key + '; treating as cache miss.');
+      var chunkKeys = [];
+      for (var i = 0; i < manifest.chunks; i++) chunkKeys.push(key + ':chunk:' + i);
+      var chunkMap = cache.getAll(chunkKeys);
+
+      var combined = '';
+      for (var j = 0; j < manifest.chunks; j++) {
+        var chunk = chunkMap[key + ':chunk:' + j];
+        if (chunk === undefined || chunk === null) {
+          Logger.log('CoreSalesforce._perfCacheReadS_: missing chunk ' + j + ' for key=' + key + '; treating as miss.');
           return null;
         }
+        combined += chunk;
       }
-      var combined = chunks.map(function (c) { return c.data; }).join('');
-      if (!combined) return null;
-      try {
-        return JSON.parse(combined);
-      } catch (parseErr) {
-        Logger.log('CoreSalesforce._perfCacheReadS_: malformed reassembled JSON for key=' + key +
-                   '; treating as cache miss. Error: ' + parseErr);
-        return null;
-      }
+      return _perfCacheDecodeS_(combined);
     }
 
-    return null;
+    // Single-key path.
+    var single = cache.get(key);
+    if (single === null || single === undefined) return null;
+    return _perfCacheDecodeS_(single);
   } catch (err) {
     Logger.log('CoreSalesforce._perfCacheReadS_: ' + err);
     return null;
   }
 }
 
-// Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
-var _PERF_CACHE_CHUNK_SIZE_S = 45000;
-
+/**
+ * Writes a value to CacheService. Best-effort with one retry on failure.
+ * @param {string} key
+ * @param {*} value any JSON-serializable value
+ */
 function _perfCacheWriteS_(key, value) {
-  try {
-    var sheet = _getPerfCacheSheet_S_();
-    var json = JSON.stringify(value);
-    var now = new Date();
+  var attempts = 0;
+  var maxAttempts = 2;
 
-    // First, delete any existing rows for this key.
-    _perfCacheDeleteKeyS_(sheet, key);
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      var cache = CacheService.getScriptCache();
+      var encoded = _perfCacheEncodeS_(value);
 
-    if (json.length <= _PERF_CACHE_CHUNK_SIZE_S) {
-      sheet.appendRow([key, json, now]);
+      _perfCacheDeleteKeyS_(key);
+
+      if (encoded.length <= _PERF_CACHE_CHUNK_SIZE_S) {
+        cache.put(key, encoded, _PERF_CACHE_TTL_SEC_S);
+        _perfCacheKnownKeysS_[key] = true;
+        return;
+      }
+
+      // Chunked write.
+      var chunkCount = Math.ceil(encoded.length / _PERF_CACHE_CHUNK_SIZE_S);
+      var chunkMap = {};
+      for (var i = 0; i < chunkCount; i++) {
+        var start = i * _PERF_CACHE_CHUNK_SIZE_S;
+        chunkMap[key + ':chunk:' + i] = encoded.substring(start, start + _PERF_CACHE_CHUNK_SIZE_S);
+      }
+      cache.putAll(chunkMap, _PERF_CACHE_TTL_SEC_S);
+      cache.put(key + ':manifest', JSON.stringify({ chunks: chunkCount, algorithm: 'gzip-base64' }), _PERF_CACHE_TTL_SEC_S);
+
+      _perfCacheKnownKeysS_[key] = true;
+      Logger.log('CoreSalesforce._perfCacheWriteS_: chunked key=' + key + ' into ' + chunkCount + ' pieces.');
       return;
+    } catch (err) {
+      Logger.log('CoreSalesforce._perfCacheWriteS_ attempt ' + attempts + ' failed for key=' + key + ': ' + err);
+      if (attempts < maxAttempts) {
+        Utilities.sleep(500);
+      } else {
+        Logger.log('CoreSalesforce._perfCacheWriteS_: giving up on key=' + key + ' after ' + attempts + ' attempts.');
+      }
     }
+  }
+}
 
-    var chunkCount = Math.ceil(json.length / _PERF_CACHE_CHUNK_SIZE_S);
-    var rows = [];
-    for (var i = 0; i < chunkCount; i++) {
-      var start = i * _PERF_CACHE_CHUNK_SIZE_S;
-      var chunk = json.substring(start, start + _PERF_CACHE_CHUNK_SIZE_S);
-      rows.push([key + ':chunk:' + i, chunk, now]);
+/**
+ * Removes a key (and its chunks/manifest) from CacheService.
+ * @param {string} key
+ */
+function _perfCacheDeleteKeyS_(key) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var manifestRaw = cache.get(key + ':manifest');
+    if (manifestRaw) {
+      var manifest;
+      try { manifest = JSON.parse(manifestRaw); } catch (e) { manifest = null; }
+      if (manifest && manifest.chunks) {
+        var chunkKeys = [];
+        for (var i = 0; i < manifest.chunks; i++) chunkKeys.push(key + ':chunk:' + i);
+        chunkKeys.push(key + ':manifest');
+        cache.removeAll(chunkKeys);
+      }
     }
-    var firstRow = sheet.getLastRow() + 1;
-    sheet.getRange(firstRow, 1, rows.length, 3).setValues(rows);
-    Logger.log('CoreSalesforce._perfCacheWriteS_: chunked key=' + key + ' into ' + chunkCount + ' rows.');
+    cache.remove(key);
+    delete _perfCacheKnownKeysS_[key];
   } catch (err) {
-    Logger.log('CoreSalesforce._perfCacheWriteS_: failed for key=' + key + ': ' + err);
-  }
-}
-
-/**
- * Removes all rows from the cache sheet matching the given key (single-row or chunked).
- */
-function _perfCacheDeleteKeyS_(sheet, key) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-  var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  var chunkPrefix = key + ':chunk:';
-  for (var i = keys.length - 1; i >= 0; i--) {
-    var k = String(keys[i][0]);
-    if (k === key || k.indexOf(chunkPrefix) === 0) {
-      sheet.deleteRow(i + 2);
-    }
-  }
-}
-
-/**
- * Removes all rows from the cache sheet matching the given key.
- */
-function _perfCacheDeleteKeyS_(sheet, key) {
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-  var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  var chunkPrefix = key + ':chunk:';
-  for (var i = keys.length - 1; i >= 0; i--) {
-    var k = String(keys[i][0]);
-    if (k === key || k.indexOf(chunkPrefix) === 0) {
-      sheet.deleteRow(i + 2);
-    }
+    Logger.log('CoreSalesforce._perfCacheDeleteKeyS_: ' + err);
   }
 }
 
 /**
  * Public entry point called by CoreData._clearCache(cfg) to invalidate
- * the enrichment map sheet-tab cache after a mutation.
+ * the enrichment map CacheService entries after a mutation.
  */
 function _clearEnrichmentSheetCache() {
   _enrichmentCache = null;
-  try {
-    var sheet = _getPerfCacheSheet_S_();
-    var lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-      var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      for (var i = data.length - 1; i >= 0; i--) {
-        var k = String(data[i][0] || '');
-        if (k.indexOf('enrichmentMap:') === 0) {
-          sheet.deleteRow(i + 2);
-        }
-      }
+  var keys = Object.keys(_perfCacheKnownKeysS_);
+  for (var i = 0; i < keys.length; i++) {
+    if (String(keys[i]).indexOf('enrichmentMap:') === 0) {
+      _perfCacheDeleteKeyS_(keys[i]);
     }
-  } catch (err) {
-    Logger.log('CoreSalesforce._clearEnrichmentSheetCache: ' + err);
   }
 }
 
@@ -370,20 +357,11 @@ function getDdAssignmentsFromContacts_(config) {
  */
 function _clearDdContactsCache() {
   _ddContactsCache = null;
-  try {
-    var sheet = _getPerfCacheSheet_S_();
-    var lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-      var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      for (var i = data.length - 1; i >= 0; i--) {
-        var k = String(data[i][0] || '');
-        if (k.indexOf('ddContacts:') === 0) {
-          sheet.deleteRow(i + 2);
-        }
-      }
+  var keys = Object.keys(_perfCacheKnownKeysS_);
+  for (var i = 0; i < keys.length; i++) {
+    if (String(keys[i]).indexOf('ddContacts:') === 0) {
+      _perfCacheDeleteKeyS_(keys[i]);
     }
-  } catch (err) {
-    Logger.log('CoreSalesforce._clearDdContactsCache: ' + err);
   }
 }
 
@@ -556,30 +534,24 @@ function getStudentProductFunctionsMap_(config) {
 function _clearStudentCache_() {
   _studentIdsCache = null;
   _studentPFCache = null;
-  try {
-    var sheet = _getPerfCacheSheet_S_();
-    var lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-      var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      for (var i = data.length - 1; i >= 0; i--) {
-        var k = String(data[i][0] || '');
-        if (k.indexOf('studentDeploymentIds:') === 0 ||
-            k.indexOf('studentProductFunctions:') === 0) {
-          sheet.deleteRow(i + 2);
-        }
-      }
+  var keys = Object.keys(_perfCacheKnownKeysS_);
+  for (var i = 0; i < keys.length; i++) {
+    var k = String(keys[i]);
+    if (k.indexOf('studentDeploymentIds:') === 0 ||
+        k.indexOf('studentProductFunctions:') === 0) {
+      _perfCacheDeleteKeyS_(k);
     }
-  } catch (err) {
-    Logger.log('CoreSalesforce._clearStudentCache_: ' + err);
   }
 }
 
 /**
- * Performance Layer 2: Pre-warm the sheet-tab cache for this app.
- * Called by an Apps Script time-based trigger in each app (every 4-5 min
- * during business hours). Computes SFDC raw rows and the enrichment map,
- * writing both to the _PerfCache sheet so user-triggered endpoints hit
- * warm cache instead of paying cold-start computation.
+ * Performance Layer 2: Pre-warm CacheService for this app.
+ * Called by four time-driven triggers per app (4 AM, 10 AM, 4 PM, 10 PM ET)
+ * so cache never expires during business hours with the 6-hour TTL.
+ * Computes SFDC raw rows and the enrichment map, writing both to CacheService
+ * so user-triggered endpoints hit warm cache instead of paying cold-start cost.
+ *
+ * C1: Replaced _PerfCache sheet writes with CacheService writes.
  *
  * @param {AppConfig} config
  * @return {{ ok:boolean, durationMs:number, rows:number, enrichmentDeployments:number }}
@@ -588,13 +560,13 @@ function _warmCaches(config) {
   var start = Date.now();
   var cfg = CoreConfig.withDefaults(config);
   // Clear in-memory first so we force fresh reads from live sheets, then
-  // populate the sheet-tab cache from those fresh reads.
+  // populate CacheService from those fresh reads.
   _enrichmentCache = null;
   var rowCount = 0;
   var deploymentCount = 0;
   try {
     // Trigger the enrichment computation. This will read live and write to
-    // both tier 1 (in-memory) and tier 2 (sheet-tab cache) per Layer 2.
+    // both tier 1 (in-memory) and tier 2 (CacheService) per C1.
     var enrichment = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
     deploymentCount = Object.keys(enrichment || {}).length;
   } catch (err) {

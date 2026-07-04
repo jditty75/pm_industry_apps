@@ -113,220 +113,187 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
-  // PERFORMANCE LAYER 2: SHEET-TAB CACHE (cross-execution persistence)
+  // PERFORMANCE LAYER 2: CacheService (C1 — replaces sheet-based cache)
   // ---------------------------------------------------------------------------
-  // Stores computed values in a per-app _PerfCache sheet so they survive
-  // across Apps Script executions. 5-minute TTL. Cleared on writes via
-  // _clearCache(cfg). Reads check tier 1 (in-memory) -> tier 2 (sheet) ->
-  // tier 3 (live recompute). Sheet name is _PerfCache; each row is a key,
-  // a JSON blob, and a timestamp.
+  // Uses Google CacheService.getScriptCache() for cross-execution caching.
+  // Millisecond-scale reads/writes. No sheet lock contention. No range errors.
+  // Values are gzip-compressed and base64-encoded. Values >95KB are chunked.
+  // TTL: 6 hours (CacheService max). Warm-cache trigger fires 4x/day.
   // ===========================================================================
 
-  var _PERF_CACHE_SHEET = '_PerfCache';
-  var _PERF_CACHE_TTL_SEC = 300; // 5 minutes
+  var _PERF_CACHE_TTL_SEC = 21600;    // 6 hours, CacheService max
+  var _PERF_CACHE_CHUNK_SIZE = 90000; // base64-encoded chars per chunk
+
+  // Track keys written during this execution so _perfCacheClearAll_ can
+  // invalidate them without needing to enumerate CacheService (no list API).
+  var _perfCacheKnownKeys = {};
 
   /**
-   * Returns the active spreadsheet's _PerfCache sheet, creating it if missing.
-   * @return {Sheet}
+   * Serializes and compresses a value for CacheService storage.
+   * Returns a base64-encoded gzipped string.
    * @private
    */
-  function _getPerfCacheSheet_() {
-    var ss = getSpreadsheet_();
-    var sheet = ss.getSheetByName(_PERF_CACHE_SHEET);
-    if (!sheet) {
-      sheet = ss.insertSheet(_PERF_CACHE_SHEET);
-      sheet.getRange(1, 1, 1, 3).setValues([['Key', 'ValueJson', 'Timestamp']]);
-      sheet.setFrozenRows(1);
-      sheet.hideSheet(); // keep clutter out of the user's view
-    }
-    return sheet;
+  function _perfCacheEncode_(value) {
+    var json = JSON.stringify(value);
+    var blob = Utilities.newBlob(json, 'application/json');
+    var compressed = Utilities.gzip(blob);
+    return Utilities.base64Encode(compressed.getBytes());
   }
 
   /**
-   * Reads a value from the sheet-tab cache. Returns null if missing or stale.
-   * @param {string} key
-   * @return {*} the parsed JSON value or null
+   * Decodes and parses a CacheService payload.
+   * Returns the parsed value or null on any error.
    * @private
    */
-    // Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
-    var _PERF_CACHE_CHUNK_SIZE = 45000;
-
-    function _perfCacheRead_(key) {
-      try {
-        var sheet = _getPerfCacheSheet_();
-        var lastRow = sheet.getLastRow();
-        if (lastRow < 2) return null;
-        var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-  
-        // Collect any matching rows: either a single-row entry (key matches exactly)
-        // or chunk entries (key starts with "<key>:chunk:<idx>").
-        var single = null;
-        var chunks = [];
-        var tsMs = null;
-        var chunkPrefix = key + ':chunk:';
-  
-        for (var i = 0; i < values.length; i++) {
-          var rowKey = String(values[i][0]);
-          if (rowKey === key) {
-            single = String(values[i][1] || '');
-            var tc = values[i][2];
-            tsMs = (tc instanceof Date) ? tc.getTime() : Number(tc);
-          } else if (rowKey.indexOf(chunkPrefix) === 0) {
-            var idx = parseInt(rowKey.substring(chunkPrefix.length), 10);
-            if (!isNaN(idx)) {
-              chunks.push({ idx: idx, data: String(values[i][1] || '') });
-              if (tsMs === null) {
-                var tc2 = values[i][2];
-                tsMs = (tc2 instanceof Date) ? tc2.getTime() : Number(tc2);
-              }
-            }
-          }
-        }
-  
-        // TTL check.
-        if (!tsMs || Date.now() - tsMs > _PERF_CACHE_TTL_SEC * 1000) {
-          return null; // stale or no rows found
-        }
-  
-        // Single-row entry path: defensively parse, return null on any error.
-        if (single !== null && chunks.length === 0) {
-          if (!single) return null;
-          try {
-            return JSON.parse(single);
-          } catch (parseErr) {
-            Logger.log('CoreData._perfCacheRead_: malformed single-row JSON for key=' + key +
-                       '; treating as cache miss. Error: ' + parseErr);
-            return null;
-          }
-        }
-  
-        // Chunked entry path.
-        if (chunks.length > 0) {
-          chunks.sort(function (a, b) { return a.idx - b.idx; });
-          // Validate chunks are contiguous (no gaps from idx 0 to N-1).
-          for (var ci = 0; ci < chunks.length; ci++) {
-            if (chunks[ci].idx !== ci) {
-              Logger.log('CoreData._perfCacheRead_: chunk gap at idx ' + ci +
-                         ' for key=' + key + '; treating as cache miss.');
-              return null;
-            }
-          }
-          var combined = chunks.map(function (c) { return c.data; }).join('');
-          if (!combined) return null;
-          try {
-            return JSON.parse(combined);
-          } catch (parseErr) {
-            Logger.log('CoreData._perfCacheRead_: malformed reassembled JSON for key=' + key +
-                       '; treating as cache miss. Error: ' + parseErr);
-            return null;
-          }
-        }
-  
-        return null;
-      } catch (err) {
-        Logger.log('CoreData._perfCacheRead_: ' + err);
-        return null;
-      }
+  function _perfCacheDecode_(encoded) {
+    try {
+      var bytes = Utilities.base64Decode(encoded);
+      var blob = Utilities.newBlob(bytes, 'application/x-gzip');
+      var decompressed = Utilities.ungzip(blob);
+      return JSON.parse(decompressed.getDataAsString());
+    } catch (err) {
+      Logger.log('CoreData._perfCacheDecode_: failed to decode payload: ' + err);
+      return null;
     }
+  }
 
   /**
-   * Writes a value to the sheet-tab cache. Overwrites any existing row with
-   * the same key. Best-effort: failures are logged but never throw.
+   * Reads a value from CacheService. Returns null if missing or decode fails.
+   * @param {string} key
+   * @return {*} the parsed value or null
+   * @private
+   */
+  function _perfCacheRead_(key) {
+    try {
+      var cache = CacheService.getScriptCache();
+      var manifestKey = key + ':manifest';
+      var manifestRaw = cache.get(manifestKey);
+
+      if (manifestRaw) {
+        // Chunked path: read manifest, then chunks.
+        var manifest;
+        try {
+          manifest = JSON.parse(manifestRaw);
+        } catch (parseErr) {
+          Logger.log('CoreData._perfCacheRead_: manifest parse failed for ' + key);
+          return null;
+        }
+        if (!manifest || !manifest.chunks || manifest.chunks < 1) return null;
+
+        var chunkKeys = [];
+        for (var i = 0; i < manifest.chunks; i++) chunkKeys.push(key + ':chunk:' + i);
+        var chunkMap = cache.getAll(chunkKeys);
+
+        var combined = '';
+        for (var j = 0; j < manifest.chunks; j++) {
+          var chunk = chunkMap[key + ':chunk:' + j];
+          if (chunk === undefined || chunk === null) {
+            Logger.log('CoreData._perfCacheRead_: missing chunk ' + j + ' for key=' + key + '; treating as miss.');
+            return null;
+          }
+          combined += chunk;
+        }
+        return _perfCacheDecode_(combined);
+      }
+
+      // Single-key path.
+      var single = cache.get(key);
+      if (single === null || single === undefined) return null;
+      return _perfCacheDecode_(single);
+    } catch (err) {
+      Logger.log('CoreData._perfCacheRead_: ' + err);
+      return null;
+    }
+  }
+
+  /**
+   * Writes a value to CacheService. Best-effort with one retry on failure.
    * @param {string} key
    * @param {*} value any JSON-serializable value
    * @private
    */
-    // Layer 2.5: chunk size = 45000 chars (under 50k cell limit with safety margin).
-    var _PERF_CACHE_CHUNK_SIZE = 45000;
+  function _perfCacheWrite_(key, value) {
+    var attempts = 0;
+    var maxAttempts = 2;
 
-    function _perfCacheWrite_(key, value) {
+    while (attempts < maxAttempts) {
+      attempts++;
       try {
-        var sheet = _getPerfCacheSheet_();
-        var json = JSON.stringify(value);
-        var now = new Date();
-  
-        // First, delete any existing rows for this key (both single and chunked).
-        _perfCacheDeleteKey_(sheet, key);
-  
-        // If the JSON fits in one cell, write as a single row.
-        if (json.length <= _PERF_CACHE_CHUNK_SIZE) {
-          sheet.appendRow([key, json, now]);
+        var cache = CacheService.getScriptCache();
+        var encoded = _perfCacheEncode_(value);
+
+        // First, remove any prior chunks/manifest for this key.
+        _perfCacheDeleteKey_(key);
+
+        if (encoded.length <= _PERF_CACHE_CHUNK_SIZE) {
+          cache.put(key, encoded, _PERF_CACHE_TTL_SEC);
+          _perfCacheKnownKeys[key] = true;
           return;
         }
-  
-        // Otherwise, chunk it. Each chunk gets its own row keyed as <key>:chunk:<idx>.
-        var chunkCount = Math.ceil(json.length / _PERF_CACHE_CHUNK_SIZE);
-        var rows = [];
+
+        // Chunked write.
+        var chunkCount = Math.ceil(encoded.length / _PERF_CACHE_CHUNK_SIZE);
+        var chunkMap = {};
         for (var i = 0; i < chunkCount; i++) {
           var start = i * _PERF_CACHE_CHUNK_SIZE;
-          var chunk = json.substring(start, start + _PERF_CACHE_CHUNK_SIZE);
-          rows.push([key + ':chunk:' + i, chunk, now]);
+          chunkMap[key + ':chunk:' + i] = encoded.substring(start, start + _PERF_CACHE_CHUNK_SIZE);
         }
-        // Append all chunks in one batch write.
-        var firstRow = sheet.getLastRow() + 1;
-        var targetRow = firstRow + rows.length - 1;
-        if (targetRow > sheet.getMaxRows()) {
-          sheet.insertRowsAfter(
-            sheet.getMaxRows(),
-            targetRow - sheet.getMaxRows() + 50
-          );
-        }
-        sheet.getRange(firstRow, 1, rows.length, 3).setValues(rows);
-        Logger.log('CoreData._perfCacheWrite_: chunked key=' + key + ' into ' + chunkCount + ' rows.');
-      } catch (err) {
-        Logger.log('CoreData._perfCacheWrite_: failed for key=' + key + ': ' + err);
-      }
-    }
-  
-    /**
-     * Removes all rows from the cache sheet matching the given key (whether
-     * single-row or chunked across multiple rows).
-     * @private
-     */
-    function _perfCacheDeleteKey_(sheet, key) {
-      var lastRow = sheet.getLastRow();
-      if (lastRow < 2) return;
-      var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      var chunkPrefix = key + ':chunk:';
-      // Iterate bottom-to-top so deletes don't shift indices.
-      for (var i = keys.length - 1; i >= 0; i--) {
-        var k = String(keys[i][0]);
-        if (k === key || k.indexOf(chunkPrefix) === 0) {
-          sheet.deleteRow(i + 2);
-        }
-      }
-    }
+        cache.putAll(chunkMap, _PERF_CACHE_TTL_SEC);
+        cache.put(key + ':manifest', JSON.stringify({ chunks: chunkCount, algorithm: 'gzip-base64' }), _PERF_CACHE_TTL_SEC);
 
-  /**
-   * Removes all rows from the cache sheet matching the given key (whether
-   * single-row or chunked across multiple rows).
-   * @private
-   */
-  function _perfCacheDeleteKey_(sheet, key) {
-    var lastRow = sheet.getLastRow();
-    if (lastRow < 2) return;
-    var keys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    var chunkPrefix = key + ':chunk:';
-    // Iterate bottom-to-top so deletes don't shift indices.
-    for (var i = keys.length - 1; i >= 0; i--) {
-      var k = String(keys[i][0]);
-      if (k === key || k.indexOf(chunkPrefix) === 0) {
-        sheet.deleteRow(i + 2);
+        _perfCacheKnownKeys[key] = true;
+        Logger.log('CoreData._perfCacheWrite_: chunked key=' + key + ' into ' + chunkCount + ' pieces.');
+        return;
+      } catch (err) {
+        Logger.log('CoreData._perfCacheWrite_ attempt ' + attempts + ' failed for key=' + key + ': ' + err);
+        if (attempts < maxAttempts) {
+          Utilities.sleep(500);
+        } else {
+          Logger.log('CoreData._perfCacheWrite_: giving up on key=' + key + ' after ' + attempts + ' attempts.');
+        }
       }
     }
   }
 
   /**
-   * Removes all rows from the sheet-tab cache. Called by _clearCache(cfg)
-   * when a mutation invalidates the data.
+   * Removes a key (and its chunks/manifest) from CacheService.
+   * @param {string} key
+   * @private
+   */
+  function _perfCacheDeleteKey_(key) {
+    try {
+      var cache = CacheService.getScriptCache();
+      var manifestRaw = cache.get(key + ':manifest');
+      if (manifestRaw) {
+        var manifest;
+        try { manifest = JSON.parse(manifestRaw); } catch (e) { manifest = null; }
+        if (manifest && manifest.chunks) {
+          var chunkKeys = [];
+          for (var i = 0; i < manifest.chunks; i++) chunkKeys.push(key + ':chunk:' + i);
+          chunkKeys.push(key + ':manifest');
+          cache.removeAll(chunkKeys);
+        }
+      }
+      cache.remove(key);
+      delete _perfCacheKnownKeys[key];
+    } catch (err) {
+      Logger.log('CoreData._perfCacheDeleteKey_: ' + err);
+    }
+  }
+
+  /**
+   * Removes all keys tracked during this execution from CacheService.
+   * Called by _clearCache(cfg) when a mutation invalidates the data.
    * @private
    */
   function _perfCacheClearAll_() {
     try {
-      var sheet = _getPerfCacheSheet_();
-      var lastRow = sheet.getLastRow();
-      if (lastRow < 2) return;
-      sheet.deleteRows(2, lastRow - 1);
+      var keys = Object.keys(_perfCacheKnownKeys);
+      if (keys.length === 0) return;
+      for (var i = 0; i < keys.length; i++) {
+        _perfCacheDeleteKey_(keys[i]);
+      }
+      _perfCacheKnownKeys = {};
     } catch (err) {
       Logger.log('CoreData._perfCacheClearAll_: ' + err);
     }

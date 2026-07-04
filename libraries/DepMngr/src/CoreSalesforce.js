@@ -67,16 +67,24 @@ function _clearEnrichmentCache() {
 }
 
 // ===========================================================================
-// PERFORMANCE LAYER 2: CacheService (C1 — replaces sheet-based cache)
+// PERFORMANCE LAYER 2 (CoreSalesforce): CacheService — KNOWN NO-OP CROSS-EXECUTION
 // ---------------------------------------------------------------------------
-// Mirrors CoreData's CacheService pattern. 6-hour TTL. Warm-cache trigger
-// fires 4x/day. Cleared by CoreData._clearCache via _clearEnrichmentSheetCache.
+// STATUS (C1-Finalize, July 2026):
+//   Same status as CoreData's tier-2 CacheService section. See CoreData.js
+//   for full explanation. This "_S" variant handles the enrichment map,
+//   DD contacts map, and Student maps. All writes go to DHLibrary's
+//   invisible cache. All reads miss.
+//
+// TIER-1 (in-memory _enrichmentCache, _ddContactsCache, _studentCache) is
+// what actually delivers within-execution performance. Cross-execution
+// caching is currently unavailable.
+//
+// FUTURE: See CoreData.js post-mortem note for Option 2 (redesign).
 // ===========================================================================
 
-var _PERF_CACHE_TTL_SEC_S = 21600;    // 6 hours, CacheService max
-var _PERF_CACHE_CHUNK_SIZE_S = 90000; // base64-encoded chars per chunk
+var _PERF_CACHE_TTL_SEC_S = 21600;      // 6 hours
+var _PERF_CACHE_CHUNK_SIZE_S = 90000;   // base64-encoded chars per chunk
 
-// Track keys written during this execution for invalidation.
 var _perfCacheKnownKeysS_ = {};
 
 /**

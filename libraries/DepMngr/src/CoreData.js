@@ -113,19 +113,46 @@ var CoreData = (function () {
   }
 
   // ===========================================================================
-  // PERFORMANCE LAYER 2: CacheService (C1 — replaces sheet-based cache)
+  // PERFORMANCE LAYER 2: CacheService — KNOWN NO-OP CROSS-EXECUTION
   // ---------------------------------------------------------------------------
-  // Uses Google CacheService.getScriptCache() for cross-execution caching.
-  // Millisecond-scale reads/writes. No sheet lock contention. No range errors.
-  // Values are gzip-compressed and base64-encoded. Values >95KB are chunked.
-  // TTL: 6 hours (CacheService max). Warm-cache trigger fires 4x/day.
+  // STATUS (C1-Finalize, July 2026):
+  //   The tier-2 CacheService layer is architecturally a no-op for
+  //   cross-execution reads. Writes DO NOT persist to the calling app's
+  //   cache. Reads always miss.
+  //
+  // ROOT CAUSE:
+  //   CacheService.getScriptCache() called from within a library binds to
+  //   the library's own script cache (DHLibrary's), not the calling app's.
+  //   Since the three apps (SLG, HENP, HC) share DHLibrary but each has its
+  //   own separate Apps Script project, writes from CoreLib go to
+  //   DHLibrary's cache — invisible to the apps that need to read them.
+  //
+  // WHY THE CODE REMAINS:
+  //   The encode/decode/chunking implementations are correct. They're
+  //   preserved in case a future redesign passes cache handles from the
+  //   app context into CoreLib functions (Option 2 in the C1-Finalize
+  //   post-mortem). For now, the tier-2 calls silently write to
+  //   DHLibrary's cache (unused) and reads silently miss and fall through
+  //   to tier-3 (live recompute).
+  //
+  // WHAT ACTUALLY MAKES THE UI FAST:
+  //   Tier-1 in-memory cache (var _cache = {...} above). Within a single
+  //   execution, repeated reads hit tier-1 and return in ~15-25ms.
+  //   Cold reads from source sheets take ~1-2 seconds (SLG 173 rows,
+  //   HENP 291 rows). Every fresh execution pays this cost once.
+  //
+  // FUTURE:
+  //   If cold-load latency becomes user-facing (data grows substantially,
+  //   or new features need heavier aggregation), revisit with Option 2:
+  //   refactor CoreLib to accept a cache parameter from the app context.
   // ===========================================================================
 
-  var _PERF_CACHE_TTL_SEC = 21600;    // 6 hours, CacheService max
-  var _PERF_CACHE_CHUNK_SIZE = 90000; // base64-encoded chars per chunk
+  var _PERF_CACHE_TTL_SEC = 21600;      // 6 hours (CacheService max)
+  var _PERF_CACHE_CHUNK_SIZE = 90000;   // base64-encoded chars per chunk
 
-  // Track keys written during this execution so _perfCacheClearAll_ can
-  // invalidate them without needing to enumerate CacheService (no list API).
+  // _perfCacheKnownKeys tracks keys written during the current execution.
+  // In the current no-op design, this is populated but never usefully read
+  // by any other execution.
   var _perfCacheKnownKeys = {};
 
   /**

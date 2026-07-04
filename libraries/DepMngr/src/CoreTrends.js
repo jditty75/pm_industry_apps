@@ -6,15 +6,20 @@
  * and reads HealthReportSnapshots and SFDC_Deployments directly as needed.
  *
  * Phase 3g design: Phase 3g Cursor Handoff Spec (canvas ts5cdwoV178e).
+ * T1 revisit (v70 baseline): adds optional pass-through cache parameter to all 7
+ * public functions.  Callers pass CacheService.getScriptCache() from the app's
+ * script context; that handle binds to the calling app's cache, sidestepping the
+ * library-scope issue documented in C1.  When cache is undefined, functions behave
+ * exactly as before — zero regression for existing callers.
  *
  * Public functions:
- *   getTimeInRedMetrics(cfg, viewModeOpts)
- *   getHealthTrajectory(cfg)                  — always team-wide, no viewModeOpts
- *   getHealthByPartner(cfg, viewModeOpts)
- *   getHealthByDeliveryDirector(cfg, viewModeOpts)
- *   getTimeInStageMetrics(cfg, viewModeOpts)
- *   getTimeToGoLiveMetrics(cfg, viewModeOpts)
- *   getGoLiveOutcomePatterns(cfg, viewModeOpts)
+ *   getTimeInRedMetrics(cfg, viewModeOpts, cache)
+ *   getHealthTrajectory(cfg, cache)                  — always team-wide, no viewModeOpts
+ *   getHealthByPartner(cfg, viewModeOpts, cache)
+ *   getHealthByDeliveryDirector(cfg, viewModeOpts, cache)
+ *   getTimeInStageMetrics(cfg, viewModeOpts, cache)
+ *   getTimeToGoLiveMetrics(cfg, viewModeOpts, cache)
+ *   getGoLiveOutcomePatterns(cfg, viewModeOpts, cache)
  *
  * Convention: top-level object (no IIFE). Follows the CoreSalesforce pattern.
  *
@@ -40,10 +45,26 @@ var CoreTrends = {
    *
    * @param {AppConfig} cfg
    * @param {Object=} viewModeOpts  { viewMode: 'my'|'all', ddDisplayName: string }
+   * @param {CacheService=} cache   Optional CacheService.getScriptCache() handle.
    * @return {Object}
    */
-  getTimeInRedMetrics: function (cfg, viewModeOpts) {
+  getTimeInRedMetrics: function (cfg, viewModeOpts, cache) {
     cfg = CoreConfig.withDefaults(cfg);
+    var _ttl_ = (cfg.trends && cfg.trends.cacheTtlSeconds) || 3600;
+    var _cKey_ = 'trends:timeInRed:' + cfg.appId + ':' +
+                 CoreTrends._buildViewModeKey_(viewModeOpts);
+    if (cache) {
+      try {
+        var _hit_ = cache.get(_cKey_);
+        if (_hit_) {
+          Logger.log('CoreTrends.getTimeInRedMetrics: cache HIT (' + _cKey_ + ')');
+          return JSON.parse(_hit_);
+        }
+      } catch (e) {
+        Logger.log('CoreTrends.getTimeInRedMetrics: cache read failed: ' + e);
+      }
+    }
+
     Logger.log('CoreTrends.getTimeInRedMetrics: start (viewMode=' +
                ((viewModeOpts || {}).viewMode || 'all') + ')');
 
@@ -140,7 +161,7 @@ var CoreTrends = {
     Logger.log('CoreTrends.getTimeInRedMetrics: ' + countCurrentlyRed +
                ' currently Red, ' + historicalResolutions.length + ' resolved in last 12mo');
 
-    return {
+    var _result_ = {
       currentRedDeployments: currentRedDeployments,
       aggregates: {
         longestCurrentStreak:  longestCurrentStreak,
@@ -154,6 +175,16 @@ var CoreTrends = {
         totalResolutionsLast12Months: historicalResolutions.length
       }
     };
+    if (cache) {
+      try {
+        var _json_ = JSON.stringify(_result_);
+        cache.put(_cKey_, _json_, _ttl_);
+        Logger.log('CoreTrends.getTimeInRedMetrics: cache MISS, wrote ' + _json_.length + ' chars');
+      } catch (e) {
+        Logger.log('CoreTrends.getTimeInRedMetrics: cache write failed (likely >100KB): ' + e);
+      }
+    }
+    return _result_;
   },
 
   // ===========================================================================
@@ -165,10 +196,25 @@ var CoreTrends = {
    * Always team-wide; ignores viewMode.
    *
    * @param {AppConfig} cfg
+   * @param {CacheService=} cache   Optional CacheService.getScriptCache() handle.
    * @return {Object}
    */
-  getHealthTrajectory: function (cfg) {
+  getHealthTrajectory: function (cfg, cache) {
     cfg = CoreConfig.withDefaults(cfg);
+    var _ttl_ = (cfg.trends && cfg.trends.cacheTtlSeconds) || 3600;
+    var _cKey_ = 'trends:healthTrajectory:' + cfg.appId;
+    if (cache) {
+      try {
+        var _hit_ = cache.get(_cKey_);
+        if (_hit_) {
+          Logger.log('CoreTrends.getHealthTrajectory: cache HIT (' + _cKey_ + ')');
+          return JSON.parse(_hit_);
+        }
+      } catch (e) {
+        Logger.log('CoreTrends.getHealthTrajectory: cache read failed: ' + e);
+      }
+    }
+
     Logger.log('CoreTrends.getHealthTrajectory: start');
 
     var sheetName = (cfg.sheets && cfg.sheets.healthReportSnapshots) || 'HealthReportSnapshots';
@@ -242,12 +288,22 @@ var CoreTrends = {
 
     Logger.log('CoreTrends.getHealthTrajectory: ' + points.length + ' monthly points');
 
-    return {
+    var _result_ = {
       points:            points,
       baselineMonth:     baselinePt.reportMonth,
       currentMonth:      currentPt.reportMonth,
       deltaSinceBaseline: delta
     };
+    if (cache) {
+      try {
+        var _json_ = JSON.stringify(_result_);
+        cache.put(_cKey_, _json_, _ttl_);
+        Logger.log('CoreTrends.getHealthTrajectory: cache MISS, wrote ' + _json_.length + ' chars');
+      } catch (e) {
+        Logger.log('CoreTrends.getHealthTrajectory: cache write failed (likely >100KB): ' + e);
+      }
+    }
+    return _result_;
   },
 
   // ===========================================================================
@@ -257,10 +313,26 @@ var CoreTrends = {
   /**
    * @param {AppConfig} cfg
    * @param {Object=} viewModeOpts
+   * @param {CacheService=} cache
    * @return {Object}
    */
-  getHealthByPartner: function (cfg, viewModeOpts) {
+  getHealthByPartner: function (cfg, viewModeOpts, cache) {
     cfg = CoreConfig.withDefaults(cfg);
+    var _ttl_ = (cfg.trends && cfg.trends.cacheTtlSeconds) || 3600;
+    var _cKey_ = 'trends:healthByPartner:' + cfg.appId + ':' +
+                 CoreTrends._buildViewModeKey_(viewModeOpts);
+    if (cache) {
+      try {
+        var _hit_ = cache.get(_cKey_);
+        if (_hit_) {
+          Logger.log('CoreTrends.getHealthByPartner: cache HIT (' + _cKey_ + ')');
+          return JSON.parse(_hit_);
+        }
+      } catch (e) {
+        Logger.log('CoreTrends.getHealthByPartner: cache read failed: ' + e);
+      }
+    }
+
     Logger.log('CoreTrends.getHealthByPartner: start');
 
     var deployments;
@@ -317,11 +389,21 @@ var CoreTrends = {
 
     Logger.log('CoreTrends.getHealthByPartner: ' + rows.length + ' partner rows');
 
-    return {
+    var _result_ = {
       rows:             rows,
       totalDeployments: totalDeployments,
       dataIntegrity:    { unassignedCount: unassignedCount, showDisclaimer: unassignedCount > 0 }
     };
+    if (cache) {
+      try {
+        var _json_ = JSON.stringify(_result_);
+        cache.put(_cKey_, _json_, _ttl_);
+        Logger.log('CoreTrends.getHealthByPartner: cache MISS, wrote ' + _json_.length + ' chars');
+      } catch (e) {
+        Logger.log('CoreTrends.getHealthByPartner: cache write failed (likely >100KB): ' + e);
+      }
+    }
+    return _result_;
   },
 
   // ===========================================================================
@@ -331,10 +413,26 @@ var CoreTrends = {
   /**
    * @param {AppConfig} cfg
    * @param {Object=} viewModeOpts
+   * @param {CacheService=} cache
    * @return {Object}
    */
-  getHealthByDeliveryDirector: function (cfg, viewModeOpts) {
+  getHealthByDeliveryDirector: function (cfg, viewModeOpts, cache) {
     cfg = CoreConfig.withDefaults(cfg);
+    var _ttl_ = (cfg.trends && cfg.trends.cacheTtlSeconds) || 3600;
+    var _cKey_ = 'trends:healthByDeliveryDirector:' + cfg.appId + ':' +
+                 CoreTrends._buildViewModeKey_(viewModeOpts);
+    if (cache) {
+      try {
+        var _hit_ = cache.get(_cKey_);
+        if (_hit_) {
+          Logger.log('CoreTrends.getHealthByDeliveryDirector: cache HIT (' + _cKey_ + ')');
+          return JSON.parse(_hit_);
+        }
+      } catch (e) {
+        Logger.log('CoreTrends.getHealthByDeliveryDirector: cache read failed: ' + e);
+      }
+    }
+
     Logger.log('CoreTrends.getHealthByDeliveryDirector: start');
 
     var deployments;
@@ -405,11 +503,21 @@ var CoreTrends = {
 
     Logger.log('CoreTrends.getHealthByDeliveryDirector: ' + rows.length + ' DD rows');
 
-    return {
+    var _result_ = {
       rows:             rows,
       totalDeployments: totalDeployments,
       dataIntegrity:    { unassignedCount: unassignedCount, showDisclaimer: unassignedCount > 0 }
     };
+    if (cache) {
+      try {
+        var _json_ = JSON.stringify(_result_);
+        cache.put(_cKey_, _json_, _ttl_);
+        Logger.log('CoreTrends.getHealthByDeliveryDirector: cache MISS, wrote ' + _json_.length + ' chars');
+      } catch (e) {
+        Logger.log('CoreTrends.getHealthByDeliveryDirector: cache write failed (likely >100KB): ' + e);
+      }
+    }
+    return _result_;
   },
 
   // ===========================================================================
@@ -419,10 +527,26 @@ var CoreTrends = {
   /**
    * @param {AppConfig} cfg
    * @param {Object=} viewModeOpts
+   * @param {CacheService=} cache
    * @return {Object}
    */
-  getTimeInStageMetrics: function (cfg, viewModeOpts) {
+  getTimeInStageMetrics: function (cfg, viewModeOpts, cache) {
     cfg = CoreConfig.withDefaults(cfg);
+    var _ttl_ = (cfg.trends && cfg.trends.cacheTtlSeconds) || 3600;
+    var _cKey_ = 'trends:timeInStage:' + cfg.appId + ':' +
+                 CoreTrends._buildViewModeKey_(viewModeOpts);
+    if (cache) {
+      try {
+        var _hit_ = cache.get(_cKey_);
+        if (_hit_) {
+          Logger.log('CoreTrends.getTimeInStageMetrics: cache HIT (' + _cKey_ + ')');
+          return JSON.parse(_hit_);
+        }
+      } catch (e) {
+        Logger.log('CoreTrends.getTimeInStageMetrics: cache read failed: ' + e);
+      }
+    }
+
     Logger.log('CoreTrends.getTimeInStageMetrics: start');
 
     var CANONICAL_STAGES = [
@@ -431,8 +555,10 @@ var CoreTrends = {
     var stageRank = {};
     CANONICAL_STAGES.forEach(function (s, i) { stageRank[s] = i; });
 
-    var outlierMultiple  = (cfg.salesforce && cfg.salesforce.timeInStageOutlierMultiple)  || 2;
-    var minSampleSize    = (cfg.salesforce && cfg.salesforce.timeInStageMinSampleSize)     || 10;
+    var outlierMultiple  = (cfg.trends && cfg.trends.timeInStageOutlierMultiple)  ||
+                           (cfg.salesforce && cfg.salesforce.timeInStageOutlierMultiple) || 2;
+    var minSampleSize    = (cfg.trends && cfg.trends.timeInStageMinSampleSize)     ||
+                           (cfg.salesforce && cfg.salesforce.timeInStageMinSampleSize)  || 10;
 
     // Current state per Active deployment.
     var activeDeployments;
@@ -505,6 +631,7 @@ var CoreTrends = {
         stage:       stage,
         averageDays: durations.length > 0 ? Math.round(CoreTrends._average_(durations)) : null,
         medianDays:  durations.length > 0 ? Math.round(CoreTrends._median_(durations))  : null,
+        p90Days:     durations.length > 0 ? Math.round(CoreTrends._percentile_(durations, 0.9)) : null,
         sampleSize:  durations.length
       };
     });
@@ -523,6 +650,7 @@ var CoreTrends = {
         outliers.push({
           deploymentId:             row.deploymentId,
           accountName:              row.accountName,
+          deploymentName:           row.deploymentName || '',
           currentStage:             stage,
           currentStageDurationDays: row.currentStageDurationDays,
           benchmarkMedian:          bench.medianDays,
@@ -537,11 +665,21 @@ var CoreTrends = {
     Logger.log('CoreTrends.getTimeInStageMetrics: ' + currentStateByDeployment.length +
                ' active, ' + outliers.length + ' outliers');
 
-    return {
+    var _result_ = {
       currentStateByDeployment: currentStateByDeployment,
       stageBenchmarks:          stageBenchmarks,
       outliers:                 outliers
     };
+    if (cache) {
+      try {
+        var _json_ = JSON.stringify(_result_);
+        cache.put(_cKey_, _json_, _ttl_);
+        Logger.log('CoreTrends.getTimeInStageMetrics: cache MISS, wrote ' + _json_.length + ' chars');
+      } catch (e) {
+        Logger.log('CoreTrends.getTimeInStageMetrics: cache write failed (likely >100KB): ' + e);
+      }
+    }
+    return _result_;
   },
 
   // ===========================================================================
@@ -551,14 +689,31 @@ var CoreTrends = {
   /**
    * @param {AppConfig} cfg
    * @param {Object=} viewModeOpts
+   * @param {CacheService=} cache
    * @return {Object}
    */
-  getTimeToGoLiveMetrics: function (cfg, viewModeOpts) {
+  getTimeToGoLiveMetrics: function (cfg, viewModeOpts, cache) {
     cfg = CoreConfig.withDefaults(cfg);
+    var _ttl_ = (cfg.trends && cfg.trends.cacheTtlSeconds) || 3600;
+    var _cKey_ = 'trends:timeToGoLive:' + cfg.appId + ':' +
+                 CoreTrends._buildViewModeKey_(viewModeOpts);
+    if (cache) {
+      try {
+        var _hit_ = cache.get(_cKey_);
+        if (_hit_) {
+          Logger.log('CoreTrends.getTimeToGoLiveMetrics: cache HIT (' + _cKey_ + ')');
+          return JSON.parse(_hit_);
+        }
+      } catch (e) {
+        Logger.log('CoreTrends.getTimeToGoLiveMetrics: cache read failed: ' + e);
+      }
+    }
+
     Logger.log('CoreTrends.getTimeToGoLiveMetrics: start');
 
     var today = CoreTrends._todayStr_();
-    var windowMonths = (cfg.salesforce && cfg.salesforce.trendsWindowMonths) || 12;
+    var windowMonths = (cfg.trends && cfg.trends.trendsWindowMonths) ||
+                       (cfg.salesforce && cfg.salesforce.trendsWindowMonths) || 12;
 
     // Active in-flight.
     var activeDeployments;
@@ -625,11 +780,21 @@ var CoreTrends = {
     Logger.log('CoreTrends.getTimeToGoLiveMetrics: ' + activeInFlight.length + ' in-flight, ' +
                overdueDeployments.length + ' overdue');
 
-    return {
+    var _result_ = {
       activeInFlight:    activeInFlight,
       overdueDeployments: overdueDeployments,
       benchmarkStats:    benchmarkStats
     };
+    if (cache) {
+      try {
+        var _json_ = JSON.stringify(_result_);
+        cache.put(_cKey_, _json_, _ttl_);
+        Logger.log('CoreTrends.getTimeToGoLiveMetrics: cache MISS, wrote ' + _json_.length + ' chars');
+      } catch (e) {
+        Logger.log('CoreTrends.getTimeToGoLiveMetrics: cache write failed (likely >100KB): ' + e);
+      }
+    }
+    return _result_;
   },
 
   // ===========================================================================
@@ -639,14 +804,32 @@ var CoreTrends = {
   /**
    * @param {AppConfig} cfg
    * @param {Object=} viewModeOpts
+   * @param {CacheService=} cache
    * @return {Object}
    */
-  getGoLiveOutcomePatterns: function (cfg, viewModeOpts) {
+  getGoLiveOutcomePatterns: function (cfg, viewModeOpts, cache) {
     cfg = CoreConfig.withDefaults(cfg);
+    var _ttl_ = (cfg.trends && cfg.trends.cacheTtlSeconds) || 3600;
+    var _cKey_ = 'trends:goLiveOutcome:' + cfg.appId + ':' +
+                 CoreTrends._buildViewModeKey_(viewModeOpts);
+    if (cache) {
+      try {
+        var _hit_ = cache.get(_cKey_);
+        if (_hit_) {
+          Logger.log('CoreTrends.getGoLiveOutcomePatterns: cache HIT (' + _cKey_ + ')');
+          return JSON.parse(_hit_);
+        }
+      } catch (e) {
+        Logger.log('CoreTrends.getGoLiveOutcomePatterns: cache read failed: ' + e);
+      }
+    }
+
     Logger.log('CoreTrends.getGoLiveOutcomePatterns: start');
 
-    var windowMonths = (cfg.salesforce && cfg.salesforce.trendsWindowMonths) || 12;
-    var byPartnerMin = (cfg.salesforce && cfg.salesforce.byPartnerMinSampleSize)   || 5;
+    var windowMonths = (cfg.trends && cfg.trends.trendsWindowMonths) ||
+                       (cfg.salesforce && cfg.salesforce.trendsWindowMonths) || 12;
+    var byPartnerMin = (cfg.trends && cfg.trends.byPartnerMinSampleSize) ||
+                       (cfg.salesforce && cfg.salesforce.byPartnerMinSampleSize) || 5;
     var today        = CoreTrends._todayStr_();
     var cutoff       = CoreTrends._dateMinusMonths_(today, windowMonths);
 
@@ -804,7 +987,7 @@ var CoreTrends = {
     Logger.log('CoreTrends.getGoLiveOutcomePatterns: sampleSize=' + sampleSize +
                ', onTime=' + onTimeOrEarlyCount + ', slipped=' + slippedCount);
 
-    return {
+    var _result_ = {
       windowMonths: windowMonths,
       sampleSize:   sampleSize,
       baselineAccuracy: {
@@ -824,6 +1007,16 @@ var CoreTrends = {
       byPartner:         byPartner,
       recentCompletions: recentCompletions
     };
+    if (cache) {
+      try {
+        var _json_ = JSON.stringify(_result_);
+        cache.put(_cKey_, _json_, _ttl_);
+        Logger.log('CoreTrends.getGoLiveOutcomePatterns: cache MISS, wrote ' + _json_.length + ' chars');
+      } catch (e) {
+        Logger.log('CoreTrends.getGoLiveOutcomePatterns: cache write failed (likely >100KB): ' + e);
+      }
+    }
+    return _result_;
   },
 
   // ===========================================================================
@@ -919,6 +1112,26 @@ var CoreTrends = {
     var hi  = Math.ceil(idx);
     if (lo === hi) return sorted[lo];
     return sorted[lo] + (idx - lo) * (sorted[hi] - sorted[lo]);
+  },
+
+  /**
+   * Builds a compact cache-key segment from viewModeOpts.
+   * Returns 'all' when viewMode is absent or 'all'.
+   * Returns 'my:<encodedName>' when viewMode is 'my'.
+   *
+   * @param {Object=} viewModeOpts
+   * @return {string}
+   * @private
+   */
+  _buildViewModeKey_: function (viewModeOpts) {
+    if (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') {
+      return 'all';
+    }
+    if (viewModeOpts.viewMode === 'my') {
+      var name = viewModeOpts.ddDisplayName || '';
+      return 'my:' + encodeURIComponent(name);
+    }
+    return 'all';
   },
 
   /**
@@ -1023,13 +1236,6 @@ var CoreTrends = {
         var actualDate = colActual >= 0
           ? CoreHistory._normalizeDate_(row[colActual], tz) : null;
         if (!actualDate || actualDate < cutoffDate) continue;
-
-        var ddName = '';
-        if (viewModeOpts && viewModeOpts.viewMode === 'my' && viewModeOpts.ddDisplayName) {
-          // Respect viewMode — skip if not this DD's deployment (approximate).
-          // We don't have deliveryDirector in SFDC_Deployments directly.
-          // We'll include all and note the limitation.
-        }
 
         rows.push({
           deploymentId:     colId     >= 0 ? String(row[colId]     || '').trim() : '',

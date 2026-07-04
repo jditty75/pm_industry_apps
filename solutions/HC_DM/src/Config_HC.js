@@ -35,7 +35,9 @@ var APP_CONFIG = {
     ddAssignment:                     'DD',
     sfdcDeploymentProductFunctions:   'SFDC_DeploymentProductFunctions',
     deployments:                      'SFDC_Deployments',
-    deploymentContacts:               'SFDC_DeploymentContacts'
+    deploymentContacts:               'SFDC_DeploymentContacts',
+    // T1: Trends history sheet (populated by SOQL)
+    deploymentHistory:                'SFDC_DeploymentHistory'
   },
 
   namedRanges: {
@@ -137,10 +139,13 @@ var APP_CONFIG = {
       { id: 'portfolio',   label: 'Portfolio Health' },
       { id: 'mgmPgl',      label: 'MGM / PGL' },
       { id: 'notable', label: 'Notable Deployments' },
-      { id: 'overrides',   label: 'Manage Overrides' }
+      { id: 'overrides',   label: 'Manage Overrides' },
+      { id: 'trends',      label: 'Trends' }
     ],
     enableAccountLinks: true,
     mgmPglTab: { enabled: true },
+    // T1: Trends tab.
+    trendsTab: { enabled: true },
 
     deploymentsTable: {
       showIndustry:           false,
@@ -195,6 +200,17 @@ var APP_CONFIG = {
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // T1: Trends tab configuration.
+  // ---------------------------------------------------------------------------
+  trends: {
+    cacheTtlSeconds:              3600,
+    trendsWindowMonths:           12,
+    timeInStageOutlierMultiple:   2,
+    timeInStageMinSampleSize:     10,
+    byPartnerMinSampleSize:       5
   },
 
   // ---------------------------------------------------------------------------

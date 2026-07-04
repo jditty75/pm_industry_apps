@@ -48,7 +48,9 @@ var APP_CONFIG = {
     // MGM/PGL patch: contacts from SFDC
     deploymentContacts: 'SFDC_DeploymentContacts',
     // D1: Delivery Director from SFDC_Contacts
-    sfdcContacts: 'SFDC_DeploymentContacts'
+    sfdcContacts: 'SFDC_DeploymentContacts',
+    // T1: Trends history sheet (populated by SOQL)
+    deploymentHistory: 'SFDC_DeploymentHistory'
   },
 
   namedRanges: {
@@ -159,13 +161,16 @@ var APP_CONFIG = {
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
       { id: 'notable', label: 'Notable Deployments' },
-      { id: 'overrides',   label: 'Manage Overrides' }
+      { id: 'overrides',   label: 'Manage Overrides' },
+      { id: 'trends',      label: 'Trends' }
     ],
 
     // MGM / PGL tab configuration (feature/mgm-pgl).
     mgmPglTab: {
       enabled: true
     },
+    // T1: Trends tab.
+    trendsTab: { enabled: true },
     enableAccountLinks: true,
     deploymentsTable: {
       showIndustry: false,
@@ -228,6 +233,17 @@ var APP_CONFIG = {
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // T1: Trends tab configuration.
+  // ---------------------------------------------------------------------------
+  trends: {
+    cacheTtlSeconds:              3600,
+    trendsWindowMonths:           12,
+    timeInStageOutlierMultiple:   2,
+    timeInStageMinSampleSize:     10,
+    byPartnerMinSampleSize:       5
   },
 
   // ---------------------------------------------------------------------------

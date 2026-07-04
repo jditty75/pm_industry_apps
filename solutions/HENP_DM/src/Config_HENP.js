@@ -33,7 +33,9 @@ var APP_CONFIG = {
     ddAssignment: 'DD',
     sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions',
     deployments: 'SFDC_Deployments',
-    deploymentContacts: 'SFDC_DeploymentContacts'
+    deploymentContacts: 'SFDC_DeploymentContacts',
+    // T1: Trends history sheet (populated by SOQL)
+    deploymentHistory: 'SFDC_DeploymentHistory'
   },
   namedRanges: {
     healthTotal: 'HealthTotal'
@@ -120,10 +122,13 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report', label: 'Monthly Report Preview' },
       { id: 'portfolio', label: 'Portfolio Health' },
-      { id: 'overrides', label: 'Manage Overrides' }
+      { id: 'overrides', label: 'Manage Overrides' },
+      { id: 'trends',    label: 'Trends' }
     ],
     enableAccountLinks: true,
     mgmPglTab: { enabled: false },
+    // T1: Trends tab.
+    trendsTab: { enabled: true },
     notable: { enabled: false },
     deploymentsTable: {
       showIndustry: false,
@@ -207,6 +212,17 @@ var APP_CONFIG = {
       enabled: true,
       copy: 'This report covers HENP Platform deployments only. Student deployments are tracked and reported separately.'
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // T1: Trends tab configuration.
+  // ---------------------------------------------------------------------------
+  trends: {
+    cacheTtlSeconds:              3600,
+    trendsWindowMonths:           12,
+    timeInStageOutlierMultiple:   2,
+    timeInStageMinSampleSize:     10,
+    byPartnerMinSampleSize:       5
   },
 
   // ---------------------------------------------------------------------------

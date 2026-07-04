@@ -131,6 +131,15 @@
  */
 
 /**
+ * @typedef {Object} TrendsConfig   T1
+ * @property {number} cacheTtlSeconds              CacheService TTL for Trends metrics. Default 3600.
+ * @property {number} trendsWindowMonths           Rolling window for benchmarks. Default 12.
+ * @property {number} timeInStageOutlierMultiple   Multiplier for outlier detection. Default 2.
+ * @property {number} timeInStageMinSampleSize     Min sample size for outlier flags. Default 10.
+ * @property {number} byPartnerMinSampleSize       Min sample size for by-partner rollups. Default 5.
+ */
+
+/**
  * @typedef {Object} MomentumConfig
  * P2: Portfolio Momentum sub-view config.
  * @property {boolean}              enabled           Set true to show the Momentum sub-view.
@@ -465,7 +474,7 @@ var CoreConfig = (function () {
     // Apps may override this in their APP_CONFIG.ui.roleVisibility block.
     cfg.ui.roleVisibility = cfg.ui.roleVisibility || {};
     if (!Array.isArray(cfg.ui.roleVisibility.READ_ONLY)) {
-      cfg.ui.roleVisibility.READ_ONLY = ['deployments', 'golives', 'portfolio', 'trends'];
+      cfg.ui.roleVisibility.READ_ONLY = ['deployments', 'golives', 'portfolio'];
     }
     if (!Array.isArray(cfg.ui.roleVisibility.POWER_USER)) {
       cfg.ui.roleVisibility.POWER_USER = [
@@ -503,6 +512,20 @@ var CoreConfig = (function () {
       cfg.ui.personalization.welcomeMessageEnabled = true;
     if (cfg.ui.personalization.showFullPortfolioIndicator === undefined)
       cfg.ui.personalization.showFullPortfolioIndicator = true;
+
+    // -------------------------------------------------------------------------
+    // Trends (T1)
+    // -------------------------------------------------------------------------
+    if (cfg.trends) {
+      if (cfg.trends.cacheTtlSeconds === undefined)            cfg.trends.cacheTtlSeconds            = 3600;
+      if (cfg.trends.trendsWindowMonths === undefined)         cfg.trends.trendsWindowMonths         = 12;
+      if (cfg.trends.timeInStageOutlierMultiple === undefined) cfg.trends.timeInStageOutlierMultiple = 2;
+      if (cfg.trends.timeInStageMinSampleSize === undefined)   cfg.trends.timeInStageMinSampleSize   = 10;
+      if (cfg.trends.byPartnerMinSampleSize === undefined)     cfg.trends.byPartnerMinSampleSize     = 5;
+    }
+    if (cfg.sheets && !cfg.sheets.deploymentHistory) {
+      cfg.sheets.deploymentHistory = 'SFDC_DeploymentHistory';
+    }
 
     return cfg;
   }

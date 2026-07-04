@@ -125,6 +125,22 @@
  */
 
 /**
+ * @typedef {Object} MomentumChartConfig
+ * @property {Object<string,string>} colors            Platform code → hex color.
+ * @property {number}                inProgressOpacity 0–1 opacity for current-FY bars (default 0.55).
+ */
+
+/**
+ * @typedef {Object} MomentumConfig
+ * P2: Portfolio Momentum sub-view config.
+ * @property {boolean}              enabled           Set true to show the Momentum sub-view.
+ * @property {Array<string>}        platforms         Ordered platform codes, e.g. ['HCM','FIN','PAY'].
+ * @property {Object<string,Array>} productAreaMapping Code → array of Product_Area__c values.
+ * @property {number}               historicalYears   FYs of history to show (default 6).
+ * @property {MomentumChartConfig}  chart             Chart appearance config.
+ */
+
+/**
  * @typedef {Object} UITabConfig
  * @property {string} id     // 'deployments' | 'golives' | 'execsummary' | 'report' | 'portfolio' | 'overrides'
  * @property {string} label  // user-facing tab label

@@ -207,5 +207,30 @@ var APP_CONFIG = {
       enabled: true,
       copy: 'This report covers HENP Platform deployments only. Student deployments are tracked and reported separately.'
     }
+  },
+
+  // ---------------------------------------------------------------------------
+  // P2: Portfolio Momentum sub-view configuration.
+  // ---------------------------------------------------------------------------
+  /** @type {MomentumConfig} */
+  momentum: {
+    enabled: true,
+    platforms: ['HCM', 'FIN', 'PAY', 'STU'],
+    productAreaMapping: {
+      HCM: ['Core HCM', 'Human Capital Management'],
+      FIN: ['Financials', 'Financial Management'],
+      PAY: ['Payroll'],
+      STU: ['Student']
+    },
+    historicalYears: 6,
+    chart: {
+      colors: {
+        HCM: '#0F4C81',
+        FIN: '#F46821',
+        PAY: '#47E6C1',
+        STU: '#A259EA'
+      },
+      inProgressOpacity: 0.55
+    }
   }
 };

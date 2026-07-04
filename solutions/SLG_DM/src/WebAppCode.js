@@ -630,3 +630,45 @@ function _debugSfdcColumns() {
     });
   });
 }
+
+function _debug_personalization() {
+  // 1. What names are in AppUsers?
+  var users = CoreLib.CoreUsers.getActiveUsers(APP_CONFIG);
+  Logger.log('AppUsers displayNames:');
+  users.forEach(function(u) {
+    Logger.log('  "' + u.displayName + '" (role=' + u.role + ')');
+  });
+
+  // 2. What does the DD Assignment map look like?
+  var map = CoreLib.CoreUsers.getDDAssignmentMap(APP_CONFIG);
+  var mapKeys = Object.keys(map);
+  Logger.log('DD Assignment map has ' + mapKeys.length + ' entries');
+  Logger.log('Sample entries:');
+  mapKeys.slice(0, 5).forEach(function(k) {
+    Logger.log('  "' + k + '" -> "' + map[k] + '"');
+  });
+
+  // 3. What accountName values are on effective deployments?
+  var deployments = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  Logger.log('Deployment accountName sample:');
+  deployments.slice(0, 5).forEach(function(d) {
+    Logger.log('  "' + d.accountName + '"');
+  });
+
+  // 4. For a specific DD, how many rows would match?
+  var testDD = 'Steve Rogers'; // or whichever you tested
+  var filtered = CoreLib.CoreUsers.filterRowsByAccountOwner(APP_CONFIG, deployments, testDD);
+  Logger.log('filterRowsByAccountOwner("' + testDD + '") returned ' + filtered.length + ' rows');
+
+  // 5. Cross-reference: which account names in the DD map actually exist in deployments?
+  var deploymentNames = {};
+  deployments.forEach(function(d) { deploymentNames[d.accountName] = true; });
+  var matchedInMap = mapKeys.filter(function(k) { return deploymentNames[k]; });
+  var unmatchedInMap = mapKeys.filter(function(k) { return !deploymentNames[k]; });
+  Logger.log('DD map entries that match a deployment accountName: ' + matchedInMap.length);
+  Logger.log('DD map entries with NO matching deployment: ' + unmatchedInMap.length);
+  Logger.log('First 5 unmatched map entries:');
+  unmatchedInMap.slice(0, 5).forEach(function(k) {
+    Logger.log('  "' + k + '" (owned by "' + map[k] + '")');
+  });
+}

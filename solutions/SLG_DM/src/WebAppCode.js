@@ -185,6 +185,14 @@ function getPortfolioHealthData() {
   return CoreLib.CorePortfolioHealth.getSnapshot(APP_CONFIG);
 }
 
+/**
+ * P2: Portfolio Momentum server endpoint.
+ * Returns null if momentum is not enabled for this app.
+ */
+function getPortfolioMomentumData() {
+  return CoreLib.CorePortfolioMomentum.getMomentumSnapshot(APP_CONFIG);
+}
+
 // ============================================================================
 // PHASE 1 — OVERRIDE / META UPDATES (unchanged — audit wiring lives in CoreData)
 // ============================================================================

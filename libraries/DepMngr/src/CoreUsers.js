@@ -282,12 +282,26 @@ var CoreUsers = (function () {
   // ---------------------------------------------------------------------------
 
   /**
-   * Filters deployment/go-live row objects down to those whose accountName
-   * is owned by the supplied DD (per the DD Assignment mapping).
+   * Filters deployment/go-live row objects to those owned by the supplied DD
+   * (display name), using D1-aware three-tier ownership precedence:
    *
-   * Rows are expected to have an `accountName` property. Rows whose
-   * accountName is not in DD Assignment are filtered out (silent — use
-   * findAccountOrphanedRows to surface orphans).
+   *   Tier 1 — Override wins: row.deliveryDirector (from DeploymentsMeta,
+   *            after .trim()) equals target.
+   *   Tier 2 — D1 contacts: no override on row; row.ddContacts array contains
+   *            an element whose .name (after .trim()) equals target.
+   *   Tier 3 — DD Assignment sheet fallback: no override, no contacts; the
+   *            DD Assignment map for row.accountName equals target.
+   *
+   * Multi-sponsor rows (Tier 2) appear in all sponsors' filtered views — OR-match.
+   *
+   * Rows are expected to have an `accountName` property. Optional properties
+   * used by the D1-aware tiers: `deliveryDirector`, `ddContacts` (Array of
+   * {name, email} objects). Rows without these fields gracefully fall through
+   * to Tier 3, preserving pre-P1 behavior for apps that don't have D1 enabled.
+   *
+   * Comparison is case-sensitive with .trim() applied to the target DD name
+   * and to Tier 1/2 sources. Account names in Tier 3 are not trimmed, matching
+   * existing DD Assignment sheet semantics.
    *
    * @param {AppConfig} config
    * @param {Array<Object>} rows
@@ -300,10 +314,31 @@ var CoreUsers = (function () {
     var target = String(ddDisplayName || '').trim();
     if (!target) return [];
 
-    var map = getDDAssignmentMap(cfg);
+    var ddAssignmentMap = getDDAssignmentMap(cfg);
+
     return rows.filter(function (row) {
-      if (!row || !row.accountName) return false;
-      return map[row.accountName] === target;
+      if (!row) return false;
+
+      // Tier 1: Override wins.
+      var override = String(row.deliveryDirector || '').trim();
+      if (override) {
+        return override === target;
+      }
+
+      // Tier 2: D1 contacts (OR-match across all sponsors on the row).
+      if (Array.isArray(row.ddContacts) && row.ddContacts.length > 0) {
+        for (var i = 0; i < row.ddContacts.length; i++) {
+          var c = row.ddContacts[i];
+          if (c && String(c.name || '').trim() === target) return true;
+        }
+        // Contacts array present but no name match — Tier 3 does NOT apply here.
+        // The contacts array is the authoritative source when it's populated.
+        return false;
+      }
+
+      // Tier 3: DD Assignment sheet fallback (contacts array empty or absent).
+      if (!row.accountName) return false;
+      return ddAssignmentMap[row.accountName] === target;
     });
   }
 

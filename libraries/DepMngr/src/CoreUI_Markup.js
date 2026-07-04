@@ -559,7 +559,7 @@ function _CoreUI_Markup_buildExecSummaryTab_(ui) {
     '    </div>',
     '  </div>',
     '  <p style="font-size: 12px; color: var(--color-text-subtle); margin-top: 8px;">',
-    '    Tip: You can paste formatted content from Docs/Word; most basic formatting (bold, italics, lists) will be preserved.',
+    '    <strong>Formatting preserved:</strong> bold, italic, underline, bullets, numbered lists, and Word Heading 2/3 styles. All other formatting will be simplified.',
     '  </p>',
     '</div>'
   ].join('\n');
@@ -639,7 +639,7 @@ function _CoreUI_Markup_buildReportingTab_(ui, cfg) {
     '      </div>',
     '    </div>',
     '    <p style="font-size: 12px; color: var(--color-text-subtle); margin-top: 8px;">',
-    '      Tip: You can paste formatted content from Docs/Word; most basic formatting (bold, italics, lists) will be preserved.',
+    '      <strong>Formatting preserved:</strong> bold, italic, underline, bullets, numbered lists, and Word Heading 2/3 styles. All other formatting will be simplified.',
     '    </p>',
     '  </div>',
     '  <div id="reporting-report-section" style="display:none;">',

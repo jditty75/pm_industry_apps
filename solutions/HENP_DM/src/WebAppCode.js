@@ -440,3 +440,61 @@ function _debugSfdcColumns() {
     });
   });
 }
+
+function _debug_c1_verify_working_v2() {
+  Logger.log('=== C1 Working Verification ===');
+
+  // Step 1: Force a cold-cache condition by clearing tier-1 in DHLibrary.
+  // We can't do this directly from SLG since _cache is inside DHLibrary's IIFE,
+  // but we can trigger a mutation which calls _clearCache internally.
+  // Instead, just measure back-to-back calls in a fresh execution.
+
+  var t0 = Date.now();
+  var d1 = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  var e1 = Date.now() - t0;
+  Logger.log('Call 1: ' + d1.length + ' rows in ' + e1 + 'ms');
+
+  var t1 = Date.now();
+  var d2 = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  var e2 = Date.now() - t1;
+  Logger.log('Call 2: ' + d2.length + ' rows in ' + e2 + 'ms');
+
+  Logger.log('');
+  Logger.log('Interpretation:');
+  Logger.log('  Call 2 fast (<100ms): tier-1 in-memory is serving (same execution)');
+  Logger.log('  Both calls similar (~1500ms+): NO caching happening at all');
+  Logger.log('  Cannot yet distinguish tier-2 vs tier-1 in same execution.');
+}
+function _debug_c1_full_trace() {
+  var appId = APP_CONFIG.appId;
+  var testKey = 'sfdcRows:' + appId;
+
+  Logger.log('=== FULL TRACE ===');
+
+  // Step 1: What does HENP's own cache see?
+  var henpCache = CacheService.getScriptCache();
+  Logger.log('Step 1 (HENP cache, pre-call):');
+  Logger.log('  single: ' + JSON.stringify(henpCache.get(testKey)));
+  Logger.log('  manifest: ' + JSON.stringify(henpCache.get(testKey + ':manifest')));
+
+  // Step 2: Trigger C1's write path.
+  Logger.log('');
+  Logger.log('Step 2: Calling getAllDeployments...');
+  var deps = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  Logger.log('  Returned ' + deps.length + ' rows');
+
+  // Step 3: Immediately check HENP's cache.
+  Logger.log('');
+  Logger.log('Step 3 (HENP cache, immediately after):');
+  Logger.log('  single: ' + JSON.stringify(henpCache.get(testKey)));
+  Logger.log('  manifest: ' + JSON.stringify(henpCache.get(testKey + ':manifest')));
+
+  // Step 4: Test HENP writing to and reading from its own cache directly.
+  Logger.log('');
+  Logger.log('Step 4: HENP direct write/read test:');
+  var directKey = 'henp-direct-' + Date.now();
+  henpCache.put(directKey, 'test payload from HENP', 300);
+  var directRead = henpCache.get(directKey);
+  Logger.log('  Wrote and read back: ' + directRead);
+  henpCache.remove(directKey);
+}

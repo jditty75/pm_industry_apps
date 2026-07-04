@@ -672,3 +672,93 @@ function _debug_personalization() {
     Logger.log('  "' + k + '" (owned by "' + map[k] + '")');
   });
 }
+
+function _debug_c1_cache_smoke() {
+  var testKey = 'c1-smoke-test-' + Date.now();
+  var testValue = { hello: 'world', numbers: [1,2,3,4,5] };
+
+  CoreLib.CoreData._perfCacheWrite_(testKey, testValue);
+  var read = CoreLib.CoreData._perfCacheRead_(testKey);
+  Logger.log('Small match: ' + (JSON.stringify(read) === JSON.stringify(testValue)));
+
+  var largeKey = 'c1-smoke-large-' + Date.now();
+  var largeArr = [];
+  for (var i = 0; i < 5000; i++) largeArr.push({ idx: i, name: 'deployment_' + i });
+
+  CoreLib.CoreData._perfCacheWrite_(largeKey, largeArr);
+  var readLarge = CoreLib.CoreData._perfCacheRead_(largeKey);
+  Logger.log('Large match: length=' + (readLarge && readLarge.length) + ' (expected 5000)');
+
+  CoreLib.CoreData._perfCacheDeleteKey_(testKey);
+  CoreLib.CoreData._perfCacheDeleteKey_(largeKey);
+  Logger.log('Post-delete (should be null): ' + CoreLib.CoreData._perfCacheRead_(testKey));
+}
+
+function _debug_c1_realpath_v2() {
+  var appId = APP_CONFIG.appId;
+
+  // First: check what's in CacheService BEFORE any call (should be null after fresh start).
+  var cache = CacheService.getScriptCache();
+  var preCheck = cache.get('sfdcRows:' + appId);
+  var preManifest = cache.get('sfdcRows:' + appId + ':manifest');
+  Logger.log('BEFORE any call:');
+  Logger.log('  sfdcRows single: ' + (preCheck ? 'PRESENT (' + preCheck.length + ' chars)' : 'null'));
+  Logger.log('  sfdcRows manifest: ' + (preManifest ? 'PRESENT (' + preManifest + ')' : 'null'));
+
+  // Second: make the call.
+  var startTime = Date.now();
+  var deployments = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  var elapsed = Date.now() - startTime;
+  Logger.log('getAllDeployments returned ' + deployments.length + ' rows in ' + elapsed + 'ms');
+
+  // Third: check CacheService IMMEDIATELY after — but also with 500ms delay in case async.
+  Logger.log('AFTER call, immediate check:');
+  var postCheck = cache.get('sfdcRows:' + appId);
+  var postManifest = cache.get('sfdcRows:' + appId + ':manifest');
+  Logger.log('  sfdcRows single: ' + (postCheck ? 'PRESENT (' + postCheck.length + ' chars)' : 'null'));
+  Logger.log('  sfdcRows manifest: ' + (postManifest ? 'PRESENT (' + postManifest + ')' : 'null'));
+
+  // Fourth: check ALL keys we might expect.
+  Logger.log('AFTER call, checking all expected keys:');
+  var allKeys = [
+    'sfdcRows:' + appId,
+    'sfdcRows:' + appId + ':manifest',
+    'enrichmentMap:' + appId,
+    'enrichmentMap:' + appId + ':manifest',
+    'ddContacts:' + appId,
+    'ddContacts:' + appId + ':manifest',
+    'mdsPglBatchView:' + appId + ':3',
+    'mdsPglBatchView:' + appId + ':3:manifest',
+    'overviewData:' + appId + ':v2',
+    'overviewData:' + appId + ':v2:manifest'
+  ];
+  allKeys.forEach(function(k) {
+    var v = cache.get(k);
+    Logger.log('  ' + k + ': ' + (v ? 'PRESENT (' + v.length + ' chars)' : 'null'));
+  });
+}
+
+function _debug_c1_verify_working_v2() {
+  Logger.log('=== C1 Working Verification ===');
+
+  // Step 1: Force a cold-cache condition by clearing tier-1 in DHLibrary.
+  // We can't do this directly from SLG since _cache is inside DHLibrary's IIFE,
+  // but we can trigger a mutation which calls _clearCache internally.
+  // Instead, just measure back-to-back calls in a fresh execution.
+
+  var t0 = Date.now();
+  var d1 = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  var e1 = Date.now() - t0;
+  Logger.log('Call 1: ' + d1.length + ' rows in ' + e1 + 'ms');
+
+  var t1 = Date.now();
+  var d2 = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  var e2 = Date.now() - t1;
+  Logger.log('Call 2: ' + d2.length + ' rows in ' + e2 + 'ms');
+
+  Logger.log('');
+  Logger.log('Interpretation:');
+  Logger.log('  Call 2 fast (<100ms): tier-1 in-memory is serving (same execution)');
+  Logger.log('  Both calls similar (~1500ms+): NO caching happening at all');
+  Logger.log('  Cannot yet distinguish tier-2 vs tier-1 in same execution.');
+}

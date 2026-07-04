@@ -639,6 +639,92 @@ function _debugSfdcColumns() {
   });
 }
 
+// ===========================================================================
+// TRENDS TAB ENDPOINTS (T1)
+// ===========================================================================
+
+/**
+ * @param {Object=} viewModeOpts
+ * @return {Object}
+ */
+function getTrendsTimeInRedData(viewModeOpts) {
+  return CoreLib.CoreTrends.getTimeInRedMetrics(
+    APP_CONFIG,
+    viewModeOpts || {},
+    CacheService.getScriptCache()
+  );
+}
+
+/**
+ * @return {Object}
+ */
+function getTrendsHealthTrajectoryData() {
+  return CoreLib.CoreTrends.getHealthTrajectory(
+    APP_CONFIG,
+    CacheService.getScriptCache()
+  );
+}
+
+/**
+ * @param {Object=} viewModeOpts
+ * @return {Object}
+ */
+function getTrendsHealthByPartnerData(viewModeOpts) {
+  return CoreLib.CoreTrends.getHealthByPartner(
+    APP_CONFIG,
+    viewModeOpts || {},
+    CacheService.getScriptCache()
+  );
+}
+
+/**
+ * @param {Object=} viewModeOpts
+ * @return {Object}
+ */
+function getTrendsHealthByDeliveryDirectorData(viewModeOpts) {
+  return CoreLib.CoreTrends.getHealthByDeliveryDirector(
+    APP_CONFIG,
+    viewModeOpts || {},
+    CacheService.getScriptCache()
+  );
+}
+
+/**
+ * @param {Object=} viewModeOpts
+ * @return {Object}
+ */
+function getTrendsTimeInStageData(viewModeOpts) {
+  return CoreLib.CoreTrends.getTimeInStageMetrics(
+    APP_CONFIG,
+    viewModeOpts || {},
+    CacheService.getScriptCache()
+  );
+}
+
+/**
+ * @param {Object=} viewModeOpts
+ * @return {Object}
+ */
+function getTrendsTimeToGoLiveData(viewModeOpts) {
+  return CoreLib.CoreTrends.getTimeToGoLiveMetrics(
+    APP_CONFIG,
+    viewModeOpts || {},
+    CacheService.getScriptCache()
+  );
+}
+
+/**
+ * @param {Object=} viewModeOpts
+ * @return {Object}
+ */
+function getTrendsGoLiveOutcomeData(viewModeOpts) {
+  return CoreLib.CoreTrends.getGoLiveOutcomePatterns(
+    APP_CONFIG,
+    viewModeOpts || {},
+    CacheService.getScriptCache()
+  );
+}
+
 function _debug_personalization() {
   // 1. What names are in AppUsers?
   var users = CoreLib.CoreUsers.getActiveUsers(APP_CONFIG);

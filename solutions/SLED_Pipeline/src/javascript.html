@@ -87,11 +87,13 @@ function activateTab(tabId) {
   document.querySelectorAll('.tab-panel').forEach(function(p) {
     p.classList.toggle('active', p.id === 'panel-' + tabId);
   });
-  if (tabId === 'overview') loadOverview();
+  if (tabId === 'overview')    loadOverview();
+  if (tabId === 'subServices') loadSubServices();
 }
 
 function refreshActiveTab() {
-  if (activeTabId === 'overview') loadOverview();
+  if (activeTabId === 'overview')    loadOverview();
+  if (activeTabId === 'subServices') loadSubServices();
 }
 
 // ===== OVERVIEW DATA LOAD =====
@@ -288,6 +290,246 @@ function arcPath(cx, cy, R, r, start, end, largeArc, color) {
     ' L' + ix1 + ',' + iy1 +
     ' A' + r + ',' + r + ' 0 ' + largeArc + ',0 ' + ix2 + ',' + iy2 +
     ' Z" fill="' + color + '"/>';
+}
+
+// ===== SUB+SERVICES STATE =====
+var ssData      = null;
+var ssSubView   = 'uncovered'; // default per spec
+
+// ===== SUB+SERVICES LOAD =====
+function loadSubServices() {
+  var container = document.getElementById('panel-subServices');
+  if (!container) return;
+  ssSubView = 'uncovered';
+  container.innerHTML = '<div class="report-loading"><div class="spinner-large"></div></div>';
+  var payload = {
+    scope:          state.scope,
+    studentFilter:  state.studentFilter,
+    pipelineStatus: state.pipelineStatus,
+    fiscalWindow:   state.fiscalWindow,
+    startWindow:    state.startWindow
+  };
+  google.script.run
+    .withSuccessHandler(renderSubServices)
+    .withFailureHandler(function(err) {
+      container.innerHTML = '<div class="empty-state">\u26a0 Error: ' +
+        esc(err.message || String(err)) + '</div>';
+    })
+    .getSubServicesSummary(payload);
+}
+
+// ===== SUB+SERVICES RENDER =====
+function renderSubServices(data) {
+  ssData = data;
+  var container = document.getElementById('panel-subServices');
+  if (!container) return;
+  var m = data.metrics;
+
+  var html = '';
+
+  // Bullets
+  html += '<div class="coffee-panel"><ul>';
+  (data.bullets || []).forEach(function(b) { html += '<li>' + esc(b) + '</li>'; });
+  html += '</ul></div>';
+
+  // KPI strip
+  html += '<div class="stats-grid">';
+  html += statCardHtml('Subscription ACV',           fmtM(m.totalSubsACV),         fmtN(m.totalSubsCount) + ' subscriptions');
+  html += statCardHtml('Attach Coverage',            m.coveredSubsPct + '%',        fmtN(m.coveredSubsCount) + ' of ' + fmtN(m.totalSubsCount) + ' covered');
+  html += statCardHtml('Uncovered Sub ACV',          fmtM(m.uncoveredSubsACV),      fmtN(m.uncoveredSubsCount) + ' uncovered subscriptions');
+  html += statCardHtml('Student Subs w/o Services',  fmtN(m.studentUncoveredCount), fmtM(m.studentUncoveredACV) + ' ACV');
+  html += '</div>';
+
+  // Charts row
+  html += '<div class="charts-row">';
+  html += '<div class="chart-card">' + buildCoverageByIndustryChart(data.charts.coverageByIndustry) + '</div>';
+  html += '<div class="chart-card">' + buildCoverageByStudentChart(data.charts.coverageByStudent)   + '</div>';
+  html += '</div>';
+
+  // In-tab sub-view control
+  html += '<div class="tab-subview">' +
+    '<span class="tab-subview-label">View:</span>' +
+    '<div class="seg-control" id="ss-subview">' +
+      '<button class="seg-btn" data-value="covered">Covered (' + fmtN(m.coveredSubsCount) + ')</button>' +
+      '<button class="seg-btn active" data-value="uncovered">Uncovered (' + fmtN(m.uncoveredSubsCount) + ')</button>' +
+    '</div></div>';
+
+  // Table container (renders uncovered by default)
+  html += '<div id="ss-table-container">' + buildSubServicesTableHtml(data.tables.uncovered, 'uncovered') + '</div>';
+
+  container.innerHTML = html;
+
+  // Wire the in-tab sub-view control after DOM is set
+  wireSegControl('ss-subview', function(v) {
+    ssSubView = v;
+    var tc = document.getElementById('ss-table-container');
+    if (tc && ssData) tc.innerHTML = buildSubServicesTableHtml(ssData.tables[v], v);
+  });
+}
+
+// ===== COVERAGE BY INDUSTRY CHART (SVG horizontal bars) =====
+function buildCoverageByIndustryChart(data) {
+  if (!data || !data.length) return '<div class="empty-state" style="min-height:180px">No data</div>';
+
+  var ROW_H = 30, PAD_T = 10, PAD_B = 8;
+  var W = 460, LBL_W = 160, BAR_X = 168, BAR_W = 190, TXT_X = 366;
+  var H = PAD_T + data.length * ROW_H + PAD_B;
+
+  var svg = '';
+  data.forEach(function(d, i) {
+    var y   = PAD_T + i * ROW_H;
+    var mid = y + ROW_H / 2 + 4;
+    var fillW = Math.round(d.coveredPct / 100 * BAR_W);
+    var color = ACCENT[i % ACCENT.length];
+
+    // Industry label (right-aligned)
+    svg += '<text x="' + (LBL_W - 4) + '" y="' + mid + '"' +
+      ' text-anchor="end" font-size="11" fill="#0F172A">' + esc(d.industryGroup) + '</text>';
+
+    // Bar track
+    svg += '<rect x="' + BAR_X + '" y="' + (mid - 5) + '" width="' + BAR_W +
+      '" height="10" rx="5" fill="#E5E7EB"/>';
+
+    // Bar fill
+    if (fillW > 0) {
+      svg += '<rect x="' + BAR_X + '" y="' + (mid - 5) + '" width="' + fillW +
+        '" height="10" rx="5" fill="' + color + '"/>';
+    }
+
+    // Count/pct label
+    svg += '<text x="' + TXT_X + '" y="' + mid + '"' +
+      ' text-anchor="start" font-size="11" fill="#475569">' +
+      esc(d.coveredCount + '/' + d.subsCount + ' (' + d.coveredPct + '%)') + '</text>';
+  });
+
+  return '<h3 class="chart-title">Coverage by Industry Group</h3>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%" role="img"' +
+    ' aria-label="Coverage by Industry Group">' + svg + '</svg>';
+}
+
+// ===== COVERAGE BY STUDENT CHART (SVG grouped bar) =====
+function buildCoverageByStudentChart(data) {
+  if (!data || !data.length) return '<div class="empty-state" style="min-height:180px">No data</div>';
+
+  var W = 340, H = 220;
+  var padL = 52, padR = 16, padT = 28, padB = 50;
+  var cW = W - padL - padR, cH = H - padT - padB;
+
+  var maxVal = 0;
+  data.forEach(function(d) {
+    maxVal = Math.max(maxVal, d.coveredACV + d.uncoveredACV);
+  });
+  if (!maxVal) maxVal = 1;
+
+  var groupW  = cW / data.length;
+  var barW    = Math.max(20, Math.floor(groupW * 0.38));
+  var gap     = 4;
+  var svg     = '';
+
+  // Gridlines
+  for (var g = 1; g <= 3; g++) {
+    var gy = padT + cH - Math.round(cH * g / 3);
+    svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (padL + cW) +
+      '" y2="' + gy + '" stroke="#E5E7EB" stroke-width="1"/>';
+    svg += '<text x="' + (padL - 4) + '" y="' + (gy + 4) + '"' +
+      ' text-anchor="end" font-size="9" fill="#94a3b8">' + esc(fmtM(maxVal * g / 3)) + '</text>';
+  }
+
+  data.forEach(function(d, i) {
+    var gx    = padL + i * groupW + (groupW - 2 * barW - gap) / 2;
+    var covH  = Math.max(2, Math.round((d.coveredACV / maxVal) * cH));
+    var uncH  = Math.max(2, Math.round((d.uncoveredACV / maxVal) * cH));
+
+    // Covered bar (green)
+    svg += '<rect x="' + gx + '" y="' + (padT + cH - covH) + '" width="' + barW +
+      '" height="' + covH + '" fill="#10B981" rx="3"/>';
+
+    // Uncovered bar (amber)
+    svg += '<rect x="' + (gx + barW + gap) + '" y="' + (padT + cH - uncH) + '" width="' + barW +
+      '" height="' + uncH + '" fill="#F59E0B" rx="3"/>';
+
+    // Group label
+    var cx = gx + barW + gap / 2;
+    svg += '<text x="' + cx + '" y="' + (padT + cH + 16) + '"' +
+      ' text-anchor="middle" font-size="11" fill="#0F172A">' + esc(d.segment) + '</text>';
+  });
+
+  // Legend
+  svg += '<rect x="' + padL + '" y="' + (H - 18) + '" width="10" height="10" rx="2" fill="#10B981"/>';
+  svg += '<text x="' + (padL + 13) + '" y="' + (H - 9) + '" font-size="10" fill="#475569">Covered</text>';
+  svg += '<rect x="' + (padL + 70) + '" y="' + (H - 18) + '" width="10" height="10" rx="2" fill="#F59E0B"/>';
+  svg += '<text x="' + (padL + 83) + '" y="' + (H - 9) + '" font-size="10" fill="#475569">Uncovered</text>';
+
+  return '<h3 class="chart-title">Coverage: Student vs Non-Student</h3>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-height:240px"' +
+    ' role="img" aria-label="Coverage by Student segment">' + svg + '</svg>';
+}
+
+// ===== SUB+SERVICES TABLE =====
+var SS_ROW_LIMIT = 500;
+
+function buildSubServicesTableHtml(rows, type) {
+  if (!rows || !rows.length) {
+    return '<div class="empty-state" style="min-height:100px">No ' + type + ' subscriptions in this view.</div>';
+  }
+
+  var limited  = rows.length > SS_ROW_LIMIT;
+  var display  = limited ? rows.slice(0, SS_ROW_LIMIT) : rows;
+  var isCovered = (type === 'covered');
+
+  var html = '<div class="data-table-wrap"><table class="data-table"><thead><tr>';
+
+  if (isCovered) {
+    html += th('Name') + th('Type') + th('Stage') + th('ACV', true) +
+            th('Industry') + th('Student') + th('Linked Service') + th('Svc Stage') + th('Partner');
+  } else {
+    html += th('Name') + th('Type') + th('Stage') + th('ACV', true) +
+            th('Industry') + th('Student') + th('PS Sub Region');
+  }
+  html += '</tr></thead><tbody>';
+
+  display.forEach(function(r) {
+    html += '<tr>';
+    html += '<td title="' + esc(r.name) + '">' + esc(r.name || '—') + '</td>';
+    html += '<td>' + esc(shortType(r.recordType)) + '</td>';
+    html += '<td>' + esc(r.stage || '—') + '</td>';
+    html += '<td class="td-num">' + esc(fmtM(r.amount)) + '</td>';
+    html += '<td title="' + esc(r.industryGroup) + '">' + esc(r.industryGroup || '—') + '</td>';
+    html += '<td>' + (r.isStudentSlice ? '<span class="status-badge covered">Student</span>' : '') + '</td>';
+
+    if (isCovered) {
+      if (r.relatedServicePresentInDataset) {
+        html += '<td title="' + esc(r.serviceName) + '">' + esc(r.serviceName || '—') + '</td>';
+        html += '<td>' + esc(r.serviceStage || '—') + '</td>';
+        html += '<td title="' + esc(r.servicePrimaryPartner) + '">' + esc(r.servicePrimaryPartner || '—') + '</td>';
+      } else {
+        html += '<td><span class="status-badge outside">Outside dataset</span></td>';
+        html += '<td>—</td><td>—</td>';
+      }
+    } else {
+      html += '<td>' + esc(r.psSubRegion || '—') + '</td>';
+    }
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  if (limited) {
+    html += '<div class="table-note">Showing first ' + fmtN(SS_ROW_LIMIT) + ' of ' +
+      fmtN(rows.length) + ' rows — apply filters to narrow the view.</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function th(label, isNum) {
+  return '<th' + (isNum ? ' style="text-align:right"' : '') + '>' + esc(label) + '</th>';
+}
+
+function shortType(t) {
+  if (!t) return '—';
+  if (t === 'Subscription Opportunity') return 'Subscription';
+  if (t === 'Renewals Opportunity')     return 'Renewals';
+  return t;
 }
 
 // ===== INIT =====

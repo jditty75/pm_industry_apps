@@ -38,6 +38,17 @@ function getOverviewSummary(payload) {
 }
 
 /**
+ * Returns the Subscription + Services summary for the given filter payload.
+ * Called by the client via google.script.run.getSubServicesSummary(payload).
+ * @param {Object} payload  Filter state from the client.
+ * @returns {Object}  { meta, metrics, bullets, charts, tables }
+ */
+function getSubServicesSummary(payload) {
+  Logger.log('getSubServicesSummary: ' + JSON.stringify(payload));
+  return Analytics_buildSubServicesSummary_(payload);
+}
+
+/**
  * Phase 1 diagnostic — kept for regression testing.
  * Run in the Apps Script editor to verify the data layer.
  * @returns {Object}

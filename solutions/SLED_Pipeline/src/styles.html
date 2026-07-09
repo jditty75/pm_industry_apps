@@ -326,4 +326,96 @@ body {
   .filter-bar { padding-left: var(--sp-4); padding-right: var(--sp-4); }
   .stats-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ===== PHASE 3 — SUB+SERVICES TAB ===== */
+
+/* Coverage mini-bar (horizontal progress bar) */
+.coverage-bar-track {
+  background:    var(--color-border);
+  border-radius: var(--radius-pill);
+  height:        8px;
+  flex:          1;
+  min-width:     60px;
+}
+.coverage-bar-fill {
+  background:    var(--color-success);
+  border-radius: var(--radius-pill);
+  height:        8px;
+  max-width:     100%;
+}
+
+/* Status badges */
+.status-badge {
+  display:       inline-flex;
+  align-items:   center;
+  padding:       2px 8px;
+  border-radius: var(--radius-pill);
+  font-size:     11px;
+  font-weight:   600;
+  white-space:   nowrap;
+}
+.status-badge.covered   { background: #D1FAE5; color: #065F46; }
+.status-badge.uncovered { background: #FEE2E2; color: #991B1B; }
+.status-badge.outside   { background: #FEF3C7; color: #92400E; }
+
+/* In-tab sub-view control */
+.tab-subview {
+  display:     flex;
+  align-items: center;
+  gap:         var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+.tab-subview-label {
+  font-size:   13px;
+  font-weight: 600;
+  color:       var(--color-text-muted);
+}
+
+/* Data table */
+.data-table-wrap {
+  overflow-x: auto;
+  border:     1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: var(--sp-4);
+}
+.data-table {
+  width:           100%;
+  border-collapse: collapse;
+  font-size:       13px;
+}
+.data-table thead th {
+  background:    var(--color-surface-alt);
+  color:         var(--color-text-muted);
+  font-size:     11px;
+  font-weight:   600;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  padding:       8px 12px;
+  border-bottom: 2px solid var(--color-border);
+  white-space:   nowrap;
+  text-align:    left;
+  position:      sticky;
+  top:           0;
+  z-index:       1;
+}
+.data-table tbody tr { border-bottom: 1px solid var(--color-border); }
+.data-table tbody tr:last-child { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--color-primary-tint); }
+.data-table tbody td {
+  padding:    8px 12px;
+  color:      var(--color-text);
+  max-width:  220px;
+  overflow:   hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+.data-table .td-num { text-align: right; font-variant-numeric: tabular-nums; }
+.table-note {
+  font-size:  12px;
+  color:      var(--color-text-muted);
+  padding:    var(--sp-2) var(--sp-3);
+  text-align: center;
+}
 </style>

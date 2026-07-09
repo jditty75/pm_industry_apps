@@ -1,0 +1,299 @@
+<script>
+'use strict';
+
+// ===== CONSTANTS =====
+var ACCENT = ['#FFB000','#F46821','#F43256','#F757C1','#29BEFD','#47E6C1','#A259EA','#78D64B','#6A7FDB','#777777'];
+
+// ===== FILTER STATE =====
+var state = {
+  scope:          'SLED',
+  studentFilter:  'all',
+  pipelineStatus: 'active',
+  fiscalWindow:   null,
+  startWindow:    { daysAhead: 60 }
+};
+var activeTabId = 'overview';
+
+// ===== CLIENT UTILITIES =====
+function fmtM(n) {
+  function addCommas(s) {
+    var parts = s.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.join('.');
+  }
+  if (n >= 1e9) return '$' + addCommas((n / 1e9).toFixed(1)) + 'B';
+  if (n >= 1e6) return '$' + addCommas((n / 1e6).toFixed(1)) + 'M';
+  if (n >= 1e3) return '$' + addCommas((n / 1e3).toFixed(1)) + 'K';
+  return '$' + Math.round(n);
+}
+
+function fmtN(n) {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ===== FILTER WIRING =====
+function wireSegControl(id, onChange) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.querySelectorAll('.seg-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      el.querySelectorAll('.seg-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      onChange(btn.getAttribute('data-value'));
+    });
+  });
+}
+
+function setupFilters() {
+  wireSegControl('filter-scope', function(v) {
+    state.scope = v;
+    refreshActiveTab();
+  });
+  wireSegControl('filter-student', function(v) {
+    state.studentFilter = v;
+    refreshActiveTab();
+  });
+  wireSegControl('filter-pipeline', function(v) {
+    state.pipelineStatus = v;
+    var startsGroup = document.getElementById('filter-starts-group');
+    if (startsGroup) startsGroup.style.display = (v === 'closedWon') ? 'flex' : 'none';
+    refreshActiveTab();
+  });
+  wireSegControl('filter-starts', function(v) {
+    state.startWindow = { daysAhead: parseInt(v, 10) || 60 };
+    refreshActiveTab();
+  });
+}
+
+// ===== TAB WIRING =====
+function setupTabs() {
+  document.querySelectorAll('.tab').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      activateTab(btn.getAttribute('data-tab'));
+    });
+  });
+}
+
+function activateTab(tabId) {
+  activeTabId = tabId;
+  document.querySelectorAll('.tab').forEach(function(b) {
+    b.classList.toggle('active', b.getAttribute('data-tab') === tabId);
+  });
+  document.querySelectorAll('.tab-panel').forEach(function(p) {
+    p.classList.toggle('active', p.id === 'panel-' + tabId);
+  });
+  if (tabId === 'overview') loadOverview();
+}
+
+function refreshActiveTab() {
+  if (activeTabId === 'overview') loadOverview();
+}
+
+// ===== OVERVIEW DATA LOAD =====
+function loadOverview() {
+  var container = document.getElementById('overview-content');
+  if (!container) return;
+  container.innerHTML = '<div class="report-loading"><div class="spinner-large"></div></div>';
+  var payload = {
+    scope:          state.scope,
+    studentFilter:  state.studentFilter,
+    pipelineStatus: state.pipelineStatus,
+    fiscalWindow:   state.fiscalWindow,
+    startWindow:    state.startWindow
+  };
+  google.script.run
+    .withSuccessHandler(renderOverview)
+    .withFailureHandler(function(err) {
+      container.innerHTML = '<div class="empty-state">\u26a0 Error: ' +
+        esc(err.message || String(err)) + '</div>';
+    })
+    .getOverviewSummary(payload);
+}
+
+// ===== OVERVIEW RENDER =====
+function renderOverview(data) {
+  var container = document.getElementById('overview-content');
+  if (!container) return;
+  var m  = data.metrics;
+  var ps = data.meta.pipelineStatus;
+
+  var countLabel = ps === 'closedWon' ? 'Won Opportunities' :
+                   ps === 'active'    ? 'Active Opportunities' : 'Opportunities';
+  var countVal   = ps === 'closedWon' ? m.wonOpps :
+                   ps === 'active'    ? m.activeOpps : m.totalOpps;
+  var acvLabel   = ps === 'closedWon' ? 'Won ACV' :
+                   ps === 'active'    ? 'Active ACV' : 'Total ACV';
+
+  var html = '';
+
+  // Morning-coffee bullets
+  html += '<div class="coffee-panel"><ul>';
+  (data.bullets || []).forEach(function(b) { html += '<li>' + esc(b) + '</li>'; });
+  html += '</ul></div>';
+
+  // KPI tiles
+  html += '<div class="stats-grid">';
+  html += statCardHtml(countLabel, fmtN(countVal), null);
+  html += statCardHtml(acvLabel,   fmtM(m.totalACV), null);
+  html += statCardHtml('Services ACV',      fmtM(m.servicesACV),     m.servicesSharePct + '% of total');
+  html += statCardHtml('Subscription ACV',  fmtM(m.subscriptionACV), m.subsSharePct     + '% of total');
+  if (m.studentOpps > 0) {
+    html += statCardHtml('Student Opportunities', fmtN(m.studentOpps), m.studentSharePct + '% of ACV');
+  }
+  html += '</div>';
+
+  // Charts
+  html += '<div class="charts-row">';
+  html += '<div class="chart-card">' + buildBarChart(data.charts.acvByStage)          + '</div>';
+  html += '<div class="chart-card">' + buildDonutChart(data.charts.acvByIndustryGroup) + '</div>';
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+function statCardHtml(label, value, sub) {
+  return '<div class="stat-card">' +
+    '<div class="stat-label">' + esc(label) + '</div>' +
+    '<div class="stat-value">' + esc(value) + '</div>' +
+    (sub ? '<div class="stat-sub">' + esc(sub) + '</div>' : '') +
+    '</div>';
+}
+
+// ===== SVG BAR CHART (ACV by Stage) =====
+function buildBarChart(data) {
+  if (!data || !data.length) {
+    return '<div class="empty-state" style="min-height:180px">No stage data</div>';
+  }
+
+  var W = 480, H = 300;
+  var padL = 52, padR = 16, padT = 28, padB = 82;
+  var cW = W - padL - padR;
+  var cH = H - padT - padB;
+
+  var maxACV = Math.max.apply(null, data.map(function(d) { return d.acv; }));
+  if (!maxACV) maxACV = 1;
+
+  var barSlot = cW / data.length;
+  var barW    = Math.max(6, Math.floor(barSlot * 0.60));
+  var svg     = '';
+
+  // Soft horizontal gridlines + y-axis labels (3 levels)
+  for (var g = 1; g <= 3; g++) {
+    var gy = padT + cH - Math.round(cH * g / 3);
+    svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (padL + cW) +
+      '" y2="' + gy + '" stroke="#E5E7EB" stroke-width="1"/>';
+    svg += '<text x="' + (padL - 4) + '" y="' + (gy + 4) + '"' +
+      ' text-anchor="end" font-size="9" fill="#94a3b8">' + esc(fmtM(maxACV * g / 3)) + '</text>';
+  }
+
+  data.forEach(function(d, i) {
+    var barH  = Math.max(2, Math.round((d.acv / maxACV) * cH));
+    var x     = padL + i * barSlot + (barSlot - barW) / 2;
+    var y     = padT + cH - barH;
+    var color = ACCENT[i % ACCENT.length];
+    var cx    = x + barW / 2;
+
+    svg += '<rect x="' + x + '" y="' + y + '" width="' + barW +
+      '" height="' + barH + '" fill="' + color + '" rx="3"/>';
+
+    // Value label above bar (skip when bar is tiny to avoid overlap)
+    if (barH > 16) {
+      svg += '<text x="' + cx + '" y="' + (y - 4) + '"' +
+        ' text-anchor="middle" font-size="9" fill="#475569">' + esc(fmtM(d.acv)) + '</text>';
+    }
+
+    // Stage label rotated -40° at bottom
+    var lx = cx;
+    var ly = padT + cH + 10;
+    svg += '<text x="' + lx + '" y="' + ly + '"' +
+      ' text-anchor="end" font-size="10" fill="#475569"' +
+      ' transform="rotate(-40,' + lx + ',' + ly + ')">' + esc(d.stage) + '</text>';
+  });
+
+  return '<h3 class="chart-title">ACV by Stage</h3>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-height:300px"' +
+    ' role="img" aria-label="ACV by Stage bar chart">' + svg + '</svg>';
+}
+
+// ===== SVG DONUT CHART (ACV by Industry Group) =====
+function buildDonutChart(data) {
+  if (!data || !data.length) {
+    return '<div class="empty-state" style="min-height:180px">No industry data</div>';
+  }
+
+  var totalACV = data.reduce(function(s, d) { return s + d.acv; }, 0);
+  if (!totalACV) return '<div class="empty-state" style="min-height:180px">No ACV data</div>';
+
+  var CX = 100, CY = 100, R = 82, r = 48;
+  var paths = '';
+  var startAngle = -Math.PI / 2;
+
+  data.forEach(function(d, i) {
+    var sweep    = (d.acv / totalACV) * 2 * Math.PI;
+    var endAngle = startAngle + sweep;
+    var color    = ACCENT[i % ACCENT.length];
+
+    // Guard: near-full circle — split into two half-arcs
+    if (Math.abs(sweep - 2 * Math.PI) < 0.0001) {
+      var midAngle = startAngle + Math.PI;
+      paths += arcPath(CX, CY, R, r, startAngle, midAngle, 0, color);
+      paths += arcPath(CX, CY, R, r, midAngle,   endAngle, 0, color);
+    } else {
+      var largeArc = sweep > Math.PI ? 1 : 0;
+      paths += arcPath(CX, CY, R, r, startAngle, endAngle, largeArc, color);
+    }
+    startAngle = endAngle;
+  });
+
+  // Center label
+  var center =
+    '<text x="' + CX + '" y="' + (CY - 7) + '" text-anchor="middle"' +
+    ' font-size="14" font-weight="700" fill="#0F172A">' + esc(fmtM(totalACV)) + '</text>' +
+    '<text x="' + CX + '" y="' + (CY + 11) + '" text-anchor="middle"' +
+    ' font-size="10" fill="#475569">Total ACV</text>';
+
+  var svgEl = '<svg viewBox="0 0 200 200" style="width:170px;flex-shrink:0"' +
+    ' role="img" aria-label="ACV by Industry Group donut chart">' +
+    paths + center + '</svg>';
+
+  // Legend
+  var legend = '<div class="chart-legend">';
+  data.forEach(function(d, i) {
+    var pct = Math.round(d.acv / totalACV * 100);
+    legend += '<div class="legend-item">' +
+      '<span class="legend-dot" style="background:' + ACCENT[i % ACCENT.length] + '"></span>' +
+      '<span class="legend-label" title="' + esc(d.industryGroup) + '">' + esc(d.industryGroup) + '</span>' +
+      '<span class="legend-val">' + esc(fmtM(d.acv)) + '&nbsp;(' + pct + '%)</span>' +
+      '</div>';
+  });
+  legend += '</div>';
+
+  return '<h3 class="chart-title">ACV by Industry Group</h3>' +
+    '<div class="donut-wrap">' + svgEl + legend + '</div>';
+}
+
+/** Builds a single donut arc path element. */
+function arcPath(cx, cy, R, r, start, end, largeArc, color) {
+  var x1 = cx + R * Math.cos(start),  y1 = cy + R * Math.sin(start);
+  var x2 = cx + R * Math.cos(end),    y2 = cy + R * Math.sin(end);
+  var ix1 = cx + r * Math.cos(end),   iy1 = cy + r * Math.sin(end);
+  var ix2 = cx + r * Math.cos(start), iy2 = cy + r * Math.sin(start);
+  return '<path d="M' + x1 + ',' + y1 +
+    ' A' + R + ',' + R + ' 0 ' + largeArc + ',1 ' + x2 + ',' + y2 +
+    ' L' + ix1 + ',' + iy1 +
+    ' A' + r + ',' + r + ' 0 ' + largeArc + ',0 ' + ix2 + ',' + iy2 +
+    ' Z" fill="' + color + '"/>';
+}
+
+// ===== INIT =====
+document.addEventListener('DOMContentLoaded', function() {
+  setupFilters();
+  setupTabs();
+  loadOverview();
+});
+</script>

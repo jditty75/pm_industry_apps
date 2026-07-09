@@ -1,6 +1,7 @@
 /**
  * Analytics.gs — Aggregation functions for SLED Pipeline Analysis.
  * Phase 2: shared filter engine + Overview summary builder.
+ * Phase 3: service index + Subscription + Services summary builder.
  * All functions read from Data_getEffectiveRows_() — never from the sheet directly.
  */
 
@@ -199,6 +200,233 @@ function buildBullets_(scope, ps, daysAhead, m, acvByIndustryGroup, filtered, st
     bullets.push(
       fmtN(startsCount) + ' Closed/Won ' + scopeLabel + ' opportunities have estimated project starts in the next ' +
       daysAhead + ' days.'
+    );
+  }
+
+  return bullets;
+}
+
+// =============================================================================
+// PHASE 3 — Subscription + Services
+// =============================================================================
+
+/**
+ * Builds a { id → row } index over all services-like rows (unfiltered).
+ * Used to resolve linked-service detail for covered subscription rows.
+ * Built over ALL rows (not the filtered set) so cross-scope links resolve.
+ * @param {Array<Object>} rows  Full result of Data_getEffectiveRows_().
+ * @returns {Object}
+ */
+function buildServiceIndex_(rows) {
+  var idx = {};
+  rows.forEach(function(r) {
+    if (r.isServicesLike && r.id) idx[r.id] = r;
+  });
+  return idx;
+}
+
+/**
+ * Builds the complete Subscription + Services summary from a filter payload.
+ * Returns { meta, metrics, bullets, charts, tables }.
+ * @param {Object} payload  Client filter payload (see applyCommonFilters_ for shape).
+ * @returns {Object}
+ */
+function Analytics_buildSubServicesSummary_(payload) {
+  Logger.log('Analytics_buildSubServicesSummary_: start scope=' +
+    (payload && payload.scope) + ' ps=' + (payload && payload.pipelineStatus));
+
+  var rows         = Data_getEffectiveRows_();
+  var filtered     = applyCommonFilters_(rows, payload);
+  var serviceIndex = buildServiceIndex_(rows); // ALL rows — cross-scope resolution
+
+  var scope = (payload && payload.scope)          || 'SLED';
+  var sf    = (payload && payload.studentFilter)  || 'all';
+  var ps    = (payload && payload.pipelineStatus) || 'active';
+
+  // ---- Subscription-like subset (numerator population for coverage) ----
+  var subs      = filtered.filter(function(r) { return r.isSubscriptionLike;     });
+  var covered   = subs.filter(function(r)    { return r.hasRelatedServiceFlag;   });
+  var uncovered = subs.filter(function(r)    { return !r.hasRelatedServiceFlag;  });
+
+  // ---- Metrics ----
+  var totalSubsCount    = subs.length;
+  var totalSubsACV      = subs.reduce(function(s, r)      { return s + r.amount; }, 0);
+  var coveredSubsCount  = covered.length;
+  var coveredSubsACV    = covered.reduce(function(s, r)   { return s + r.amount; }, 0);
+  var uncoveredSubsCount = uncovered.length;
+  var uncoveredSubsACV  = uncovered.reduce(function(s, r) { return s + r.amount; }, 0);
+
+  var relatedPresentCount = covered.filter(function(r) {
+    return r.relatedServiceId && serviceIndex[r.relatedServiceId] !== undefined;
+  }).length;
+
+  var studentUncovered    = uncovered.filter(function(r)  { return r.isStudentSlice; });
+  var studentUncoveredACV = studentUncovered.reduce(function(s, r) { return s + r.amount; }, 0);
+
+  var metrics = {
+    totalSubsCount:       totalSubsCount,
+    totalSubsACV:         totalSubsACV,
+    coveredSubsCount:     coveredSubsCount,
+    coveredSubsACV:       coveredSubsACV,
+    coveredSubsPct:       Utils_pct_(coveredSubsCount, totalSubsCount),
+    uncoveredSubsCount:   uncoveredSubsCount,
+    uncoveredSubsACV:     uncoveredSubsACV,
+    relatedPresentCount:  relatedPresentCount,
+    studentUncoveredCount: studentUncovered.length,
+    studentUncoveredACV:  studentUncoveredACV
+  };
+
+  // ---- Coverage by Industry ----
+  var industryMap = {};
+  subs.forEach(function(r) {
+    var ig = r.industryGroup;
+    if (!industryMap[ig]) industryMap[ig] = { subsCount: 0, coveredCount: 0, uncoveredACV: 0 };
+    industryMap[ig].subsCount++;
+    if (r.hasRelatedServiceFlag) {
+      industryMap[ig].coveredCount++;
+    } else {
+      industryMap[ig].uncoveredACV += r.amount;
+    }
+  });
+  var coverageByIndustry = Object.keys(industryMap).map(function(ig) {
+    var d = industryMap[ig];
+    return {
+      industryGroup: ig,
+      subsCount:     d.subsCount,
+      coveredCount:  d.coveredCount,
+      coveredPct:    Utils_pct_(d.coveredCount, d.subsCount),
+      uncoveredACV:  d.uncoveredACV
+    };
+  }).sort(function(a, b) { return b.subsCount - a.subsCount; });
+
+  // ---- Coverage by Student segment ----
+  function segSplit(arr) {
+    return {
+      coveredACV:   arr.filter(function(r) { return  r.hasRelatedServiceFlag; }).reduce(function(s, r) { return s + r.amount; }, 0),
+      uncoveredACV: arr.filter(function(r) { return !r.hasRelatedServiceFlag; }).reduce(function(s, r) { return s + r.amount; }, 0)
+    };
+  }
+  var stuSubs    = subs.filter(function(r) { return  r.isStudentSlice; });
+  var nonStuSubs = subs.filter(function(r) { return !r.isStudentSlice; });
+  var stu    = segSplit(stuSubs);
+  var nonStu = segSplit(nonStuSubs);
+  var coverageByStudent = [
+    { segment: 'Student',     coveredACV: stu.coveredACV,    uncoveredACV: stu.uncoveredACV    },
+    { segment: 'Non-Student', coveredACV: nonStu.coveredACV, uncoveredACV: nonStu.uncoveredACV }
+  ];
+
+  // ---- Tables ----
+  function subRow_(r) {
+    return {
+      id:            r.id,
+      name:          r.name,
+      recordType:    r.recordType,
+      stage:         r.stage,
+      amount:        r.amount,
+      fiscalPeriod:  r.fiscalPeriod,
+      industryGroup: r.industryGroup,
+      isStudentSlice: r.isStudentSlice,
+      ownerName:     r.ownerName,
+      psSubRegion:   r.psSubRegion
+    };
+  }
+
+  // Covered table — sorted by amount desc, with linked-service detail resolved
+  var coveredTable = covered.slice().sort(function(a, b) { return b.amount - a.amount; })
+    .map(function(r) {
+      var row = subRow_(r);
+      row.relatedServiceId = r.relatedServiceId;
+      var svc = r.relatedServiceId ? serviceIndex[r.relatedServiceId] : null;
+      if (svc) {
+        row.relatedServicePresentInDataset = true;
+        row.serviceName              = svc.name;
+        row.serviceStage             = svc.stage;
+        row.servicePrimaryPartner    = svc.primaryPartner;
+        row.serviceDeploymentApproach = svc.deploymentApproach;
+        row.serviceDeploymentPhase   = svc.deploymentPhase;
+      } else {
+        row.relatedServicePresentInDataset = false;
+        row.serviceOutsideDataset          = true;
+      }
+      return row;
+    });
+
+  // Uncovered table — sorted by amount desc
+  var uncoveredTable = uncovered.slice().sort(function(a, b) { return b.amount - a.amount; })
+    .map(subRow_);
+
+  // ---- Bullets ----
+  var bullets = buildSubServicesBullets_(scope, ps, metrics, coverageByIndustry);
+
+  Logger.log('Analytics_buildSubServicesSummary_: totalSubs=' + totalSubsCount +
+    ' covered=' + coveredSubsCount + ' uncovered=' + uncoveredSubsCount);
+
+  return {
+    meta: {
+      scope:          scope,
+      studentFilter:  sf,
+      pipelineStatus: ps,
+      generatedAt:    new Date().toISOString()
+    },
+    metrics: metrics,
+    bullets: bullets,
+    charts: {
+      coverageByIndustry: coverageByIndustry,
+      coverageByStudent:  coverageByStudent
+    },
+    tables: {
+      covered:   coveredTable,
+      uncovered: uncoveredTable
+    }
+  };
+}
+
+/**
+ * Builds the 3–4 narrative bullet strings for the Sub+Services panel.
+ * @private
+ */
+function buildSubServicesBullets_(scope, ps, m, coverageByIndustry) {
+  var scopeLabel = scope === 'SLG' ? 'SLG' : (scope === 'HENP' ? 'HENP' : 'SLED');
+  var psLabel    = ps === 'active' ? 'active' : (ps === 'closedWon' ? 'Closed/Won' : '');
+
+  function fmtN(n) {
+    return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  var bullets = [];
+
+  // Bullet 1 — total subs + ACV
+  bullets.push(
+    scopeLabel + (psLabel ? ' ' + psLabel : '') + ' subscriptions: ' +
+    fmtN(m.totalSubsCount) + ' opportunities totaling ' +
+    Utils_fmtMoney_(m.totalSubsACV) + ' ACV.'
+  );
+
+  // Bullet 2 — coverage + uncovered
+  bullets.push(
+    'Services attach coverage: ' + fmtN(m.coveredSubsCount) + ' of ' +
+    fmtN(m.totalSubsCount) + ' (' + m.coveredSubsPct + '%) have a linked services opportunity. ' +
+    fmtN(m.uncoveredSubsCount) + ' remain uncovered (' + Utils_fmtMoney_(m.uncoveredSubsACV) + ' ACV).'
+  );
+
+  // Bullet 3 — highest / lowest coverage industry
+  if (coverageByIndustry.length >= 2) {
+    var sorted  = coverageByIndustry.slice().sort(function(a, b) { return b.coveredPct - a.coveredPct; });
+    var highest = sorted[0];
+    var lowest  = sorted[sorted.length - 1];
+    bullets.push(
+      'Highest attach: ' + highest.industryGroup + ' at ' + highest.coveredPct + '% (' +
+      fmtN(highest.coveredCount) + '/' + fmtN(highest.subsCount) + '). ' +
+      'Lowest: ' + lowest.industryGroup + ' at ' + lowest.coveredPct + '% (' +
+      fmtN(lowest.coveredCount) + '/' + fmtN(lowest.subsCount) + ').'
+    );
+  }
+
+  // Bullet 4 — student uncovered
+  if (m.studentUncoveredCount > 0) {
+    bullets.push(
+      'Student subscriptions without services: ' + fmtN(m.studentUncoveredCount) +
+      ' (' + Utils_fmtMoney_(m.studentUncoveredACV) + ' ACV).'
     );
   }
 

@@ -19,9 +19,13 @@
 // ============================================================
 
 function doGet() {
+  // Desktop-first viewport (weekly-forecast-migration §9/§11): the app is no
+  // longer mobile-responsive, so we drop the mobile-oriented
+  // width=device-width directive and pin a desktop-sized initial layout
+  // viewport instead.
   return HtmlService.createTemplateFromFile('Index').evaluate()
     .setTitle('SLG Delivery Capacity Planner')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .addMetaTag('viewport', 'width=1280, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -400,6 +404,109 @@ function api_getResourceDetail(params) {
 }
 
 // ------------------------------------------------------------
+// Weekly Forecast Table (weekly-forecast-migration §8)
+//
+// Powers the redesigned Dashboard's weekly table. Built on
+// computeWeeklyForecast_ (Engine.gs) + the same buildServerParams_-style
+// filter pass-through as api_getDashboard. Visible weeks are DERIVED from
+// planning_window_months (§4.6, locked) rather than a separate weeks
+// setting, to minimize config churn.
+// ------------------------------------------------------------
+
+/**
+ * Derive the visible week set from the planning-window-months setting
+ * (locked derivation, §4.6): weeks whose week_start falls within
+ * [first of current month, first of current month + windowMonths).
+ * Mirrors buildPlanningWindow_'s month-window math (Engine.gs).
+ * @param {Array<{week_start:Date}>} weeks sorted calendar weeks (readCalendar_().weeks)
+ * @param {number} windowMonths
+ * @return {Array} the subset of weeks within the window, in order
+ */
+function _deriveVisibleWeeks_(weeks, windowMonths) {
+  const now = new Date();
+  const winStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const winEnd = new Date(now.getFullYear(), now.getMonth() + windowMonths, 1);
+  return (weeks || []).filter(w => w.week_start >= winStart && w.week_start < winEnd);
+}
+
+/**
+ * @param {Object} params same shape as api_getDashboard's params
+ * @return {{
+ *   weeks: Array<{weekKey:string, weekStart:string, label:string, fiscalQuarter:string, fiscalQuarterKey:string}>,
+ *   rows: Array<{worker:string, level:string, jobProfile:string, manager:string, managersManager:string,
+ *                weeklyTarget:number,
+ *                workerWeekly: Array<{weekKey:string, hours:number, util:number, icpTarget:number}>,
+ *                projects: Array<{project:string, weekly: Array<{weekKey:string, hours:number}>}>}>,
+ *   planningWindowWeeks: number
+ * }}
+ */
+function api_getForecastTable(params) {
+  _requireAuthorized_();
+  params = params || {};
+
+  const forecast = computeWeeklyForecast_({
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  });
+
+  const windowMonths = (typeof readPlanningWindowMonths_ === 'function')
+    ? readPlanningWindowMonths_() : 6;
+  const visibleWeeks = _deriveVisibleWeeks_(forecast.weeks, windowMonths);
+
+  const weeksOut = visibleWeeks.map(w => ({
+    weekKey:          String(w.week_key),
+    weekStart:        _toIso_(w.week_start),
+    label:            Utilities.formatDate(w.week_start, Session.getScriptTimeZone() || 'Etc/UTC', 'MM/dd/yy'),
+    fiscalQuarter:    String(w.fiscal_quarter || ''),
+    fiscalQuarterKey: fiscalQuarterKey_(w.week_start)
+  }));
+
+  const icp = forecast.icp || {};
+
+  const rowsOut = forecast.workers.map(w => {
+    const icpTarget = (icp[w.icpRole] && isFinite(icp[w.icpRole].target)) ? icp[w.icpRole].target : 0.70;
+    const workerWeekly = visibleWeeks.map(vw => {
+      const hours = Number(w.workerWeekly[vw.week_key] || 0);
+      const util = w.weeklyTarget > 0 ? (hours / w.weeklyTarget) : 0;
+      return {
+        weekKey:   String(vw.week_key),
+        hours:     Number(hours) || 0,
+        util:      Number(util) || 0,
+        icpTarget: Number(icpTarget) || 0
+      };
+    });
+    const projects = Object.keys(w.projects).sort().map(proj => ({
+      project: String(proj),
+      weekly: visibleWeeks.map(vw => ({
+        weekKey: String(vw.week_key),
+        hours:   Number(w.projects[proj][vw.week_key] || 0)
+      }))
+    }));
+    return {
+      worker:          String(w.resource),
+      level:           String(w.level || ''),
+      jobProfile:      String(w.jobProfile || ''),
+      manager:         String(w.managerOrg || ''),
+      managersManager: String(w.managersManager || ''),
+      weeklyTarget:    Number(w.weeklyTarget) || 0,
+      workerWeekly:    workerWeekly,
+      projects:        projects
+    };
+  });
+
+  return {
+    weeks:               weeksOut,
+    rows:                rowsOut,
+    planningWindowWeeks: visibleWeeks.length
+  };
+}
+
+// ------------------------------------------------------------
 // Reporting & Metrics summary
 //
 // Practice-based attribution for External rows is enabled here.
@@ -446,15 +553,16 @@ function api_getReportingSummary(params) {
     windowKeys[key] = true;
   }
 
+  // Fiscal quarter filter (weekly-forecast-migration §4/§13): params.quarter
+  // is now a fiscal quarter key ('FY<yy>-Q<n>', e.g. 'FY27-Q2'), matching
+  // fiscalQuarterKey_ / api_getReference's quarters list / the client's
+  // #quarterFilter. Replaces the old calendar Math.floor(month/3) mapping.
   let quarterKeys = null;
   if (params.quarter) {
     quarterKeys = {};
     Object.keys(windowKeys).forEach(mk => {
-      const parts = mk.split('-');
-      const y = Number(parts[0]);
-      const m = Number(parts[1]);
-      const q = 'Q' + (Math.floor((m - 1) / 3) + 1);
-      if (y + '-' + q === params.quarter) quarterKeys[mk] = true;
+      const d = monthKeyToDate_(mk);
+      if (fiscalQuarterKey_(d) === params.quarter) quarterKeys[mk] = true;
     });
     if (!Object.keys(quarterKeys).length) quarterKeys = null;
   }
@@ -531,6 +639,11 @@ function api_getReportingSummary(params) {
   } catch (e) { settings = {}; }
   const hideAllExternal = String(settings['hide_all_external'] || '')
     .trim().toLowerCase() === 'true';
+  // weekly-forecast-migration: PSA rows and assignment expansion are now
+  // weekly-grain; roll each week's hours up to the calendar month(s) it
+  // overlaps via splitWeekAcrossMonths_ (proportional, sum-exact) so the
+  // rest of this reporting function is unchanged (out of scope for redesign).
+  const splitBasis = String(settings.week_month_split_basis || 'calendar');
 
   function effectiveInScope_(wc) {
     if (hideAllExternal && String(wc || '').indexOf('External_') === 0) return false;
@@ -648,11 +761,18 @@ function api_getReportingSummary(params) {
   }
 
   // ----- PSA rows -----
+  // weekly-forecast-migration: r.hours is now a WEEK's hours (r.week_start).
+  // Roll each row's hours up to whichever calendar month(s) the window
+  // check cares about via splitWeekAcrossMonths_, then sum the in-window
+  // portion into hWindow. All downstream accumulators below are flat sums
+  // (not month-keyed), so a single hWindow-scaled pass reproduces the exact
+  // same shape as before while reconciling exactly against weekly totals.
   rows.forEach(r => {
     const h = Number(r.hours) || 0;
-    if (!h) return;
-    const mk = monthKeyOf_(r.period_start);
-    if (!inWindow_(mk)) return;
+    if (!h || !r.week_start) return;
+    const parts = splitWeekAcrossMonths_(r.week_start, h, splitBasis);
+    const hWindow = parts.reduce((s, p) => s + (inWindow_(p.monthKey) ? p.hours : 0), 0);
+    if (!hWindow) return;
     if (excluded.has(r.resource_name)) return;
 
     const mgrCheck = _rowPassesManagerFilter_(r);
@@ -660,17 +780,17 @@ function api_getReportingSummary(params) {
 
     const wc = String(r.worker_class || '');
     if (!wc) {
-      blankClassWorkers[r.resource_name] = (blankClassWorkers[r.resource_name] || 0) + h;
+      blankClassWorkers[r.resource_name] = (blankClassWorkers[r.resource_name] || 0) + hWindow;
     }
 
     if (!effectiveInScope_(wc)) {
-      scopeFilteredOutHours += h;
+      scopeFilteredOutHours += hWindow;
       return;
     }
 
-    if (wcBucket[wc] !== undefined) { wcBucket[wc] += h; }
+    if (wcBucket[wc] !== undefined) { wcBucket[wc] += hWindow; }
     if (mgrCheck.viaPractice && wc.indexOf('External_') === 0) {
-      externalHoursByPracticeOwnership += h;
+      externalHoursByPracticeOwnership += hWindow;
     }
 
     // Drop 5: use enriched team_label if present, otherwise resolve via unified resolver.
@@ -680,7 +800,7 @@ function api_getReportingSummary(params) {
         : _classifyTeam_(r, rtMap));
     if (teamKey === 'Unclassified') {
       const sig = (r.role_category || '(blank)') + ' | ' + (r.resource_type || '(blank)');
-      unmappedSamples[sig] = (unmappedSamples[sig] || 0) + h;
+      unmappedSamples[sig] = (unmappedSamples[sig] || 0) + hWindow;
     }
     const acct = String(r.account_name || '') || '(No account)';
     const proj = String(r.project_name || '') || '(No project)';
@@ -688,19 +808,19 @@ function api_getReportingSummary(params) {
     const jobProf = String(r.job_profile || 'Unspecified');
     const roleCapKey = roleForCapacity_(r);
 
-    byTeamHours[teamKey] = (byTeamHours[teamKey] || 0) + h;
-    byAcctHours[acct] = (byAcctHours[acct] || 0) + h;
-    byRoleCategoryHrs[roleCat] = (byRoleCategoryHrs[roleCat] || 0) + h;
-    byJobProfileHrs[jobProf] = (byJobProfileHrs[jobProf] || 0) + h;
+    byTeamHours[teamKey] = (byTeamHours[teamKey] || 0) + hWindow;
+    byAcctHours[acct] = (byAcctHours[acct] || 0) + hWindow;
+    byRoleCategoryHrs[roleCat] = (byRoleCategoryHrs[roleCat] || 0) + hWindow;
+    byJobProfileHrs[jobProf] = (byJobProfileHrs[jobProf] || 0) + hWindow;
 
-    addBreakdown_(teamRC, teamKey, roleCat, h);
-    addBreakdown_(teamAccts, teamKey, acct, h);
-    addBreakdown_(teamProjs, teamKey, acct + '||' + proj, h);
-    addBreakdown_(teamWC, teamKey, wc, h);
+    addBreakdown_(teamRC, teamKey, roleCat, hWindow);
+    addBreakdown_(teamAccts, teamKey, acct, hWindow);
+    addBreakdown_(teamProjs, teamKey, acct + '||' + proj, hWindow);
+    addBreakdown_(teamWC, teamKey, wc, hWindow);
 
-    addBreakdown_(acctRoles, acct, roleCat, h);
-    addBreakdown_(acctProjs, acct, proj, h);
-    addBreakdown_(acctWC, acct, wc, h);
+    addBreakdown_(acctRoles, acct, roleCat, hWindow);
+    addBreakdown_(acctProjs, acct, proj, hWindow);
+    addBreakdown_(acctWC, acct, wc, hWindow);
 
     distinctWorkers[r.resource_name] = true;
     if (!distinctCapacity[r.resource_name]) {
@@ -798,17 +918,27 @@ function api_getReportingSummary(params) {
          (!scenarioId || a.scenario_id === scenarioId));
       if (!include) return;
 
-      let monthly = [];
+      let weekly = [];
       try {
-        if (typeof expandAssignmentToMonthly_ === 'function') {
-          monthly = expandAssignmentToMonthly_(a, calendar) || [];
-        }
-      } catch (e) { monthly = []; }
+        weekly = expandAssignmentToWeekly_(a, calendar) || [];
+      } catch (e) { weekly = []; }
+
+      // weekly-forecast-migration: roll each expanded week up to the
+      // calendar month(s) it overlaps before applying the inWindow_ check,
+      // same proportional-split pattern as the PSA rows loop above.
+      const monthly = [];
+      weekly.forEach(w => {
+        const wHrs = Number(w.hours) || 0;
+        if (!wHrs) return;
+        splitWeekAcrossMonths_(w.week_start, wHrs, splitBasis).forEach(m => {
+          monthly.push(m);
+        });
+      });
 
       monthly.forEach(m => {
         const hrs = Number(m.hours) || 0;
         if (!hrs) return;
-        const mk = monthKeyOf_(m.period_start);
+        const mk = m.monthKey;
         if (!inWindow_(mk)) return;
 
         if (!effectiveInScope_(wc)) {
@@ -1151,11 +1281,14 @@ function api_getReference() {
     )).sort();
   }
 
+  // Fiscal quarters (weekly-forecast-migration §4/§13): Workday fiscal year,
+  // Feb-anchored (fiscalQuarterKey_ format 'FY<yy>-Q<n>', e.g. 'FY27-Q2').
+  // Replaces the old calendar-quarter 'YYYY-Qn' generation.
   const quarters = {};
   const now = new Date();
   for (let i = 0; i < 6; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    quarters[d.getFullYear() + '-Q' + (Math.floor(d.getMonth() / 3) + 1)] = true;
+    quarters[fiscalQuarterKey_(d)] = true;
   }
   const quartersSorted = Object.keys(quarters).sort();
 
@@ -1514,13 +1647,21 @@ function api_getWorkerBillableByAccount(params) {
   if (!resourceName || !monthKey) return { resource_name: resourceName, monthKey: monthKey, totalHours: 0, rows: [] };
 
   // PSA hours by account for this worker × month.
+  // weekly-forecast-migration: alloc rows are weekly (week_start/hours);
+  // roll each row up to the requested calendar month via
+  // splitWeekAcrossMonths_ and take only the portion attributable to it.
   const alloc = cachedRead_(ALLOC_NORM);
+  const _wbaSettings = readSettings_();
+  const _wbaSplitBasis = String(_wbaSettings.week_month_split_basis || 'calendar');
   const psaByAccount = {};
   alloc.forEach(function(a) {
     if (a.resource_name !== resourceName) return;
     if (String(a.allocation_type || '') !== 'Billable') return;
-    if (monthKey_(a.period_start) !== monthKey) return;
-    var hrs = Number(a.hours) || 0;
+    if (!a.week_start) return;
+    var h = Number(a.hours) || 0;
+    if (!h) return;
+    var parts = splitWeekAcrossMonths_(a.week_start, h, _wbaSplitBasis);
+    var hrs = parts.reduce(function (s, p) { return s + (p.monthKey === monthKey ? p.hours : 0); }, 0);
     if (!hrs) return;
     var acct = String(a.account_name || '') || '(No account)';
     psaByAccount[acct] = (psaByAccount[acct] || 0) + hrs;
@@ -1542,10 +1683,13 @@ function api_getWorkerBillableByAccount(params) {
       var ref = _resolveDeploymentRef_(String(adj.deployment_id));
       if (!ref) return;
       var acct = ref.account_name || '(No account)';
-      var months = expandAdjustmentToMonthly_(adj, calendar);
-      months.forEach(function (m) {
-        if (monthKey_(m.period_start) !== monthKey) return;
-        var hrs = Number(m.hours_reduction) || 0;
+      var weeks = expandAdjustmentToWeekly_(adj, calendar);
+      weeks.forEach(function (w) {
+        var wHrs = Number(w.hours_reduction) || 0;
+        if (!wHrs) return;
+        var parts = splitWeekAcrossMonths_(w.week_start, wHrs, _wbaSplitBasis);
+        var hrs = parts.reduce(function (s, p) { return s + (p.monthKey === monthKey ? p.hours : 0); }, 0);
+        if (!hrs) return;
         adjByAccount[acct] = (adjByAccount[acct] || 0) + hrs;
         if (!adjMeta[acct]) adjMeta[acct] = { reasons: [], adjustment_ids: [] };
         var reason = String(adj.reason || '');
@@ -1615,14 +1759,21 @@ function api_getDeploymentsForWorkerAccount(params) {
   if (!resourceName || !accountName || !monthKey) return [];
 
   // Build set of project_name values from ALLOC_NORM for this worker × account × month.
+  // weekly-forecast-migration: roll each weekly row up to the target month
+  // via splitWeekAcrossMonths_ before matching.
   const projectSet = {};
   try {
+    var _dfwaSettings = readSettings_();
+    var _dfwaSplitBasis = String(_dfwaSettings.week_month_split_basis || 'calendar');
     cachedRead_(ALLOC_NORM).forEach(function (a) {
       if (a.resource_name !== resourceName) return;
       if (String(a.account_name || '') !== accountName) return;
-      if (monthKey_(a.period_start) !== monthKey) return;
+      if (!a.week_start) return;
       var hrs = Number(a.hours) || 0;
       if (!hrs) return;
+      var parts = splitWeekAcrossMonths_(a.week_start, hrs, _dfwaSplitBasis);
+      var inMonth = parts.some(function (p) { return p.monthKey === monthKey && p.hours > 0; });
+      if (!inMonth) return;
       var proj = String(a.project_name || '').trim();
       if (proj) projectSet[proj] = true;
     });
@@ -1685,18 +1836,25 @@ function api_getPsaHoursForWorkerDeploymentMonth(params) {
   var psaProject = String(ref.psa_project_name || '').trim();
   var accountName = String(ref.account_name    || '').trim();
 
+  // weekly-forecast-migration: alloc rows are weekly; roll up to the
+  // target month via splitWeekAcrossMonths_ and sum only that portion.
   var total = 0;
   try {
+    var _phSettings = readSettings_();
+    var _phSplitBasis = String(_phSettings.week_month_split_basis || 'calendar');
     cachedRead_(ALLOC_NORM).forEach(function (a) {
       if (a.resource_name !== resourceName) return;
       if (String(a.allocation_type || '') !== 'Billable') return;
-      if (monthKey_(a.period_start) !== monthKey) return;
+      if (!a.week_start) return;
       var proj = String(a.project_name  || '').trim();
       var acct = String(a.account_name  || '').trim();
       // Tier 1: match by PSA project name; Tier 2: match by account when psa_project_name is blank.
       var matches = psaProject ? (proj === psaProject) : (acct === accountName);
       if (!matches) return;
-      total += Number(a.hours) || 0;
+      var h = Number(a.hours) || 0;
+      if (!h) return;
+      var parts = splitWeekAcrossMonths_(a.week_start, h, _phSplitBasis);
+      total += parts.reduce(function (s, p) { return s + (p.monthKey === monthKey ? p.hours : 0); }, 0);
     });
   } catch (e) {
     Logger.log('api_getPsaHoursForWorkerDeploymentMonth: ' + e);
@@ -1849,11 +2007,20 @@ function api_getWorkersForDeployment(deploymentId) {
   try { allocs = cachedRead_(ALLOC_NORM); } catch (e) { allocs = []; }
 
   const PSA_TYPES = { Billable: true, Internal: true, Education: true };
-  // Filter to PSA work rows within the planning window
+  // Filter to PSA work rows within the planning window.
+  // weekly-forecast-migration: a weekly row can straddle two calendar
+  // months, so treat it as in-window if ANY of its proportional
+  // month-split parts falls in the window (boolean membership check,
+  // not an hours sum -- see api_getResourceBaselineForDeployment below
+  // for the hours-summing case, which uses the full split).
   const pw = buildPlanningWindow_(readPlanningWindowMonths_());
+  const _wfdSettings = readSettings_();
+  const _wfdSplitBasis = String(_wfdSettings.week_month_split_basis || 'calendar');
   const relevant = allocs.filter(function (a) {
     if (!PSA_TYPES[String(a.allocation_type || '')]) return false;
-    return !!pw.monthKeys[monthKey_(a.period_start)];
+    if (!a.week_start) return false;
+    var parts = splitWeekAcrossMonths_(a.week_start, Number(a.hours) || 0, _wfdSplitBasis);
+    return parts.some(function (p) { return !!pw.monthKeys[p.monthKey]; });
   });
 
   // Tier 1: precise project match via psa_project_name
@@ -1937,16 +2104,26 @@ function api_getResourceBaselineForDeployment(resourceName, deploymentId) {
   }
   if (!matchFn) matchFn = function () { return false; };
 
+  // weekly-forecast-migration: rows are weekly; roll each row's hours up
+  // to the calendar month(s) it overlaps via splitWeekAcrossMonths_
+  // (proportional, sum-exact) so byMonth totals reconcile against the
+  // underlying weekly hours.
+  const _rbSettings = readSettings_();
+  const _rbSplitBasis = String(_rbSettings.week_month_split_basis || 'calendar');
   const byMonth = {};
   allocs.forEach(function (row) {
     if (String(row.resource_name || '') !== resourceName) return;
     if (!PSA_TYPES[String(row.allocation_type || '')]) return;
-    const k = monthKey_(row.period_start);
-    if (!k) return;
-    if (!byMonth[k]) byMonth[k] = { total: 0, matched: 0 };
+    if (!row.week_start) return;
     const h = Number(row.hours) || 0;
-    byMonth[k].total += h;
-    if (matchFn(row)) byMonth[k].matched += h;
+    if (!h) return;
+    const isMatched = matchFn(row);
+    splitWeekAcrossMonths_(row.week_start, h, _rbSplitBasis).forEach(function (p) {
+      const k = p.monthKey;
+      if (!byMonth[k]) byMonth[k] = { total: 0, matched: 0 };
+      byMonth[k].total += p.hours;
+      if (isMatched) byMonth[k].matched += p.hours;
+    });
   });
 
   const months = Object.keys(byMonth).sort().map(function (k) {
@@ -2182,10 +2359,16 @@ function api_getResourceBaseline(resource_name) {
     const alloc = cachedRead_(ALLOC_NORM).filter(a =>
       a.resource_name === resource_name && a.allocation_type === 'Billable'
     );
+    const settings = readSettings_();
+    const basis = String(settings.week_month_split_basis || 'calendar');
     const byMonth = {};
     alloc.forEach(a => {
-      const k = monthKey_(a.period_start);
-      byMonth[k] = (byMonth[k] || 0) + (Number(a.hours) || 0);
+      if (!a.week_start) return;
+      const h = Number(a.hours) || 0;
+      if (!h) return;
+      splitWeekAcrossMonths_(a.week_start, h, basis).forEach(p => {
+        byMonth[p.monthKey] = (byMonth[p.monthKey] || 0) + p.hours;
+      });
     });
     return Object.keys(byMonth).sort().map(k => ({
       monthKey: k,

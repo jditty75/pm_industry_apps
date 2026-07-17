@@ -31,17 +31,140 @@ function monthsBetween_(start, end) {
   return out;
 }
 
-function quarterKey_(d) {
+// ============================================================
+// Week + fiscal helpers (weekly-forecast-migration)
+//
+// Calendar-quarter logic (quarterKey_ / quarterMonths_) has been removed
+// per the weekly-forecast-migration spec (LOCKED: Workday fiscal quarters
+// everywhere, Feb-anchored). Use fiscalQuarter_ / fiscalYear_ /
+// fiscalQuarterKey_ below instead. Do not reintroduce calendar-quarter
+// (Math.floor(month/3)) logic anywhere in this codebase.
+// ============================================================
+
+/**
+ * Normalize a date to its week's canonical start. The export column date
+ * is used AS-IS (sample exports start weeks on Saturday) -- this does NOT
+ * snap to the ISO Monday week start. Only strips the time-of-day component.
+ * @param {Date|string|number} d
+ * @return {Date} midnight local time on the same calendar day as d
+ */
+function weekStart_(d) {
   const x = new Date(d);
-  return x.getFullYear() + '-Q' + (Math.floor(x.getMonth() / 3) + 1);
+  return new Date(x.getFullYear(), x.getMonth(), x.getDate());
 }
 
-function quarterMonths_(quarterKey) {
-  const m = String(quarterKey).match(/^(\d{4})-Q([1-4])$/);
-  if (!m) return [];
-  const year = +m[1], q = +m[2];
-  const startMonth = (q - 1) * 3;
-  return [0,1,2].map(i => new Date(year, startMonth + i, 1));
+/**
+ * Canonical week id: 'YYYY-MM-DD' of weekStart_(d). Sortable, unambiguous,
+ * identical server- and client-side. LOCKED format -- see Constants.gs.
+ * @param {Date|string|number} d
+ * @return {string}
+ */
+function weekKey_(d) {
+  const x = weekStart_(d);
+  return Utilities.formatString('%04d-%02d-%02d', x.getFullYear(), x.getMonth() + 1, x.getDate());
+}
+
+/**
+ * Enumerate 7-day-step week starts from weekStart_(start) through
+ * weekStart_(end) inclusive, anchored on start's own day-of-week (NOT
+ * snapped to Monday -- matches weekStart_'s as-is semantics).
+ *
+ * NOTE: callers that must align to the REAL PSA week grid (e.g. Engine.gs
+ * assignment/adjustment expansion, which needs calendar[weekKey] lookups
+ * to hit) should prefer filtering the actual Config_Calendar rows that
+ * fall within [start, end] over this naive stepper, since an arbitrary
+ * start date will not in general land on the same weekday as the
+ * ingested PSA week columns.
+ *
+ * @param {Date|string|number} start
+ * @param {Date|string|number} end
+ * @return {Date[]}
+ */
+function weeksBetween_(start, end) {
+  const out = [];
+  let cur = weekStart_(start);
+  const last = weekStart_(end);
+  while (cur <= last) {
+    out.push(new Date(cur));
+    cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 7);
+  }
+  return out;
+}
+
+/**
+ * Workday fiscal year number for a date (February-anchored). Months
+ * Feb-Dec roll into the FOLLOWING calendar year's fiscal year; January
+ * belongs to the fiscal year that started the previous February.
+ * E.g. Jul 2026 -> 2027 ("FY27"); Jan 2027 -> 2027 ("FY27").
+ * @param {Date|string|number} d
+ * @return {number} full 4-digit fiscal year
+ */
+function fiscalYear_(d) {
+  const x = new Date(d);
+  const y = x.getFullYear();
+  const m = x.getMonth() + 1; // 1-indexed
+  return (m >= FISCAL_YEAR_START_MONTH) ? y + 1 : y;
+}
+
+/**
+ * Workday fiscal quarter ('Q1'..'Q4') for a date, per
+ * FISCAL_QUARTER_BY_CALENDAR_MONTH (Constants.gs): Feb-Apr=Q1,
+ * May-Jul=Q2, Aug-Oct=Q3, Nov-Jan=Q4.
+ * @param {Date|string|number} d
+ * @return {string}
+ */
+function fiscalQuarter_(d) {
+  const x = new Date(d);
+  return FISCAL_QUARTER_BY_CALENDAR_MONTH[x.getMonth() + 1];
+}
+
+/**
+ * Combined fiscal-quarter label, e.g. 'FY27-Q2'. LOCKED format -- server
+ * and client must produce byte-identical labels for the same date.
+ * @param {Date|string|number} d
+ * @return {string}
+ */
+function fiscalQuarterKey_(d) {
+  const fy = fiscalYear_(d);
+  const q = fiscalQuarter_(d);
+  return 'FY' + String(fy % 100).padStart(2, '0') + '-' + q;
+}
+
+/**
+ * Split a week's hours across the calendar month(s) it overlaps,
+ * proportional to day count. Sum of returned hours always equals the
+ * input hours exactly -- no rounding here (round only at display time).
+ *
+ * @param {Date|string|number} weekStart the week's start date (as-is, not Monday-snapped)
+ * @param {number} hours total hours for the week
+ * @param {string} [basis] 'calendar' (all 7 days, default) | 'weekday' (Mon-Fri only)
+ * @return {Array<{monthKey:string, hours:number}>}
+ */
+function splitWeekAcrossMonths_(weekStart, hours, basis) {
+  basis = basis || 'calendar';
+  const start = weekStart_(weekStart);
+  const dayKeys = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const dow = d.getDay();
+    const isWeekday = dow !== 0 && dow !== 6;
+    if (basis === 'weekday' && !isWeekday) continue;
+    dayKeys.push(monthKey_(d));
+  }
+  const totalDays = dayKeys.length;
+  if (totalDays === 0) return [];
+
+  const order = [];
+  const counts = {};
+  dayKeys.forEach(mk => {
+    if (!counts[mk]) { counts[mk] = 0; order.push(mk); }
+    counts[mk]++;
+  });
+
+  return order.map(mk => ({
+    monthKey: mk,
+    hours: hours * (counts[mk] / totalDays)
+  }));
 }
 
 function workdaysInMonth_(year, monthIdx /*0-11*/) {
@@ -133,13 +256,21 @@ function updateRow_(name, idField, idValue, patch, headers) {
   return false;
 }
 
-function logRefresh_(source, rowsIn, rowsOut, monthsDetected) {
+/**
+ * Log one ingest run to Normalization_Log.
+ * @param {string} source 'staff' | 'opps'
+ * @param {number} rowsIn
+ * @param {number} rowsOut
+ * @param {number} weeksDetected count of weekly columns detected (was
+ *   months_detected pre-weekly-forecast-migration; see REFRESH_HEADERS)
+ */
+function logRefresh_(source, rowsIn, rowsOut, weeksDetected) {
   appendRow_(REFRESH_LOG, {
     timestamp: now_(),
     source: source,
     rows_in: rowsIn,
     rows_out: rowsOut,
-    months_detected: monthsDetected,
+    weeks_detected: weeksDetected,
     user: getUserEmail_()
   }, REFRESH_HEADERS);
 }

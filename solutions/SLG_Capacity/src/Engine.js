@@ -319,9 +319,14 @@ function buildEffectiveManagers_(selectedName, includeMyManagers, managersByName
  * expandAssignmentToMonthly_. Filters calendar.weeks to those overlapping
  * [a.start_date, a.end_date] rather than stepping 7 days from
  * a.start_date, so weekly buckets line up with PSA-ingested weeks.
- * Custom JSON is keyed by week_key (post-wipe; no legacy monthly keys).
  *
- * @param {Object} a assignment row (start_date, end_date, estimated_hours, distribution, custom_monthly_json)
+ * 'Custom' distribution was removed in WFM.12 (client collected
+ * month-keyed custom_monthly_json while this function looked up
+ * week_key, silently zeroing every week). Any distribution value outside
+ * DISTRIBUTIONS -- e.g. a legacy 'Custom' row -- is defensively treated
+ * as Even, with a logged warning; never silently produces all-zero weeks.
+ *
+ * @param {Object} a assignment row (start_date, end_date, estimated_hours, distribution)
  * @param {{weeks: Array}} calendar output of readCalendar_()
  * @return {Array<{week_start:Date, week_key:string, hours:number}>}
  */
@@ -338,24 +343,21 @@ function expandAssignmentToWeekly_(a, calendar) {
 
   const total = Number(a.estimated_hours) || 0;
 
-  if (a.distribution === 'Custom' && a.custom_monthly_json) {
-    let custom = {};
-    try { custom = JSON.parse(a.custom_monthly_json); } catch (e) { custom = {}; }
-    return weeks.map(w => ({
-      week_start: w.week_start,
-      week_key: w.week_key,
-      hours: Number(custom[w.week_key] || 0)
-    }));
+  let dist = a.distribution;
+  if (DISTRIBUTIONS.indexOf(dist) === -1) {
+    Logger.log('expandAssignmentToWeekly_: unrecognized distribution "' + dist +
+      '" for assignment ' + (a.assignment_id || '(no id)') + ' -- defaulting to Even');
+    dist = 'Even';
   }
 
   const wdTotal = weeks.reduce((s, w) => s + (w.workdays_in_week || 5), 0) || 1;
   const n = weeks.length;
   let weights = weeks.map(w => (w.workdays_in_week || 5) / wdTotal);
 
-  if (a.distribution === 'Front-loaded' || a.distribution === 'Back-loaded') {
+  if (dist === 'Front-loaded' || dist === 'Back-loaded') {
     const ramp = weeks.map((_, i) => {
       const t = n === 1 ? 0.5 : i / (n - 1);
-      return a.distribution === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
+      return dist === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
     });
     const rsum = ramp.reduce((s, x) => s + x, 0);
     weights = weights.map((w, i) => ramp[i] / rsum);

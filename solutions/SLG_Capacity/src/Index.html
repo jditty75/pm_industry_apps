@@ -1269,33 +1269,8 @@
               <button type="button" data-val="Even" class="on">Even</button>
               <button type="button" data-val="Front-loaded">Front-loaded</button>
               <button type="button" data-val="Back-loaded">Back-loaded</button>
-              <button type="button" data-val="Custom">Custom</button>
             </div>
           </label>
-
-          <!-- Custom Distribution per-month inputs.
-               Hidden by default; revealed when Distribution = Custom.
-               Rows are regenerated whenever Start/End date change.
-               Pre-filled with Even distribution on first reveal. -->
-          <div class="field" id="customMonthsField" hidden>
-            <div class="custom-months-header">
-              <span class="custom-months-title">Custom hours by month</span>
-              <button type="button" class="btn-ghost btn-ghost-sm" id="customMonthsResetBtn">Reset to Even</button>
-            </div>
-            <div class="muted" style="margin-top:4px;margin-bottom:8px;font-size:11px;">
-              Enter hours for each month. The total below will reconcile against your Estimated hours.
-            </div>
-            <div class="custom-months-list" id="customMonthsList">
-              <!-- per-month rows injected by renderCustomMonths_() -->
-            </div>
-            <div class="custom-months-footer" id="customMonthsFooter">
-              <span class="muted">Total:</span>
-              <strong id="customMonthsTotal">0</strong>
-              <span class="muted">of</span>
-              <strong id="customMonthsTarget">0</strong>
-              <span id="customMonthsDelta" class="custom-months-delta"></span>
-            </div>
-          </div>
           <label class="field">
             <span>Scenario <span class="muted">(optional)</span></span>
           <div class="field-row compact">
@@ -1588,27 +1563,8 @@
             <button type="button" data-val="Even" class="on">Even</button>
             <button type="button" data-val="Front-loaded">Front-loaded</button>
             <button type="button" data-val="Back-loaded">Back-loaded</button>
-            <button type="button" data-val="Custom">Custom</button>
           </div>
         </label>
-
-        <div class="field" id="rCustomMonthsField" hidden>
-          <div class="custom-months-header">
-            <span class="custom-months-title">Custom reduction by month</span>
-            <button type="button" class="btn-ghost btn-ghost-sm" id="rCustomMonthsResetBtn">Reset to Even</button>
-          </div>
-          <div class="muted" style="margin-top:4px;margin-bottom:8px;font-size:11px;">
-            Enter reduction hours for each month. Total must equal hours to reduce (within 0.5h).
-          </div>
-          <div class="custom-months-list" id="rCustomMonthsList"></div>
-          <div class="custom-months-footer" id="rCustomMonthsFooter">
-            <span class="muted">Total:</span>
-            <strong id="rCustomMonthsTotal">0</strong>
-            <span class="muted">of</span>
-            <strong id="rCustomMonthsTarget">0</strong>
-            <span id="rCustomMonthsDelta" class="custom-months-delta"></span>
-          </div>
-        </div>
 
         <label class="field">
           <span>Reason <span style="color:var(--thumbtack);">*</span></span>

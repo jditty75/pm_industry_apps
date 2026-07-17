@@ -3286,7 +3286,6 @@
     $('#r_hours').value = '';
     $('#r_reason').value = '';
     $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
-    $('#rCustomMonthsField').hidden = true;
 
     // Scenario select
     const sSel = $('#r_scenario');
@@ -3446,7 +3445,6 @@
     $('#r_hours').value = '';
     $('#r_reason').value = '';
     $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
-    $('#rCustomMonthsField').hidden = true;
     const sub = $('#reductionDrawerWorkerSub');
     if (sub) sub.textContent = '';
 
@@ -3477,11 +3475,12 @@
           const savedDir = adj.direction || (Number(adj.hours_reduction) >= 0 ? 'reduce' : 'add');
           $$('#r_direction button').forEach(b => b.classList.toggle('on', b.dataset.val === savedDir));
           _syncAdjustHoursDirectionUI_(savedDir);
-          $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === (adj.distribution || 'Even')));
-          if (adj.distribution === 'Custom') {
-            renderReductionCustomMonths_();
-            $('#rCustomMonthsField').hidden = false;
-          }
+          // Restore saved distribution; fall back to Even if it's not one of
+          // the currently-allowed modes (e.g. a legacy 'Custom' row -- removed
+          // in WFM.12 -- mirrors the server's defensive default-to-Even).
+          const allowedDist = ['Even', 'Front-loaded', 'Back-loaded'];
+          const restoredDist = allowedDist.includes(adj.distribution) ? adj.distribution : 'Even';
+          $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === restoredDist));
           if (sub) sub.textContent = adj.resource_name || '';
           // Populate deployment dropdown and pre-select saved value
           await _populateDeploymentDropdown_(adj.resource_name || '', String(adj.deployment_id || ''));
@@ -3512,133 +3511,17 @@
     if (res && st && en) loadResourceBaselineForDrawer_(res, st, en);
   }
 
-  /**
-   * Render custom per-month inputs for the reduction drawer.
-   * Mirrors renderCustomMonths_ but uses rCustomMonths* IDs.
-   *
-   * KNOWN GAP (weekly-forecast-migration, flagged not fixed): same issue as
-   * collectCustomMonthsJson_ above -- this produces month-keyed JSON, but
-   * expandAdjustmentToWeekly_ (CapacityAdjustments.gs) looks up
-   * custom[week_key], so Custom-distribution reductions are silently
-   * dropped once written to weekly grain.
-   */
-  function renderReductionCustomMonths_() {
-    const startVal = $('#r_start').value;
-    const endVal   = $('#r_end').value;
-    const total    = Number($('#r_hours').value) || 0;
-    const list     = $('#rCustomMonthsList');
-    if (!list || !startVal || !endVal) return;
-
-    const start = new Date(startVal + 'T00:00:00');
-    const end   = new Date(endVal   + 'T00:00:00');
-    const months = [];
-    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-    while (cur <= end) {
-      months.push(new Date(cur));
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-    }
-    if (!months.length) return;
-
-    const n = months.length;
-    const evenBase = Math.floor(total / n);
-    const remainder = total - evenBase * n;
-
-    list.innerHTML = months.map((m, i) => {
-      const mk = m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2,'0');
-      const label = m.toLocaleString('default', { month: 'short', year: '2-digit' });
-      const val = (i === n - 1) ? (evenBase + remainder) : evenBase;
-      return `<div class="custom-month-row">
-        <span class="custom-month-label">${label}</span>
-        <input type="number" min="0" step="1"
-          class="input rCustomMonthInput"
-          data-month-key="${mk}" value="${val}">
-        <span class="muted custom-month-hrs">hrs</span>
-      </div>`;
-    }).join('');
-
-    updateReductionCustomTotal_();
-  }
-
-  function updateReductionCustomTotal_() {
-    const inputs = $$('.rCustomMonthInput');
-    const total  = inputs.reduce((s, el) => s + (Number(el.value) || 0), 0);
-    const target = Number($('#r_hours').value) || 0;
-    const delta  = total - target;
-    const totalEl = $('#rCustomMonthsTotal');
-    const targetEl = $('#rCustomMonthsTarget');
-    const deltaEl  = $('#rCustomMonthsDelta');
-    if (totalEl) totalEl.textContent = String(total);
-    if (targetEl) targetEl.textContent = String(target);
-    if (deltaEl) {
-      if (delta === 0) {
-        deltaEl.textContent = '✓ matched';
-        deltaEl.className = 'custom-months-delta matched';
-      } else if (delta > 0) {
-        deltaEl.textContent = '(+' + delta + ' over)';
-        deltaEl.className = 'custom-months-delta mismatch';
-      } else {
-        deltaEl.textContent = '(' + delta + ' short)';
-        deltaEl.className = 'custom-months-delta mismatch';
-      }
-    }
-    const saveBtn   = $('#saveReductionModeledBtn');
-    const commitBtn = $('#commitReductionNowBtn');
-    if (saveBtn)   saveBtn.disabled   = delta !== 0;
-    if (commitBtn) commitBtn.disabled = delta !== 0;
-  }
-
-  function collectReductionCustomJson_() {
-    const inputs = $$('.rCustomMonthInput');
-    if (!inputs.length) return '';
-    const obj = {};
-    inputs.forEach(el => {
-      if (el.dataset.monthKey) obj[el.dataset.monthKey] = Number(el.value) || 0;
-    });
-    return JSON.stringify(obj);
-  }
-
   // Distribution segmented control for reduction drawer
   $$('#r_distribution button').forEach(b => {
     b.addEventListener('click', () => {
       $$('#r_distribution button').forEach(x => x.classList.toggle('on', x === b));
-      const isCustom = b.dataset.val === 'Custom';
-      if (isCustom) {
-        renderReductionCustomMonths_();
-        $('#rCustomMonthsField').hidden = false;
-      } else {
-        $('#rCustomMonthsField').hidden = true;
-        const saveBtn   = $('#saveReductionModeledBtn');
-        const commitBtn = $('#commitReductionNowBtn');
-        if (saveBtn)   saveBtn.disabled   = false;
-        if (commitBtn) commitBtn.disabled = false;
-      }
       updateReductionPreview_();
     });
   });
 
-  // Sync custom month inputs for reduction drawer
-  document.addEventListener('input', (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains('rCustomMonthInput')) {
-      updateReductionCustomTotal_();
-      clearTimeout(window._reductionPreviewTimer);
-      window._reductionPreviewTimer = setTimeout(updateReductionPreview_, 200);
-    }
-  });
-
-  $('#rCustomMonthsResetBtn')?.addEventListener('click', () => {
-    renderReductionCustomMonths_();
-    updateReductionPreview_();
-    toast('Custom hours reset to Even distribution', 'ok');
-  });
-
-  // Re-render custom months when dates or hours change
+  // Event wiring — date and hours inputs (debounced 200ms).
   ['r_start', 'r_end', 'r_hours'].forEach(id => {
     $('#' + id)?.addEventListener('input', () => {
-      const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
-      if (activeBtn && activeBtn.dataset.val === 'Custom') {
-        renderReductionCustomMonths_();
-        toast('Custom hours reset — date or hours changed', 'warn');
-      }
       clearTimeout(window._reductionPreviewTimer);
       window._reductionPreviewTimer = setTimeout(updateReductionPreview_, 200);
       // reload baseline when resource is set
@@ -3763,8 +3646,7 @@
     const dist = activeBtn ? activeBtn.dataset.val : 'Even';
     const adj = {
       start_date: start, end_date: end,
-      hours_reduction: hours, distribution: dist,
-      custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : ''
+      hours_reduction: hours, distribution: dist
     };
     try {
       const preview = await call('api_previewCapacityAdjustment', adj);
@@ -3784,13 +3666,6 @@
       });
     } catch (e) { /* preview is best-effort */ }
   }
-
-  // Wire preview to dates/hours changes
-  ['r_start', 'r_end', 'r_hours'].forEach(id => {
-    // Only updateReductionPreview_ here (baseline reloaded in the
-    // earlier listener for the same fields above).
-    // Use a shared timer to avoid double-scheduling.
-  });
 
   /**
    * Sync the hours label and preview chart color to the selected direction.
@@ -3844,15 +3719,6 @@
     const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
     const dist = activeBtn ? activeBtn.dataset.val : 'Even';
 
-    if (dist === 'Custom') {
-      const totalEl = $('#rCustomMonthsTotal');
-      const customTotal = Number(totalEl ? totalEl.textContent : 0);
-      if (Math.abs(customTotal - hours) > 0.5) {
-        toast('Custom distribution total does not match hours', 'err');
-        return;
-      }
-    }
-
     const adj = {
       adjustment_id:     adjId || null,
       resource_name:     resource,
@@ -3861,7 +3727,6 @@
       hours_reduction:   hours,
       direction:         direction,
       distribution:      dist,
-      custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : '',
       reason:            reason,
       scenario_id:       scenario || '',
       deployment_id:     ($('#r_deployment_id') && !$('#r_deployment_id').disabled) ? ($('#r_deployment_id').value || '') : '',
@@ -4290,7 +4155,12 @@ async function _qaRefreshPsaHours_() {
     if ($('#f_start'))  $('#f_start').value  = planRow.start_date || '';
     if ($('#f_end'))    $('#f_end').value    = planRow.end_date || '';
     if ($('#f_hours'))  $('#f_hours').value  = planRow.hours || '';
-    $$('#f_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === (planRow.distribution || 'Even')));
+    // Fall back to Even if the saved distribution isn't one of the
+    // currently-allowed modes (e.g. a legacy 'Custom' row -- removed in
+    // WFM.12 -- mirrors the server's defensive default-to-Even).
+    const allowedDist_ = ['Even', 'Front-loaded', 'Back-loaded'];
+    const restoredDist_ = allowedDist_.includes(planRow.distribution) ? planRow.distribution : 'Even';
+    $$('#f_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === restoredDist_));
     const scenSel = $('#f_scenario');
     if (scenSel && planRow.scenario_id) scenSel.value = planRow.scenario_id;
   }
@@ -4492,27 +4362,6 @@ async function _qaRefreshPsaHours_() {
 
         const dist = $$('#f_distribution button').find(b => b.classList.contains('on'));
     const distVal = dist ? dist.dataset.val : 'Even';
-    // Custom Distribution: serialize per-month inputs into custom_monthly_json.
-    // KNOWN GAP (weekly-forecast-migration, flagged not fixed -- see handoff
-    // notes): the server (expandAssignmentToWeekly_, Engine.gs) now looks up
-    // custom[week_key], but this UI still collects month-keyed values, so
-    // Custom-distribution hours are silently dropped (all weeks get 0) once
-    // this reaches the weekly expansion. Even/Front-loaded/Back-loaded are
-    // unaffected. Needs a week-grid rework of renderCustomMonths_ /
-    // collectCustomMonthsJson_ (and the parallel reduction-drawer functions)
-    // plus a server endpoint to fetch the real Config_Calendar weeks for a
-    // date range.
-    const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
-
-    if (distVal === 'Custom') {
-      const _customInputs = $$('.custom-month-input');
-      const _sumOfMonths = _customInputs.reduce((s, el) => s + (Number(el.value) || 0), 0);
-      const _estHours = Number($('#f_hours').value) || 0;
-      if (Math.abs(_sumOfMonths - _estHours) > 0.5) {
-        toast('Custom distribution total must equal Estimated Hours before saving.', 'err');
-        return;
-      }
-    }
 
     const payload = {
       assignment_id: $('#f_assignment_id').value || null,
@@ -4524,7 +4373,6 @@ async function _qaRefreshPsaHours_() {
       end_date: $('#f_end').value,
       estimated_hours: Number($('#f_hours').value) || 0,
       distribution: distVal,
-      custom_monthly_json: customJson,           // Custom Distribution v1
       scenario_id: $('#f_scenario').value || null,
       notes: $('#f_notes').value,
       status: status
@@ -4574,15 +4422,11 @@ async function _qaRefreshPsaHours_() {
     function collectFormForPreview_() {
     const dist = $$('#f_distribution button').find(b => b.classList.contains('on'));
     const distVal = dist ? dist.dataset.val : 'Even';
-    // Custom Distribution: send the per-month inputs to the server so
-    // the preview chart reflects exactly what the user is editing.
-    const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
     return {
       start_date: $('#f_start').value,
       end_date: $('#f_end').value,
       estimated_hours: Number($('#f_hours').value) || 0,
-      distribution: distVal,
-      custom_monthly_json: customJson
+      distribution: distVal
     };
   }
 
@@ -4626,197 +4470,22 @@ async function _qaRefreshPsaHours_() {
   }
 
   // ============================================================
-  // Custom Distribution per-month inputs
-  //
-  // Rendered when Distribution = Custom. Pre-fills with Even
-  // distribution. User edits any month; live total updates
-  // immediately, chart updates debounced. Resets to Even on
-  // date/hours change (with toast warning) or on Reset button.
+  // Distribution controls (Even / Front-loaded / Back-loaded only --
+  // Custom removed in WFM.12; see the parent commit message for why).
   // ============================================================
 
-  /**
-   * Generate the list of month keys between f_start and f_end.
-   * Returns array of {monthKey, monthLabel} pairs.
-   * Empty array if either date is missing or invalid.
-   */
-  function customMonthsRange_() {
-    const startStr = $('#f_start').value;
-    const endStr = $('#f_end').value;
-    if (!startStr || !endStr) return [];
-    const start = new Date(startStr);
-    const end = new Date(endStr);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return [];
-    if (end < start) return [];
-    const out = [];
-    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-    const last = new Date(end.getFullYear(), end.getMonth(), 1);
-    while (cur <= last) {
-      const mk = cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0');
-      out.push({ monthKey: mk, monthLabel: fmtMonth(mk) });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-    }
-    return out;
-  }
-
-  /**
-   * Render per-month input rows into #customMonthsList.
-   * Pre-fills inputs with Even distribution (estimated_hours / monthCount,
-   * with remainder added to the last month to keep total exact).
-   */
-  function renderCustomMonths_() {
-    const list = $('#customMonthsList');
-    if (!list) return;
-    const months = customMonthsRange_();
-    const estHours = Number($('#f_hours').value) || 0;
-
-    $('#customMonthsTarget').textContent = String(estHours);
-
-    if (!months.length) {
-      list.innerHTML = '<div class="muted" style="padding:8px 0;">' +
-        'Set Start date and End date above to define month rows.</div>';
-      $('#customMonthsTotal').textContent = '0';
-      $('#customMonthsDelta').textContent = '';
-      $('#customMonthsDelta').className = 'custom-months-delta';
-      return;
-    }
-
-    // Even distribution: floor(estHours / n) per month, remainder on last month.
-    const n = months.length;
-    const evenBase = Math.floor(estHours / n);
-    const remainder = estHours - (evenBase * n);
-
-    list.innerHTML = months.map(function (m, i) {
-      const initialValue = (i === n - 1) ? (evenBase + remainder) : evenBase;
-      return '' +
-        '<div class="custom-month-row">' +
-          '<span class="custom-month-label">' + escapeHtml_(m.monthLabel) + '</span>' +
-          '<input type="number" min="0" step="1" ' +
-            'class="input custom-month-input" ' +
-            'data-month-key="' + escapeHtml_(m.monthKey) + '" ' +
-            'value="' + initialValue + '">' +
-          '<span class="muted custom-month-hrs">hrs</span>' +
-        '</div>';
-    }).join('');
-
-    updateCustomMonthsTotal_();
-  }
-
-  /**
-   * Read all per-month inputs, compute total, update footer display.
-   * Color-codes the delta indicator: green (matched), amber (mismatch).
-   */
-  function updateCustomMonthsTotal_() {
-    const inputs = $$('.custom-month-input');
-    const total = inputs.reduce(function (sum, el) {
-      return sum + (Number(el.value) || 0);
-    }, 0);
-    const target = Number($('#f_hours').value) || 0;
-    const delta = total - target;
-
-    $('#customMonthsTotal').textContent = String(total);
-    $('#customMonthsTarget').textContent = String(target);
-
-    const deltaEl = $('#customMonthsDelta');
-    if (delta === 0) {
-      deltaEl.textContent = '✓ matched';
-      deltaEl.className = 'custom-months-delta matched';
-    } else if (delta > 0) {
-      deltaEl.textContent = '(+' + delta + ' over)';
-      deltaEl.className = 'custom-months-delta mismatch';
-    } else {
-      deltaEl.textContent = '(' + delta + ' short)';
-      deltaEl.className = 'custom-months-delta mismatch';
-    }
-    const _saveBtn = $('#saveModeledBtn');
-    const _commitBtn = $('#commitNowBtn');
-    if (_saveBtn) _saveBtn.disabled = delta !== 0;
-    if (_commitBtn) _commitBtn.disabled = delta !== 0;
-  }
-
-  /**
-   * Read per-month inputs, return JSON-stringified {monthKey: hours} map.
-   * Returns empty string if no inputs exist (e.g., dates not set).
-   */
-  function collectCustomMonthsJson_() {
-    const inputs = $$('.custom-month-input');
-    if (!inputs.length) return '';
-    const obj = {};
-    inputs.forEach(function (el) {
-      const mk = el.dataset.monthKey;
-      const hrs = Number(el.value) || 0;
-      if (mk) obj[mk] = hrs;
-    });
-    return JSON.stringify(obj);
-  }
-
-  /**
-   * Show or hide the Custom Months section.
-   * On show, regenerates the rows from current dates and hours.
-   */
-  function showCustomMonthsSection_(show) {
-    const field = $('#customMonthsField');
-    if (!field) return;
-    if (show) {
-      renderCustomMonths_();
-      field.hidden = false;
-    } else {
-      field.hidden = true;
-      const _saveBtn = $('#saveModeledBtn');
-      const _commitBtn = $('#commitNowBtn');
-      if (_saveBtn) _saveBtn.disabled = false;
-      if (_commitBtn) _commitBtn.disabled = false;
-    }
-  }
-
-  /**
-   * Reset all per-month inputs to Even distribution. Wired to the
-   * "Reset to Even" button inside the Custom Months section.
-   */
-  function resetCustomMonthsToEven_() {
-    renderCustomMonths_();
-    updatePreview_();
-    toast('Custom hours reset to Even distribution', 'ok');
-  }
-
-    // Event wiring — distribution segmented control change
+  // Event wiring — distribution segmented control change
   $('#f_distribution')?.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     // The visual .on toggle is already handled elsewhere (in the
     // existing $$('#f_distribution button').forEach handler).
-    // Show/hide Custom Months section based on selection.
-    const isCustom = (b.dataset.val === 'Custom');
-    showCustomMonthsSection_(isCustom);
     updatePreview_();
   });
 
-  // Custom Months inline event wiring — input changes update total
-  // immediately and trigger debounced preview chart refresh.
-  document.addEventListener('input', (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains('custom-month-input')) {
-      updateCustomMonthsTotal_();
-      clearTimeout(window._previewTimer);
-      window._previewTimer = setTimeout(updatePreview_, 200);
-    }
-  });
-
-  // Reset to Even button inside Custom Months section
-  $('#customMonthsResetBtn')?.addEventListener('click', resetCustomMonthsToEven_);
-
-    // Event wiring — date and hours inputs (debounced 200ms).
-  // If Distribution is Custom, regenerate the per-month rows
-  // (resets to Even) and toast a warning.
+  // Event wiring — date and hours inputs (debounced 200ms).
   ['f_start', 'f_end', 'f_hours'].forEach(id => {
     $('#' + id)?.addEventListener('input', () => {
-      // Check if Custom is currently active
-      const activeBtn = $$('#f_distribution button').find(b => b.classList.contains('on'));
-      const isCustom = activeBtn && activeBtn.dataset.val === 'Custom';
-      if (isCustom) {
-        // Regenerate rows on date/hours change. Warn user that custom
-        // entries were reset (only when there's been actual user input).
-        renderCustomMonths_();
-        toast('Custom hours reset — date or hours changed', 'warn');
-      }
       clearTimeout(window._previewTimer);
       window._previewTimer = setTimeout(updatePreview_, 200);
     });

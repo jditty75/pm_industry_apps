@@ -133,10 +133,14 @@ function deleteCapacityAdjustment_(adjustment_id) {
  * the REAL Config_Calendar week grid (weekly-forecast-migration). Replaces
  * expandAdjustmentToMonthly_. Reuses the same distribution math as
  * expandAssignmentToWeekly_ (Engine.gs). Returns positive hours_reduction
- * values; the engine negates when applying to buckets. Custom JSON is
- * keyed by week_key (post-wipe; no legacy monthly keys survive).
+ * values; the engine negates when applying to buckets.
  *
- * @param {Object} adj  - adjustment row (start_date, end_date, hours_reduction, distribution, custom_monthly_json)
+ * 'Custom' distribution was removed in WFM.12 (see expandAssignmentToWeekly_
+ * for the full rationale). Any distribution value outside DISTRIBUTIONS is
+ * defensively treated as Even, with a logged warning; never silently
+ * produces all-zero weeks.
+ *
+ * @param {Object} adj  - adjustment row (start_date, end_date, hours_reduction, distribution)
  * @param {{weeks: Array}} calendar - output of readCalendar_() (Engine.gs)
  * @return {{ week_start: Date, week_key: string, hours_reduction: number }[]}
  */
@@ -153,24 +157,21 @@ function expandAdjustmentToWeekly_(adj, calendar) {
 
   const total = Number(adj.hours_reduction) || 0;
 
-  if (adj.distribution === 'Custom' && adj.custom_monthly_json) {
-    let custom = {};
-    try { custom = JSON.parse(adj.custom_monthly_json); } catch (e) { custom = {}; }
-    return weeks.map(w => ({
-      week_start:      w.week_start,
-      week_key:        w.week_key,
-      hours_reduction: Number(custom[w.week_key] || 0)
-    }));
+  let dist = adj.distribution;
+  if (DISTRIBUTIONS.indexOf(dist) === -1) {
+    Logger.log('expandAdjustmentToWeekly_: unrecognized distribution "' + dist +
+      '" for adjustment ' + (adj.adjustment_id || '(no id)') + ' -- defaulting to Even');
+    dist = 'Even';
   }
 
   const wdTotal = weeks.reduce((s, w) => s + (w.workdays_in_week || 5), 0) || 1;
   const n = weeks.length;
   let weights = weeks.map(w => (w.workdays_in_week || 5) / wdTotal);
 
-  if (adj.distribution === 'Front-loaded' || adj.distribution === 'Back-loaded') {
+  if (dist === 'Front-loaded' || dist === 'Back-loaded') {
     const ramp = weeks.map((_, i) => {
       const t = n === 1 ? 0.5 : i / (n - 1);
-      return adj.distribution === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
+      return dist === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
     });
     const rsum = ramp.reduce((s, x) => s + x, 0);
     weights = weights.map((w, i) => ramp[i] / rsum);

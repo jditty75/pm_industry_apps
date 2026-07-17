@@ -216,7 +216,13 @@ const DEFAULT_ALIASES = [
 ];
 
 const ALLOC_TYPES   = ['Billable','Internal','Education','PTO_Holiday','Unassigned'];
-const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded','Custom'];
+// Allowed distribution modes. 'Custom' removed in WFM.12 (weekly-forecast-
+// migration): client collected month-keyed custom_monthly_json while the
+// weekly expansion functions look up week_key, silently zeroing every week.
+// Returns later as its own week-grid feature. custom_monthly_json /
+// custom_weekly_json columns remain in the schema, dormant and unwritten,
+// for that future feature to reuse.
+const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded'];
 const ASSIGN_STATUSES = ['Modeled','Committed','Archived'];
 
 // --- Drop 6: Capacity Adjustments schema ---

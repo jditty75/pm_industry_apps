@@ -224,14 +224,23 @@ function _normalizedTeamFallback_(resourceType) {
 // ============================================================
 
 /**
- * Enriched form of Allocations_Normalized. Each row has all original fields
- * plus: team_label (resolved via unified resolver), month_key (YYYY-MM).
+ * Enriched form of Allocations_Normalized (weekly grain,
+ * weekly-forecast-migration). Each row has all original fields plus:
+ *   week_key       -- canonical 'YYYY-MM-DD' id (defensively recomputed
+ *                      from week_start if the stored value is missing/stale)
+ *   month_key      -- 'YYYY-MM' of week_start; a single "primary month"
+ *                      stamp for quick client-side monthly filtering. This
+ *                      is NOT the proportional week->month split used by
+ *                      Engine.gs's monthly rollups (splitWeekAcrossMonths_)
+ *                      -- it's a simple denormalized convenience field.
+ *   fiscal_quarter -- 'Q1'..'Q4' per the Feb-anchored fiscal mapping
+ *   team_label     -- resolved via unified resolver (unchanged)
  * Cached 6 hours, keyed on the config version stamp so cache invalidation
  * is a single property write.
  */
 function getEnrichedAllocations_() {
   var version = _getEnrichedCacheVersion_();
-  var cacheKey = 'enriched:alloc:v1:' + version;
+  var cacheKey = 'enriched:alloc:v2:' + version;
 
   var cached = _enrichedCacheRead_(cacheKey);
   if (cached) return cached;
@@ -242,8 +251,11 @@ function getEnrichedAllocations_() {
   var enriched = rows.map(function (r) {
     var row = {};
     Object.keys(r).forEach(function (k) { row[k] = r[k]; });
-    row.month_key   = typeof monthKey_ === 'function' ? monthKey_(r.period_start) : '';
-    row.team_label  = resolveTeamLabel_(row, ctx);
+    var ws = r.week_start ? new Date(r.week_start) : null;
+    row.week_key       = r.week_key || (ws && typeof weekKey_ === 'function' ? weekKey_(ws) : '');
+    row.month_key      = ws && typeof monthKey_ === 'function' ? monthKey_(ws) : '';
+    row.fiscal_quarter  = ws && typeof fiscalQuarter_ === 'function' ? fiscalQuarter_(ws) : '';
+    row.team_label      = resolveTeamLabel_(row, ctx);
     return row;
   });
 

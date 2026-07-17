@@ -2436,8 +2436,9 @@ function api_getRefreshLog() {
           source: String(r.source || ''),
           rows_in: Number(r.rows_in) || 0,
           rows_out: Number(r.rows_out) || 0,
-          months_detected: Number(r.months_detected) || 0,
-          user: String(r.user || '')
+          weeks_detected: Number(r.weeks_detected) || 0,
+          user: String(r.user || ''),
+          warnings: String(r.warnings || '')
         };
       });
   } catch (e) {

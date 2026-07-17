@@ -106,6 +106,37 @@
     const dt = new Date(+y, +m - 1, 1);
     return dt.toLocaleString('en', { month: 'short', year: '2-digit' });
   }
+
+  // ============================================================
+  // Fiscal calendar (weekly-forecast-migration §4/§13) -- MUST mirror
+  // Constants.gs's FISCAL_YEAR_START_MONTH/FISCAL_QUARTER_BY_CALENDAR_MONTH
+  // and Util.gs's fiscalYear_/fiscalQuarter_/fiscalQuarterKey_ exactly, so
+  // client and server produce identical fiscal-quarter keys (e.g. 'FY27-Q2').
+  // Replaces the old calendar Math.floor(month/3) quarter mapping
+  // everywhere on the client (recomputeKpisForClient, chip strip label,
+  // #quarterFilter comparisons).
+  // ============================================================
+  const FISCAL_YEAR_START_MONTH = 2; // February
+  const FISCAL_QUARTER_BY_CALENDAR_MONTH = {
+    1:  'Q4',
+    2:  'Q1', 3:  'Q1', 4:  'Q1',
+    5:  'Q2', 6:  'Q2', 7:  'Q2',
+    8:  'Q3', 9:  'Q3', 10: 'Q3',
+    11: 'Q4', 12: 'Q4'
+  };
+  function fiscalYear_(d) {
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    return (m >= FISCAL_YEAR_START_MONTH) ? y + 1 : y;
+  }
+  function fiscalQuarter_(d) {
+    return FISCAL_QUARTER_BY_CALENDAR_MONTH[d.getMonth() + 1];
+  }
+  function fiscalQuarterKey_(d) {
+    const fy = fiscalYear_(d);
+    const q = fiscalQuarter_(d);
+    return 'FY' + String(fy % 100).padStart(2, '0') + '-' + q;
+  }
   function call(fn, ...args) {
     return new Promise((resolve, reject) => {
       google.script.run
@@ -417,7 +448,7 @@
       monthsInView.forEach(mk => {
         const [y, m] = mk.split('-');
         const dt = new Date(+y, +m - 1, 1);
-        const qKey = dt.getFullYear() + '-Q' + (Math.floor(dt.getMonth() / 3) + 1);
+        const qKey = fiscalQuarterKey_(dt);
         if (qKey === quarterFilter) qSet.add(mk);
       });
       if (qSet.size) monthSet = qSet;
@@ -481,46 +512,6 @@
     };
   }
 
-  function computeTrendForClient(d, quarterFilter) {
-    const monthsInView = d.monthsInView || (d.heatmap ? d.heatmap.months : []);
-    const baseMonthSet = new Set(monthsInView);
-    let monthSet = baseMonthSet;
-
-    if (quarterFilter) {
-      const qSet = new Set();
-      monthsInView.forEach(mk => {
-        const [y, m] = mk.split('-');
-        const dt = new Date(+y, +m - 1, 1);
-        const qKey = dt.getFullYear() + '-Q' + (Math.floor(dt.getMonth() / 3) + 1);
-        if (qKey === quarterFilter) qSet.add(mk);
-      });
-      if (qSet.size) monthSet = qSet;
-    }
-
-    const includePTO = State.filters.includeTimeOff;
-    const byMonth = {};
-    if (d.byResource) {
-      d.byResource.forEach(r => {
-        r.months.forEach(m => {
-          if (!monthSet.has(m.monthKey)) return;
-          const key = m.monthKey;
-          if (!byMonth[key]) byMonth[key] = { used: 0, capacity: 0 };
-          const committed = Number(m.committed) || 0;
-          const timeOff = Number(m.timeOff) || 0;
-          const cap = Number(m.capacity) || 0;
-          const usedHours = includePTO ? committed + timeOff : committed;
-          byMonth[key].used += usedHours;
-          byMonth[key].capacity += cap;
-        });
-      });
-    }
-    return Object.keys(byMonth).sort().map(k => {
-      const row = byMonth[k];
-      const util = row.capacity > 0 ? row.used / row.capacity : 0;
-      return { monthKey: k, utilization: util };
-    });
-  }
-
   // ============================================================
   // Routing
   //
@@ -561,14 +552,13 @@
       activateAdminTab_(savedTab);
       loadAdmin();
     }
-    if (window.innerWidth <= 768) $('#sidebar').classList.remove('open');
   }
   $$('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
   });
-  $('#hamburger').addEventListener('click', () =>
-    $('#sidebar').classList.toggle('open')
-  );
+  // Desktop-first (weekly-forecast-migration §9/§11): the mobile hamburger
+  // button and off-canvas sidebar toggle are gone (#hamburger removed from
+  // Index.html); the sidebar is always visible now.
 
   // ============================================================
   // Init
@@ -843,14 +833,6 @@
       markDirty_(b);
     });
 
-    $('#drawerGroupBySeg').addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      $$('#drawerGroupBySeg button').forEach(x => x.classList.toggle('on', x === b));
-      State.draftFilters.groupBy = b.dataset.val;
-      markDirty_(b);
-    });
-
     $('#drawerIncludeMyManagers').addEventListener('change', (e) => {
       State.draftFilters.includeMyManagers = !!e.target.checked;
       markDirty_(e.target);
@@ -930,10 +912,6 @@
     }
 
     $('#drawerIncludeTimeOffToggle').checked = !!d.includeTimeOff;
-
-    $$('#drawerGroupBySeg button').forEach(btn => {
-      btn.classList.toggle('on', btn.dataset.val === d.groupBy);
-    });
   }
 
   function applyDraftFilters_() {
@@ -1143,13 +1121,9 @@
 
 <script>
   // ============================================================
-  // Dashboard: KPIs, heatmap, trend
+  // Dashboard: KPIs, weekly forecast table
   // ============================================================
   async function loadDashboard() {
-    const grid = $('#heatmap');
-    grid.innerHTML = '<div style="padding:32px;text-align:center;color:var(--staple)">Loading…</div>';
-    grid.style.gridTemplateColumns = '1fr';
-
     try {
       const params = buildServerParams_({ quarter: null });
       const signature = JSON.stringify(params);
@@ -1165,18 +1139,15 @@
 
       const quarterFilter = State.filters.quarter;
       const kpis = recomputeKpisForClient(d, quarterFilter);
-      const clientTrend = computeTrendForClient(d, quarterFilter);
 
       renderKpis(kpis);
-      renderHeatmap(d.heatmap);
       renderHeadcountGap(d.headcountByTeam || []);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => renderTrend(clientTrend));
-      });
     } catch (err) {
       toast('Dashboard load failed: ' + err.message, 'err');
       console.error(err);
     }
+
+    loadWeeklyForecastTable();
   }
 
   function renderKpis(k) {
@@ -1205,79 +1176,156 @@
     $('#kpiOverUnderSub').title = tooltipText;
   }
 
-  function renderHeatmap(h) {
-    const grid = $('#heatmap');
-    const rows = h.rows || [];
-    const months = h.months || [];
-    grid.style.gridTemplateColumns = `minmax(180px, 240px) repeat(${months.length}, minmax(80px, 1fr))`;
-    const idx = {};
-    (h.cells || []).forEach(c => { idx[c.rowKey + '|' + c.monthKey] = c; });
+  // ============================================================
+  // Weekly Forecast Table (weekly-forecast-migration §10) -- replaces
+  // renderHeatmap/renderTrend above. Fetches api_getForecastTable via
+  // buildServerParams_, groups by worker with sticky identity columns,
+  // per-week cells colored by utilization-vs-ICP (cellColor, reused from
+  // the removed heatmap), and expandable worker→project child rows.
+  // ============================================================
+  const WeeklyForecastState = {
+    expanded: new Set(),   // worker names with project rows currently shown
+    showManagersManager: false
+  };
 
+  async function loadWeeklyForecastTable() {
+    const body = $('#weeklyForecastBody');
+    if (body) body.innerHTML = '<tr><td class="muted" style="padding:12px">Loading…</td></tr>';
+    try {
+      const params = buildServerParams_();
+      const forecast = await call('api_getForecastTable', params);
+      State.weeklyForecast = forecast;
+      renderWeeklyForecastTable_(forecast);
+    } catch (err) {
+      if (body) {
+        body.innerHTML = '<tr><td class="muted" style="padding:12px;color:var(--thumbtack)">' +
+          'Failed to load weekly forecast: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
+      }
+      console.error('loadWeeklyForecastTable failed:', err);
+    }
+  }
+
+  function renderWeeklyForecastTable_(forecast) {
+    const headerRow = $('#weeklyForecastHeaderRow');
+    const body = $('#weeklyForecastBody');
+    if (!headerRow || !body) return;
+
+    const weeks = (forecast && forecast.weeks) || [];
+    const rows = (forecast && forecast.rows) || [];
+
+    $$('.wf-col-week', headerRow).forEach(el => el.remove());
+    weeks.forEach(w => {
+      const th = document.createElement('th');
+      th.className = 'wf-col-week';
+      th.textContent = w.label + ' · ' + w.fiscalQuarter;
+      th.title = w.fiscalQuarterKey;
+      headerRow.appendChild(th);
+    });
+
+    if (!rows.length) {
+      body.innerHTML = '<tr><td class="muted" style="padding:12px" colspan="' + (4 + weeks.length) + '">' +
+        'No forecast data in current scope.</td></tr>';
+      return;
+    }
+
+    const showMgrMgr = WeeklyForecastState.showManagersManager;
     const html = [];
-    const label = GROUP_LABELS[State.filters.groupBy] || State.filters.groupBy;
-    html.push(`<div class="heatmap-head heatmap-label" style="left:0;position:sticky;z-index:3">${label}</div>`);
-    months.forEach(m => { html.push(`<div class="heatmap-head">${fmtMonth(m)}</div>`); });
-
     rows.forEach(r => {
-      html.push(`<div class="heatmap-label" title="${r}">${r}</div>`);
-      months.forEach(m => {
-        const c = idx[r + '|' + m];
-        if (!c) {
-          html.push(`<div class="heatmap-cell empty">—</div>`);
-        } else {
-          const includePTO = State.filters.includeTimeOff;
-          const committedWork = Number(c.committed) || 0;
-          const timeOff = Number(c.timeOff) || 0;
-          const capacity = Number(c.capacity) || 0;
-          const committedTotal = includePTO ? (committedWork + timeOff) : committedWork;
-          const util = capacity > 0 ? (committedTotal / capacity) : 0;
-          const color = cellColor(util, c.icpTarget);
-          const title = [
-            `${r} · ${fmtMonth(m)}`,
-            `Utilization: ${fmtPct(util)}`,
-            `ICP target: ${fmtPct(c.icpTarget)}`,
-            `Committed: ${Math.round(committedTotal)}h`,
-            `Capacity: ${Math.round(capacity)}h`,
-            `Time off: ${Math.round(timeOff)}h`,
-            `Headcount: ${c.headcount}`
-          ].join('\n');
-          html.push(
-            `<div class="heatmap-cell" style="background:${color.bg};color:${color.fg}" title="${title.replace(/"/g, '&quot;')}">${fmtPct(util)}</div>`
-          );
-        }
+      const isOpen = WeeklyForecastState.expanded.has(r.worker);
+      const weekByKey = {};
+      (r.workerWeekly || []).forEach(w => { weekByKey[w.weekKey] = w; });
+
+      html.push('<tr class="wf-row-worker' + (isOpen ? ' wf-open' : '') + '" data-worker="' + escapeHtml_(r.worker) + '">');
+      html.push(
+        '<td class="wf-col-sticky wf-col-worker">' +
+          '<button type="button" class="wf-expand-toggle" aria-expanded="' + isOpen + '">' +
+            '<span class="wf-expand-chev">' + (isOpen ? '▾' : '▸') + '</span> ' +
+            escapeHtml_(r.worker) +
+          '</button>' +
+        '</td>'
+      );
+      html.push('<td class="wf-col-sticky wf-col-level">' + escapeHtml_(r.level || '') + '</td>');
+      html.push('<td class="wf-col-sticky wf-col-manager">' + escapeHtml_(r.manager || '') + '</td>');
+      html.push(
+        '<td class="wf-col-sticky wf-col-mgrmgr"' + (showMgrMgr ? '' : ' hidden') + '>' +
+          escapeHtml_(r.managersManager || '') +
+        '</td>'
+      );
+      weeks.forEach(w => {
+        const cell = weekByKey[w.weekKey] || { hours: 0, util: 0, icpTarget: 0.70 };
+        const color = cellColor(cell.util, cell.icpTarget);
+        const title = [
+          r.worker + ' · ' + w.label,
+          'Hours: ' + Math.round(cell.hours) + 'h',
+          'Weekly target: ' + Math.round(r.weeklyTarget) + 'h',
+          'Utilization: ' + fmtPct(cell.util),
+          'ICP target: ' + fmtPct(cell.icpTarget)
+        ].join('\n');
+        html.push(
+          '<td class="wf-col-week wf-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
+          escapeHtml_(title) + '">' + Math.round(cell.hours) + '</td>'
+        );
+      });
+      html.push('</tr>');
+
+      (r.projects || []).forEach(p => {
+        const projByKey = {};
+        (p.weekly || []).forEach(w => { projByKey[w.weekKey] = w; });
+        html.push('<tr class="wf-row-project"' + (isOpen ? '' : ' hidden') + ' data-worker="' + escapeHtml_(r.worker) + '">');
+        html.push('<td class="wf-col-sticky wf-col-worker wf-project-name">↳ ' + escapeHtml_(p.project) + '</td>');
+        html.push('<td class="wf-col-sticky wf-col-level"></td>');
+        html.push('<td class="wf-col-sticky wf-col-manager"></td>');
+        html.push('<td class="wf-col-sticky wf-col-mgrmgr"' + (showMgrMgr ? '' : ' hidden') + '></td>');
+        weeks.forEach(w => {
+          const cell = projByKey[w.weekKey];
+          const hrs = cell ? Math.round(cell.hours) : 0;
+          html.push('<td class="wf-col-week wf-cell-project">' + (hrs || '—') + '</td>');
+        });
+        html.push('</tr>');
       });
     });
-    grid.innerHTML = html.join('');
+
+    body.innerHTML = html.join('');
   }
 
-  function renderTrend(trend) {
-    const ctx = $('#trendChart').getContext('2d');
-    if (State.charts.trend) State.charts.trend.destroy();
-    const cs = getComputedStyle(document.documentElement);
-    const data = Array.isArray(trend) ? trend : [];
-    State.charts.trend = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: data.map(t => fmtMonth(t.monthKey)),
-        datasets: [{
-          label: 'Avg Utilization',
-          data: data.map(t => Math.round(t.utilization * 1000) / 10),
-          borderColor: cs.getPropertyValue('--ballpoint').trim(),
-          backgroundColor: 'rgba(8,117,193,.12)',
-          tension: .3, fill: true, pointRadius: 3
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        animation: false, resizeDelay: 100,
-        plugins: { legend: { display: false } },
-        scales: {
-          y: { beginAtZero: true, ticks: { callback: v => v + '%' }, grid: { color: '#ECEEF1' } },
-          x: { grid: { display: false } }
-        }
-      }
+  document.addEventListener('click', (e) => {
+    const toggle = e.target.closest('.wf-expand-toggle');
+    if (!toggle) return;
+    const tr = toggle.closest('tr[data-worker]');
+    if (!tr) return;
+    const worker = tr.dataset.worker;
+    const nowOpen = !WeeklyForecastState.expanded.has(worker);
+    if (nowOpen) WeeklyForecastState.expanded.add(worker);
+    else WeeklyForecastState.expanded.delete(worker);
+    toggle.setAttribute('aria-expanded', String(nowOpen));
+    tr.classList.toggle('wf-open', nowOpen);
+    const chev = toggle.querySelector('.wf-expand-chev');
+    if (chev) chev.textContent = nowOpen ? '▾' : '▸';
+    $$('tr.wf-row-project').forEach(pr => {
+      if (pr.dataset.worker === worker) pr.hidden = !nowOpen;
     });
-  }
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const expandBtn = $('#wfExpandAllBtn');
+    const collapseBtn = $('#wfCollapseAllBtn');
+    const mgrMgrToggle = $('#wfShowManagersManager');
+    if (expandBtn) expandBtn.addEventListener('click', () => {
+      const forecast = State.weeklyForecast;
+      if (forecast && forecast.rows) forecast.rows.forEach(r => WeeklyForecastState.expanded.add(r.worker));
+      renderWeeklyForecastTable_(forecast);
+    });
+    if (collapseBtn) collapseBtn.addEventListener('click', () => {
+      WeeklyForecastState.expanded.clear();
+      renderWeeklyForecastTable_(State.weeklyForecast);
+    });
+    if (mgrMgrToggle) mgrMgrToggle.addEventListener('change', (e) => {
+      WeeklyForecastState.showManagersManager = !!e.target.checked;
+      const col = $('#wfColManagersManager');
+      if (col) col.hidden = !WeeklyForecastState.showManagersManager;
+      renderWeeklyForecastTable_(State.weeklyForecast);
+    });
+  });
 
     function renderHeadcountGap(rows) {
     const body = $('#kpiHeadcountBody');
@@ -1341,15 +1389,6 @@
     }
   }
 
-  document.addEventListener('click', (e) => {
-    const seg = e.target.closest('#groupBySeg button');
-    if (!seg) return;
-    $$('#groupBySeg button').forEach(x => x.classList.toggle('on', x === seg));
-    State.filters.groupBy = seg.dataset.val;
-    renderChipStrip_();
-    updateFilterCountBadge_();
-    loadDashboard();
-  });
 </script>
 
 <script>
@@ -4812,8 +4851,9 @@ async function _qaRefreshPsaHours_() {
           <td>${escapeHtml_(l.source)}</td>
           <td class="num">${l.rows_in}</td>
           <td class="num">${l.rows_out}</td>
-          <td class="num">${l.months_detected}</td>
+          <td class="num">${l.weeks_detected}</td>
           <td>${escapeHtml_(l.user)}</td>
+          <td class="muted" style="font-size:12px;">${escapeHtml_(l.warnings || '')}</td>
         </tr>
       `).join('');
 

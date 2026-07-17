@@ -3515,6 +3515,12 @@
   /**
    * Render custom per-month inputs for the reduction drawer.
    * Mirrors renderCustomMonths_ but uses rCustomMonths* IDs.
+   *
+   * KNOWN GAP (weekly-forecast-migration, flagged not fixed): same issue as
+   * collectCustomMonthsJson_ above -- this produces month-keyed JSON, but
+   * expandAdjustmentToWeekly_ (CapacityAdjustments.gs) looks up
+   * custom[week_key], so Custom-distribution reductions are silently
+   * dropped once written to weekly grain.
    */
   function renderReductionCustomMonths_() {
     const startVal = $('#r_start').value;
@@ -4487,8 +4493,15 @@ async function _qaRefreshPsaHours_() {
         const dist = $$('#f_distribution button').find(b => b.classList.contains('on'));
     const distVal = dist ? dist.dataset.val : 'Even';
     // Custom Distribution: serialize per-month inputs into custom_monthly_json.
-    // Server's expandAssignmentToMonthly_ will use these literal values
-    // instead of computing weights. Empty for non-Custom distributions.
+    // KNOWN GAP (weekly-forecast-migration, flagged not fixed -- see handoff
+    // notes): the server (expandAssignmentToWeekly_, Engine.gs) now looks up
+    // custom[week_key], but this UI still collects month-keyed values, so
+    // Custom-distribution hours are silently dropped (all weeks get 0) once
+    // this reaches the weekly expansion. Even/Front-loaded/Back-loaded are
+    // unaffected. Needs a week-grid rework of renderCustomMonths_ /
+    // collectCustomMonthsJson_ (and the parallel reduction-drawer functions)
+    // plus a server endpoint to fetch the real Config_Calendar weeks for a
+    // date range.
     const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
 
     if (distVal === 'Custom') {
@@ -5235,7 +5248,9 @@ async function _qaRefreshPsaHours_() {
         const base64 = reader.result.split(',')[1];
         const result = await call('api_uploadStaffFile', base64, file.name);
         status.className = 'status ok';
-        status.textContent = 'Uploaded: ' + result.rowsOut + ' rows normalized · ' + result.monthsDetected + ' months';
+        const warnCount = (result.warnings || []).length;
+        status.textContent = 'Uploaded: ' + result.rowsOut + ' rows normalized · ' + result.weeksDetected + ' weeks' +
+          (warnCount ? ' · ' + warnCount + ' warning' + (warnCount === 1 ? '' : 's') + ' (see Admin → Normalization Log)' : '');
         State.ref = await call('api_getReference');
         if (State.currentView === 'dashboard') loadDashboard();
       } catch (err) {

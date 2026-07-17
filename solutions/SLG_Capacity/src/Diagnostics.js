@@ -177,10 +177,14 @@ function _dbg_debugUnclassifiedSlgWorkers() {
     if (!name) return;
     if (excluded.has(name)) return;
 
-    // Only count hours in the planning window for the totals
+    // Only count hours in the planning window for the totals. weekly-
+    // forecast-migration: rows are weekly (week_start); use the week's
+    // primary month as a simple stamp, consistent with EnrichedData.gs's
+    // month_key denormalized field (not a proportional split -- this
+    // diagnostic only needs an approximate "months seen" signal).
     const mk = (function () {
-      if (!r.period_start) return '';
-      const dt = (r.period_start instanceof Date) ? r.period_start : new Date(r.period_start);
+      if (!r.week_start) return '';
+      const dt = (r.week_start instanceof Date) ? r.week_start : new Date(r.week_start);
       if (isNaN(dt.getTime())) return '';
       return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
     })();
@@ -508,6 +512,94 @@ function _dbg_debugReportingSummaryReconciliation() {
   Logger.log('reconcileOk: ' + r.totals.reconcileOk);
 }
 
+/**
+ * weekly-forecast-migration §6.6 reconciliation diagnostic #1: sum a
+ * sample worker's weekly hours straight from Allocations_Normalized, then
+ * separately roll every one of that worker's rows through
+ * splitWeekAcrossMonths_ and re-sum across all resulting month buckets.
+ * The two totals must match (within floating-point tolerance) -- confirms
+ * the proportional week->month split never gains or loses hours.
+ *
+ * @param {string} [resourceName] defaults to the first resource_name found
+ *   in Allocations_Normalized if omitted.
+ */
+function _dbg_reconcileWeekToMonthSplit(resourceName) {
+  _dbg_requireAdmin_();
+  const rows = readTable_(ALLOC_NORM);
+  if (!rows.length) {
+    Logger.log('_dbg_reconcileWeekToMonthSplit: Allocations_Normalized is empty.');
+    return;
+  }
+  const name = resourceName || rows[0].resource_name;
+  const settings = readSettings_();
+  const basis = String(settings.week_month_split_basis || 'calendar');
+
+  const workerRows = rows.filter(function (r) { return r.resource_name === name; });
+  Logger.log('--- _dbg_reconcileWeekToMonthSplit("' + name + '") --- basis=' + basis);
+  Logger.log('Rows for worker: ' + workerRows.length);
+
+  let weeklyTotal = 0;
+  const byWeek = {};
+  const byMonth = {};
+  workerRows.forEach(function (r) {
+    const h = Number(r.hours) || 0;
+    if (!h || !r.week_start) return;
+    weeklyTotal += h;
+    const wk = r.week_key || weekKey_(r.week_start);
+    byWeek[wk] = (byWeek[wk] || 0) + h;
+    splitWeekAcrossMonths_(r.week_start, h, basis).forEach(function (p) {
+      byMonth[p.monthKey] = (byMonth[p.monthKey] || 0) + p.hours;
+    });
+  });
+
+  const monthlyTotal = Object.values(byMonth).reduce(function (s, h) { return s + h; }, 0);
+  const diff = Math.abs(weeklyTotal - monthlyTotal);
+
+  Logger.log('Distinct weeks: ' + Object.keys(byWeek).length);
+  Logger.log('Distinct months (post-split): ' + Object.keys(byMonth).length);
+  Logger.log('Weekly total hours:   ' + weeklyTotal.toFixed(4));
+  Logger.log('Monthly total hours:  ' + monthlyTotal.toFixed(4) + '  (sum of splitWeekAcrossMonths_ output)');
+  Logger.log('Difference:            ' + diff.toFixed(6));
+  Logger.log('RECONCILE: ' + (diff < 0.01 ? 'OK — totals match' : 'MISMATCH — investigate splitWeekAcrossMonths_'));
+  Logger.log('Per-month breakdown: ' + JSON.stringify(byMonth));
+}
+
+/**
+ * weekly-forecast-migration §6.6 reconciliation diagnostic #2: run
+ * detectWeekColumns_ against the CURRENT PSA/STAFF_SHEET header row and
+ * confirm (a) the expected week count is found (27 in the spec's sample
+ * export) and (b) "Total Hours" is excluded. Run this against the live
+ * sheet right after uploading a file, before normalizeStaff() overwrites
+ * the header context you're inspecting.
+ */
+function _dbg_verifyWeekColumnDetection() {
+  _dbg_requireAdmin_();
+  const sh = SpreadsheetApp.getActive().getSheetByName(STAFF_SHEET);
+  if (!sh) {
+    Logger.log('_dbg_verifyWeekColumnDetection: sheet "' + STAFF_SHEET + '" not found.');
+    return;
+  }
+  const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const detection = detectWeekColumns_(header);
+
+  const hasTotalHoursCol = header.some(function (h) {
+    return String(h || '').trim().toLowerCase() === 'total hours';
+  });
+  const totalHoursExcluded = hasTotalHoursCol &&
+    !detection.weeks.some(function (w) { return String(header[w.index] || '').trim().toLowerCase() === 'total hours'; });
+
+  Logger.log('--- _dbg_verifyWeekColumnDetection ---');
+  Logger.log('Header columns: ' + header.length);
+  Logger.log('Weeks detected: ' + detection.weeks.length + ' (spec sample export: 27)');
+  Logger.log('"Total Hours" column present in header: ' + hasTotalHoursCol);
+  Logger.log('"Total Hours" excluded from detected weeks: ' + (hasTotalHoursCol ? totalHoursExcluded : 'n/a (no such column)'));
+  Logger.log('First week:  ' + (detection.weeks[0] ? weekKey_(detection.weeks[0].weekStart) : '(none)'));
+  Logger.log('Last week:   ' + (detection.weeks.length ? weekKey_(detection.weeks[detection.weeks.length - 1].weekStart) : '(none)'));
+  Logger.log('Contiguity warnings: ' + detection.warnings.length);
+  detection.warnings.forEach(function (w) { Logger.log('  - ' + w); });
+  Logger.log('RESULT: ' + (detection.weeks.length > 0 && (!hasTotalHoursCol || totalHoursExcluded) ? 'OK' : 'FAILED — see above'));
+}
+
 
 // ============================================================
 // 3. KPI SANITY CHECKS
@@ -677,25 +769,24 @@ function _dbg_debugRoleHeadcount(roleKey, paramsOverride) {
     });
   });
 
+  const splitBasis = String(settings.week_month_split_basis || 'calendar');
+
   allocRaw.forEach(function (a) {
     if (!a.resource_name) return;
     if (workerNames.indexOf(a.resource_name) < 0) return;
-    if (!a.period_start) return;
-    const mk = monthKey_(a.period_start);
-    if (!windowKeys[mk]) return;
-    const m = workerMonthMap[a.resource_name][mk];
-    if (!m) return;
+    if (!a.week_start) return;
     const h = Number(a.hours) || 0;
-    if (a.allocation_type === 'PTO_Holiday') {
-      m.timeOff += h;
-    } else if (a.allocation_type === 'Education' ||
-               a.allocation_type === 'Billable' ||
-               a.allocation_type === 'Internal' ||
-               a.allocation_type === 'Unassigned') {
-      m.committed += h;
-    } else {
-      m.committed += h;
-    }
+    if (!h) return;
+    splitWeekAcrossMonths_(a.week_start, h, splitBasis).forEach(function (p) {
+      if (!windowKeys[p.monthKey]) return;
+      const m = workerMonthMap[a.resource_name][p.monthKey];
+      if (!m) return;
+      if (a.allocation_type === 'PTO_Holiday') {
+        m.timeOff += p.hours;
+      } else {
+        m.committed += p.hours;
+      }
+    });
   });
 
   if (params.viewMode !== 'Actual') {
@@ -708,12 +799,13 @@ function _dbg_debugRoleHeadcount(roleKey, paramsOverride) {
         (params.viewMode === 'Scenario' && isScenario &&
          (!params.scenarioId || a.scenario_id === params.scenarioId));
       if (!include) return;
-      expandAssignmentToMonthly_(a, calendar).forEach(function (m) {
-        const mk = monthKey_(m.period_start);
-        if (!windowKeys[mk]) return;
-        const entry = workerMonthMap[a.resource_name][mk];
-        if (!entry) return;
-        entry.committed += m.hours;
+      expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+        splitWeekAcrossMonths_(w.week_start, w.hours, splitBasis).forEach(function (p) {
+          if (!windowKeys[p.monthKey]) return;
+          const entry = workerMonthMap[a.resource_name][p.monthKey];
+          if (!entry) return;
+          entry.committed += p.hours;
+        });
       });
     });
   }
@@ -1211,7 +1303,26 @@ function _dbg_debugScenarioWithReductions(scenarioId) {
     return;
   }
 
+  // weekly-forecast-migration: expand at weekly grain, then roll each week
+  // up to the calendar month(s) it overlaps via splitWeekAcrossMonths_ for
+  // the per-month log lines below (same proportional-split pattern as
+  // Api.gs's api_getReportingSummary).
   const calendar = readCalendar_();
+  const splitBasis = String((readSettings_() || {}).week_month_split_basis || 'calendar');
+
+  function toMonthly_(weekly, hoursField) {
+    const byMonth = {};
+    weekly.forEach(function (w) {
+      splitWeekAcrossMonths_(w.week_start, w[hoursField], splitBasis).forEach(function (p) {
+        byMonth[p.monthKey] = (byMonth[p.monthKey] || 0) + p.hours;
+      });
+    });
+    return Object.keys(byMonth).sort().map(function (mk) {
+      const o = { monthKey: mk };
+      o[hoursField] = byMonth[mk];
+      return o;
+    });
+  }
 
   // Assignments
   const assigns = readTable_(ASSIGNMENTS)
@@ -1219,13 +1330,13 @@ function _dbg_debugScenarioWithReductions(scenarioId) {
   Logger.log('=== Scenario: ' + scenarioId + ' ===');
   Logger.log('Assignments (' + assigns.length + '):');
   assigns.forEach(a => {
-    const months = expandAssignmentToMonthly_(a, calendar);
+    const months = toMonthly_(expandAssignmentToWeekly_(a, calendar), 'hours');
     const total = months.reduce((s, m) => s + m.hours, 0);
     Logger.log('  [' + a.status + '] ' + (a.resource_name || '(blank)') +
       ' | ' + a.estimated_hours + 'h (' + a.distribution + ')' +
       ' | net total across months: ' + Math.round(total) + 'h');
     months.forEach(m => {
-      Logger.log('      ' + monthKey_(m.period_start) + ': +' + Math.round(m.hours) + 'h');
+      Logger.log('      ' + m.monthKey + ': +' + Math.round(m.hours) + 'h');
     });
   });
 
@@ -1234,13 +1345,13 @@ function _dbg_debugScenarioWithReductions(scenarioId) {
   try { adjs = readTable_(CAPACITY_ADJUSTMENTS_SHEET).filter(a => a.scenario_id === scenarioId); } catch (e) {}
   Logger.log('Capacity Adjustments (' + adjs.length + '):');
   adjs.forEach(adj => {
-    const months = expandAdjustmentToMonthly_(adj, calendar);
+    const months = toMonthly_(expandAdjustmentToWeekly_(adj, calendar), 'hours_reduction');
     const total = months.reduce((s, m) => s + m.hours_reduction, 0);
     Logger.log('  [' + adj.status + '] ' + (adj.resource_name || '(blank)') +
       ' | -' + adj.hours_reduction + 'h (' + adj.distribution + ')' +
       ' | net total across months: -' + Math.round(total) + 'h');
     months.forEach(m => {
-      Logger.log('      ' + monthKey_(m.period_start) + ': -' + Math.round(m.hours_reduction) + 'h');
+      Logger.log('      ' + m.monthKey + ': -' + Math.round(m.hours_reduction) + 'h');
     });
   });
 
@@ -1248,17 +1359,17 @@ function _dbg_debugScenarioWithReductions(scenarioId) {
   const workerNet = {};
   assigns.forEach(a => {
     if (!a.resource_name) return;
-    const months = expandAssignmentToMonthly_(a, calendar);
+    const months = toMonthly_(expandAssignmentToWeekly_(a, calendar), 'hours');
     months.forEach(m => {
-      const k = a.resource_name + '|' + monthKey_(m.period_start);
+      const k = a.resource_name + '|' + m.monthKey;
       workerNet[k] = (workerNet[k] || 0) + m.hours;
     });
   });
   adjs.forEach(adj => {
     if (!adj.resource_name) return;
-    const months = expandAdjustmentToMonthly_(adj, calendar);
+    const months = toMonthly_(expandAdjustmentToWeekly_(adj, calendar), 'hours_reduction');
     months.forEach(m => {
-      const k = adj.resource_name + '|' + monthKey_(m.period_start);
+      const k = adj.resource_name + '|' + m.monthKey;
       workerNet[k] = (workerNet[k] || 0) - m.hours_reduction;
     });
   });

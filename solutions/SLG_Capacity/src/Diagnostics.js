@@ -21,18 +21,55 @@
 // ============================================================
 
 /**
- * Throws if the calling user is not the spreadsheet owner.
- * Diagnostics are restricted to admins (the script owner) to prevent
- * accidental invocation via google.script.run.
+ * Throws if the calling user is not authorized as a diagnostics admin.
+ *
+ * Authorization sources (any match grants access):
+ *   1. Spreadsheet owner (works on personal Drive, fails on Shared Drives
+ *      because Shared Drive files have no individual owner)
+ *   2. Config_Settings.admin_emails (comma-separated list — works
+ *      everywhere, recommended for Shared Drive setups)
+ *
+ * The dual-path check mirrors the production access gate in
+ * AccessControl.gs::isAuthorized_ which uses the same admin_emails setting.
  */
 function _dbg_requireAdmin_() {
   try {
-    const owner = SpreadsheetApp.getActive().getOwner();
-    const ownerEmail = owner ? owner.getEmail() : '';
     const userEmail = Session.getActiveUser().getEmail();
-    if (!ownerEmail || !userEmail || ownerEmail !== userEmail) {
-      throw new Error('Diagnostics restricted to spreadsheet owner.');
+    if (!userEmail) {
+      throw new Error('Could not resolve active user — re-authorize the script.');
     }
+    const userLc = String(userEmail).toLowerCase().trim();
+
+    // Path 1: spreadsheet owner (personal Drive)
+    try {
+      const owner = SpreadsheetApp.getActive().getOwner();
+      const ownerEmail = owner ? owner.getEmail() : '';
+      if (ownerEmail && String(ownerEmail).toLowerCase().trim() === userLc) {
+        return;
+      }
+    } catch (e) {
+      // Fall through to admin_emails check
+    }
+
+    // Path 2: Config_Settings.admin_emails (Shared Drive friendly)
+    let settings = {};
+    try {
+      settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    } catch (e) {
+      settings = {};
+    }
+    const raw = String(settings.admin_emails || '');
+    if (raw) {
+      const entries = raw.split(',').map(function (e) {
+        return String(e || '').toLowerCase().trim();
+      });
+      if (entries.indexOf(userLc) >= 0) {
+        return;
+      }
+    }
+
+    throw new Error('Diagnostics restricted to spreadsheet owner or admin_emails. ' +
+      'Add ' + userEmail + ' to Config_Settings.admin_emails to grant access.');
   } catch (e) {
     throw new Error('Diagnostics access denied: ' + e.message);
   }
@@ -1310,4 +1347,59 @@ function _dbg_checkResourceTypeForDelivery() {
     }
   });
   Logger.log('Direct rtMap["Delivery"]: ' + rtMap['Delivery']);
+}
+
+// ============================================================
+// Doc B: Capacity Adjustment diagnostics
+// ============================================================
+
+/**
+ * Log the 20 most recently modified Capacity_Adjustments rows.
+ */
+function _dbg_recentCapacityAdjustments() {
+  _dbg_requireAdmin_();
+  const rows = readTable_(CAPACITY_ADJUSTMENTS_SHEET);
+  rows.sort(function (a, b) { return new Date(b.modified_at || 0) - new Date(a.modified_at || 0); });
+  rows.slice(0, 20).forEach(function (r) {
+    Logger.log(JSON.stringify({
+      adjustment_id: r.adjustment_id,
+      resource_name: r.resource_name,
+      direction:     r.direction,
+      hours_reduction: r.hours_reduction,
+      deployment_id: r.deployment_id,
+      status:        r.status,
+      modified_at:   r.modified_at
+    }));
+  });
+}
+
+/**
+ * Log the 20 most recent Capacity_Adjustments_Audit rows.
+ */
+function _dbg_recentCapacityAdjustmentAudit() {
+  _dbg_requireAdmin_();
+  const rows = readTable_(CAPACITY_ADJUSTMENTS_AUDIT_SHEET);
+  rows.sort(function (a, b) { return new Date(b.timestamp || 0) - new Date(a.timestamp || 0); });
+  rows.slice(0, 20).forEach(function (r) { Logger.log(JSON.stringify(r)); });
+}
+
+/**
+ * Log all Capacity_Adjustments rows for a given worker.
+ * @param {string} resourceName
+ */
+function _dbg_findAdjustmentsByWorker(resourceName) {
+  _dbg_requireAdmin_();
+  const rows = readTable_(CAPACITY_ADJUSTMENTS_SHEET).filter(function (r) { return r.resource_name === resourceName; });
+  Logger.log('Count: ' + rows.length);
+  rows.forEach(function (r) {
+    Logger.log(JSON.stringify({
+      adjustment_id: r.adjustment_id,
+      direction:     r.direction,
+      hours_reduction: r.hours_reduction,
+      start_date:    r.start_date,
+      end_date:      r.end_date,
+      deployment_id: r.deployment_id,
+      status:        r.status
+    }));
+  });
 }

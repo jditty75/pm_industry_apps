@@ -2,7 +2,7 @@
  * Ingest an uploaded PSA .xlsx file (base64) into the active spreadsheet,
  * replacing the PSA sheet, then normalize it.
  *
- * Returns: { filename, rowsIn, rowsOut, monthsDetected }
+ * Returns: { filename, rowsIn, rowsOut, weeksDetected, warnings }
  */
 function uploadStaffFile(base64, filename) {
   if (!base64) {
@@ -66,7 +66,8 @@ function uploadStaffFile(base64, filename) {
       filename: filename || gsFile.title,
       rowsIn: rowsIn,
       rowsOut: normResult.rowsOut || 0,
-      monthsDetected: normResult.monthsDetected || 0
+      weeksDetected: normResult.weeksDetected || 0,
+      warnings: normResult.warnings || []
     };
   } finally {
     // 7) Clean up the temporary Google Sheet
@@ -488,75 +489,77 @@ function readWorkerRoleOverrides_() {
 }
 
 /**
- * Detect month columns matching MM/YYYY (Workday default) and tolerate
- * several common formats.
+ * Detect weekly PSA columns (weekly-forecast-migration; clean cutover --
+ * monthly detection is no longer supported, see normalizeStaff's throw).
  *
- * Returns an array of objects:
- *   [{ index: <colIndex>, periodStart: <Date> }, ...]
+ * Matches header cells that are real Date cells OR strings matching
+ * MM/DD/YYYY (tolerates MM/DD/YY). Explicitly excludes a 'Total Hours'
+ * column (case-insensitive) even if it were to otherwise match. Any other
+ * non-date trailing column is naturally excluded by not matching.
+ *
+ * Sorts ascending by date and validates 7-day contiguity between
+ * consecutive columns; gaps/duplicates are collected as warnings but do
+ * NOT hard-fail (only a zero-weeks result hard-fails, in normalizeStaff).
+ *
+ * @param {Array} headerRow raw header row values (strings and/or Date objects)
+ * @return {{weeks: Array<{index:number, weekStart:Date}>, warnings: string[]}}
  */
-function detectMonthColumns_(headerRow) {
+function detectWeekColumns_(headerRow) {
   const cols = [];
-
-  const monthNames = {
-    jan:1,feb:2,mar:3,apr:4,may:5,jun:6,
-    jul:7,aug:8,sep:9,oct:10,nov:11,dec:12,
-    january:1,february:2,march:3,april:4,may_long:5,june:6,july:7,
-    august:8,september:9,october:10,november:11,december:12
-  };
-
-  const patterns = [
-    { re: /^(\d{1,2})\/(\d{4})$/,      type: 'mY' }, // 11/2024
-    { re: /^(\d{1,2})-(\d{4})$/,      type: 'mY' }, // 11-2024
-    { re: /^(\d{4})-(\d{1,2})$/,      type: 'Ym' }, // 2024-11
-    { re: /^([A-Za-z]{3,9})[\s\-]?(\d{2,4})$/, type: 'nm' } // Nov 2024, Nov-24
-  ];
+  const reMDYYYY = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/; // MM/DD/YYYY
+  const reMDYY   = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/;  // MM/DD/YY
 
   headerRow.forEach((h, i) => {
-    const s = String(h || '').trim();
+    if (h === '' || h === null || h === undefined) return;
+
+    // Header cells often arrive as real Date values (Sheets auto-converts
+    // date-like header text on paste/import).
+    if (Object.prototype.toString.call(h) === '[object Date]' && !isNaN(h.getTime())) {
+      cols.push({ index: i, weekStart: weekStart_(h) });
+      return;
+    }
+
+    const s = String(h).trim();
     if (!s) return;
+    if (s.toLowerCase() === 'total hours') return; // explicit exclusion
 
-    for (let p = 0; p < patterns.length; p++) {
-      const pat = patterns[p];
-      const m = s.match(pat.re);
-      if (!m) continue;
+    let m = s.match(reMDYYYY);
+    if (m) {
+      cols.push({ index: i, weekStart: new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2])) });
+      return;
+    }
 
-      let month, year;
-      if (pat.type === 'mY') {
-        // 11/2024 or 11-2024
-        month = Number(m[1]);
-        year  = Number(m[2]);
-      } else if (pat.type === 'Ym') {
-        // 2024-11
-        year  = Number(m[1]);
-        month = Number(m[2]);
-      } else if (pat.type === 'nm') {
-        // Nov 2024, Nov-24, etc.
-        const name = m[1].toLowerCase();
-        const mm   = monthNames[name] || monthNames[name.slice(0,3)];
-        if (!mm) continue;
-        month = mm;
-        year  = Number(m[2]);
-        if (year < 100) {
-          // e.g. '24' -> 2024 (simple heuristic)
-          year += 2000;
-        }
-      }
-
-      if (!year || !month) continue;
-
-      cols.push({ index: i, periodStart: new Date(year, month - 1, 1) });
-      break;
+    m = s.match(reMDYY);
+    if (m) {
+      let yy = Number(m[3]);
+      yy += 2000; // MM/DD/YY heuristic, consistent with the old mY-format handling
+      cols.push({ index: i, weekStart: new Date(yy, Number(m[1]) - 1, Number(m[2])) });
     }
   });
 
-  // Sort by date ascending
-  cols.sort((a, b) => a.periodStart - b.periodStart);
-  return cols;
+  cols.sort((a, b) => a.weekStart - b.weekStart);
+
+  const warnings = [];
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  for (let i = 1; i < cols.length; i++) {
+    const diffDays = Math.round((cols[i].weekStart - cols[i - 1].weekStart) / ONE_DAY_MS);
+    if (diffDays === 0) {
+      warnings.push('Duplicate week column: ' + weekKey_(cols[i].weekStart));
+    } else if (diffDays !== 7) {
+      warnings.push(
+        'Non-contiguous week columns: ' + weekKey_(cols[i - 1].weekStart) +
+        ' -> ' + weekKey_(cols[i].weekStart) + ' (' + diffDays + ' days apart, expected 7)'
+      );
+    }
+  }
+
+  return { weeks: cols, warnings: warnings };
 }
 
 /**
  * Normalize PSA staff allocations to Allocations_Normalized.
- * - Detects month columns dynamically.
+ * - Detects WEEKLY columns dynamically (detectWeekColumns_). Clean cutover:
+ *   monthly exports are no longer supported -- see the throw below.
  * - Maps headers via Config_ColumnAliases.
  * - Treats "(Blank)" Project rows as "PTO/Holiday" PTO time.
  * - POPULATES account_name from the PSA "Account" column.
@@ -572,9 +575,9 @@ function normalizeStaff() {
   const values = src.getDataRange().getValues();
   if (values.length < 2) {
     writeTable_(ALLOC_NORM, ALLOC_HEADERS, []);
-    logRefresh_('staff', 0, 0, 0);
+    logRefresh_('staff', 0, 0, 0, '');
     invalidateCache_(ALLOC_NORM);
-    return { rowsIn: 0, rowsOut: 0, monthsDetected: 0 };
+    return { rowsIn: 0, rowsOut: 0, weeksDetected: 0, warnings: [] };
   }
 
   const header = values.shift();
@@ -605,11 +608,19 @@ function normalizeStaff() {
   const iRegionW    = idx[aliasMap['region_worker']  || 'Region - Worker']           ?? -1;
   const iProjRegion = idx[aliasMap['region_project'] || 'Project Region']            ?? -1;
 
-  // Detect month columns (dynamic)
-  const months = detectMonthColumns_(header);
-  if (!months.length) {
-    throw new Error('Could not detect any month columns in PSA sheet.');
+  // Detect week columns (dynamic). Clean cutover: monthly exports are no
+  // longer supported.
+  const weekDetection = detectWeekColumns_(header);
+  const weeks = weekDetection.weeks;
+  if (!weeks.length) {
+    throw new Error(
+      'No weekly columns detected (expected MM/DD/YYYY week headers). ' +
+      'Monthly exports are no longer supported.'
+    );
   }
+  weekDetection.warnings.forEach(function (w) {
+    Logger.log('normalizeStaff: ' + w);
+  });
 
   // First pass: determine per-worker canonical ICP role from non-PTO rows
   const workerIcp = {}; // worker_name -> icpRole
@@ -715,19 +726,19 @@ function normalizeStaff() {
       iMgr >= 0 ? row[iMgr] : ''             // manager (raw PSA value)
     ];
 
-    for (let k = 0; k < months.length; k++) {
-      const mc  = months[k];
-      const hrs = Number(row[mc.index]);
+    for (let k = 0; k < weeks.length; k++) {
+      const wc  = weeks[k];
+      const hrs = Number(row[wc.index]);
       if (!hrs) continue;
 
       out.push(
-        base.concat([mc.periodStart, hrs, entry.rowIndex + 2]) // period_start, hours, source_row
+        base.concat([wc.weekStart, weekKey_(wc.weekStart), hrs, entry.rowIndex + 2]) // week_start, week_key, hours, source_row
       );
     }
   }
 
   writeTable_(ALLOC_NORM, ALLOC_HEADERS, out);
-  logRefresh_('staff', values.length, out.length, months.length);
+  logRefresh_('staff', values.length, out.length, weeks.length, weekDetection.warnings.join(' | '));
   invalidateCache_(ALLOC_NORM);
   // Drop 5: invalidate enriched-data caches that depend on ALLOC_NORM.
   try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e) {}
@@ -735,7 +746,8 @@ function normalizeStaff() {
   return {
     rowsIn: values.length,
     rowsOut: out.length,
-    monthsDetected: months.length
+    weeksDetected: weeks.length,
+    warnings: weekDetection.warnings
   };
 }
 

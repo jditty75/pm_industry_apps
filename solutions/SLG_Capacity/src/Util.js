@@ -263,15 +263,18 @@ function updateRow_(name, idField, idValue, patch, headers) {
  * @param {number} rowsOut
  * @param {number} weeksDetected count of weekly columns detected (was
  *   months_detected pre-weekly-forecast-migration; see REFRESH_HEADERS)
+ * @param {string} [warnings] pipe-joined contiguity/duplicate warnings from
+ *   detectWeekColumns_, for Admin surfacing (Normalization_Log.warnings)
  */
-function logRefresh_(source, rowsIn, rowsOut, weeksDetected) {
+function logRefresh_(source, rowsIn, rowsOut, weeksDetected, warnings) {
   appendRow_(REFRESH_LOG, {
     timestamp: now_(),
     source: source,
     rows_in: rowsIn,
     rows_out: rowsOut,
     weeks_detected: weeksDetected,
-    user: getUserEmail_()
+    user: getUserEmail_(),
+    warnings: warnings || ''
   }, REFRESH_HEADERS);
 }
 

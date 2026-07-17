@@ -126,7 +126,7 @@ const CAL_HEADERS = [
 
 const ALIAS_HEADERS  = ['logical','actual','notes'];
 const REFRESH_HEADERS = [
-  'timestamp','source','rows_in','rows_out','weeks_detected','user'
+  'timestamp','source','rows_in','rows_out','weeks_detected','user','warnings'
 ];
 
 // ------------------------------------------------------------

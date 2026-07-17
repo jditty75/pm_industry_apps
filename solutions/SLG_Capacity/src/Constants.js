@@ -172,10 +172,40 @@ const ASSIGN_STATUSES = ['Modeled','Committed','Archived'];
 const CAPACITY_ADJUSTMENTS_SHEET = 'Capacity_Adjustments';
 
 const ADJUSTMENT_HEADERS = [
-  'adjustment_id', 'resource_name', 'start_date', 'end_date',
-  'hours_reduction', 'distribution', 'custom_monthly_json',
-  'reason', 'scenario_id', 'deployment_id', 'status',
-  'created_by', 'created_at', 'modified_by', 'modified_at'
+  'adjustment_id',
+  'resource_name',
+  'start_date',
+  'end_date',
+  'hours_reduction',          // SIGNED: positive = reduce, negative = add. Column name kept for backward compat.
+  'distribution',
+  'direction',                // 'add' | 'reduce' — denormalized for readability in the sheet
+  'custom_monthly_json',
+  'reason',
+  'scenario_id',
+  'deployment_id',
+  'status',                   // 'Modeled' | 'Committed' | 'Archived' (unchanged)
+  'created_by',
+  'created_at',
+  'modified_by',
+  'modified_at'
+];
+
+// --- Doc B: Capacity Adjustments Audit schema ---
+
+const CAPACITY_ADJUSTMENTS_AUDIT_SHEET = 'Capacity_Adjustments_Audit';
+const CAPACITY_ADJUSTMENTS_AUDIT_ARCHIVE_SHEET = 'Capacity_Adjustments_Audit_Archive';
+
+const CAPACITY_ADJUSTMENT_AUDIT_HEADERS = [
+  'audit_id',
+  'timestamp',
+  'actor',
+  'action',              // 'create' | 'update' | 'commit' | 'archive' | 'delete'
+  'adjustment_id',
+  'resource_name',
+  'deployment_id',
+  'before_json',
+  'after_json',
+  'notes'
 ];
 
 // Generic Resources table headers (used by api_saveGenericResources / writeTable_).

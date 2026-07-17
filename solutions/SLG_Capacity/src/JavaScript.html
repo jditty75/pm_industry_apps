@@ -2578,11 +2578,11 @@
       const months = detail && detail.months ? detail.months : detail;
       renderResourceChart_(name, months);
       renderUtilizationSummary_(detail && detail.summary ? detail.summary : null);
-      // Show "Reduce hours" button now that a resource is selected
-      const reduceBtn = $('#reduceHoursBtn');
-      if (reduceBtn) {
-        reduceBtn.hidden = false;
-        reduceBtn.onclick = () => openReductionDrawer_(null, name);
+      // Show "Adjust hours" button now that a resource is selected
+      const adjustBtn = $('#adjustHoursBtn');
+      if (adjustBtn) {
+        adjustBtn.hidden = false;
+        adjustBtn.onclick = () => openAdjustHoursDrawer_(null, name);
       }
       // Drop 7: load Worker Planning Detail card in parallel
       loadWorkerPlanning_(name);
@@ -2656,7 +2656,7 @@
             return;
           }
           State.projectAllocation = { resource: name, monthKey: monthKey };
-          showProjectAllocationCard_(name, monthKey);
+          loadProjectAllocationCard_(name, monthKey);
         }
       }
     });
@@ -2677,7 +2677,7 @@
     });
   }
 
-  async function showProjectAllocationCard_(resourceName, monthKey) {
+  async function loadProjectAllocationCard_(resourceName, monthKey) {
     const card  = $('#projectAllocationCard');
     const title = $('#projectAllocationTitle');
     const sub   = $('#projectAllocationSub');
@@ -2686,7 +2686,7 @@
 
     title.textContent = 'Project Allocation \u2014 ' + fmtMonth(monthKey);
     sub.textContent   = 'Billable hours \u00b7 ' + resourceName;
-    body.innerHTML    = '<tr><td colspan="2" class="muted" style="padding:12px">Loading\u2026</td></tr>';
+    body.innerHTML    = '<tr><td colspan="3" class="muted" style="padding:12px">Loading\u2026</td></tr>';
     total.textContent = '\u2014';
     card.hidden = false;
 
@@ -2696,18 +2696,104 @@
         monthKey: monthKey
       });
       if (!result.rows || result.rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="2" class="muted" style="padding:12px">No billable allocations.</td></tr>';
+        body.innerHTML = '<tr><td colspan="3" class="muted" style="padding:12px">No billable allocations.</td></tr>';
         total.textContent = '0h';
       } else {
-        body.innerHTML = result.rows.map(r =>
-          '<tr><td>' + escapeHtml_(r.account_name) + '</td><td class="num">' + fmtHours(r.hours) + 'h</td></tr>'
-        ).join('');
+        body.innerHTML = result.rows.map(function (r) {
+          const hasAdj = !!(r.adjustment);
+          const badge  = hasAdj
+            ? '<span class="badge amber" title="' + escapeHtml_(r.adjustment.reason) + '" style="margin-left:6px;font-size:10px;">adjusted</span>'
+            : '';
+          const adjIdsJson = hasAdj ? escapeHtml_(JSON.stringify(r.adjustment.adjustment_ids || [])) : '[]';
+          const clearBtn = hasAdj
+            ? '<button class="btn-ghost row-btn danger" data-pa-clear' +
+                ' data-account="' + escapeHtml_(r.account_name) + '"' +
+                ' data-worker="' + escapeHtml_(resourceName) + '"' +
+                ' data-month="' + escapeHtml_(monthKey) + '"' +
+                ' data-direction="' + escapeHtml_(r.adjustment.direction || 'reduce') + '"' +
+                ' data-magnitude="' + escapeHtml_(String(Math.round(r.adjustment.magnitude || 0))) + '"' +
+                ' data-adjustment-ids="' + adjIdsJson + '"' +
+                ' style="margin-left:4px;">Clear</button>'
+            : '';
+          return '<tr>' +
+            '<td>' + escapeHtml_(r.account_name) + badge + '</td>' +
+            '<td class="num">' + fmtHours(r.hours) + 'h</td>' +
+            '<td>' +
+              '<button class="btn-ghost row-btn" data-pa-edit' +
+                ' data-account="' + escapeHtml_(r.account_name) + '"' +
+                ' data-worker="' + escapeHtml_(resourceName) + '"' +
+                ' data-month="' + escapeHtml_(monthKey) + '">Edit</button>' +
+              clearBtn +
+            '</td>' +
+            '</tr>';
+        }).join('');
         total.textContent = fmtHours(result.totalHours) + 'h';
+
+        // Wire Edit button click handlers
+        $$('#projectAllocationBody [data-pa-edit]').forEach(function (btn) {
+          btn.addEventListener('click', async function (e) {
+            e.stopPropagation();
+            const accountName = btn.dataset.account;
+            const workerName  = btn.dataset.worker;
+            const mk          = btn.dataset.month;
+            try {
+              const deployments = await call('api_getDeploymentsForWorkerAccount', {
+                resource_name: workerName,
+                account_name:  accountName,
+                monthKey:      mk
+              });
+              if (!deployments || !deployments.length) {
+                toast('No matching deployment found for this allocation.', 'err');
+                return;
+              }
+              openQuickAdjustModal_({ workerName: workerName, accountName: accountName, monthKey: mk, deployments: deployments });
+            } catch (err) {
+              toast('Failed to load deployments: ' + err.message, 'err');
+            }
+          });
+        });
+
+        // Wire Clear button click handlers
+        $$('#projectAllocationBody [data-pa-clear]').forEach(function (btn) {
+          btn.addEventListener('click', async function (e) {
+            e.stopPropagation();
+            const accountName   = btn.dataset.account;
+            const workerName    = btn.dataset.worker;
+            const mk            = btn.dataset.month;
+            const direction     = btn.dataset.direction || 'reduce';
+            const magnitude     = Number(btn.dataset.magnitude) || 0;
+            const adjIds        = JSON.parse(btn.dataset.adjustmentIds || '[]');
+
+            const verb = direction === 'add' ? 'added' : 'reduced';
+            const bodyText = 'This will remove the adjustment of ' + magnitude + 'h ' + verb +
+              ' for ' + workerName + ' on ' + accountName + ' in ' + fmtMonth(mk) +
+              '. The Project Allocation will revert to PSA\u2019s reported value.';
+
+            const ok = await confirmAction_({
+              title:        'Clear adjustment?',
+              body:         bodyText,
+              confirmLabel: 'Clear',
+              confirmStyle: 'danger',
+              asyncHandler: async function () {
+                for (var i = 0; i < adjIds.length; i++) {
+                  await call('api_deleteCapacityAdjustment', adjIds[i]);
+                }
+              }
+            });
+            if (ok) {
+              toast('Adjustment cleared', 'ok');
+              refreshExplorerSurfaces_(workerName);
+            }
+          });
+        });
       }
     } catch (err) {
-      body.innerHTML = '<tr><td colspan="2" class="muted" style="padding:12px">Failed to load.</td></tr>';
+      body.innerHTML = '<tr><td colspan="3" class="muted" style="padding:12px">Failed to load.</td></tr>';
     }
   }
+
+  // Alias kept for backward compat within this session
+  var showProjectAllocationCard_ = loadProjectAllocationCard_;
 
   $('#projectAllocationClose')?.addEventListener('click', function() {
     State.projectAllocation = null;
@@ -2801,15 +2887,12 @@
       d.account_name.toLowerCase().indexOf(q) >= 0
     );
     body.innerHTML = filtered.map(d => {
-      const isWPS = d.priming_partner_account === 'Workday Professional Services';
-      let reduceDisabledAttr = '';
-      if (!isWPS) {
-        reduceDisabledAttr = ' disabled title="Reductions only apply to Workday Professional Services-led deployments."';
-      } else if ((d.psa_worker_count || 0) === 0) {
-        reduceDisabledAttr = ' disabled title="No workers with PSA allocations on this project or account."';
+      let adjustDisabledAttr = '';
+      if ((d.psa_worker_count || 0) === 0) {
+        adjustDisabledAttr = ' disabled title="No workers with PSA allocations on this project."';
       }
       // Small badge for account-level fallback match so Director knows precision
-      const approxBadge = (isWPS && (d.psa_worker_count || 0) > 0 && d.match_type === 'account')
+      const approxBadge = ((d.psa_worker_count || 0) > 0 && d.match_type === 'account')
         ? ' <span class="muted" style="font-size:10px;" title="Matched by account (no PSA project name)">~</span>'
         : '';
       return `
@@ -2823,7 +2906,7 @@
         <td>${_renderCellWithOverride_(d, 'dam_name', d.dam_name)}</td>
         <td>
           <button class="btn-ghost row-btn" data-dep="${escapeHtml_(d.deployment_id)}">Assign</button>
-          <button class="btn-ghost row-btn" data-dep-reduce="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;"${reduceDisabledAttr}>Reduce${approxBadge}</button>
+          <button class="btn-ghost row-btn" data-dep-reduce="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;"${adjustDisabledAttr}>Adjust hours${approxBadge}</button>
           <button class="btn-ghost row-btn" data-edit-dep="${escapeHtml_(d.deployment_id)}" style="margin-left:4px;">Edit</button>
         </td>
       </tr>
@@ -2833,7 +2916,7 @@
       btn.addEventListener('click', () => openAssignDrawer_(btn.dataset.dep, 'deployment'));
     });
     $$('#deployBody button[data-dep-reduce]').forEach(btn => {
-      btn.addEventListener('click', () => openReductionDrawerForDeployment_(btn.dataset.depReduce));
+      btn.addEventListener('click', () => openAdjustHoursDrawerForDeployment_(btn.dataset.depReduce));
     });
     $$('#deployBody button[data-edit-dep]').forEach(btn => {
       btn.addEventListener('click', () => openOverrideDrawer_('Deployments', btn.dataset.editDep));
@@ -3018,7 +3101,7 @@
     const addReductionBtn = $('#addReductionBtn');
     if (addReductionBtn) {
       addReductionBtn.disabled = false;
-      addReductionBtn.onclick = () => openReductionDrawer_(null, null, scenarioId);
+      addReductionBtn.onclick = () => openAdjustHoursDrawer_(null, null, scenarioId);
     }
   }
 
@@ -3047,7 +3130,7 @@
       `).join('');
       // Wire Edit buttons
       reductBody.querySelectorAll('[data-edit-adj]').forEach(btn => {
-        btn.addEventListener('click', () => openReductionDrawer_(btn.dataset.editAdj));
+        btn.addEventListener('click', () => openAdjustHoursDrawer_(btn.dataset.editAdj));
       });
     } catch (err) {
       reductBody.innerHTML = '<tr><td colspan="8" class="muted" style="padding:8px">Failed to load reductions.</td></tr>';
@@ -3130,16 +3213,20 @@
   let _reductionDrawerDepLock = null;
 
   /**
-   * Open the reduction drawer from the Deployments view with the deployment
+   * Open the adjust-hours drawer from the Deployments view with the deployment
    * pre-selected and locked. Populates the Worker dropdown from
    * api_getWorkersForDeployment (with hours shown per worker).
    * @param {string} deploymentId
    */
-  async function openReductionDrawerForDeployment_(deploymentId) {
+  async function openAdjustHoursDrawerForDeployment_(deploymentId) {
     const drawer = $('#reductionDrawer');
     if (!drawer || !deploymentId) return;
 
     _reductionDrawerDepLock = deploymentId;
+
+    // Reset direction to 'reduce'
+    $$('#r_direction button').forEach(b => b.classList.toggle('on', b.dataset.val === 'reduce'));
+    _syncAdjustHoursDirectionUI_('reduce');
 
     // Update drawer header
     const dep = (State.deployments || []).find(d => d.deployment_id === deploymentId);
@@ -3148,7 +3235,7 @@
       : deploymentId;
     const titleEl = $('#reductionDrawerTitle');
     const ctxEl   = $('#reductionDrawerContext');
-    if (titleEl) titleEl.textContent = 'Reduce Hours on Deployment';
+    if (titleEl) titleEl.textContent = 'Adjust Hours on Deployment';
     if (ctxEl)   ctxEl.textContent   = depLabel;
     const sub = $('#reductionDrawerWorkerSub');
     if (sub) sub.textContent = '';
@@ -3286,7 +3373,7 @@
     }
   }
 
-  async function openReductionDrawer_(adjustmentId, prefilledResource, prefilledScenario) {
+  async function openAdjustHoursDrawer_(adjustmentId, prefilledResource, prefilledScenario) {
     const drawer = $('#reductionDrawer');
     if (!drawer) return;
 
@@ -3294,7 +3381,7 @@
     _reductionDrawerDepLock = null;
     const titleEl = $('#reductionDrawerTitle');
     const ctxEl   = $('#reductionDrawerContext');
-    if (titleEl) titleEl.textContent = 'Reduce Worker Capacity';
+    if (titleEl) titleEl.textContent = 'Adjust Worker Capacity';
     if (ctxEl)   ctxEl.textContent   = 'Workforce Modeling';
     const depField = $('#r_deployment_field');
     if (depField) depField.hidden = false;
@@ -3324,6 +3411,10 @@
     const sub = $('#reductionDrawerWorkerSub');
     if (sub) sub.textContent = '';
 
+    // Default direction to 'reduce'
+    $$('#r_direction button').forEach(b => b.classList.toggle('on', b.dataset.val === 'reduce'));
+    _syncAdjustHoursDirectionUI_('reduce');
+
     // Reset deployment dropdown to a neutral state before async populate
     const depSel = $('#r_deployment_id');
     if (depSel) { depSel.innerHTML = '<option value="">— No deployment —</option>'; depSel.disabled = false; }
@@ -3339,9 +3430,14 @@
           rSel.disabled = false;
           if (adj.start_date) $('#r_start').value = String(adj.start_date).slice(0,10);
           if (adj.end_date)   $('#r_end').value   = String(adj.end_date).slice(0,10);
-          $('#r_hours').value  = adj.hours_reduction || '';
+          // hours_reduction is signed; show magnitude in the input
+          $('#r_hours').value  = Math.abs(Number(adj.hours_reduction) || 0) || '';
           $('#r_reason').value = adj.reason || '';
           sSel.value = adj.scenario_id || '';
+          // Restore direction from saved adjustment
+          const savedDir = adj.direction || (Number(adj.hours_reduction) >= 0 ? 'reduce' : 'add');
+          $$('#r_direction button').forEach(b => b.classList.toggle('on', b.dataset.val === savedDir));
+          _syncAdjustHoursDirectionUI_(savedDir);
           $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === (adj.distribution || 'Even')));
           if (adj.distribution === 'Custom') {
             renderReductionCustomMonths_();
@@ -3651,6 +3747,28 @@
     // Use a shared timer to avoid double-scheduling.
   });
 
+  /**
+   * Sync the hours label and preview chart color to the selected direction.
+   * @param {'reduce'|'add'} dir
+   */
+  function _syncAdjustHoursDirectionUI_(dir) {
+    const labelEl = $('#r_hoursLabel');
+    if (labelEl) {
+      labelEl.innerHTML = dir === 'add'
+        ? 'Hours to add <span style="color:var(--thumbtack);">*</span>'
+        : 'Hours to reduce <span style="color:var(--thumbtack);">*</span>';
+    }
+  }
+
+  // Wire direction segmented control
+  $$('#r_direction button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      $$('#r_direction button').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      _syncAdjustHoursDirectionUI_(btn.dataset.val);
+    });
+  });
+
   // Submit reduction form
   $('#reductionForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -3672,8 +3790,11 @@
 
     if (!resource) { toast('Worker is required', 'err'); return; }
     if (!start || !end) { toast('Date range is required', 'err'); return; }
-    if (hours <= 0) { toast('Hours to reduce must be > 0', 'err'); return; }
+    if (hours <= 0) { toast('Hours must be > 0', 'err'); return; }
     if (!reason) { toast('Reason is required', 'err'); return; }
+
+    const dirBtn = $$('#r_direction button').find(b => b.classList.contains('on'));
+    const direction = dirBtn ? dirBtn.dataset.val : 'reduce';
 
     const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
     const dist = activeBtn ? activeBtn.dataset.val : 'Even';
@@ -3682,7 +3803,7 @@
       const totalEl = $('#rCustomMonthsTotal');
       const customTotal = Number(totalEl ? totalEl.textContent : 0);
       if (Math.abs(customTotal - hours) > 0.5) {
-        toast('Custom distribution total does not match hours to reduce', 'err');
+        toast('Custom distribution total does not match hours', 'err');
         return;
       }
     }
@@ -3693,6 +3814,7 @@
       start_date:        start,
       end_date:          end,
       hours_reduction:   hours,
+      direction:         direction,
       distribution:      dist,
       custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : '',
       reason:            reason,
@@ -3707,16 +3829,14 @@
     if (spinner) spinner.textContent = commitNow ? 'Committing...' : 'Saving...';
     try {
       await call('api_saveCapacityAdjustment', adj);
-      toast(commitNow ? 'Reduction committed' : 'Reduction saved as modeled', 'ok');
+      toast(commitNow ? 'Adjustment committed' : 'Adjustment saved as modeled', 'ok');
       $('#reductionDrawer').hidden = true;
 
       // Refresh relevant views
       if (State.currentView === 'scenarios' && State.selectedScenario) {
         await loadScenarioAssignments_(State.selectedScenario);
       }
-      if (State.currentView === 'explorer' && State.selectedResource) {
-        loadResourceDetail_(State.selectedResource);
-      }
+      refreshExplorerSurfaces_(resource);
     } catch (err) {
       toast('Save failed: ' + err.message, 'err');
     } finally {
@@ -3730,6 +3850,176 @@
       $('#reductionDrawer').hidden = true;
       _reductionDrawerDepLock = null;
     }
+  });
+</script>
+
+<script>
+// ============================================================
+// Capacity Explorer — unified three-surface refresh
+// ============================================================
+
+/**
+ * Refresh all three Capacity Explorer surfaces for a given worker.
+ * Guards on both State.currentView and State.selectedResource so
+ * saves from other views don't trigger wasted fetches.
+ * @param {string} workerName
+ */
+function refreshExplorerSurfaces_(workerName) {
+  if (State.currentView === 'explorer' && State.selectedResource === workerName) {
+    loadResourceDetail_(workerName);
+  }
+  if (State.projectAllocation && State.projectAllocation.resource === workerName) {
+    loadProjectAllocationCard_(State.projectAllocation.resource, State.projectAllocation.monthKey);
+  }
+}
+
+// ============================================================
+// Quick Adjust Modal — scoped to (worker, account, month)
+// ============================================================
+
+/**
+ * Open the quick-adjust modal for an Edit button click from the
+ * Project Allocation card.
+ * @param {{ workerName: string, accountName: string, monthKey: string, deployments: Object[] }} ctx
+ */
+function openQuickAdjustModal_(ctx) {
+  State.qaCtx = ctx;
+  const modal = $('#quickAdjustModal');
+  if (!modal) return;
+
+  // Context line
+  const ctxEl = $('#qaContext');
+  if (ctxEl) ctxEl.textContent = ctx.workerName + ' \u00b7 ' + ctx.accountName + ' \u00b7 ' + fmtMonth(ctx.monthKey);
+
+  // Deployment dropdown — show only when multiple
+  const depField = $('#qaDeploymentField');
+  const depSel   = $('#qaDeployment');
+  if (depField && depSel) {
+    depSel.innerHTML = (ctx.deployments || []).map(function (d) {
+      return '<option value="' + escapeHtml_(d.deployment_id) + '">' + escapeHtml_(d.deployment_name) + '</option>';
+    }).join('');
+    depField.hidden = (ctx.deployments || []).length <= 1;
+  }
+
+  // Scenario dropdown
+  const scSel = $('#qaScenario');
+  if (scSel) {
+    scSel.innerHTML = '<option value="">— No scenario —</option>' +
+      (State.scenarios || []).filter(function (s) { return s.status !== 'Archived'; })
+        .map(function (s) { return '<option value="' + escapeHtml_(s.scenario_id) + '">' + escapeHtml_(s.name) + '</option>'; }).join('');
+  }
+
+  // Reset form
+  const hoursEl = $('#qaHours');
+  const reasonEl = $('#qaReason');
+  const errEl   = $('#qaError');
+  if (hoursEl)  hoursEl.value = '';
+  if (reasonEl) reasonEl.value = '';
+  if (errEl)    errEl.textContent = '';
+
+  // Default direction to 'reduce'
+  $$('#qaDirection button').forEach(function (b) { b.classList.toggle('on', b.dataset.val === 'reduce'); });
+  const labEl = $('#qaHoursLabel');
+  if (labEl) labEl.textContent = 'Hours to reduce';
+
+  modal.hidden = false;
+
+  // Populate PSA hours for the first deployment
+  _qaRefreshPsaHours_();
+}
+
+/**
+ * Fetch and display PSA hours in the modal's read-only field.
+ */
+async function _qaRefreshPsaHours_() {
+    const ctx = State.qaCtx;
+    if (!ctx) return;
+    const depSel = $('#qaDeployment');
+    const deploymentId = depSel && depSel.value
+      ? depSel.value
+      : ((ctx.deployments && ctx.deployments[0]) ? ctx.deployments[0].deployment_id : '');
+    if (!deploymentId) { const f = $('#qaPsaHours'); if (f) f.value = '—'; return; }
+    try {
+      const resp = await call('api_getPsaHoursForWorkerDeploymentMonth', {
+        resource_name: ctx.workerName,
+        deployment_id: deploymentId,
+        monthKey: ctx.monthKey
+      });
+      const f = $('#qaPsaHours');
+      if (f) f.value = String(Math.round((resp && resp.psa_hours) || 0)) + 'h';
+    } catch (e) {
+      const f = $('#qaPsaHours');
+      if (f) f.value = '—';
+    }
+  }
+
+  // Wire QA modal close (backdrop + cancel buttons with data-qa-close)
+  document.addEventListener('click', function (e) {
+    if (e.target.dataset && e.target.dataset.qaClose !== undefined) {
+      const modal = $('#quickAdjustModal');
+      if (modal) modal.hidden = true;
+    }
+  });
+
+  // Wire QA deployment change to refresh PSA hours
+  $('#qaDeployment')?.addEventListener('change', _qaRefreshPsaHours_);
+
+  // Wire QA direction toggle
+  $$('#qaDirection button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      $$('#qaDirection button').forEach(function (b) { b.classList.remove('on'); });
+      btn.classList.add('on');
+      const labEl = $('#qaHoursLabel');
+      if (labEl) labEl.textContent = btn.dataset.val === 'add' ? 'Hours to add' : 'Hours to reduce';
+    });
+  });
+
+  // Wire QA save button
+  $('#qaSaveBtn')?.addEventListener('click', async function () {
+    const ctx = State.qaCtx;
+    if (!ctx) return;
+
+    const dirBtn = $$('#qaDirection button').find(function (b) { return b.classList.contains('on'); });
+    const direction = dirBtn ? dirBtn.dataset.val : 'reduce';
+    const magnitude = Number($('#qaHours').value) || 0;
+    const reason    = ($('#qaReason').value || '').trim();
+    const scenario  = $('#qaScenario') ? $('#qaScenario').value : '';
+    const depSel    = $('#qaDeployment');
+    const deploymentId = depSel && depSel.value
+      ? depSel.value
+      : ((ctx.deployments && ctx.deployments[0]) ? ctx.deployments[0].deployment_id : '');
+
+    const errEl = $('#qaError');
+    if (errEl) errEl.textContent = '';
+
+    if (magnitude <= 0) { if (errEl) errEl.textContent = 'Hours must be greater than 0.'; return; }
+    if (!reason)        { if (errEl) errEl.textContent = 'Reason is required.'; return; }
+
+    // Build date range from monthKey (first → last of month)
+    const [yr, mo] = ctx.monthKey.split('-').map(Number);
+    const startDate = yr + '-' + String(mo).padStart(2, '0') + '-01';
+    const lastDay = new Date(yr, mo, 0).getDate();
+    const endDate = yr + '-' + String(mo).padStart(2, '0') + '-' + String(lastDay).padStart(2, '0');
+
+    const payload = {
+      resource_name:  ctx.workerName,
+      start_date:     startDate,
+      end_date:       endDate,
+      hours_reduction: magnitude,
+      direction:       direction,
+      distribution:   'Even',
+      reason:          reason,
+      scenario_id:     scenario || '',
+      deployment_id:   deploymentId || '',
+      status:          'Modeled'
+    };
+
+    await withLoading_($('#qaSaveBtn'), async function () {
+      await call('api_saveCapacityAdjustment', payload);
+      $('#quickAdjustModal').hidden = true;
+      toast('Adjustment saved as Modeled', 'ok');
+      refreshExplorerSurfaces_(ctx.workerName);
+    }, { label: 'Saving...' });
   });
 </script>
 
@@ -5460,5 +5750,71 @@
       _ovAuditLoaded = true;
       loadOvAudit_();
     });
+
+    // ---- Adjustment Audit Log collapsible ----
+    let _cadjAuditOpen   = false;
+    let _cadjAuditLoaded = false;
+
+    const cadjAuditHeader = $('#cadjAuditHeader');
+    if (cadjAuditHeader) {
+      cadjAuditHeader.addEventListener('click', function () {
+        _cadjAuditOpen = !_cadjAuditOpen;
+        const body = $('#cadjAuditBody');
+        const chev = $('#cadjAuditChev');
+        if (body) body.hidden = !_cadjAuditOpen;
+        if (chev) chev.classList.toggle('open', _cadjAuditOpen);
+        if (_cadjAuditOpen && !_cadjAuditLoaded) {
+          _cadjAuditLoaded = true;
+          loadCadjAudit_();
+        }
+      });
+    }
+
+    $('#cadjAuditApplyBtn')?.addEventListener('click', function () {
+      _cadjAuditLoaded = true;
+      loadCadjAudit_();
+    });
   });
+
+  async function loadCadjAudit_() {
+    const body = $('#cadjAuditTableBody');
+    if (!body) return;
+    body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:12px;">Loading\u2026</td></tr>';
+    try {
+      const filter = {};
+      const worker = ($('#cadjAuditFilterWorker')?.value || '').trim();
+      const action = ($('#cadjAuditFilterAction')?.value || '').trim();
+      const actor  = ($('#cadjAuditFilterActor')?.value  || '').trim();
+      if (worker) filter.resource_name = worker;
+      if (action) filter.action        = action;
+      if (actor)  filter.actor         = actor;
+      filter.limit = 100;
+      const rows = await call('api_listCapacityAdjustmentAudit', filter);
+
+      const limitEl = $('#cadjAuditLimit');
+      const totalEl = $('#cadjAuditTotal');
+      const summEl  = $('#cadjAuditSummary');
+      if (limitEl) limitEl.textContent = String(rows.length);
+      if (totalEl) totalEl.textContent = String(rows.length);
+      if (summEl)  summEl.textContent  = rows.length > 0 ? '(' + rows.length + ')' : '';
+
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:12px;">No audit rows match the filter.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(function (r) {
+        const when = r.timestamp ? String(r.timestamp).slice(0, 16).replace('T', ' ') : '\u2014';
+        return '<tr>' +
+          '<td>' + escapeHtml_(when) + '</td>' +
+          '<td>' + escapeHtml_(r.actor || '') + '</td>' +
+          '<td>' + escapeHtml_(r.action || '') + '</td>' +
+          '<td>' + escapeHtml_(r.resource_name || '') + '</td>' +
+          '<td>' + escapeHtml_(r.deployment_id || '') + '</td>' +
+          '<td>' + escapeHtml_(r.notes || '') + '</td>' +
+          '</tr>';
+      }).join('');
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:12px;">Load failed: ' + escapeHtml_(err.message) + '</td></tr>';
+    }
+  }
 </script>

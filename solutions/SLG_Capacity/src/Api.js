@@ -1452,9 +1452,8 @@ function api_saveAssignment(a) {
 
 function api_previewAssignment(a) {
   _requireAuthorized_();
-  const calendar = readCalendar_();
-  return expandAssignmentToMonthly_(a, calendar).map(m => ({
-    monthKey: monthKey_(m.period_start),
+  return previewAssignmentWeekly_(a).map(m => ({
+    monthKey: m.monthKey,
     hours: Math.round(m.hours)
   }));
 }
@@ -2145,8 +2144,10 @@ function api_deleteCapacityAdjustment(adjustment_id) {
 }
 
 /**
- * Preview monthly expansion for the reduction drawer chart.
- * Mirrors api_previewAssignment.
+ * Preview weekly expansion (rolled up to months for the chart) for the
+ * reduction drawer. Mirrors api_previewAssignment. Uses
+ * splitWeekAcrossMonths_ so monthly totals reconcile with the weekly
+ * expansion (weekly-forecast-migration).
  * @return {{ monthKey: string, hours_reduction: number }[]}
  */
 function api_previewCapacityAdjustment(adj) {
@@ -2154,8 +2155,16 @@ function api_previewCapacityAdjustment(adj) {
   if (adj.start_date) adj.start_date = new Date(adj.start_date);
   if (adj.end_date)   adj.end_date   = new Date(adj.end_date);
   adj.hours_reduction = Number(adj.hours_reduction) || 0;
-  return expandAdjustmentToMonthly_(adj, readCalendar_())
-    .map(m => ({ monthKey: monthKey_(m.period_start), hours_reduction: m.hours_reduction }));
+  const settings = readSettings_();
+  const basis = settings['week_month_split_basis'] || 'calendar';
+  const weekly = expandAdjustmentToWeekly_(adj, readCalendar_());
+  const byMonth = {};
+  weekly.forEach(w => {
+    splitWeekAcrossMonths_(w.week_start, w.hours_reduction, basis).forEach(part => {
+      byMonth[part.monthKey] = (byMonth[part.monthKey] || 0) + part.hours;
+    });
+  });
+  return Object.keys(byMonth).sort().map(mk => ({ monthKey: mk, hours_reduction: byMonth[mk] }));
 }
 
 /**

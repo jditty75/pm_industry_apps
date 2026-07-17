@@ -20,6 +20,18 @@ function monthKey_(d) {
   return Utilities.formatString('%04d-%02d', x.getFullYear(), x.getMonth() + 1);
 }
 
+/**
+ * Inverse of monthKey_: parse a 'YYYY-MM' string back to the 1st of that
+ * month. Used when rolling weekly data up to monthly buckets via
+ * splitWeekAcrossMonths_ (weekly-forecast-migration).
+ * @param {string} mk
+ * @return {Date}
+ */
+function monthKeyToDate_(mk) {
+  const parts = String(mk).split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+}
+
 function monthsBetween_(start, end) {
   const out = [];
   let cur = firstOfMonth_(start);

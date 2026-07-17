@@ -129,10 +129,25 @@ function setAssignmentStatus_(assignment_id, status) {
   return { assignment_id: assignment_id, status: status };
 }
 
-function previewAssignmentMonthly_(a) {
+/**
+ * Weekly expansion for the assignment-form preview chart, rolled up to
+ * months for display (weekly-forecast-migration). Replaces
+ * previewAssignmentMonthly_. Uses splitWeekAcrossMonths_ so the sum of
+ * returned monthly hours always equals the weekly expansion's total.
+ * @return {{ monthKey: string, hours: number }[]}
+ */
+function previewAssignmentWeekly_(a) {
   if (a.start_date) a.start_date = new Date(a.start_date);
   if (a.end_date)   a.end_date   = new Date(a.end_date);
   a.estimated_hours = Number(a.estimated_hours) || 0;
-  return expandAssignmentToMonthly_(a, readCalendar_())
-    .map(m => ({ monthKey: monthKey_(m.period_start), hours: m.hours }));
+  const settings = readSettings_();
+  const basis = settings['week_month_split_basis'] || 'calendar';
+  const weekly = expandAssignmentToWeekly_(a, readCalendar_());
+  const byMonth = {};
+  weekly.forEach(w => {
+    splitWeekAcrossMonths_(w.week_start, w.hours, basis).forEach(part => {
+      byMonth[part.monthKey] = (byMonth[part.monthKey] || 0) + part.hours;
+    });
+  });
+  return Object.keys(byMonth).sort().map(mk => ({ monthKey: mk, hours: byMonth[mk] }));
 }

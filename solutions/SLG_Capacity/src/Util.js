@@ -179,17 +179,6 @@ function splitWeekAcrossMonths_(weekStart, hours, basis) {
   }));
 }
 
-function workdaysInMonth_(year, monthIdx /*0-11*/) {
-  const first = new Date(year, monthIdx, 1);
-  const last  = new Date(year, monthIdx + 1, 0);
-  let count = 0;
-  for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
-    const wd = d.getDay();
-    if (wd !== 0 && wd !== 6) count++;
-  }
-  return count;
-}
-
 // ============================================================
 // Sheet I/O
 // ============================================================
@@ -246,6 +235,56 @@ function appendRow_(name, rowObj, headers) {
   const row = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
   sh.appendRow(row);
   invalidateCache_(name);
+}
+
+/**
+ * Ensure every date in weekStarts has a matching row in Config_Calendar,
+ * appending any that are missing (workdays_in_week=5, holiday_hours=0
+ * defaults; fiscal_year/fiscal_quarter computed). weekly-forecast-migration:
+ * Config_Calendar is the SOLE source of the week grid that readCalendar_()
+ * (Engine.gs) and computeWeeklyForecast_ iterate over -- an uploaded PSA
+ * week that isn't already a Config_Calendar row would otherwise be bucketed
+ * into Allocations_Normalized correctly but never appear as a column
+ * anywhere (silently zero hours), because nothing else ever adds calendar
+ * rows once bootstrap()'s one-time seed has run. Called from Ingest.gs's
+ * normalizeStaff() right after week detection, on every upload, so the
+ * calendar grid always self-heals to match whatever day-of-week the actual
+ * export uses (Bootstrap.gs's seed is only a placeholder baseline).
+ * @param {Date[]} weekStarts
+ * @return {number} count of newly-appended calendar weeks
+ */
+function ensureCalendarWeeks_(weekStarts) {
+  const existing = readTable_(CFG_CAL) || [];
+  const byKey = {};
+  const rows = existing.map(r => {
+    const ws  = r.week_start ? new Date(r.week_start) : null;
+    const key = r.week_key ? String(r.week_key) : (ws ? weekKey_(ws) : '');
+    if (key) byKey[key] = true;
+    return [
+      ws,
+      key,
+      Number(r.fiscal_year) || (ws ? fiscalYear_(ws) : ''),
+      r.fiscal_quarter || (ws ? fiscalQuarter_(ws) : ''),
+      Number(r.workdays_in_week) || 5,
+      Number(r.holiday_hours) || 0
+    ];
+  });
+
+  let added = 0;
+  (weekStarts || []).forEach(d => {
+    if (!d) return;
+    const ws  = weekStart_(d);
+    const key = weekKey_(ws);
+    if (byKey[key]) return;
+    byKey[key] = true;
+    rows.push([ws, key, fiscalYear_(ws), fiscalQuarter_(ws), 5, 0]);
+    added++;
+  });
+
+  if (!added) return 0;
+  rows.sort((a, b) => a[0] - b[0]);
+  writeTable_(CFG_CAL, CAL_HEADERS, rows);
+  return added;
 }
 
 function updateRow_(name, idField, idValue, patch, headers) {

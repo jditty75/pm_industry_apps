@@ -622,6 +622,18 @@ function normalizeStaff() {
     Logger.log('normalizeStaff: ' + w);
   });
 
+  // Self-heal Config_Calendar coverage (weekly-forecast-migration): append
+  // any week from THIS export that Config_Calendar doesn't already have a
+  // row for, so readCalendar_()/computeWeeklyForecast_ always see every
+  // week that Allocations_Normalized actually contains. See
+  // ensureCalendarWeeks_ (Util.gs) for why this matters.
+  try {
+    const addedWeeks = ensureCalendarWeeks_(weeks.map(function (w) { return w.weekStart; }));
+    if (addedWeeks) Logger.log('normalizeStaff: added ' + addedWeeks + ' new week(s) to Config_Calendar');
+  } catch (e) {
+    Logger.log('normalizeStaff: ensureCalendarWeeks_ failed \u2014 ' + e);
+  }
+
   // First pass: determine per-worker canonical ICP role from non-PTO rows
   const workerIcp = {}; // worker_name -> icpRole
   const cache     = []; // cache per-row derived values so we don't recompute

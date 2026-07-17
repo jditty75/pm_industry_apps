@@ -2657,7 +2657,11 @@ function api_listSettings() {
     { key: 'hide_all_external',      label: 'Hide all external workers',   description: 'When true, External workers are excluded from all views.', defaultValue: 'false' },
     { key: 'default_team_filter',    label: 'Default team filter',         description: 'Pre-select this team in the Team dropdown on load.',    defaultValue: ''     },
     { key: 'admin_emails',           label: 'Admin emails',                description: 'Comma-separated emails granted admin access (in addition to SLG managers).', defaultValue: '' },
-    { key: 'app_access_restricted',  label: 'Restrict app to authorized users', description: 'When true, only emails in Config_SLG_Managers or admin_emails can access the app. Default false for safe deploys.', defaultValue: 'false' }
+    { key: 'app_access_restricted',  label: 'Restrict app to authorized users', description: 'When true, only emails in Config_SLG_Managers or admin_emails can access the app. Default false for safe deploys.', defaultValue: 'false' },
+    { key: 'weekly_target_default',   label: 'Weekly target hours (default)',  description: 'Default weekly capacity target hours per worker (weekly-forecast-migration).', defaultValue: '32.8' },
+    { key: 'weekly_target_P6',        label: 'Weekly target hours (P6)',       description: 'Weekly capacity target hours for P6-level workers (Job Profile starts with P6).', defaultValue: '26.0' },
+    { key: 'week_month_split_basis',  label: 'Week\u2192month split basis',    description: '"calendar" splits a week\'s hours across months by calendar days; "weekday" splits by Mon\u2013Fri days only.', defaultValue: 'calendar' },
+    { key: 'fiscal_year_start_month', label: 'Fiscal year start month',        description: '1-indexed calendar month the fiscal year starts in (2 = February, Workday\u2019s fiscal anchor).', defaultValue: '2' }
   ];
   const currentSettings = readSettings_();
   return KNOWN_SETTINGS.map(function (s) {

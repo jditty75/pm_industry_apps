@@ -105,6 +105,11 @@ function readRoleTeamLabels_() {
  * 7-day stepper from the assignment's own start_date, which would not
  * align with the PSA-ingested week grid).
  *
+ * WFM.13: week_key is always RECOMPUTED from week_start here, never trusted
+ * from the stored cell -- a week_key cell corrupted by Sheets' auto-Date-
+ * conversion (see writeTable_, Util.gs) would otherwise flow through as a
+ * raw Date object instead of the canonical 'YYYY-MM-DD' string.
+ *
  * @return {{byWeekKey: Object, weeks: Array<{week_start:Date, week_key:string, fiscal_year:number, fiscal_quarter:string, workdays_in_week:number, holiday_hours:number}>}}
  */
 function readCalendar_() {
@@ -113,7 +118,7 @@ function readCalendar_() {
   const weeks = [];
   rows.forEach(r => {
     const ws = weekStart_(r.week_start);
-    const wk = r.week_key ? String(r.week_key) : weekKey_(ws);
+    const wk = weekKey_(ws);
     const entry = {
       week_start: ws,
       week_key: wk,

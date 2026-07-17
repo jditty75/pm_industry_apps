@@ -226,8 +226,11 @@ function _normalizedTeamFallback_(resourceType) {
 /**
  * Enriched form of Allocations_Normalized (weekly grain,
  * weekly-forecast-migration). Each row has all original fields plus:
- *   week_key       -- canonical 'YYYY-MM-DD' id (defensively recomputed
- *                      from week_start if the stored value is missing/stale)
+ *   week_key       -- canonical 'YYYY-MM-DD' id, ALWAYS recomputed from
+ *                      week_start (WFM.13: never trusted from the stored
+ *                      cell, which could hold a raw Date object if a prior
+ *                      write was auto-converted by Sheets -- see
+ *                      writeTable_, Util.gs)
  *   month_key      -- 'YYYY-MM' of week_start; a single "primary month"
  *                      stamp for quick client-side monthly filtering. This
  *                      is NOT the proportional week->month split used by
@@ -252,7 +255,7 @@ function getEnrichedAllocations_() {
     var row = {};
     Object.keys(r).forEach(function (k) { row[k] = r[k]; });
     var ws = r.week_start ? new Date(r.week_start) : null;
-    row.week_key       = r.week_key || (ws && typeof weekKey_ === 'function' ? weekKey_(ws) : '');
+    row.week_key       = ws && typeof weekKey_ === 'function' ? weekKey_(ws) : '';
     row.month_key      = ws && typeof monthKey_ === 'function' ? monthKey_(ws) : '';
     row.fiscal_quarter  = ws && typeof fiscalQuarter_ === 'function' ? fiscalQuarter_(ws) : '';
     row.team_label      = resolveTeamLabel_(row, ctx);

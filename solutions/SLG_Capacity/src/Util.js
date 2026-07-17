@@ -68,12 +68,19 @@ function weekStart_(d) {
 /**
  * Canonical week id: 'YYYY-MM-DD' of weekStart_(d). Sortable, unambiguous,
  * identical server- and client-side. LOCKED format -- see Constants.gs.
+ * Always a string -- see writeTable_'s week_key plain-text guard (WFM.13):
+ * without it, Sheets silently auto-converts an ISO-date-shaped string back
+ * into a real Date serial on write, so a later String(dateCell) read
+ * produces a locale toString ('Sat Jul 04 2026 00:00:00 GMT-0400...')
+ * instead of this canonical form. That auto-conversion, not this function,
+ * was WFM.13's defect #1.
  * @param {Date|string|number} d
  * @return {string}
  */
 function weekKey_(d) {
   const x = weekStart_(d);
-  return Utilities.formatString('%04d-%02d-%02d', x.getFullYear(), x.getMonth() + 1, x.getDate());
+  if (!(x instanceof Date) || isNaN(x.getTime())) return '';
+  return Utilities.formatDate(x, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
 /**
@@ -209,6 +216,16 @@ function writeTable_(name, headers, rows) {
   const lastCol = Math.max(sh.getLastColumn(), headers.length);
   if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, lastCol).clearContent();
   if (rows && rows.length) {
+    // WFM.13: force any week_key column to Plain Text BEFORE setValues().
+    // Sheets auto-detects ISO-date-shaped strings ('2026-07-04') and
+    // silently rewrites them as real Date serials on write unless the
+    // cell's number format is already '@' -- the actual source of the
+    // week_key locale-string corruption (weekKey_ itself already returned
+    // a canonical string; the sheet reinterpreted it on write).
+    const wkCol = headers.indexOf('week_key');
+    if (wkCol !== -1) {
+      sh.getRange(2, wkCol + 1, rows.length, 1).setNumberFormat('@');
+    }
     sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }
   invalidateCache_(name);
@@ -234,22 +251,37 @@ function appendRow_(name, rowObj, headers) {
   const sh = getOrCreateSheet_(name, headers);
   const row = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
   sh.appendRow(row);
+  // WFM.13: same week_key plain-text guard as writeTable_ (see there for
+  // why) -- no current appendRow_ caller writes week_key, but this keeps
+  // the guarantee in force for any future one.
+  const wkCol = headers.indexOf('week_key');
+  if (wkCol !== -1) {
+    sh.getRange(sh.getLastRow(), wkCol + 1, 1, 1).setNumberFormat('@');
+  }
   invalidateCache_(name);
 }
 
 /**
  * Ensure every date in weekStarts has a matching row in Config_Calendar,
  * appending any that are missing (workdays_in_week=5, holiday_hours=0
- * defaults; fiscal_year/fiscal_quarter computed). weekly-forecast-migration:
- * Config_Calendar is the SOLE source of the week grid that readCalendar_()
- * (Engine.gs) and computeWeeklyForecast_ iterate over -- an uploaded PSA
- * week that isn't already a Config_Calendar row would otherwise be bucketed
- * into Allocations_Normalized correctly but never appear as a column
- * anywhere (silently zero hours), because nothing else ever adds calendar
- * rows once bootstrap()'s one-time seed has run. Called from Ingest.gs's
- * normalizeStaff() right after week detection, on every upload, so the
- * calendar grid always self-heals to match whatever day-of-week the actual
- * export uses (Bootstrap.gs's seed is only a placeholder baseline).
+ * defaults; fiscal_year/fiscal_quarter computed).
+ *
+ * WFM.13: this is now the SOLE populator of Config_Calendar -- Bootstrap.gs
+ * no longer pre-seeds a speculative week grid (that Monday-anchored,
+ * multi-year generator was WFM.13's defect #2: it didn't match the export's
+ * actual Saturday anchor, and the upload's real weeks piled up alongside it
+ * instead of replacing it, producing a duplicate/interleaved week set).
+ * The anchor here is whatever the export's week columns actually use --
+ * never hardcoded -- so Config_Calendar can only ever contain real weeks.
+ *
+ * Every existing row's key is unconditionally RECOMPUTED from week_start
+ * (never trusted from the stored week_key cell): a corrupted week_key cell
+ * would otherwise both (a) fail to match a freshly computed canonical key,
+ * causing this function to treat an existing week as "new" and re-add it
+ * -- the mechanism behind defect #2's duplicate columns -- and (b) get
+ * written back out as the same corrupted value. Recomputing here makes
+ * this function self-healing for any legacy rows.
+ *
  * @param {Date[]} weekStarts
  * @return {number} count of newly-appended calendar weeks
  */
@@ -258,7 +290,7 @@ function ensureCalendarWeeks_(weekStarts) {
   const byKey = {};
   const rows = existing.map(r => {
     const ws  = r.week_start ? new Date(r.week_start) : null;
-    const key = r.week_key ? String(r.week_key) : (ws ? weekKey_(ws) : '');
+    const key = ws ? weekKey_(ws) : '';
     if (key) byKey[key] = true;
     return [
       ws,

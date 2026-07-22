@@ -1631,6 +1631,37 @@ function _dbg_migrateWorkerExclusions() {
 }
 
 /**
+ * WFM-PERF.2: prove _fastYmd_ / the rewritten weekKey_ / monthKey_ produce
+ * byte-identical output to the old Utilities.formatDate/formatString path,
+ * across every real Allocations_Normalized row, before trusting the swap.
+ * Gate: any mismatch means the date arithmetic diverges from the LOCKED
+ * week_key/month_key format -- do not ship (this is the WFM.13 defect
+ * class: a week_key corruption bug).
+ */
+function _dbg_verifyFastDateParity() {
+  _dbg_requireAdmin_();
+  var tz = Session.getScriptTimeZone();
+  var rows = readTable_(ALLOC_NORM);
+  var mismatches = 0, checked = 0;
+  rows.forEach(function (r) {
+    if (!r.week_start) return;
+    var x = weekStart_(r.week_start);
+    if (isNaN(x.getTime())) return;
+    checked++;
+    var fastWk = _fastYmd_(x);
+    var oldWk = Utilities.formatDate(x, tz, 'yyyy-MM-dd');
+    var fastMk = monthKey_(x);
+    var oldMk = Utilities.formatString('%04d-%02d', x.getFullYear(), x.getMonth() + 1);
+    if (fastWk !== oldWk || fastMk !== oldMk) {
+      mismatches++;
+      if (mismatches <= 10) Logger.log('MISMATCH: wk ' + fastWk + ' vs ' + oldWk + ' | mk ' + fastMk + ' vs ' + oldMk);
+    }
+  });
+  Logger.log('_dbg_verifyFastDateParity: checked ' + checked + ', mismatches ' + mismatches +
+    (mismatches === 0 ? ' \u2014 PARITY OK' : ' \u2014 FAILED, DO NOT SHIP'));
+}
+
+/**
  * WFM-PERF.1 (throwaway diagnostic): profile a COLD api_getDashboard.
  * Flushes caches first so every step runs cold, then calls the dashboard
  * once and lets the [PERF] logs fire (computeUtilization's _p.mark calls,

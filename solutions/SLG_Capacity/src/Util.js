@@ -55,9 +55,27 @@ function firstOfMonth_(d) {
   return new Date(x.getFullYear(), x.getMonth(), 1);
 }
 
+/**
+ * WFM-PERF.2: fast 'yyyy-MM-dd' from a Date's LOCAL components. Byte-
+ * identical to Utilities.formatDate(x, tz, 'yyyy-MM-dd') for dates already
+ * in the script timezone -- Utilities.* calls are ~100-1000x slower than
+ * plain JS in tight per-row loops (~7,000 Allocations_Normalized rows).
+ * Verified for parity via _dbg_verifyFastDateParity (Diagnostics.gs).
+ * @param {Date} x
+ * @return {string}
+ */
+function _fastYmd_(x) {
+  const y = x.getFullYear();
+  const m = x.getMonth() + 1;
+  const d = x.getDate();
+  return y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
+}
+
 function monthKey_(d) {
   const x = new Date(d);
-  return Utilities.formatString('%04d-%02d', x.getFullYear(), x.getMonth() + 1);
+  const y = x.getFullYear();
+  const m = x.getMonth() + 1;
+  return y + '-' + (m < 10 ? '0' + m : m); // WFM-PERF.2: was Utilities.formatString('%04d-%02d', ...)
 }
 
 /**
@@ -120,7 +138,12 @@ function weekStart_(d) {
 function weekKey_(d) {
   const x = weekStart_(d);
   if (!(x instanceof Date) || isNaN(x.getTime())) return '';
-  return Utilities.formatDate(x, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  // WFM-PERF.2: was Utilities.formatDate(x, tz, 'yyyy-MM-dd'). weekStart_
+  // above already zeroes to LOCAL midnight, so _fastYmd_'s local Date
+  // components are byte-identical to the old Utilities.formatDate output
+  // -- do not remove the weekStart_ call above; that normalization is what
+  // makes this substitution behavior-preserving.
+  return _fastYmd_(x);
 }
 
 /**

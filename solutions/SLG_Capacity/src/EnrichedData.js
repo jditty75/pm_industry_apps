@@ -253,14 +253,23 @@ function getEnrichedAllocations_() {
   var rows = cachedRead_(ALLOC_NORM);
   var ctx  = resolveTeamLabel_.buildCtx_();
 
+  // WFM-PERF.2: compute one weekStart_-normalized Date per row and derive
+  // week_key/month_key/fiscal_quarter from its local components directly,
+  // instead of each helper (weekKey_/monthKey_/fiscalQuarter_) re-wrapping
+  // r.week_start in its own `new Date(...)`. Output is identical to the
+  // helper-based version -- verified via _dbg_verifyFastDateParity.
   var enriched = rows.map(function (r) {
     var row = {};
     Object.keys(r).forEach(function (k) { row[k] = r[k]; });
-    var ws = r.week_start ? new Date(r.week_start) : null;
-    row.week_key       = ws && typeof weekKey_ === 'function' ? weekKey_(ws) : '';
-    row.month_key      = ws && typeof monthKey_ === 'function' ? monthKey_(ws) : '';
-    row.fiscal_quarter  = ws && typeof fiscalQuarter_ === 'function' ? fiscalQuarter_(ws) : '';
-    row.team_label      = resolveTeamLabel_(row, ctx);
+    var ws = r.week_start ? weekStart_(r.week_start) : null;
+    if (ws && !isNaN(ws.getTime())) {
+      row.week_key = _fastYmd_(ws);
+      row.month_key = ws.getFullYear() + '-' + (ws.getMonth() + 1 < 10 ? '0' : '') + (ws.getMonth() + 1);
+      row.fiscal_quarter = FISCAL_QUARTER_BY_CALENDAR_MONTH[ws.getMonth() + 1];
+    } else {
+      row.week_key = ''; row.month_key = ''; row.fiscal_quarter = '';
+    }
+    row.team_label = resolveTeamLabel_(row, ctx);
     return row;
   });
   Logger.log('[PERF getEnrichedAllocations_] COLD REBUILD: ' + (Date.now() - _t) + 'ms');

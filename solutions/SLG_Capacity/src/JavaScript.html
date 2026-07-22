@@ -1137,7 +1137,27 @@
   // ============================================================
   // Dashboard: KPIs, weekly forecast table
   // ============================================================
+  // WFM-PERF.2: honest loading state for the Dashboard's first (possibly
+  // cold) load, so a slow api_getDashboard/api_getForecastTable reads as
+  // "working", not frozen. Mirrors the "Loading…" table-body convention
+  // already used by loadWeeklyForecastTable.
+  const DASHBOARD_LOADING_MSG = 'Computing capacity forecast\u2026 (first load after an upload can take a moment)';
+
+  function showDashboardLoading_() {
+    $('#kpiUtil').textContent = '\u2026';
+    $('#kpiUtilSub').textContent = DASHBOARD_LOADING_MSG;
+    $('#kpiCommitted').textContent = '\u2026';
+    $('#kpiScenario').textContent = '\u2026';
+    $('#kpiOverUnder').textContent = '\u2026';
+    const headcountBody = $('#kpiHeadcountBody');
+    if (headcountBody) {
+      headcountBody.innerHTML = '<tr><td colspan="10" class="muted" style="padding:12px">' +
+        escapeHtml_(DASHBOARD_LOADING_MSG) + '</td></tr>';
+    }
+  }
+
   async function loadDashboard() {
+    showDashboardLoading_();
     try {
       const params = buildServerParams_({ quarter: null });
       const signature = JSON.stringify(params);
@@ -1204,7 +1224,7 @@
 
   async function loadWeeklyForecastTable() {
     const body = $('#weeklyForecastBody');
-    if (body) body.innerHTML = '<tr><td class="muted" style="padding:12px">Loading…</td></tr>';
+    if (body) body.innerHTML = '<tr><td class="muted" style="padding:12px">' + escapeHtml_(DASHBOARD_LOADING_MSG) + '</td></tr>';
     try {
       const params = buildServerParams_();
       const forecast = await call('api_getForecastTable', params);

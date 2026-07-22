@@ -781,6 +781,16 @@ function normalizeStaff() {
   // Drop 5: invalidate enriched-data caches that depend on ALLOC_NORM.
   try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e) {}
 
+  // WFM-PERF.2: warm enriched caches so the next viewer doesn't pay the
+  // cold rebuild. The uploader absorbs it once, here, right after ingest.
+  // Runs after reconcileWorkerExclusions_ and cache invalidation above so
+  // it warms the final, post-reconcile state. Non-fatal, wrapped.
+  try {
+    if (typeof getEnrichedAllocations_ === 'function') getEnrichedAllocations_();
+    if (typeof getResourceIndex_ === 'function') getResourceIndex_();
+    if (typeof getEnrichedAssignments_ === 'function') getEnrichedAssignments_();
+  } catch (e) { Logger.log('normalizeStaff warm-up failed (non-fatal): ' + e); }
+
   return {
     rowsIn: values.length,
     rowsOut: out.length,

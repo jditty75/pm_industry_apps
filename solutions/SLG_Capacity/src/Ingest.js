@@ -386,24 +386,22 @@ function classifyIcpRole_(roleCategory, jobProfile, projectRole, resourceType) {
   if (jp.indexOf('engagement manager') >= 0) return 'EM';
   if (jp.indexOf('project director')   >= 0) return 'PD';
 
-  // Bench / unassigned consultant fallback:
-  // When Project Role is blank (worker has no current project assignment),
-  // Job Profile + Resource Type still identify the worker's role.
+  // Job Profile is authoritative for consultants regardless of resource_type.
+  // (WFM-FIX.2: the previous "&& rt === ..." guard here dropped bench/
+  // specialty workers whose Job Profile clearly stated their role family
+  // -- e.g. "P4 Sr Functional Consultant" -- but whose resource_type wasn't
+  // exactly 'functional'/'integrations', leaving 75% of SLG workers
+  // Unclassified. Job Profile carries the canonical role family;
+  // resource_type does not reliably. Validated 429/436 rows, 98.4%; the
+  // 7 residual rows are management titles (Consulting Management, Program
+  // Management) that stay blank by design and are handled via
+  // Config_Worker_Exclusions.
   //
-  // PSA Job Profile patterns we expect to see:
-  //   "P3 Functional Consultant"
-  //   "P4 Sr Functional Consultant"
-  //   "P6 Sr Principal Functional Consultant"
-  //   "P5 Principal Technical Consultant"
-  // Resource Type values we expect:
-  //   "Functional"  -> CS_FUNC
-  //   "Integrations" -> CS_TECH
-  if (jp.indexOf('functional consultant') >= 0 && rt === 'functional') {
-    return 'CS_FUNC';
-  }
-  if (jp.indexOf('technical consultant') >= 0 && rt === 'integrations') {
-    return 'CS_TECH';
-  }
+  // Order matters: "technical consultant" is checked before "functional
+  // consultant" -- both are substrings of longer titles, but neither
+  // contains the other, so order is safe (validated).
+  if (jp.indexOf('technical consultant') >= 0) return 'CS_TECH';
+  if (jp.indexOf('functional consultant') >= 0) return 'CS_FUNC';
 
   return '';
 }

@@ -783,7 +783,7 @@ function api_getReportingSummary(params) {
     const parts = splitWeekAcrossMonths_(r.week_start, h, splitBasis);
     const hWindow = parts.reduce((s, p) => s + (inWindow_(p.monthKey) ? p.hours : 0), 0);
     if (!hWindow) return;
-    if (excluded.has(r.resource_name)) return;
+    if (excluded.has(_exclusionKey_(r.resource_name))) return;
 
     const mgrCheck = _rowPassesManagerFilter_(r);
     if (!mgrCheck.pass) return;
@@ -898,7 +898,7 @@ function api_getReportingSummary(params) {
 
     assigns.forEach(a => {
       if (!a.resource_name) return;
-      if (excluded.has(a.resource_name)) return;
+      if (excluded.has(_exclusionKey_(a.resource_name))) return;
 
       // Drop 5: enriched assignments carry all worker fields directly;
       // fall back to the per-worker lookup maps for non-enriched path.
@@ -1249,7 +1249,7 @@ function api_getReference() {
   const teamTypes = {};
   const subteams = {};
   Object.values(resIndex).forEach(r => {
-    if (excluded.has(r.name)) return;
+    if (excluded.has(_exclusionKey_(r.name))) return;
     if (r.teamType) teamTypes[r.teamType] = true;
     if (r.subteam) subteams[r.subteam] = true;
   });
@@ -1260,7 +1260,7 @@ function api_getReference() {
   const resolveResourceTeam = _buildResourceTeamResolver_();
 
   const resources = Object.values(resIndex)
-    .filter(r => !excluded.has(r.name))
+    .filter(r => !excluded.has(_exclusionKey_(r.name)))
     .map(r => ({
       name: r.name,
       team: r.team || '',
@@ -2398,22 +2398,53 @@ function api_getResourceBaseline(resource_name) {
 
 function api_getExclusions() {
   _requireAuthorized_();
-  try { return readTable_('Config_Worker_Exclusions') || []; } catch (e) { return []; }
+  try { return readTable_(CFG_WORKER_EXCLUSIONS) || []; } catch (e) { return []; }
 }
 
+/**
+ * WFM-FIX.3: Config_Worker_Exclusions gained source/override columns that
+ * this endpoint's client UI does not edit (worker_name/manager_org/reason/
+ * active only). Previously this wrote a fixed 4-column headers list, which
+ * -- combined with writeTable_'s clear-then-rewrite -- would silently
+ * blank the source/override columns' data on every save from the Admin
+ * panel, undoing rule stamps and human overrides alike. Each row's
+ * existing source/override (looked up by _exclusionKey_) is now carried
+ * forward unless the payload explicitly supplies a value.
+ */
 function api_saveExclusions(payload) {
   _requireAuthorized_();
   const rows = (payload && payload.workers) || [];
-  const headers = ['worker_name', 'manager_org', 'reason', 'active'];
-  writeTable_('Config_Worker_Exclusions', headers, rows);
+
+  const existing = {};
+  try {
+    (readTable_(CFG_WORKER_EXCLUSIONS) || []).forEach(r => {
+      const k = _exclusionKey_(r.worker_name);
+      if (k) existing[k] = r;
+    });
+  } catch (e) { /* fall through with an empty existing map */ }
+
+  const merged = rows.map(r => {
+    const prev = existing[_exclusionKey_(r.worker_name)] || {};
+    return {
+      worker_name: r.worker_name || '',
+      manager_org: r.manager_org || '',
+      reason: r.reason || '',
+      active: r.active || '',
+      source: (r.source !== undefined ? r.source : prev.source) || '',
+      override: (r.override !== undefined ? r.override : prev.override) || ''
+    };
+  });
+
+  writeTable_(CFG_WORKER_EXCLUSIONS, WORKER_EXCLUSION_HEADERS,
+    merged.map(r => WORKER_EXCLUSION_HEADERS.map(h => r[h] !== undefined ? r[h] : '')));
   if (typeof invalidateCache_ === 'function') {
-    invalidateCache_('Config_Worker_Exclusions');
+    invalidateCache_(CFG_WORKER_EXCLUSIONS);
   }
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   // Bust per-user api_getReference cache so excluded workers disappear
   // from Capacity Explorer immediately on next reference fetch.
   try { CacheService.getUserCache().remove('api_getReference_v1'); } catch (e) {}
-  return { ok: true, count: rows.length };
+  return { ok: true, count: merged.length };
 }
 
 function api_listAllWorkers() {

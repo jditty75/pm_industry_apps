@@ -168,35 +168,40 @@ function buildPlanningWindow_(windowMonths) {
   return { monthKeys: set, monthsList: list };
 }
 
+/**
+ * WFM-FIX.3: Config_Worker_Exclusions is now code-maintained (see
+ * reconcileWorkerExclusions_, Ingest.gs) with a locked precedence, keyed by
+ * _exclusionKey_ (Util.gs) everywhere -- not the raw worker_name string --
+ * so suffix/spacing/case drift (e.g. an "(On Leave)" tag appearing or
+ * disappearing between exports) can't silently break matching.
+ *
+ * Precedence, per worker:
+ *   1) any row with override='include' -> NOT excluded (wins over everything)
+ *   2) else any row with override='exclude' -> excluded
+ *   3) else excluded if a rule:* row exists, OR a manual row with active=Yes exists
+ *
+ * @return {Set<string>} set of _exclusionKey_ values that ARE excluded
+ */
 function readExclusions_() {
-  const rows = cachedRead_
-    ? cachedRead_('Config_Worker_Exclusions')
-    : readTable_('Config_Worker_Exclusions');
-
-  function _normCell_(v) {
-    if (v === null || v === undefined) return '';
-    return String(v)
-      .replace(/\u00A0/g, ' ')
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      .trim();
-  }
-  const TRUTHY = {
-    'yes': 1, 'y': 1, 'true': 1, 't': 1,
-    '1': 1, 'x': 1, 'active': 1, 'on': 1
-  };
-
-  const set = new Set();
-  rows.forEach(r => {
-    const name = _normCell_(r.worker_name);
-    if (!name) return;
-    const raw = r.active === '' || r.active === null || r.active === undefined
-      ? 'Yes'
-      : r.active;
-    const active = _normCell_(raw).toLowerCase();
-    if (TRUTHY[active]) {
-      set.add(name);
-    }
+  var rows;
+  try { rows = cachedRead_(CFG_WORKER_EXCLUSIONS); }
+  catch (e) { rows = readTable_(CFG_WORKER_EXCLUSIONS); }
+  var TRUTHY = {'yes':1,'y':1,'true':1,'t':1,'1':1,'x':1,'active':1,'on':1};
+  var forceInclude = {}, excluded = {};
+  (rows || []).forEach(function (r) {
+    var k = _exclusionKey_(r.worker_name);
+    if (!k) return;
+    var ovr = String(r.override || '').trim().toLowerCase();
+    if (ovr === 'include') { forceInclude[k] = true; return; }
+    if (ovr === 'exclude') { excluded[k] = true; return; }
+    var src = String(r.source || '').trim();
+    var isRule = src.indexOf('rule:') === 0 || src.indexOf('rule:') > 0;
+    var activeRaw = (r.active === '' || r.active == null) ? 'Yes' : r.active;
+    var active = String(activeRaw).replace(/\u00A0/g,' ').trim().toLowerCase();
+    if (isRule || TRUTHY[active]) excluded[k] = true;
   });
+  var set = new Set();
+  Object.keys(excluded).forEach(function (k) { if (!forceInclude[k]) set.add(k); });
   return set;
 }
 
@@ -661,12 +666,12 @@ function computeUtilization(params) {
 
   const alloc = allocRaw.filter(a => {
     if (!a.resource_name) return false;
-    if (excluded.has(a.resource_name)) return false;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return false;
     return inScope(a.resource_name);
   });
   const assigns = assignsRaw.filter(a => {
     if (!a.resource_name) return false;
-    if (excluded.has(a.resource_name)) return false;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return false;
     return inScope(a.resource_name);
   });
 
@@ -779,7 +784,7 @@ function computeUtilization(params) {
     try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
     adjRows.forEach(adj => {
       if (!adj.resource_name) return;
-      if (excluded.has(adj.resource_name)) return;
+      if (excluded.has(_exclusionKey_(adj.resource_name))) return;
       const isCommitted = (adj.status === 'Committed');
       const isModeled   = (adj.status === 'Modeled');
       const include = isCommitted ||
@@ -1179,12 +1184,12 @@ function computeWeeklyForecast_(params) {
 
   const alloc = allocRaw.filter(a => {
     if (!a.resource_name) return false;
-    if (excluded.has(a.resource_name)) return false;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return false;
     return inScope(a.resource_name);
   });
   const assigns = assignsRaw.filter(a => {
     if (!a.resource_name) return false;
-    if (excluded.has(a.resource_name)) return false;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return false;
     return inScope(a.resource_name);
   });
 
@@ -1272,7 +1277,7 @@ function computeWeeklyForecast_(params) {
     try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
     adjRows.forEach(adj => {
       if (!adj.resource_name) return;
-      if (excluded.has(adj.resource_name)) return;
+      if (excluded.has(_exclusionKey_(adj.resource_name))) return;
       const isCommitted = (adj.status === 'Committed');
       const isModeled   = (adj.status === 'Modeled');
       const include = isCommitted ||
@@ -1313,7 +1318,7 @@ function computeResourceDetail(params) {
   const resource = params.resource;
   if (!resource) return { months: [], summary: null };
   const excluded = readExclusions_();
-  if (excluded.has(resource)) return { months: [], summary: null };
+  if (excluded.has(_exclusionKey_(resource))) return { months: [], summary: null };
 
   const viewMode = params.viewMode || 'Committed';
   const alloc = cachedRead_(ALLOC_NORM).filter(a => a.resource_name === resource);

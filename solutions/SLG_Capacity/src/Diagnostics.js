@@ -175,7 +175,7 @@ function _dbg_debugUnclassifiedSlgWorkers() {
 
     const name = r.resource_name;
     if (!name) return;
-    if (excluded.has(name)) return;
+    if (excluded.has(_exclusionKey_(name))) return;
 
     // Only count hours in the planning window for the totals. weekly-
     // forecast-migration: rows are weekly (week_start); use the week's
@@ -329,7 +329,7 @@ function _dbg_debugSlgWorkerTeamMismatches() {
     if (wc !== 'SLG_Real' && wc !== 'SLG_Generic') return;
     const name = String(r.resource_name || '').trim();
     if (!name) return;
-    if (excluded.has(name)) return;
+    if (excluded.has(_exclusionKey_(name))) return;
     if (!workerInfo[name]) {
       workerInfo[name] = {
         name: name,
@@ -731,7 +731,7 @@ function _dbg_debugRoleHeadcount(roleKey, paramsOverride) {
   const slgInRole = {};
   allocRaw.forEach(function (a) {
     if (!a.resource_name) return;
-    if (excluded.has(a.resource_name)) return;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return;
     const info = resIndex[a.resource_name] || {};
     const wc = String(info.worker_class || '');
     if (wc !== 'SLG_Real' && wc !== 'SLG_Generic') return;
@@ -747,7 +747,7 @@ function _dbg_debugRoleHeadcount(roleKey, paramsOverride) {
   try {
     readGenericResources_().forEach(function (g) {
       if (!g.name) return;
-      if (excluded.has(g.name)) return;
+      if (excluded.has(_exclusionKey_(g.name))) return;
       const info = resIndex[g.name] || {};
       const workerRole = (info.icp || info.resource_type || g.resource_type || 'Unclassified');
       if (workerRole !== roleKey) return;
@@ -1513,4 +1513,119 @@ function _dbg_findAdjustmentsByWorker(resourceName) {
       status:        r.status
     }));
   });
+}
+
+/**
+ * ONE-TIME (WFM-FIX.3): clean up Config_Worker_Exclusions before ingest
+ * reconciliation (reconcileWorkerExclusions_, Ingest.gs) takes over as the
+ * ongoing maintainer. Run manually from the editor; review the sheet
+ * before running Normalize Staff.
+ *
+ * - Prunes all contractor ('[C]' tag in worker_name) rows -- worker-scope
+ *   already handles contractors via worker_class; this sheet is SLG
+ *   workers/managers only.
+ * - Prunes dormant non-rule rows: active != Yes, no override, and the
+ *   worker isn't currently a Config_SLG_Managers member or on-leave-tagged
+ *   (Option X -- a dormant row with no rule basis and no human override is
+ *   just noise).
+ * - Stamps source on every surviving row: Config_SLG_Managers membership
+ *   -> rule:manager, current "(On Leave)" name-tag in Allocations_Normalized
+ *   -> rule:on_leave (dual-status rows carry both), everything else that
+ *   survives -> manual. Any existing override is preserved untouched.
+ * - Also materializes rows for any manager/on-leave worker who doesn't yet
+ *   have a row at all, so the sheet ends up in the same shape
+ *   reconcileWorkerExclusions_ would produce going forward.
+ *
+ * On-leave detection here tests the "(On Leave)" tag directly against
+ * current resource_name values (same pattern as _deriveOnLeave_, Ingest.gs)
+ * rather than the Allocations_Normalized on_leave column, since this
+ * migration is meant to run BEFORE the first post-fix Normalize Staff --
+ * the column may not be populated yet.
+ *
+ * @return {{before:number, after:number, prunedContractor:number, prunedDormant:number}}
+ */
+function _dbg_migrateWorkerExclusions() {
+  _dbg_requireAdmin_();
+
+  const TRUTHY = {'yes':1,'y':1,'true':1,'t':1,'1':1,'x':1,'active':1,'on':1};
+  const existing = readTable_(CFG_WORKER_EXCLUSIONS) || [];
+
+  // Data-derived signals (mirrors reconcileWorkerExclusions_'s classification).
+  const managers = {};   // _exclusionKey_ -> display name
+  (readConfigSlgManagers_() || []).forEach(function (m) {
+    const nm = String(m.manager_name || '').trim();
+    if (nm) managers[_exclusionKey_(nm)] = nm;
+  });
+
+  const onLeave = {};    // _exclusionKey_ -> display name
+  let allocRows = [];
+  try { allocRows = readTable_(ALLOC_NORM) || []; } catch (e) { allocRows = []; }
+  allocRows.forEach(function (a) {
+    const raw = String(a.resource_name || '').trim();
+    if (raw && /\(On Leave\)\s*$/i.test(raw)) {
+      onLeave[_exclusionKey_(raw)] = raw;
+    }
+  });
+
+  const pruned = { contractor: 0, dormant: 0 };
+  const out = {};  // _exclusionKey_ -> row
+
+  existing.forEach(function (r) {
+    const name = String(r.worker_name || '').trim();
+    if (!name) return;
+    const k = _exclusionKey_(name);
+    const ovr = String(r.override || '').trim();
+    const activeRaw = (r.active === '' || r.active == null) ? 'Yes' : r.active;
+    const isActive = !!TRUTHY[String(activeRaw).trim().toLowerCase()];
+    const isRuleCandidate = !!managers[k] || !!onLeave[k];
+
+    if (name.indexOf('[C]') >= 0) { pruned.contractor++; return; }
+    if (!isActive && !ovr && !isRuleCandidate) { pruned.dormant++; return; }
+
+    out[k] = {
+      worker_name: name,
+      manager_org: String(r.manager_org || '').trim(),
+      reason: String(r.reason || '').trim(),
+      active: 'Yes',
+      source: '',   // re-derived below, discarding whatever was stored before
+      override: ovr
+    };
+  });
+
+  function ensureRow(k, name) {
+    if (!out[k]) {
+      out[k] = { worker_name: name, manager_org: '', reason: '', active: 'Yes', source: '', override: '' };
+    }
+    return out[k];
+  }
+  // Materialize rule:manager / rule:on_leave, including for workers who
+  // don't have a pre-existing row at all.
+  Object.keys(managers).forEach(function (k) { _addSource_(ensureRow(k, managers[k]), 'rule:manager'); });
+  Object.keys(onLeave).forEach(function (k)  { _addSource_(ensureRow(k, onLeave[k]),   'rule:on_leave'); });
+  // Anything left without a rule tag is a genuine human judgment call.
+  Object.keys(out).forEach(function (k) { if (!out[k].source) out[k].source = 'manual'; });
+
+  const finalRows = Object.keys(out).map(function (k) { return out[k]; });
+  finalRows.sort(function (a, b) { return String(a.worker_name).localeCompare(String(b.worker_name)); });
+
+  writeTable_(CFG_WORKER_EXCLUSIONS, WORKER_EXCLUSION_HEADERS,
+    finalRows.map(function (r) {
+      return WORKER_EXCLUSION_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+    }));
+  invalidateCache_(CFG_WORKER_EXCLUSIONS);
+
+  const counts = {
+    ruleManager: finalRows.filter(function (r) { return _hasSource_(r, 'rule:manager'); }).length,
+    ruleOnLeave: finalRows.filter(function (r) { return _hasSource_(r, 'rule:on_leave'); }).length,
+    manual:      finalRows.filter(function (r) { return _hasSource_(r, 'manual'); }).length,
+    overrides:   finalRows.filter(function (r) { return !!r.override; }).length
+  };
+
+  Logger.log('_dbg_migrateWorkerExclusions: BEFORE ' + existing.length + ' rows -> AFTER ' + finalRows.length + ' rows.');
+  Logger.log('  rule:manager=' + counts.ruleManager + ', rule:on_leave=' + counts.ruleOnLeave +
+    ', manual=' + counts.manual + ', overrides=' + counts.overrides);
+  Logger.log('  Pruned: ' + pruned.contractor + ' contractor row(s), ' + pruned.dormant + ' dormant row(s).');
+  Logger.log('  Review the sheet now, before running Normalize Staff.');
+
+  return { before: existing.length, after: finalRows.length, prunedContractor: pruned.contractor, prunedDormant: pruned.dormant };
 }

@@ -10,6 +10,27 @@ function getUserEmail_() {
   catch (e) { return 'unknown'; }
 }
 
+/**
+ * Canonical matching key for a worker name, used everywhere a name is
+ * looked up against Config_Worker_Exclusions (WFM-FIX.3). Strips the PSA
+ * "(On Leave)" name-tag (see _deriveOnLeave_, Ingest.gs) plus whitespace/
+ * zero-width-char/case drift, so an exclusion-sheet row and an
+ * Allocations_Normalized resource_name can't fail to match on suffix,
+ * spacing, or case alone -- the root cause of on-leave workers leaking
+ * through exact-string matches.
+ * @param {string} name
+ * @return {string}
+ */
+function _exclusionKey_(name) {
+  return String(name || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s*\(On Leave\)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function firstOfMonth_(d) {
   const x = new Date(d);
   return new Date(x.getFullYear(), x.getMonth(), 1);
@@ -461,7 +482,7 @@ function invalidateAllCaches_() {
     CFG_ICP, CFG_ROLES, CFG_CAL, CFG_ALIAS,
     CFG_SETTINGS, CFG_GENERIC, CFG_SLG_MGRS,
     CFG_PRACTICE_MGRS,                     // NEW: practice -> manager ownership
-    'Config_Worker_Exclusions',
+    CFG_WORKER_EXCLUSIONS,
     'Config_Resource_Type', 'Config_ResourceType_Map',
     'Config_Ingest_Filters',
     CAPACITY_ADJUSTMENTS_AUDIT_SHEET,       // Doc B: adjustment audit log

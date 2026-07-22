@@ -284,6 +284,19 @@ function normalizeManagerName_(name) {
 }
 
 /**
+ * Detect a PSA "(On Leave)" tag on a worker's name. Returns 'Yes' or ''.
+ * WFM-FIX.3, Option A: the tag is authoritative for ADDING a worker to the
+ * on_leave rule set (see reconcileWorkerExclusions_) -- untagged + present
+ * + has project rows is the separate, safer signal for REMOVING one.
+ * Does not alter resource_name; the suffix stays in the normalized row.
+ * @param {string} workerName
+ * @return {string} 'Yes' or ''
+ */
+function _deriveOnLeave_(workerName) {
+  return /\(On Leave\)\s*$/i.test(String(workerName || '')) ? 'Yes' : '';
+}
+
+/**
  * Read SLG manager names from Config_SLG_Managers.
  * Returns a Set of lowercase manager names for matching.
  */
@@ -718,6 +731,9 @@ function normalizeStaff() {
     const managerOrg  = iMgr     >= 0 ? String(row[iMgr] || '')     : ''; // RAW from PSA (may include "(On Leave)")
     const accountName = iAccount >= 0 ? String(row[iAccount] || '') : '';
     const workerClass = entry.workerClass || '';
+    // WFM-FIX.3: stamp every row regardless of exclusion -- retained as the
+    // hook for a future requirement even for workers who end up excluded.
+    const onLeave = _deriveOnLeave_(workerName);
 
     const base = [
       row[iWorker],                          // resource_name
@@ -742,12 +758,24 @@ function normalizeStaff() {
       if (!hrs) continue;
 
       out.push(
-        base.concat([wc.weekStart, weekKey_(wc.weekStart), hrs, entry.rowIndex + 2]) // week_start, week_key, hours, source_row
+        // week_start, week_key, hours, source_row, on_leave
+        base.concat([wc.weekStart, weekKey_(wc.weekStart), hrs, entry.rowIndex + 2, onLeave])
       );
     }
   }
 
   writeTable_(ALLOC_NORM, ALLOC_HEADERS, out);
+
+  // WFM-FIX.3: reconcile Config_Worker_Exclusions against this ingest's
+  // manager membership + on_leave tags. Read back via readTable_ (not
+  // cachedRead_) so we see the just-written on_leave column fresh, not a
+  // stale cached copy. Reconciliation failure must never break ingest.
+  try {
+    reconcileWorkerExclusions_(readTable_(ALLOC_NORM));
+  } catch (e) {
+    Logger.log('normalizeStaff: reconcileWorkerExclusions_ failed \u2014 ' + e);
+  }
+
   logRefresh_('staff', values.length, out.length, weeks.length, weekDetection.warnings.join(' | '));
   invalidateCache_(ALLOC_NORM);
   // Drop 5: invalidate enriched-data caches that depend on ALLOC_NORM.
@@ -759,6 +787,155 @@ function normalizeStaff() {
     weeksDetected: weeks.length,
     warnings: weekDetection.warnings
   };
+}
+
+/**
+ * Reconcile Config_Worker_Exclusions against current data (WFM-FIX.3).
+ * - Materializes rule:manager (Config_SLG_Managers membership) and
+ *   rule:on_leave (workers with the (On Leave) tag in the just-ingested data).
+ * - NEVER modifies rows whose source is 'manual' or that carry an override.
+ * - Removes a rule:on_leave row only when the worker is PRESENT in the
+ *   export, UNTAGGED, and has project (>1) rows -- the safe return signal.
+ * - Idempotent: keyed by _exclusionKey_, single write, stable order.
+ * Called at the end of normalizeStaff; also standalone-callable (e.g. from
+ * the Apps Script editor, or _dbg_migrateWorkerExclusions).
+ * @param {Array<Object>} allocRows rows shaped like Allocations_Normalized
+ *   (must include resource_name and on_leave)
+ */
+function reconcileWorkerExclusions_(allocRows) {
+  // 1. Build data-derived signals
+  var managers = {};   // _exclusionKey_ -> display name
+  (readConfigSlgManagers_() || []).forEach(function (m) {
+    var nm = String(m.manager_name || '').trim();
+    if (nm) managers[_exclusionKey_(nm)] = nm;
+  });
+
+  // Per-worker: is tagged on-leave? how many rows? (project-row = return signal)
+  var byWorker = {};   // _exclusionKey_ -> { name, tagged, rowCount }
+  (allocRows || []).forEach(function (a) {
+    var raw = String(a.resource_name || '').trim();
+    if (!raw) return;
+    var k = _exclusionKey_(raw);
+    if (!byWorker[k]) byWorker[k] = { name: raw, tagged: false, rowCount: 0 };
+    byWorker[k].rowCount++;
+    if (String(a.on_leave || '').trim().toLowerCase() === 'yes') {
+      byWorker[k].tagged = true;
+      byWorker[k].name = raw; // prefer the tagged spelling for display
+    }
+  });
+  var onLeave = {}; // _exclusionKey_ -> display name  (Option A: tag authoritative)
+  Object.keys(byWorker).forEach(function (k) {
+    if (byWorker[k].tagged) onLeave[k] = byWorker[k].name;
+  });
+
+  // 2. Read existing sheet; index by _exclusionKey_
+  var existing = readTable_(CFG_WORKER_EXCLUSIONS) || [];
+  var rowsByKey = {};
+  existing.forEach(function (r) {
+    var k = _exclusionKey_(r.worker_name);
+    if (k) rowsByKey[k] = r;
+  });
+
+  // 3. Build target rows
+  var out = {}; // _exclusionKey_ -> row object
+  function ensure(k, name) {
+    if (!out[k]) {
+      var prev = rowsByKey[k] || {};
+      out[k] = {
+        worker_name: name || prev.worker_name || '',
+        manager_org: prev.manager_org || '',
+        reason: '',
+        active: 'Yes',
+        source: '',
+        override: String(prev.override || '').trim()  // preserve human override
+      };
+    }
+    return out[k];
+  }
+
+  // 3a. Preserve all human-owned rows: manual, or anything with an override.
+  Object.keys(rowsByKey).forEach(function (k) {
+    var r = rowsByKey[k];
+    var src = String(r.source || '').trim().toLowerCase();
+    var ovr = String(r.override || '').trim();
+    var isManual = (src === 'manual' || src === '');   // legacy blank source treated as manual
+    if (isManual || ovr) {
+      out[k] = {
+        worker_name: r.worker_name, manager_org: r.manager_org || '',
+        reason: r.reason || '', active: r.active || 'Yes',
+        source: isManual ? 'manual' : (r.source || 'manual'),
+        override: ovr
+      };
+    }
+  });
+
+  // 3b. Materialize rule:manager
+  Object.keys(managers).forEach(function (k) {
+    var row = ensure(k, managers[k]);
+    _addSource_(row, 'rule:manager');
+    row.active = 'Yes';
+  });
+
+  // 3c. Materialize rule:on_leave (Option A)
+  Object.keys(onLeave).forEach(function (k) {
+    var row = ensure(k, onLeave[k]);
+    _addSource_(row, 'rule:on_leave');
+    row.active = 'Yes';
+  });
+
+  // 3d. Safe removal of stale rule:on_leave (return-from-leave)
+  Object.keys(out).forEach(function (k) {
+    var row = out[k];
+    if (_hasSource_(row, 'rule:on_leave') && !onLeave[k]) {
+      var w = byWorker[k];
+      var returned = w && !w.tagged && w.rowCount > 1; // present, untagged, has project rows
+      if (returned) {
+        _removeSource_(row, 'rule:on_leave');
+      } else if (!w) {
+        // Absent from export: DO NOT remove. Keep the row as-is.
+        // (Preserve the previously stored row rather than dropping it.)
+        if (!out[k].source) out[k] = rowsByKey[k];
+      }
+    }
+  });
+
+  // 3e. Drop rows that ended up with no source and no override and not manual-active
+  //     (i.e., a rule row whose rule no longer applies). Manual/override rows already preserved.
+  var finalRows = Object.keys(out).map(function (k) { return out[k]; }).filter(function (r) {
+    var src = String(r.source || '').trim();
+    var ovr = String(r.override || '').trim();
+    var manualActive = (src === 'manual' && String(r.active).toLowerCase() === 'yes');
+    return !!ovr || manualActive || src.indexOf('rule:') === 0;
+  });
+
+  // 4. Stable sort + single write
+  finalRows.sort(function (a, b) {
+    return String(a.worker_name).localeCompare(String(b.worker_name));
+  });
+  writeTable_(CFG_WORKER_EXCLUSIONS,
+    WORKER_EXCLUSION_HEADERS,
+    finalRows.map(function (r) {
+      return WORKER_EXCLUSION_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+    }));
+  invalidateCache_(CFG_WORKER_EXCLUSIONS);
+}
+
+// source is a comma-joined set of tags
+function _addSource_(row, tag) {
+  var set = String(row.source || '').split(',').map(function (s){return s.trim();}).filter(Boolean);
+  if (set.indexOf('manual') >= 0) set = set.filter(function(s){return s!=='manual';}); // rule supersedes bare manual
+  if (set.indexOf(tag) < 0) set.push(tag);
+  row.source = set.join(',');
+  // reason mirror for human readability
+  var reasons = set.map(function(s){ return s==='rule:manager'?'Manager':(s==='rule:on_leave'?'On Leave':''); }).filter(Boolean);
+  if (reasons.length) row.reason = reasons.join(' + ');
+}
+function _hasSource_(row, tag){ return String(row.source||'').split(',').map(function(s){return s.trim();}).indexOf(tag)>=0; }
+function _removeSource_(row, tag){
+  var set = String(row.source||'').split(',').map(function(s){return s.trim();}).filter(function(s){return s && s!==tag;});
+  row.source = set.join(',');
+  var reasons = set.map(function(s){ return s==='rule:manager'?'Manager':(s==='rule:on_leave'?'On Leave':''); }).filter(Boolean);
+  row.reason = reasons.join(' + ');
 }
 
 /**

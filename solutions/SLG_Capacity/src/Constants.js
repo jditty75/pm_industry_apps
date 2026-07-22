@@ -34,6 +34,12 @@ const CFG_SETTINGS = 'Config_Settings';         // key/value settings
 const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
 const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership
 const CFG_WORKER_ROLE_OVERRIDES = 'Config_Worker_Role_Overrides'; // per-worker ICP role override (applied at ingest time)
+const CFG_WORKER_EXCLUSIONS = 'Config_Worker_Exclusions'; // SLG worker/manager exclusion list -- WFM-FIX.3: code-maintained
+// source: 'manual' | 'rule:manager' | 'rule:on_leave'  (comma-join if multiple, e.g. 'rule:manager,rule:on_leave')
+// override: '' | 'include' | 'exclude'   (human-owned; always wins over rules and active)
+const WORKER_EXCLUSION_HEADERS = [
+  'worker_name', 'manager_org', 'reason', 'active', 'source', 'override'
+];
 
 const REFRESH_LOG       = 'Normalization_Log';
 // Salesforce connector-owned pipeline refresh log.
@@ -68,7 +74,10 @@ const ALLOC_HEADERS = [
   'week_start',             // Date -- the week's column date, as-is from export
   'week_key',               // string -- 'YYYY-MM-DD' of week_start; canonical, sortable
   'hours',                  // number -- forecast hours for that week
-  'source_row'
+  'source_row',
+  'on_leave'                // WFM-FIX.3: 'Yes' | '' -- PSA "(On Leave)" name-tag stamp,
+                             // written for every row regardless of exclusion. See
+                             // _deriveOnLeave_ (Ingest.gs) and reconcileWorkerExclusions_.
 ];
 
 const OPP_HEADERS = [

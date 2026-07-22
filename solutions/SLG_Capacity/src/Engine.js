@@ -601,6 +601,8 @@ function _resolveTeamForBucket_(bucket, roleTeamLabels, rtTeamMap) {
 }
 
 function computeUtilization(params) {
+  // WFM-PERF.1 (throwaway diagnostic instrumentation -- see Util.gs _perfStart_).
+  var _p = _perfStart_('computeUtilization');
   params = params || {};
   const viewMode = params.viewMode || 'Committed';
   const groupBy = params.groupBy || 'Function';
@@ -634,6 +636,7 @@ function computeUtilization(params) {
   const managerDescendants = buildManagerDescendants_(mgrRows);
   const managersByName = {};
   mgrRows.forEach(function(r) { managersByName[r.manager_name] = r; });
+  _p.mark('config reads (roleTeamLabels/rtTeamMap/settings/mgrRows/descendants)');
 
   // Priority 2: Team filter overrides Manager filter.
   // If teamLabelFilter is set, force effectiveManagers to null so the
@@ -651,11 +654,15 @@ function computeUtilization(params) {
   // Drop 5: use shared cached getters to avoid redundant reads across endpoints.
   const allocRaw = (typeof getEnrichedAllocations_ === 'function')
     ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+  _p.mark('getEnrichedAllocations_');
   const assignsRaw = (typeof getEnrichedAssignments_ === 'function')
     ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  _p.mark('getEnrichedAssignments_');
   const excluded = readExclusions_();
+  _p.mark('readExclusions_');
   const resIndex = (typeof getResourceIndex_ === 'function')
     ? getResourceIndex_() : _resourceIndex_(allocRaw);
+  _p.mark('getResourceIndex_');
 
   function inScope(workerName) {
     const info = resIndex[workerName] || {};
@@ -674,6 +681,7 @@ function computeUtilization(params) {
     if (excluded.has(_exclusionKey_(a.resource_name))) return false;
     return inScope(a.resource_name);
   });
+  _p.mark('scope+exclusion filters');
 
   const icp = readIcp_();
   const calendar = readCalendar_();
@@ -683,6 +691,7 @@ function computeUtilization(params) {
   const _resolverCtx_ = (typeof resolveTeamLabel_ === 'function')
     ? resolveTeamLabel_.buildCtx_(roleTeamLabels, rtTeamMap)
     : null;
+  _p.mark('icp/calendar/roleCap/resolverCtx');
 
   const buckets = {};
   function bucket(resourceName, period) {
@@ -752,6 +761,7 @@ function computeUtilization(params) {
       }
     });
   });
+  _p.mark('step1 alloc bucket loop');
 
   // 2) Assignments -- expand weekly against the real calendar grid, then
   // roll each week's hours up to month(s) via proportional split.
@@ -777,6 +787,7 @@ function computeUtilization(params) {
       });
     });
   }
+  _p.mark('step2 assignments');
 
   // 2.5) Capacity adjustments (worker-scoped reductions — Drop 6)
   if (viewMode !== 'Actual') {
@@ -806,6 +817,7 @@ function computeUtilization(params) {
       });
     });
   }
+  _p.mark('step2.5 adjustments');
 
   // 3) Compute per-bucket utilization, capacity, etc.
   Object.values(buckets).forEach(b => {
@@ -817,6 +829,7 @@ function computeUtilization(params) {
     b.available = Math.max(cap - usedWork, 0);
     b.utilization = cap > 0 ? (usedWork / cap) : 0;
   });
+  _p.mark('step3 per-bucket util');
 
   // 4) Apply manager filter AND Priority 2 team filter.
   //    Team filter overrides manager (effectiveManagers is null when
@@ -835,6 +848,7 @@ function computeUtilization(params) {
     }
     return true;
   });
+  _p.mark('step4 manager/team filter');
 
   // 5) Group-by rollup for heatmap
   const groupMonth = {};
@@ -886,6 +900,7 @@ function computeUtilization(params) {
     g.icpTarget = den > 0 ? num / den : 0.70;
     g.gapHours = usedForUtil - (g.icpTarget * g.capacity);
   });
+  _p.mark('step5 groupby rollup');
 
   // 6) Individual mode cap to avoid huge payloads
   let rows = Object.keys(allRows).sort();
@@ -1056,6 +1071,7 @@ function computeUtilization(params) {
         }))
       };
     });
+  _p.mark('step10 headcountByTeam');
 
   const sanitizedCells = cells.map(c => ({
     rowKey: String(c.rowKey),
@@ -1085,6 +1101,7 @@ function computeUtilization(params) {
       scenario: Number(m.scenario) || 0
     }))
   }));
+  _p.mark('sanitize+return');
 
   return {
     viewMode: String(viewMode),

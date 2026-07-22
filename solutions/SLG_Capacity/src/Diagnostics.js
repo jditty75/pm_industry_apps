@@ -1629,3 +1629,20 @@ function _dbg_migrateWorkerExclusions() {
 
   return { before: existing.length, after: finalRows.length, prunedContractor: pruned.contractor, prunedDormant: pruned.dormant };
 }
+
+/**
+ * WFM-PERF.1 (throwaway diagnostic): profile a COLD api_getDashboard.
+ * Flushes caches first so every step runs cold, then calls the dashboard
+ * once and lets the [PERF] logs fire (computeUtilization's _p.mark calls,
+ * plus the getEnrichedAllocations_/getEnrichedAssignments_/getResourceIndex_
+ * cache-hit/cold-rebuild logs). Run from the editor; read View -> Logs.
+ * Strip this instrumentation once the real fix ships (see WFM-PERF.1 §6).
+ */
+function _dbg_profileDashboardCold() {
+  _dbg_requireAdmin_();
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  Logger.log('=== COLD api_getDashboard profile (SLG/Function) ===');
+  var t0 = Date.now();
+  api_getDashboard({ viewMode: 'Committed', groupBy: 'Function', workerScope: 'SLG', includeTimeOff: false });
+  Logger.log('TOTAL api_getDashboard: ' + (Date.now() - t0) + 'ms');
+}

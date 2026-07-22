@@ -26,6 +26,7 @@ function bootstrap() {
   getOrCreateSheet_(CFG_CAL,      CAL_HEADERS);
   getOrCreateSheet_(CFG_ALIAS,    ALIAS_HEADERS);
   getOrCreateSheet_(REFRESH_LOG,  REFRESH_HEADERS);
+  getOrCreateSheet_(CFG_HOLIDAYS, HOLIDAY_HEADERS);
 
   // Drop 3: Source Overrides tabs
   getOrCreateSheet_(OVERRIDES_SHEET,              OVERRIDE_HEADERS);
@@ -55,6 +56,17 @@ function bootstrap() {
   // Seed Aliases if empty
   if (readTable_(CFG_ALIAS).length === 0) {
     writeTable_(CFG_ALIAS, ALIAS_HEADERS, DEFAULT_ALIASES);
+  }
+
+  // Seed Config_Holidays if empty (WFM.15). Idempotent -- only seeds when
+  // the sheet has zero data rows, so re-running bootstrap() never
+  // overwrites Jeff's manual edits (added/removed holidays, corrected
+  // hours, etc.). DEFAULT_HOLIDAYS_2026 is the official 2026 Workday
+  // schedule only.
+  if (readTable_(CFG_HOLIDAYS).length === 0) {
+    writeTable_(CFG_HOLIDAYS, HOLIDAY_HEADERS, DEFAULT_HOLIDAYS_2026);
+    Logger.log('bootstrap: seeded Config_Holidays with the 2026 Workday schedule (16 rows). ' +
+      '2027 holiday dates are NOT included -- add them to Config_Holidays manually once published.');
   }
 
   // Clear Config_Calendar to headers-only, zero data rows (weekly-forecast-

@@ -40,6 +40,7 @@ const CFG_WORKER_EXCLUSIONS = 'Config_Worker_Exclusions'; // SLG worker/manager 
 const WORKER_EXCLUSION_HEADERS = [
   'worker_name', 'manager_org', 'reason', 'active', 'source', 'override'
 ];
+const CFG_HOLIDAYS = 'Config_Holidays'; // WFM.15: company holiday calendar; reduces ICP available hours
 
 const REFRESH_LOG       = 'Normalization_Log';
 // Salesforce connector-owned pipeline refresh log.
@@ -133,6 +134,13 @@ const CAL_HEADERS = [
   'holiday_hours'      // number (default 0) -- for capacity netting if needed
 ];
 
+// WFM.15: company holiday calendar. Flat hours (default 8) per active
+// holiday, applied to EVERY worker (no per-worker eligibility). Multiple
+// holidays landing in the same week sum -- see holidayHoursForWeek_
+// (Engine.gs). holiday_date is a real Date; matched against a week's
+// [week_start, week_start+6] range, not by exact week_key equality.
+const HOLIDAY_HEADERS = ['holiday_date', 'holiday_name', 'hours', 'active'];
+
 const ALIAS_HEADERS  = ['logical','actual','notes'];
 const REFRESH_HEADERS = [
   'timestamp','source','rows_in','rows_out','weeks_detected','user','warnings'
@@ -193,6 +201,29 @@ const PRACTICE_MGRS_HEADERS = [
 const DEFAULT_ICP = [
   ['EM', 0.72, 0.90],
   ['PD', 0.65, 0.85]
+];
+
+// WFM.15: official 2026 Workday holiday schedule. 2026 ONLY -- 2027 dates
+// must be added manually to Config_Holidays once published (see the
+// Bootstrap.gs seeder's logged notice). Bootstrap only seeds this when
+// Config_Holidays is empty, so it never overwrites Jeff's manual edits.
+const DEFAULT_HOLIDAYS_2026 = [
+  [new Date(2026, 0, 1),  "New Year's Day",           8, true],
+  [new Date(2026, 0, 19), 'Martin Luther King Jr. Day', 8, true],
+  [new Date(2026, 1, 16), "Presidents' Day",          8, true],
+  [new Date(2026, 2, 27), 'Thank You Day',            8, true],
+  [new Date(2026, 4, 22), 'Thank You Day',            8, true],
+  [new Date(2026, 4, 25), 'Memorial Day',             8, true],
+  [new Date(2026, 5, 18), 'Thank You Day',            8, true],
+  [new Date(2026, 5, 19), 'Juneteenth',                8, true],
+  [new Date(2026, 6, 3),  'Independence Day (observed)', 8, true],
+  [new Date(2026, 8, 4),  'Thank You Day',            8, true],
+  [new Date(2026, 8, 7),  'Labor Day',                8, true],
+  [new Date(2026, 10, 11), 'Veterans Day',            8, true],
+  [new Date(2026, 10, 26), 'Thanksgiving Day',        8, true],
+  [new Date(2026, 10, 27), 'Thanksgiving Day After',  8, true],
+  [new Date(2026, 11, 24), 'Christmas Eve',           8, true],
+  [new Date(2026, 11, 25), 'Christmas Day',           8, true]
 ];
 
 const DEFAULT_ROLES = [

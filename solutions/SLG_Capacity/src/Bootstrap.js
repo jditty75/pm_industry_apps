@@ -57,17 +57,46 @@ function bootstrap() {
     writeTable_(CFG_ALIAS, ALIAS_HEADERS, DEFAULT_ALIASES);
   }
 
-  // Seed Calendar for 2024-2028 if empty
-  if (readTable_(CFG_CAL).length === 0) {
-    const rows = [];
-    for (let y = 2024; y <= 2028; y++) {
-      for (let m = 0; m < 12; m++) {
-        const period = new Date(y, m, 1);
-        const q = 'Q' + (Math.floor(m / 3) + 1);
-        rows.push([period, y, m + 1, q, workdaysInMonth_(y, m)]);
-      }
-    }
-    writeTable_(CFG_CAL, CAL_HEADERS, rows);
+  // Clear Config_Calendar to headers-only, zero data rows (weekly-forecast-
+  // migration; WFM.13 fix). No speculative week generation here -- the
+  // previous version of this block generated a 260-week, Monday-anchored
+  // grid spanning ~2 years back to ~3 years forward regardless of what the
+  // real PSA export's day-of-week actually was (Saturday in the sample
+  // export). That phantom grid was WFM.13's defect #2: ensureCalendarWeeks_()
+  // (Util.gs, called from Ingest.gs's normalizeStaff() on every upload)
+  // then added the REAL Saturday weeks alongside it as a second set
+  // instead of replacing it, and the forecast table rendered the union --
+  // interleaved 2-day/5-day columns, half of them empty.
+  //
+  // Config_Calendar is now populated EXCLUSIVELY by ensureCalendarWeeks_()
+  // from the actual uploaded export's week columns (see that function,
+  // Util.gs, for the full rationale) -- the anchor is derived from the
+  // data, never hardcoded. This unconditional reseed-to-empty (still NOT
+  // guarded by "if empty" like ICP/Roles/Aliases above) also wipes any
+  // pre-migration monthly rows or corrupted week_key values left over from
+  // before this fix, so re-running bootstrap() always yields a clean slate
+  // ready for the next upload to repopulate.
+  writeTable_(CFG_CAL, CAL_HEADERS, []);
+
+  // Seed new Config_Settings keys if missing (weekly-forecast-migration
+  // §4.1). Config_Settings is a sparse key/value table -- existing keys
+  // (planning_window_months, hide_all_external, etc.) are left untouched;
+  // this only appends the 4 new weekly-migration keys when absent, so
+  // re-running bootstrap() never clobbers an admin's saved settings.
+  {
+    const newSettingsDefaults = {
+      weekly_target_default:   '32.8',
+      weekly_target_P6:        '26.0',
+      week_month_split_basis:  'calendar',
+      fiscal_year_start_month: '2'
+    };
+    const existingSettings = readTable_(CFG_SETTINGS);
+    const existingKeys = {};
+    existingSettings.forEach(function (r) { existingKeys[String(r.key || '')] = true; });
+    Object.keys(newSettingsDefaults).forEach(function (k) {
+      if (existingKeys[k]) return;
+      appendRow_(CFG_SETTINGS, { key: k, value: newSettingsDefaults[k] }, ['key', 'value']);
+    });
   }
 
   // Reorder tabs for usability

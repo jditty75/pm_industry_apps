@@ -52,9 +52,7 @@
     <!-- ============ Top Bar ============ -->
     <header class="topbar">
       <div class="topbar-row">
-        <button class="icon-btn hamburger" id="hamburger" aria-label="Menu">☰</button>
-
-                <!-- Pinned filters -->
+        <!-- Pinned filters -->
         <div class="topbar-pinned">
           <label class="filter">
             <span class="filter-label">Quarter</span>
@@ -145,33 +143,48 @@
         </div>
       </div>
 
-      <div class="card card-heatmap">
+      <!-- Weekly Forecast Table (weekly-forecast-migration §9) -- replaces the
+           former Utilization Heatmap + Utilization Trend cards. Sticky
+           Worker/Level/Manager identity columns, horizontally-scrolling
+           per-week columns (MM/dd/yy · Q<n> headers), expandable
+           worker→project rows, utilization-vs-ICP cell coloring. Populated
+           by renderWeeklyForecastTable_() in JavaScript.html via
+           api_getForecastTable. -->
+      <div class="card card-weekly-forecast" id="weeklyForecastCard">
         <div class="card-header">
-          <div class="card-title">Utilization Heatmap</div>
-          <div class="seg seg-sm" id="groupBySeg">
-            <button data-val="Function">Function</button>
-            <button data-val="Role">Role</button>
-            <button data-val="Team">Team</button>
-            <button data-val="Individual" class="on">Individual</button>
+          <div class="card-title">Weekly Forecast</div>
+          <div class="weekly-forecast-tools">
+            <label class="check-row check-row-sm">
+              <input type="checkbox" id="wfShowManagersManager">
+              Manager's Manager
+            </label>
+            <button type="button" class="btn-ghost btn-ghost-sm" id="wfExpandAllBtn">Expand All</button>
+            <button type="button" class="btn-ghost btn-ghost-sm" id="wfCollapseAllBtn">Collapse All</button>
           </div>
         </div>
-        <div class="heatmap-scroll">
-          <div id="heatmap" class="heatmap"></div>
+        <div class="weekly-forecast-scroll" id="weeklyForecastScroll">
+          <table class="data-table weekly-forecast-table" id="weeklyForecastTable">
+            <thead>
+              <tr id="weeklyForecastHeaderRow">
+                <th class="wf-col-sticky wf-col-worker">Worker</th>
+                <th class="wf-col-sticky wf-col-level">Level</th>
+                <th class="wf-col-sticky wf-col-manager">Manager</th>
+                <th class="wf-col-sticky wf-col-mgrmgr" id="wfColManagersManager" hidden>Manager's Manager</th>
+                <!-- per-week <th> cells injected by renderWeeklyForecastTable_() -->
+              </tr>
+            </thead>
+            <tbody id="weeklyForecastBody">
+              <tr>
+                <td class="muted" style="padding:12px">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         <div class="legend">
           <span class="legend-swatch" style="background:var(--water-cooler)"></span><span>Healthy</span>
           <span class="legend-swatch" style="background:var(--pencil)"></span><span>At ICP</span>
           <span class="legend-swatch" style="background:var(--happy-hour)"></span><span>Over ICP</span>
           <span class="legend-swatch" style="background:var(--thumbtack)"></span><span>Red threshold</span>
-        </div>
-      </div>
-
-      <div class="card card-trend">
-        <div class="card-header">
-          <div class="card-title">Utilization Trend (6 months)</div>
-        </div>
-        <div style="position:relative;height:280px;width:100%">
-          <canvas id="trendChart"></canvas>
         </div>
       </div>
     </section>
@@ -794,7 +807,7 @@
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>When</th><th>Source</th><th class="num">In</th><th class="num">Out</th><th class="num">Months</th><th>User</th></tr>
+                <tr><th>When</th><th>Source</th><th class="num">In</th><th class="num">Out</th><th class="num">Weeks</th><th>User</th><th>Warnings</th></tr>
               </thead>
               <tbody id="refreshLogBody"></tbody>
             </table>
@@ -1189,15 +1202,6 @@
             <input type="checkbox" id="drawerIncludeTimeOffToggle" checked>
             Include PTO/Holiday in totals
           </label>
-          <label class="field" style="margin-top:10px;">
-            <span>Heatmap group by (Dashboard only)</span>
-            <div class="seg seg-sm" id="drawerGroupBySeg">
-              <button type="button" data-val="Function">Function</button>
-              <button type="button" data-val="Role">Role</button>
-              <button type="button" data-val="Team">Team</button>
-              <button type="button" data-val="Individual" class="on">Individual</button>
-            </div>
-          </label>
         </div>
 
       </div>
@@ -1265,33 +1269,8 @@
               <button type="button" data-val="Even" class="on">Even</button>
               <button type="button" data-val="Front-loaded">Front-loaded</button>
               <button type="button" data-val="Back-loaded">Back-loaded</button>
-              <button type="button" data-val="Custom">Custom</button>
             </div>
           </label>
-
-          <!-- Custom Distribution per-month inputs.
-               Hidden by default; revealed when Distribution = Custom.
-               Rows are regenerated whenever Start/End date change.
-               Pre-filled with Even distribution on first reveal. -->
-          <div class="field" id="customMonthsField" hidden>
-            <div class="custom-months-header">
-              <span class="custom-months-title">Custom hours by month</span>
-              <button type="button" class="btn-ghost btn-ghost-sm" id="customMonthsResetBtn">Reset to Even</button>
-            </div>
-            <div class="muted" style="margin-top:4px;margin-bottom:8px;font-size:11px;">
-              Enter hours for each month. The total below will reconcile against your Estimated hours.
-            </div>
-            <div class="custom-months-list" id="customMonthsList">
-              <!-- per-month rows injected by renderCustomMonths_() -->
-            </div>
-            <div class="custom-months-footer" id="customMonthsFooter">
-              <span class="muted">Total:</span>
-              <strong id="customMonthsTotal">0</strong>
-              <span class="muted">of</span>
-              <strong id="customMonthsTarget">0</strong>
-              <span id="customMonthsDelta" class="custom-months-delta"></span>
-            </div>
-          </div>
           <label class="field">
             <span>Scenario <span class="muted">(optional)</span></span>
           <div class="field-row compact">
@@ -1584,27 +1563,8 @@
             <button type="button" data-val="Even" class="on">Even</button>
             <button type="button" data-val="Front-loaded">Front-loaded</button>
             <button type="button" data-val="Back-loaded">Back-loaded</button>
-            <button type="button" data-val="Custom">Custom</button>
           </div>
         </label>
-
-        <div class="field" id="rCustomMonthsField" hidden>
-          <div class="custom-months-header">
-            <span class="custom-months-title">Custom reduction by month</span>
-            <button type="button" class="btn-ghost btn-ghost-sm" id="rCustomMonthsResetBtn">Reset to Even</button>
-          </div>
-          <div class="muted" style="margin-top:4px;margin-bottom:8px;font-size:11px;">
-            Enter reduction hours for each month. Total must equal hours to reduce (within 0.5h).
-          </div>
-          <div class="custom-months-list" id="rCustomMonthsList"></div>
-          <div class="custom-months-footer" id="rCustomMonthsFooter">
-            <span class="muted">Total:</span>
-            <strong id="rCustomMonthsTotal">0</strong>
-            <span class="muted">of</span>
-            <strong id="rCustomMonthsTarget">0</strong>
-            <span id="rCustomMonthsDelta" class="custom-months-delta"></span>
-          </div>
-        </div>
 
         <label class="field">
           <span>Reason <span style="color:var(--thumbtack);">*</span></span>

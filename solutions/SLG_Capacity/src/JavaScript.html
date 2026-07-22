@@ -106,6 +106,37 @@
     const dt = new Date(+y, +m - 1, 1);
     return dt.toLocaleString('en', { month: 'short', year: '2-digit' });
   }
+
+  // ============================================================
+  // Fiscal calendar (weekly-forecast-migration §4/§13) -- MUST mirror
+  // Constants.gs's FISCAL_YEAR_START_MONTH/FISCAL_QUARTER_BY_CALENDAR_MONTH
+  // and Util.gs's fiscalYear_/fiscalQuarter_/fiscalQuarterKey_ exactly, so
+  // client and server produce identical fiscal-quarter keys (e.g. 'FY27-Q2').
+  // Replaces the old calendar Math.floor(month/3) quarter mapping
+  // everywhere on the client (recomputeKpisForClient, chip strip label,
+  // #quarterFilter comparisons).
+  // ============================================================
+  const FISCAL_YEAR_START_MONTH = 2; // February
+  const FISCAL_QUARTER_BY_CALENDAR_MONTH = {
+    1:  'Q4',
+    2:  'Q1', 3:  'Q1', 4:  'Q1',
+    5:  'Q2', 6:  'Q2', 7:  'Q2',
+    8:  'Q3', 9:  'Q3', 10: 'Q3',
+    11: 'Q4', 12: 'Q4'
+  };
+  function fiscalYear_(d) {
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    return (m >= FISCAL_YEAR_START_MONTH) ? y + 1 : y;
+  }
+  function fiscalQuarter_(d) {
+    return FISCAL_QUARTER_BY_CALENDAR_MONTH[d.getMonth() + 1];
+  }
+  function fiscalQuarterKey_(d) {
+    const fy = fiscalYear_(d);
+    const q = fiscalQuarter_(d);
+    return 'FY' + String(fy % 100).padStart(2, '0') + '-' + q;
+  }
   function call(fn, ...args) {
     return new Promise((resolve, reject) => {
       google.script.run
@@ -417,7 +448,7 @@
       monthsInView.forEach(mk => {
         const [y, m] = mk.split('-');
         const dt = new Date(+y, +m - 1, 1);
-        const qKey = dt.getFullYear() + '-Q' + (Math.floor(dt.getMonth() / 3) + 1);
+        const qKey = fiscalQuarterKey_(dt);
         if (qKey === quarterFilter) qSet.add(mk);
       });
       if (qSet.size) monthSet = qSet;
@@ -481,46 +512,6 @@
     };
   }
 
-  function computeTrendForClient(d, quarterFilter) {
-    const monthsInView = d.monthsInView || (d.heatmap ? d.heatmap.months : []);
-    const baseMonthSet = new Set(monthsInView);
-    let monthSet = baseMonthSet;
-
-    if (quarterFilter) {
-      const qSet = new Set();
-      monthsInView.forEach(mk => {
-        const [y, m] = mk.split('-');
-        const dt = new Date(+y, +m - 1, 1);
-        const qKey = dt.getFullYear() + '-Q' + (Math.floor(dt.getMonth() / 3) + 1);
-        if (qKey === quarterFilter) qSet.add(mk);
-      });
-      if (qSet.size) monthSet = qSet;
-    }
-
-    const includePTO = State.filters.includeTimeOff;
-    const byMonth = {};
-    if (d.byResource) {
-      d.byResource.forEach(r => {
-        r.months.forEach(m => {
-          if (!monthSet.has(m.monthKey)) return;
-          const key = m.monthKey;
-          if (!byMonth[key]) byMonth[key] = { used: 0, capacity: 0 };
-          const committed = Number(m.committed) || 0;
-          const timeOff = Number(m.timeOff) || 0;
-          const cap = Number(m.capacity) || 0;
-          const usedHours = includePTO ? committed + timeOff : committed;
-          byMonth[key].used += usedHours;
-          byMonth[key].capacity += cap;
-        });
-      });
-    }
-    return Object.keys(byMonth).sort().map(k => {
-      const row = byMonth[k];
-      const util = row.capacity > 0 ? row.used / row.capacity : 0;
-      return { monthKey: k, utilization: util };
-    });
-  }
-
   // ============================================================
   // Routing
   //
@@ -561,14 +552,13 @@
       activateAdminTab_(savedTab);
       loadAdmin();
     }
-    if (window.innerWidth <= 768) $('#sidebar').classList.remove('open');
   }
   $$('.nav-item').forEach(btn => {
     btn.addEventListener('click', () => showView(btn.dataset.view));
   });
-  $('#hamburger').addEventListener('click', () =>
-    $('#sidebar').classList.toggle('open')
-  );
+  // Desktop-first (weekly-forecast-migration §9/§11): the mobile hamburger
+  // button and off-canvas sidebar toggle are gone (#hamburger removed from
+  // Index.html); the sidebar is always visible now.
 
   // ============================================================
   // Init
@@ -843,14 +833,6 @@
       markDirty_(b);
     });
 
-    $('#drawerGroupBySeg').addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      $$('#drawerGroupBySeg button').forEach(x => x.classList.toggle('on', x === b));
-      State.draftFilters.groupBy = b.dataset.val;
-      markDirty_(b);
-    });
-
     $('#drawerIncludeMyManagers').addEventListener('change', (e) => {
       State.draftFilters.includeMyManagers = !!e.target.checked;
       markDirty_(e.target);
@@ -930,10 +912,6 @@
     }
 
     $('#drawerIncludeTimeOffToggle').checked = !!d.includeTimeOff;
-
-    $$('#drawerGroupBySeg button').forEach(btn => {
-      btn.classList.toggle('on', btn.dataset.val === d.groupBy);
-    });
   }
 
   function applyDraftFilters_() {
@@ -1143,13 +1121,9 @@
 
 <script>
   // ============================================================
-  // Dashboard: KPIs, heatmap, trend
+  // Dashboard: KPIs, weekly forecast table
   // ============================================================
   async function loadDashboard() {
-    const grid = $('#heatmap');
-    grid.innerHTML = '<div style="padding:32px;text-align:center;color:var(--staple)">Loading…</div>';
-    grid.style.gridTemplateColumns = '1fr';
-
     try {
       const params = buildServerParams_({ quarter: null });
       const signature = JSON.stringify(params);
@@ -1165,18 +1139,15 @@
 
       const quarterFilter = State.filters.quarter;
       const kpis = recomputeKpisForClient(d, quarterFilter);
-      const clientTrend = computeTrendForClient(d, quarterFilter);
 
       renderKpis(kpis);
-      renderHeatmap(d.heatmap);
       renderHeadcountGap(d.headcountByTeam || []);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => renderTrend(clientTrend));
-      });
     } catch (err) {
       toast('Dashboard load failed: ' + err.message, 'err');
       console.error(err);
     }
+
+    loadWeeklyForecastTable();
   }
 
   function renderKpis(k) {
@@ -1205,79 +1176,156 @@
     $('#kpiOverUnderSub').title = tooltipText;
   }
 
-  function renderHeatmap(h) {
-    const grid = $('#heatmap');
-    const rows = h.rows || [];
-    const months = h.months || [];
-    grid.style.gridTemplateColumns = `minmax(180px, 240px) repeat(${months.length}, minmax(80px, 1fr))`;
-    const idx = {};
-    (h.cells || []).forEach(c => { idx[c.rowKey + '|' + c.monthKey] = c; });
+  // ============================================================
+  // Weekly Forecast Table (weekly-forecast-migration §10) -- replaces
+  // renderHeatmap/renderTrend above. Fetches api_getForecastTable via
+  // buildServerParams_, groups by worker with sticky identity columns,
+  // per-week cells colored by utilization-vs-ICP (cellColor, reused from
+  // the removed heatmap), and expandable worker→project child rows.
+  // ============================================================
+  const WeeklyForecastState = {
+    expanded: new Set(),   // worker names with project rows currently shown
+    showManagersManager: false
+  };
 
+  async function loadWeeklyForecastTable() {
+    const body = $('#weeklyForecastBody');
+    if (body) body.innerHTML = '<tr><td class="muted" style="padding:12px">Loading…</td></tr>';
+    try {
+      const params = buildServerParams_();
+      const forecast = await call('api_getForecastTable', params);
+      State.weeklyForecast = forecast;
+      renderWeeklyForecastTable_(forecast);
+    } catch (err) {
+      if (body) {
+        body.innerHTML = '<tr><td class="muted" style="padding:12px;color:var(--thumbtack)">' +
+          'Failed to load weekly forecast: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
+      }
+      console.error('loadWeeklyForecastTable failed:', err);
+    }
+  }
+
+  function renderWeeklyForecastTable_(forecast) {
+    const headerRow = $('#weeklyForecastHeaderRow');
+    const body = $('#weeklyForecastBody');
+    if (!headerRow || !body) return;
+
+    const weeks = (forecast && forecast.weeks) || [];
+    const rows = (forecast && forecast.rows) || [];
+
+    $$('.wf-col-week', headerRow).forEach(el => el.remove());
+    weeks.forEach(w => {
+      const th = document.createElement('th');
+      th.className = 'wf-col-week';
+      th.textContent = w.label + ' · ' + w.fiscalQuarter;
+      th.title = w.fiscalQuarterKey;
+      headerRow.appendChild(th);
+    });
+
+    if (!rows.length) {
+      body.innerHTML = '<tr><td class="muted" style="padding:12px" colspan="' + (4 + weeks.length) + '">' +
+        'No forecast data in current scope.</td></tr>';
+      return;
+    }
+
+    const showMgrMgr = WeeklyForecastState.showManagersManager;
     const html = [];
-    const label = GROUP_LABELS[State.filters.groupBy] || State.filters.groupBy;
-    html.push(`<div class="heatmap-head heatmap-label" style="left:0;position:sticky;z-index:3">${label}</div>`);
-    months.forEach(m => { html.push(`<div class="heatmap-head">${fmtMonth(m)}</div>`); });
-
     rows.forEach(r => {
-      html.push(`<div class="heatmap-label" title="${r}">${r}</div>`);
-      months.forEach(m => {
-        const c = idx[r + '|' + m];
-        if (!c) {
-          html.push(`<div class="heatmap-cell empty">—</div>`);
-        } else {
-          const includePTO = State.filters.includeTimeOff;
-          const committedWork = Number(c.committed) || 0;
-          const timeOff = Number(c.timeOff) || 0;
-          const capacity = Number(c.capacity) || 0;
-          const committedTotal = includePTO ? (committedWork + timeOff) : committedWork;
-          const util = capacity > 0 ? (committedTotal / capacity) : 0;
-          const color = cellColor(util, c.icpTarget);
-          const title = [
-            `${r} · ${fmtMonth(m)}`,
-            `Utilization: ${fmtPct(util)}`,
-            `ICP target: ${fmtPct(c.icpTarget)}`,
-            `Committed: ${Math.round(committedTotal)}h`,
-            `Capacity: ${Math.round(capacity)}h`,
-            `Time off: ${Math.round(timeOff)}h`,
-            `Headcount: ${c.headcount}`
-          ].join('\n');
-          html.push(
-            `<div class="heatmap-cell" style="background:${color.bg};color:${color.fg}" title="${title.replace(/"/g, '&quot;')}">${fmtPct(util)}</div>`
-          );
-        }
+      const isOpen = WeeklyForecastState.expanded.has(r.worker);
+      const weekByKey = {};
+      (r.workerWeekly || []).forEach(w => { weekByKey[w.weekKey] = w; });
+
+      html.push('<tr class="wf-row-worker' + (isOpen ? ' wf-open' : '') + '" data-worker="' + escapeHtml_(r.worker) + '">');
+      html.push(
+        '<td class="wf-col-sticky wf-col-worker">' +
+          '<button type="button" class="wf-expand-toggle" aria-expanded="' + isOpen + '">' +
+            '<span class="wf-expand-chev">' + (isOpen ? '▾' : '▸') + '</span> ' +
+            escapeHtml_(r.worker) +
+          '</button>' +
+        '</td>'
+      );
+      html.push('<td class="wf-col-sticky wf-col-level">' + escapeHtml_(r.level || '') + '</td>');
+      html.push('<td class="wf-col-sticky wf-col-manager">' + escapeHtml_(r.manager || '') + '</td>');
+      html.push(
+        '<td class="wf-col-sticky wf-col-mgrmgr"' + (showMgrMgr ? '' : ' hidden') + '>' +
+          escapeHtml_(r.managersManager || '') +
+        '</td>'
+      );
+      weeks.forEach(w => {
+        const cell = weekByKey[w.weekKey] || { hours: 0, util: 0, icpTarget: 0.70 };
+        const color = cellColor(cell.util, cell.icpTarget);
+        const title = [
+          r.worker + ' · ' + w.label,
+          'Hours: ' + Math.round(cell.hours) + 'h',
+          'Weekly target: ' + Math.round(r.weeklyTarget) + 'h',
+          'Utilization: ' + fmtPct(cell.util),
+          'ICP target: ' + fmtPct(cell.icpTarget)
+        ].join('\n');
+        html.push(
+          '<td class="wf-col-week wf-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
+          escapeHtml_(title) + '">' + Math.round(cell.hours) + '</td>'
+        );
+      });
+      html.push('</tr>');
+
+      (r.projects || []).forEach(p => {
+        const projByKey = {};
+        (p.weekly || []).forEach(w => { projByKey[w.weekKey] = w; });
+        html.push('<tr class="wf-row-project"' + (isOpen ? '' : ' hidden') + ' data-worker="' + escapeHtml_(r.worker) + '">');
+        html.push('<td class="wf-col-sticky wf-col-worker wf-project-name">↳ ' + escapeHtml_(p.project) + '</td>');
+        html.push('<td class="wf-col-sticky wf-col-level"></td>');
+        html.push('<td class="wf-col-sticky wf-col-manager"></td>');
+        html.push('<td class="wf-col-sticky wf-col-mgrmgr"' + (showMgrMgr ? '' : ' hidden') + '></td>');
+        weeks.forEach(w => {
+          const cell = projByKey[w.weekKey];
+          const hrs = cell ? Math.round(cell.hours) : 0;
+          html.push('<td class="wf-col-week wf-cell-project">' + (hrs || '—') + '</td>');
+        });
+        html.push('</tr>');
       });
     });
-    grid.innerHTML = html.join('');
+
+    body.innerHTML = html.join('');
   }
 
-  function renderTrend(trend) {
-    const ctx = $('#trendChart').getContext('2d');
-    if (State.charts.trend) State.charts.trend.destroy();
-    const cs = getComputedStyle(document.documentElement);
-    const data = Array.isArray(trend) ? trend : [];
-    State.charts.trend = new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: data.map(t => fmtMonth(t.monthKey)),
-        datasets: [{
-          label: 'Avg Utilization',
-          data: data.map(t => Math.round(t.utilization * 1000) / 10),
-          borderColor: cs.getPropertyValue('--ballpoint').trim(),
-          backgroundColor: 'rgba(8,117,193,.12)',
-          tension: .3, fill: true, pointRadius: 3
-        }]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        animation: false, resizeDelay: 100,
-        plugins: { legend: { display: false } },
-        scales: {
-          y: { beginAtZero: true, ticks: { callback: v => v + '%' }, grid: { color: '#ECEEF1' } },
-          x: { grid: { display: false } }
-        }
-      }
+  document.addEventListener('click', (e) => {
+    const toggle = e.target.closest('.wf-expand-toggle');
+    if (!toggle) return;
+    const tr = toggle.closest('tr[data-worker]');
+    if (!tr) return;
+    const worker = tr.dataset.worker;
+    const nowOpen = !WeeklyForecastState.expanded.has(worker);
+    if (nowOpen) WeeklyForecastState.expanded.add(worker);
+    else WeeklyForecastState.expanded.delete(worker);
+    toggle.setAttribute('aria-expanded', String(nowOpen));
+    tr.classList.toggle('wf-open', nowOpen);
+    const chev = toggle.querySelector('.wf-expand-chev');
+    if (chev) chev.textContent = nowOpen ? '▾' : '▸';
+    $$('tr.wf-row-project').forEach(pr => {
+      if (pr.dataset.worker === worker) pr.hidden = !nowOpen;
     });
-  }
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const expandBtn = $('#wfExpandAllBtn');
+    const collapseBtn = $('#wfCollapseAllBtn');
+    const mgrMgrToggle = $('#wfShowManagersManager');
+    if (expandBtn) expandBtn.addEventListener('click', () => {
+      const forecast = State.weeklyForecast;
+      if (forecast && forecast.rows) forecast.rows.forEach(r => WeeklyForecastState.expanded.add(r.worker));
+      renderWeeklyForecastTable_(forecast);
+    });
+    if (collapseBtn) collapseBtn.addEventListener('click', () => {
+      WeeklyForecastState.expanded.clear();
+      renderWeeklyForecastTable_(State.weeklyForecast);
+    });
+    if (mgrMgrToggle) mgrMgrToggle.addEventListener('change', (e) => {
+      WeeklyForecastState.showManagersManager = !!e.target.checked;
+      const col = $('#wfColManagersManager');
+      if (col) col.hidden = !WeeklyForecastState.showManagersManager;
+      renderWeeklyForecastTable_(State.weeklyForecast);
+    });
+  });
 
     function renderHeadcountGap(rows) {
     const body = $('#kpiHeadcountBody');
@@ -1341,15 +1389,6 @@
     }
   }
 
-  document.addEventListener('click', (e) => {
-    const seg = e.target.closest('#groupBySeg button');
-    if (!seg) return;
-    $$('#groupBySeg button').forEach(x => x.classList.toggle('on', x === seg));
-    State.filters.groupBy = seg.dataset.val;
-    renderChipStrip_();
-    updateFilterCountBadge_();
-    loadDashboard();
-  });
 </script>
 
 <script>
@@ -3247,7 +3286,6 @@
     $('#r_hours').value = '';
     $('#r_reason').value = '';
     $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
-    $('#rCustomMonthsField').hidden = true;
 
     // Scenario select
     const sSel = $('#r_scenario');
@@ -3407,7 +3445,6 @@
     $('#r_hours').value = '';
     $('#r_reason').value = '';
     $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
-    $('#rCustomMonthsField').hidden = true;
     const sub = $('#reductionDrawerWorkerSub');
     if (sub) sub.textContent = '';
 
@@ -3438,11 +3475,12 @@
           const savedDir = adj.direction || (Number(adj.hours_reduction) >= 0 ? 'reduce' : 'add');
           $$('#r_direction button').forEach(b => b.classList.toggle('on', b.dataset.val === savedDir));
           _syncAdjustHoursDirectionUI_(savedDir);
-          $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === (adj.distribution || 'Even')));
-          if (adj.distribution === 'Custom') {
-            renderReductionCustomMonths_();
-            $('#rCustomMonthsField').hidden = false;
-          }
+          // Restore saved distribution; fall back to Even if it's not one of
+          // the currently-allowed modes (e.g. a legacy 'Custom' row -- removed
+          // in WFM.12 -- mirrors the server's defensive default-to-Even).
+          const allowedDist = ['Even', 'Front-loaded', 'Back-loaded'];
+          const restoredDist = allowedDist.includes(adj.distribution) ? adj.distribution : 'Even';
+          $$('#r_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === restoredDist));
           if (sub) sub.textContent = adj.resource_name || '';
           // Populate deployment dropdown and pre-select saved value
           await _populateDeploymentDropdown_(adj.resource_name || '', String(adj.deployment_id || ''));
@@ -3473,127 +3511,17 @@
     if (res && st && en) loadResourceBaselineForDrawer_(res, st, en);
   }
 
-  /**
-   * Render custom per-month inputs for the reduction drawer.
-   * Mirrors renderCustomMonths_ but uses rCustomMonths* IDs.
-   */
-  function renderReductionCustomMonths_() {
-    const startVal = $('#r_start').value;
-    const endVal   = $('#r_end').value;
-    const total    = Number($('#r_hours').value) || 0;
-    const list     = $('#rCustomMonthsList');
-    if (!list || !startVal || !endVal) return;
-
-    const start = new Date(startVal + 'T00:00:00');
-    const end   = new Date(endVal   + 'T00:00:00');
-    const months = [];
-    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-    while (cur <= end) {
-      months.push(new Date(cur));
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-    }
-    if (!months.length) return;
-
-    const n = months.length;
-    const evenBase = Math.floor(total / n);
-    const remainder = total - evenBase * n;
-
-    list.innerHTML = months.map((m, i) => {
-      const mk = m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2,'0');
-      const label = m.toLocaleString('default', { month: 'short', year: '2-digit' });
-      const val = (i === n - 1) ? (evenBase + remainder) : evenBase;
-      return `<div class="custom-month-row">
-        <span class="custom-month-label">${label}</span>
-        <input type="number" min="0" step="1"
-          class="input rCustomMonthInput"
-          data-month-key="${mk}" value="${val}">
-        <span class="muted custom-month-hrs">hrs</span>
-      </div>`;
-    }).join('');
-
-    updateReductionCustomTotal_();
-  }
-
-  function updateReductionCustomTotal_() {
-    const inputs = $$('.rCustomMonthInput');
-    const total  = inputs.reduce((s, el) => s + (Number(el.value) || 0), 0);
-    const target = Number($('#r_hours').value) || 0;
-    const delta  = total - target;
-    const totalEl = $('#rCustomMonthsTotal');
-    const targetEl = $('#rCustomMonthsTarget');
-    const deltaEl  = $('#rCustomMonthsDelta');
-    if (totalEl) totalEl.textContent = String(total);
-    if (targetEl) targetEl.textContent = String(target);
-    if (deltaEl) {
-      if (delta === 0) {
-        deltaEl.textContent = '✓ matched';
-        deltaEl.className = 'custom-months-delta matched';
-      } else if (delta > 0) {
-        deltaEl.textContent = '(+' + delta + ' over)';
-        deltaEl.className = 'custom-months-delta mismatch';
-      } else {
-        deltaEl.textContent = '(' + delta + ' short)';
-        deltaEl.className = 'custom-months-delta mismatch';
-      }
-    }
-    const saveBtn   = $('#saveReductionModeledBtn');
-    const commitBtn = $('#commitReductionNowBtn');
-    if (saveBtn)   saveBtn.disabled   = delta !== 0;
-    if (commitBtn) commitBtn.disabled = delta !== 0;
-  }
-
-  function collectReductionCustomJson_() {
-    const inputs = $$('.rCustomMonthInput');
-    if (!inputs.length) return '';
-    const obj = {};
-    inputs.forEach(el => {
-      if (el.dataset.monthKey) obj[el.dataset.monthKey] = Number(el.value) || 0;
-    });
-    return JSON.stringify(obj);
-  }
-
   // Distribution segmented control for reduction drawer
   $$('#r_distribution button').forEach(b => {
     b.addEventListener('click', () => {
       $$('#r_distribution button').forEach(x => x.classList.toggle('on', x === b));
-      const isCustom = b.dataset.val === 'Custom';
-      if (isCustom) {
-        renderReductionCustomMonths_();
-        $('#rCustomMonthsField').hidden = false;
-      } else {
-        $('#rCustomMonthsField').hidden = true;
-        const saveBtn   = $('#saveReductionModeledBtn');
-        const commitBtn = $('#commitReductionNowBtn');
-        if (saveBtn)   saveBtn.disabled   = false;
-        if (commitBtn) commitBtn.disabled = false;
-      }
       updateReductionPreview_();
     });
   });
 
-  // Sync custom month inputs for reduction drawer
-  document.addEventListener('input', (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains('rCustomMonthInput')) {
-      updateReductionCustomTotal_();
-      clearTimeout(window._reductionPreviewTimer);
-      window._reductionPreviewTimer = setTimeout(updateReductionPreview_, 200);
-    }
-  });
-
-  $('#rCustomMonthsResetBtn')?.addEventListener('click', () => {
-    renderReductionCustomMonths_();
-    updateReductionPreview_();
-    toast('Custom hours reset to Even distribution', 'ok');
-  });
-
-  // Re-render custom months when dates or hours change
+  // Event wiring — date and hours inputs (debounced 200ms).
   ['r_start', 'r_end', 'r_hours'].forEach(id => {
     $('#' + id)?.addEventListener('input', () => {
-      const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
-      if (activeBtn && activeBtn.dataset.val === 'Custom') {
-        renderReductionCustomMonths_();
-        toast('Custom hours reset — date or hours changed', 'warn');
-      }
       clearTimeout(window._reductionPreviewTimer);
       window._reductionPreviewTimer = setTimeout(updateReductionPreview_, 200);
       // reload baseline when resource is set
@@ -3718,8 +3646,7 @@
     const dist = activeBtn ? activeBtn.dataset.val : 'Even';
     const adj = {
       start_date: start, end_date: end,
-      hours_reduction: hours, distribution: dist,
-      custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : ''
+      hours_reduction: hours, distribution: dist
     };
     try {
       const preview = await call('api_previewCapacityAdjustment', adj);
@@ -3739,13 +3666,6 @@
       });
     } catch (e) { /* preview is best-effort */ }
   }
-
-  // Wire preview to dates/hours changes
-  ['r_start', 'r_end', 'r_hours'].forEach(id => {
-    // Only updateReductionPreview_ here (baseline reloaded in the
-    // earlier listener for the same fields above).
-    // Use a shared timer to avoid double-scheduling.
-  });
 
   /**
    * Sync the hours label and preview chart color to the selected direction.
@@ -3799,15 +3719,6 @@
     const activeBtn = $$('#r_distribution button').find(b => b.classList.contains('on'));
     const dist = activeBtn ? activeBtn.dataset.val : 'Even';
 
-    if (dist === 'Custom') {
-      const totalEl = $('#rCustomMonthsTotal');
-      const customTotal = Number(totalEl ? totalEl.textContent : 0);
-      if (Math.abs(customTotal - hours) > 0.5) {
-        toast('Custom distribution total does not match hours', 'err');
-        return;
-      }
-    }
-
     const adj = {
       adjustment_id:     adjId || null,
       resource_name:     resource,
@@ -3816,7 +3727,6 @@
       hours_reduction:   hours,
       direction:         direction,
       distribution:      dist,
-      custom_monthly_json: dist === 'Custom' ? collectReductionCustomJson_() : '',
       reason:            reason,
       scenario_id:       scenario || '',
       deployment_id:     ($('#r_deployment_id') && !$('#r_deployment_id').disabled) ? ($('#r_deployment_id').value || '') : '',
@@ -4245,7 +4155,12 @@ async function _qaRefreshPsaHours_() {
     if ($('#f_start'))  $('#f_start').value  = planRow.start_date || '';
     if ($('#f_end'))    $('#f_end').value    = planRow.end_date || '';
     if ($('#f_hours'))  $('#f_hours').value  = planRow.hours || '';
-    $$('#f_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === (planRow.distribution || 'Even')));
+    // Fall back to Even if the saved distribution isn't one of the
+    // currently-allowed modes (e.g. a legacy 'Custom' row -- removed in
+    // WFM.12 -- mirrors the server's defensive default-to-Even).
+    const allowedDist_ = ['Even', 'Front-loaded', 'Back-loaded'];
+    const restoredDist_ = allowedDist_.includes(planRow.distribution) ? planRow.distribution : 'Even';
+    $$('#f_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === restoredDist_));
     const scenSel = $('#f_scenario');
     if (scenSel && planRow.scenario_id) scenSel.value = planRow.scenario_id;
   }
@@ -4447,20 +4362,6 @@ async function _qaRefreshPsaHours_() {
 
         const dist = $$('#f_distribution button').find(b => b.classList.contains('on'));
     const distVal = dist ? dist.dataset.val : 'Even';
-    // Custom Distribution: serialize per-month inputs into custom_monthly_json.
-    // Server's expandAssignmentToMonthly_ will use these literal values
-    // instead of computing weights. Empty for non-Custom distributions.
-    const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
-
-    if (distVal === 'Custom') {
-      const _customInputs = $$('.custom-month-input');
-      const _sumOfMonths = _customInputs.reduce((s, el) => s + (Number(el.value) || 0), 0);
-      const _estHours = Number($('#f_hours').value) || 0;
-      if (Math.abs(_sumOfMonths - _estHours) > 0.5) {
-        toast('Custom distribution total must equal Estimated Hours before saving.', 'err');
-        return;
-      }
-    }
 
     const payload = {
       assignment_id: $('#f_assignment_id').value || null,
@@ -4472,7 +4373,6 @@ async function _qaRefreshPsaHours_() {
       end_date: $('#f_end').value,
       estimated_hours: Number($('#f_hours').value) || 0,
       distribution: distVal,
-      custom_monthly_json: customJson,           // Custom Distribution v1
       scenario_id: $('#f_scenario').value || null,
       notes: $('#f_notes').value,
       status: status
@@ -4522,15 +4422,11 @@ async function _qaRefreshPsaHours_() {
     function collectFormForPreview_() {
     const dist = $$('#f_distribution button').find(b => b.classList.contains('on'));
     const distVal = dist ? dist.dataset.val : 'Even';
-    // Custom Distribution: send the per-month inputs to the server so
-    // the preview chart reflects exactly what the user is editing.
-    const customJson = (distVal === 'Custom') ? collectCustomMonthsJson_() : '';
     return {
       start_date: $('#f_start').value,
       end_date: $('#f_end').value,
       estimated_hours: Number($('#f_hours').value) || 0,
-      distribution: distVal,
-      custom_monthly_json: customJson
+      distribution: distVal
     };
   }
 
@@ -4574,197 +4470,22 @@ async function _qaRefreshPsaHours_() {
   }
 
   // ============================================================
-  // Custom Distribution per-month inputs
-  //
-  // Rendered when Distribution = Custom. Pre-fills with Even
-  // distribution. User edits any month; live total updates
-  // immediately, chart updates debounced. Resets to Even on
-  // date/hours change (with toast warning) or on Reset button.
+  // Distribution controls (Even / Front-loaded / Back-loaded only --
+  // Custom removed in WFM.12; see the parent commit message for why).
   // ============================================================
 
-  /**
-   * Generate the list of month keys between f_start and f_end.
-   * Returns array of {monthKey, monthLabel} pairs.
-   * Empty array if either date is missing or invalid.
-   */
-  function customMonthsRange_() {
-    const startStr = $('#f_start').value;
-    const endStr = $('#f_end').value;
-    if (!startStr || !endStr) return [];
-    const start = new Date(startStr);
-    const end = new Date(endStr);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return [];
-    if (end < start) return [];
-    const out = [];
-    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-    const last = new Date(end.getFullYear(), end.getMonth(), 1);
-    while (cur <= last) {
-      const mk = cur.getFullYear() + '-' + String(cur.getMonth() + 1).padStart(2, '0');
-      out.push({ monthKey: mk, monthLabel: fmtMonth(mk) });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-    }
-    return out;
-  }
-
-  /**
-   * Render per-month input rows into #customMonthsList.
-   * Pre-fills inputs with Even distribution (estimated_hours / monthCount,
-   * with remainder added to the last month to keep total exact).
-   */
-  function renderCustomMonths_() {
-    const list = $('#customMonthsList');
-    if (!list) return;
-    const months = customMonthsRange_();
-    const estHours = Number($('#f_hours').value) || 0;
-
-    $('#customMonthsTarget').textContent = String(estHours);
-
-    if (!months.length) {
-      list.innerHTML = '<div class="muted" style="padding:8px 0;">' +
-        'Set Start date and End date above to define month rows.</div>';
-      $('#customMonthsTotal').textContent = '0';
-      $('#customMonthsDelta').textContent = '';
-      $('#customMonthsDelta').className = 'custom-months-delta';
-      return;
-    }
-
-    // Even distribution: floor(estHours / n) per month, remainder on last month.
-    const n = months.length;
-    const evenBase = Math.floor(estHours / n);
-    const remainder = estHours - (evenBase * n);
-
-    list.innerHTML = months.map(function (m, i) {
-      const initialValue = (i === n - 1) ? (evenBase + remainder) : evenBase;
-      return '' +
-        '<div class="custom-month-row">' +
-          '<span class="custom-month-label">' + escapeHtml_(m.monthLabel) + '</span>' +
-          '<input type="number" min="0" step="1" ' +
-            'class="input custom-month-input" ' +
-            'data-month-key="' + escapeHtml_(m.monthKey) + '" ' +
-            'value="' + initialValue + '">' +
-          '<span class="muted custom-month-hrs">hrs</span>' +
-        '</div>';
-    }).join('');
-
-    updateCustomMonthsTotal_();
-  }
-
-  /**
-   * Read all per-month inputs, compute total, update footer display.
-   * Color-codes the delta indicator: green (matched), amber (mismatch).
-   */
-  function updateCustomMonthsTotal_() {
-    const inputs = $$('.custom-month-input');
-    const total = inputs.reduce(function (sum, el) {
-      return sum + (Number(el.value) || 0);
-    }, 0);
-    const target = Number($('#f_hours').value) || 0;
-    const delta = total - target;
-
-    $('#customMonthsTotal').textContent = String(total);
-    $('#customMonthsTarget').textContent = String(target);
-
-    const deltaEl = $('#customMonthsDelta');
-    if (delta === 0) {
-      deltaEl.textContent = '✓ matched';
-      deltaEl.className = 'custom-months-delta matched';
-    } else if (delta > 0) {
-      deltaEl.textContent = '(+' + delta + ' over)';
-      deltaEl.className = 'custom-months-delta mismatch';
-    } else {
-      deltaEl.textContent = '(' + delta + ' short)';
-      deltaEl.className = 'custom-months-delta mismatch';
-    }
-    const _saveBtn = $('#saveModeledBtn');
-    const _commitBtn = $('#commitNowBtn');
-    if (_saveBtn) _saveBtn.disabled = delta !== 0;
-    if (_commitBtn) _commitBtn.disabled = delta !== 0;
-  }
-
-  /**
-   * Read per-month inputs, return JSON-stringified {monthKey: hours} map.
-   * Returns empty string if no inputs exist (e.g., dates not set).
-   */
-  function collectCustomMonthsJson_() {
-    const inputs = $$('.custom-month-input');
-    if (!inputs.length) return '';
-    const obj = {};
-    inputs.forEach(function (el) {
-      const mk = el.dataset.monthKey;
-      const hrs = Number(el.value) || 0;
-      if (mk) obj[mk] = hrs;
-    });
-    return JSON.stringify(obj);
-  }
-
-  /**
-   * Show or hide the Custom Months section.
-   * On show, regenerates the rows from current dates and hours.
-   */
-  function showCustomMonthsSection_(show) {
-    const field = $('#customMonthsField');
-    if (!field) return;
-    if (show) {
-      renderCustomMonths_();
-      field.hidden = false;
-    } else {
-      field.hidden = true;
-      const _saveBtn = $('#saveModeledBtn');
-      const _commitBtn = $('#commitNowBtn');
-      if (_saveBtn) _saveBtn.disabled = false;
-      if (_commitBtn) _commitBtn.disabled = false;
-    }
-  }
-
-  /**
-   * Reset all per-month inputs to Even distribution. Wired to the
-   * "Reset to Even" button inside the Custom Months section.
-   */
-  function resetCustomMonthsToEven_() {
-    renderCustomMonths_();
-    updatePreview_();
-    toast('Custom hours reset to Even distribution', 'ok');
-  }
-
-    // Event wiring — distribution segmented control change
+  // Event wiring — distribution segmented control change
   $('#f_distribution')?.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     // The visual .on toggle is already handled elsewhere (in the
     // existing $$('#f_distribution button').forEach handler).
-    // Show/hide Custom Months section based on selection.
-    const isCustom = (b.dataset.val === 'Custom');
-    showCustomMonthsSection_(isCustom);
     updatePreview_();
   });
 
-  // Custom Months inline event wiring — input changes update total
-  // immediately and trigger debounced preview chart refresh.
-  document.addEventListener('input', (e) => {
-    if (e.target && e.target.classList && e.target.classList.contains('custom-month-input')) {
-      updateCustomMonthsTotal_();
-      clearTimeout(window._previewTimer);
-      window._previewTimer = setTimeout(updatePreview_, 200);
-    }
-  });
-
-  // Reset to Even button inside Custom Months section
-  $('#customMonthsResetBtn')?.addEventListener('click', resetCustomMonthsToEven_);
-
-    // Event wiring — date and hours inputs (debounced 200ms).
-  // If Distribution is Custom, regenerate the per-month rows
-  // (resets to Even) and toast a warning.
+  // Event wiring — date and hours inputs (debounced 200ms).
   ['f_start', 'f_end', 'f_hours'].forEach(id => {
     $('#' + id)?.addEventListener('input', () => {
-      // Check if Custom is currently active
-      const activeBtn = $$('#f_distribution button').find(b => b.classList.contains('on'));
-      const isCustom = activeBtn && activeBtn.dataset.val === 'Custom';
-      if (isCustom) {
-        // Regenerate rows on date/hours change. Warn user that custom
-        // entries were reset (only when there's been actual user input).
-        renderCustomMonths_();
-        toast('Custom hours reset — date or hours changed', 'warn');
-      }
       clearTimeout(window._previewTimer);
       window._previewTimer = setTimeout(updatePreview_, 200);
     });
@@ -4812,8 +4533,9 @@ async function _qaRefreshPsaHours_() {
           <td>${escapeHtml_(l.source)}</td>
           <td class="num">${l.rows_in}</td>
           <td class="num">${l.rows_out}</td>
-          <td class="num">${l.months_detected}</td>
+          <td class="num">${l.weeks_detected}</td>
           <td>${escapeHtml_(l.user)}</td>
+          <td class="muted" style="font-size:12px;">${escapeHtml_(l.warnings || '')}</td>
         </tr>
       `).join('');
 
@@ -5195,7 +4917,9 @@ async function _qaRefreshPsaHours_() {
         const base64 = reader.result.split(',')[1];
         const result = await call('api_uploadStaffFile', base64, file.name);
         status.className = 'status ok';
-        status.textContent = 'Uploaded: ' + result.rowsOut + ' rows normalized · ' + result.monthsDetected + ' months';
+        const warnCount = (result.warnings || []).length;
+        status.textContent = 'Uploaded: ' + result.rowsOut + ' rows normalized · ' + result.weeksDetected + ' weeks' +
+          (warnCount ? ' · ' + warnCount + ' warning' + (warnCount === 1 ? '' : 's') + ' (see Admin → Normalization Log)' : '');
         State.ref = await call('api_getReference');
         if (State.currentView === 'dashboard') loadDashboard();
       } catch (err) {

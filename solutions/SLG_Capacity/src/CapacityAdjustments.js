@@ -129,53 +129,57 @@ function deleteCapacityAdjustment_(adjustment_id) {
 }
 
 /**
- * Expand a capacity adjustment into per-month reduction buckets.
- * Reuses the same monthly distribution math as expandAssignmentToMonthly_.
- * Returns array of { period_start, hours_reduction } with positive values;
- * the engine negates when applying to buckets.
+ * Expand a capacity adjustment into per-week reduction buckets, aligned to
+ * the REAL Config_Calendar week grid (weekly-forecast-migration). Replaces
+ * expandAdjustmentToMonthly_. Reuses the same distribution math as
+ * expandAssignmentToWeekly_ (Engine.gs). Returns positive hours_reduction
+ * values; the engine negates when applying to buckets.
  *
- * @param {Object} adj  - adjustment row (start_date, end_date, hours_reduction, distribution, custom_monthly_json)
- * @param {Object} calendar - monthKey → { workdays } map from readCalendar_()
- * @return {{ period_start: Date, hours_reduction: number }[]}
+ * 'Custom' distribution was removed in WFM.12 (see expandAssignmentToWeekly_
+ * for the full rationale). Any distribution value outside DISTRIBUTIONS is
+ * defensively treated as Even, with a logged warning; never silently
+ * produces all-zero weeks.
+ *
+ * @param {Object} adj  - adjustment row (start_date, end_date, hours_reduction, distribution)
+ * @param {{weeks: Array}} calendar - output of readCalendar_() (Engine.gs)
+ * @return {{ week_start: Date, week_key: string, hours_reduction: number }[]}
  */
-function expandAdjustmentToMonthly_(adj, calendar) {
+function expandAdjustmentToWeekly_(adj, calendar) {
   if (!adj.start_date || !adj.end_date) return [];
-  const start = new Date(adj.start_date);
-  const end   = new Date(adj.end_date);
-  const months = monthsBetween_(start, end);
-  if (!months.length) return [];
+  const start = weekStart_(adj.start_date);
+  const end   = weekStart_(adj.end_date);
+
+  const weeks = ((calendar && calendar.weeks) || []).filter(w => {
+    const weekEnd = new Date(w.week_start.getFullYear(), w.week_start.getMonth(), w.week_start.getDate() + 6);
+    return weekEnd >= start && w.week_start <= end;
+  });
+  if (!weeks.length) return [];
 
   const total = Number(adj.hours_reduction) || 0;
 
-  if (adj.distribution === 'Custom' && adj.custom_monthly_json) {
-    let custom = {};
-    try { custom = JSON.parse(adj.custom_monthly_json); } catch (e) { custom = {}; }
-    return months.map(m => ({
-      period_start:    m,
-      hours_reduction: Number(custom[monthKey_(m)] || 0)
-    }));
+  let dist = adj.distribution;
+  if (DISTRIBUTIONS.indexOf(dist) === -1) {
+    Logger.log('expandAdjustmentToWeekly_: unrecognized distribution "' + dist +
+      '" for adjustment ' + (adj.adjustment_id || '(no id)') + ' -- defaulting to Even');
+    dist = 'Even';
   }
 
-  const wdTotal = months.reduce(
-    (s, m) => s + ((calendar[monthKey_(m)] || {}).workdays || 20),
-    0
-  );
-  const n = months.length;
-  let weights = months.map(
-    m => (((calendar[monthKey_(m)] || {}).workdays || 20) / wdTotal)
-  );
+  const wdTotal = weeks.reduce((s, w) => s + (w.workdays_in_week || 5), 0) || 1;
+  const n = weeks.length;
+  let weights = weeks.map(w => (w.workdays_in_week || 5) / wdTotal);
 
-  if (adj.distribution === 'Front-loaded' || adj.distribution === 'Back-loaded') {
-    const ramp = months.map((_, i) => {
+  if (dist === 'Front-loaded' || dist === 'Back-loaded') {
+    const ramp = weeks.map((_, i) => {
       const t = n === 1 ? 0.5 : i / (n - 1);
-      return adj.distribution === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
+      return dist === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
     });
     const rsum = ramp.reduce((s, x) => s + x, 0);
     weights = weights.map((w, i) => ramp[i] / rsum);
   }
 
-  return months.map((m, i) => ({
-    period_start:    m,
+  return weeks.map((w, i) => ({
+    week_start:      w.week_start,
+    week_key:        w.week_key,
     hours_reduction: total * weights[i]
   }));
 }

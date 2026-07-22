@@ -36,6 +36,54 @@ function readRoleCapacity_() {
   return m;
 }
 
+// ============================================================
+// Weekly capacity targets (weekly-forecast-migration).
+//
+// Distinct from readRoleCapacity_ above -- that MONTHLY roleCap model is
+// preserved as-is for the legacy computeUtilization/computeResourceDetail
+// Explorer/Reporting outputs (out of scope for this migration). These
+// WEEKLY targets power the new computeWeeklyForecast_ / api_getForecastTable
+// path only.
+// ============================================================
+
+/**
+ * Level = Job Profile.substring(0, 2), e.g. 'P3'..'P6'. Blank-safe.
+ * @param {string} jobProfile
+ * @return {string}
+ */
+function deriveLevel_(jobProfile) {
+  return String(jobProfile || '').trim().substring(0, 2);
+}
+
+/**
+ * Weekly capacity targets from Config_Settings (weekly_target_default,
+ * weekly_target_P6), falling back to the LOCKED defaults (32.8 / 26.0)
+ * when a key is missing or non-numeric.
+ * @param {Object} [settings] output of readSettings_(); read fresh if omitted
+ * @return {{default:number, p6:number}}
+ */
+function readWeeklyTargets_(settings) {
+  settings = settings || readSettings_();
+  const def = Number(settings.weekly_target_default);
+  const p6  = Number(settings.weekly_target_P6);
+  return {
+    default: (isFinite(def) && def > 0) ? def : 32.8,
+    p6:      (isFinite(p6)  && p6  > 0) ? p6  : 26.0
+  };
+}
+
+/**
+ * Resolve a worker's weekly capacity target. P6-level workers (Level ===
+ * 'P6', derived from Job Profile) use weekly_target_P6; everyone else
+ * uses weekly_target_default.
+ * @param {string} jobProfile
+ * @param {{default:number, p6:number}} weeklyTargets output of readWeeklyTargets_()
+ * @return {number}
+ */
+function weeklyTargetFor_(jobProfile, weeklyTargets) {
+  return deriveLevel_(jobProfile) === 'P6' ? weeklyTargets.p6 : weeklyTargets.default;
+}
+
 function readRoleTeamLabels_() {
   const rows = cachedRead_(CFG_ROLES);
   const m = {};
@@ -49,14 +97,41 @@ function readRoleTeamLabels_() {
   return m;
 }
 
+/**
+ * Read Config_Calendar (weekly grain, weekly-forecast-migration). Returns
+ * both a keyed lookup and a sorted array -- the array is what
+ * expandAssignmentToWeekly_/expandAdjustmentToWeekly_ use to find the real
+ * calendar weeks overlapping an assignment's date range (NOT a naive
+ * 7-day stepper from the assignment's own start_date, which would not
+ * align with the PSA-ingested week grid).
+ *
+ * WFM.13: week_key is always RECOMPUTED from week_start here, never trusted
+ * from the stored cell -- a week_key cell corrupted by Sheets' auto-Date-
+ * conversion (see writeTable_, Util.gs) would otherwise flow through as a
+ * raw Date object instead of the canonical 'YYYY-MM-DD' string.
+ *
+ * @return {{byWeekKey: Object, weeks: Array<{week_start:Date, week_key:string, fiscal_year:number, fiscal_quarter:string, workdays_in_week:number, holiday_hours:number}>}}
+ */
 function readCalendar_() {
   const rows = cachedRead_(CFG_CAL);
-  const m = {};
+  const byWeekKey = {};
+  const weeks = [];
   rows.forEach(r => {
-    const k = monthKey_(r.period_start);
-    m[k] = { workdays: Number(r.workdays) || 20, quarter: r.quarter };
+    const ws = weekStart_(r.week_start);
+    const wk = weekKey_(ws);
+    const entry = {
+      week_start: ws,
+      week_key: wk,
+      fiscal_year: Number(r.fiscal_year) || fiscalYear_(ws),
+      fiscal_quarter: r.fiscal_quarter || fiscalQuarter_(ws),
+      workdays_in_week: Number(r.workdays_in_week) || 5,
+      holiday_hours: Number(r.holiday_hours) || 0
+    };
+    byWeekKey[wk] = entry;
+    weeks.push(entry);
   });
-  return m;
+  weeks.sort((a, b) => a.week_start - b.week_start);
+  return { byWeekKey: byWeekKey, weeks: weeks };
 }
 
 function readSettings_() {
@@ -243,44 +318,59 @@ function buildEffectiveManagers_(selectedName, includeMyManagers, managersByName
   return set;
 }
 
-function expandAssignmentToMonthly_(a, calendar) {
+/**
+ * Expand an assignment into per-week hours, aligned to the REAL
+ * Config_Calendar week grid (weekly-forecast-migration). Replaces
+ * expandAssignmentToMonthly_. Filters calendar.weeks to those overlapping
+ * [a.start_date, a.end_date] rather than stepping 7 days from
+ * a.start_date, so weekly buckets line up with PSA-ingested weeks.
+ *
+ * 'Custom' distribution was removed in WFM.12 (client collected
+ * month-keyed custom_monthly_json while this function looked up
+ * week_key, silently zeroing every week). Any distribution value outside
+ * DISTRIBUTIONS -- e.g. a legacy 'Custom' row -- is defensively treated
+ * as Even, with a logged warning; never silently produces all-zero weeks.
+ *
+ * @param {Object} a assignment row (start_date, end_date, estimated_hours, distribution)
+ * @param {{weeks: Array}} calendar output of readCalendar_()
+ * @return {Array<{week_start:Date, week_key:string, hours:number}>}
+ */
+function expandAssignmentToWeekly_(a, calendar) {
   if (!a.start_date || !a.end_date) return [];
-  const start = new Date(a.start_date);
-  const end = new Date(a.end_date);
-  const months = monthsBetween_(start, end);
-  if (!months.length) return [];
+  const start = weekStart_(a.start_date);
+  const end = weekStart_(a.end_date);
+
+  const weeks = ((calendar && calendar.weeks) || []).filter(w => {
+    const weekEnd = new Date(w.week_start.getFullYear(), w.week_start.getMonth(), w.week_start.getDate() + 6);
+    return weekEnd >= start && w.week_start <= end;
+  });
+  if (!weeks.length) return [];
 
   const total = Number(a.estimated_hours) || 0;
 
-  if (a.distribution === 'Custom' && a.custom_monthly_json) {
-    let custom = {};
-    try { custom = JSON.parse(a.custom_monthly_json); } catch (e) { custom = {}; }
-    return months.map(m => ({
-      period_start: m,
-      hours: Number(custom[monthKey_(m)] || 0)
-    }));
+  let dist = a.distribution;
+  if (DISTRIBUTIONS.indexOf(dist) === -1) {
+    Logger.log('expandAssignmentToWeekly_: unrecognized distribution "' + dist +
+      '" for assignment ' + (a.assignment_id || '(no id)') + ' -- defaulting to Even');
+    dist = 'Even';
   }
 
-  const wdTotal = months.reduce(
-    (s, m) => s + ((calendar[monthKey_(m)] || {}).workdays || 20),
-    0
-  );
-  const n = months.length;
-  let weights = months.map(
-    m => (((calendar[monthKey_(m)] || {}).workdays || 20) / wdTotal)
-  );
+  const wdTotal = weeks.reduce((s, w) => s + (w.workdays_in_week || 5), 0) || 1;
+  const n = weeks.length;
+  let weights = weeks.map(w => (w.workdays_in_week || 5) / wdTotal);
 
-  if (a.distribution === 'Front-loaded' || a.distribution === 'Back-loaded') {
-    const ramp = months.map((_, i) => {
+  if (dist === 'Front-loaded' || dist === 'Back-loaded') {
+    const ramp = weeks.map((_, i) => {
       const t = n === 1 ? 0.5 : i / (n - 1);
-      return a.distribution === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
+      return dist === 'Front-loaded' ? (1.5 - t) : (0.5 + t);
     });
     const rsum = ramp.reduce((s, x) => s + x, 0);
     weights = weights.map((w, i) => ramp[i] / rsum);
   }
 
-  return months.map((m, i) => ({
-    period_start: m,
+  return weeks.map((w, i) => ({
+    week_start: w.week_start,
+    week_key: w.week_key,
     hours: total * weights[i]
   }));
 }
@@ -615,29 +705,41 @@ function computeUtilization(params) {
     return buckets[k];
   }
 
+  // weekly-forecast-migration: Allocations_Normalized/assignments/
+  // adjustments are now sourced at WEEKLY grain. This legacy monthly
+  // aggregator rolls each week's hours up to the calendar month(s) it
+  // overlaps via splitWeekAcrossMonths_ (proportional, sum-exact) so the
+  // rest of computeUtilization (steps 3-10 below) is unchanged -- it still
+  // consumes monthly buckets keyed by resource_name + '|' + monthKey.
+  const splitBasis = String(settings.week_month_split_basis || 'calendar');
+
   // 1) Actual allocations from PSA
   alloc.forEach(a => {
-    if (!a.resource_name || !a.period_start) return;
-    const b = bucket(a.resource_name, a.period_start);
+    if (!a.resource_name || !a.week_start) return;
     const h = Number(a.hours) || 0;
     if (!h) return;
-    if (a.allocation_type === 'PTO_Holiday') {
-      b.timeOff += h;
-    } else if (a.allocation_type === 'Education') {
-      b.education += h;
-      b.committed += h;
-    } else if (a.allocation_type === 'Billable') {
-      b.billable += h;
-      b.committed += h;
-    } else {
-      b.committed += h;
-      if (a.allocation_type && a.allocation_type !== '') {
-        b.unassigned += h;
+    splitWeekAcrossMonths_(a.week_start, h, splitBasis).forEach(m => {
+      const b = bucket(a.resource_name, monthKeyToDate_(m.monthKey));
+      const hrs = m.hours;
+      if (a.allocation_type === 'PTO_Holiday') {
+        b.timeOff += hrs;
+      } else if (a.allocation_type === 'Education') {
+        b.education += hrs;
+        b.committed += hrs;
+      } else if (a.allocation_type === 'Billable') {
+        b.billable += hrs;
+        b.committed += hrs;
+      } else {
+        b.committed += hrs;
+        if (a.allocation_type && a.allocation_type !== '') {
+          b.unassigned += hrs;
+        }
       }
-    }
+    });
   });
 
-  // 2) Assignments
+  // 2) Assignments -- expand weekly against the real calendar grid, then
+  // roll each week's hours up to month(s) via proportional split.
   if (viewMode !== 'Actual') {
     assigns.forEach(a => {
       if (!a.resource_name) return;
@@ -647,14 +749,16 @@ function computeUtilization(params) {
         (viewMode === 'Scenario' && isScenario &&
          (!params.scenarioId || a.scenario_id === params.scenarioId));
       if (!include) return;
-      expandAssignmentToMonthly_(a, calendar).forEach(m => {
-        const b = bucket(a.resource_name, m.period_start);
-        if (isCommitted) {
-          b.billable += m.hours;
-          b.committed += m.hours;
-        } else if (isScenario) {
-          b.scenario += m.hours;
-        }
+      expandAssignmentToWeekly_(a, calendar).forEach(w => {
+        splitWeekAcrossMonths_(w.week_start, w.hours, splitBasis).forEach(m => {
+          const b = bucket(a.resource_name, monthKeyToDate_(m.monthKey));
+          if (isCommitted) {
+            b.billable += m.hours;
+            b.committed += m.hours;
+          } else if (isScenario) {
+            b.scenario += m.hours;
+          }
+        });
       });
     });
   }
@@ -672,16 +776,18 @@ function computeUtilization(params) {
         (viewMode === 'Scenario' && isModeled &&
          (!params.scenarioId || adj.scenario_id === params.scenarioId));
       if (!include) return;
-      expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
-        const b = bucket(adj.resource_name, m.period_start);
-        const hrs = Number(m.hours_reduction) || 0;
-        b.reduction += hrs;
-        if (isCommitted) {
-          b.billable  = Math.max(0, b.billable  - hrs);
-          b.committed = Math.max(0, b.committed - hrs);
-        } else if (isModeled) {
-          b.scenario = b.scenario - hrs; // can go negative (net reduction)
-        }
+      expandAdjustmentToWeekly_(adj, calendar).forEach(w => {
+        splitWeekAcrossMonths_(w.week_start, w.hours_reduction, splitBasis).forEach(m => {
+          const b = bucket(adj.resource_name, monthKeyToDate_(m.monthKey));
+          const hrs = m.hours;
+          b.reduction += hrs;
+          if (isCommitted) {
+            b.billable  = Math.max(0, b.billable  - hrs);
+            b.committed = Math.max(0, b.committed - hrs);
+          } else if (isModeled) {
+            b.scenario = b.scenario - hrs; // can go negative (net reduction)
+          }
+        });
       });
     });
   }
@@ -989,6 +1095,209 @@ function computeUtilization(params) {
   };
 }
 
+// ============================================================
+// Weekly-native forecast computation (weekly-forecast-migration).
+//
+// Powers api_getForecastTable / the redesigned Dashboard weekly table.
+// Distinct from computeUtilization above (which stays monthly-shaped for
+// the out-of-scope legacy Explorer/Reporting views). Buckets by
+// resource_name + '|' + week_key using WEEKLY capacity targets
+// (weeklyTargetFor_), not the monthly roleCap model.
+//
+// Applies the same filter pipeline as computeUtilization: exclusions,
+// manager hierarchy (+descendants), Team override, worker scope,
+// viewMode, scenario, PTO toggle, worker-class logic.
+// ============================================================
+
+/**
+ * @param {Object} params same shape as computeUtilization's params
+ * @return {{
+ *   weeks: Array<{week_start:Date, week_key:string, fiscal_year:number, fiscal_quarter:string, workdays_in_week:number}>,
+ *   workers: Array<{
+ *     resource:string, jobProfile:string, level:string, managerOrg:string,
+ *     managersManager:string, teamLabel:string, icpRole:string,
+ *     weeklyTarget:number,
+ *     workerWeekly: Object<string, number>,
+ *     projects: Object<string, Object<string, number>>
+ *   }>,
+ *   icp: Object
+ * }}
+ */
+function computeWeeklyForecast_(params) {
+  params = params || {};
+  const viewMode = params.viewMode || 'Committed';
+  const workerScope = params.workerScope || 'SLG';
+  const includePto = params.includeTimeOff !== false; // default TRUE per spec §3
+
+  const teamLabelFilter = params.teamLabel ? String(params.teamLabel).trim() : '';
+
+  const roleTeamLabels = readRoleTeamLabels_();
+  const rtTeamMap = _readResourceTypeTeamMap_();
+  const settings = readSettings_();
+  const hideAllExternal = String(settings['hide_all_external'] || '').trim().toLowerCase() === 'true';
+  const weeklyTargets = readWeeklyTargets_(settings);
+
+  const mgrRows = readConfigSlgManagers_();
+  const managerDescendants = buildManagerDescendants_(mgrRows);
+  const managersByName = {};
+  mgrRows.forEach(function (r) { managersByName[r.manager_name] = r; });
+
+  const selectedManager = (params.teams && params.teams.length) ? params.teams[0] : null;
+  const effectiveManagers = teamLabelFilter
+    ? null
+    : buildEffectiveManagers_(
+        selectedManager,
+        !!params.includeMyManagers,
+        managersByName,
+        managerDescendants
+      );
+
+  const allocRaw = (typeof getEnrichedAllocations_ === 'function')
+    ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+  const assignsRaw = (typeof getEnrichedAssignments_ === 'function')
+    ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  const excluded = readExclusions_();
+  const resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : _resourceIndex_(allocRaw);
+
+  function inScope(workerName) {
+    const info = resIndex[workerName] || {};
+    const cls = String(info.worker_class || '');
+    if (hideAllExternal && cls.startsWith('External_')) return false;
+    return _workerClassInScope_(cls, workerScope);
+  }
+
+  const alloc = allocRaw.filter(a => {
+    if (!a.resource_name) return false;
+    if (excluded.has(a.resource_name)) return false;
+    return inScope(a.resource_name);
+  });
+  const assigns = assignsRaw.filter(a => {
+    if (!a.resource_name) return false;
+    if (excluded.has(a.resource_name)) return false;
+    return inScope(a.resource_name);
+  });
+
+  const icp = readIcp_();
+  const calendar = readCalendar_();
+
+  const _resolverCtx_ = (typeof resolveTeamLabel_ === 'function')
+    ? resolveTeamLabel_.buildCtx_(roleTeamLabels, rtTeamMap)
+    : null;
+
+  const managersManagerByName = {};
+  mgrRows.forEach(function (r) { managersManagerByName[r.manager_name] = r.parent_manager || ''; });
+
+  const workers = {};
+
+  function ensureWorker(resourceName) {
+    if (!workers[resourceName]) {
+      const info = resIndex[resourceName] || {};
+      const teamLabel = _resolverCtx_
+        ? resolveTeamLabel_({
+            worker_class:  info.worker_class  || '',
+            icp_role:      info.icp           || '',
+            role_category: info.role_category || '',
+            job_profile:   info.job_profile   || '',
+            project_role:  info.project_role  || '',
+            resource_type: info.resource_type || ''
+          }, _resolverCtx_)
+        : 'Unclassified';
+      const managerOrgNorm = normalizeManagerName_(info.manager_org || '');
+      workers[resourceName] = {
+        resource: resourceName,
+        jobProfile: info.job_profile || '',
+        level: deriveLevel_(info.job_profile || ''),
+        managerOrg: info.manager_org || '',
+        managersManager: managersManagerByName[managerOrgNorm] || '',
+        icpRole: info.icp || '',
+        teamLabel: teamLabel,
+        workerClass: info.worker_class || '',
+        weeklyTarget: weeklyTargetFor_(info.job_profile || '', weeklyTargets),
+        workerWeekly: {},  // weekKey -> hours
+        projects: {}       // project -> { weekKey -> hours }
+      };
+    }
+    return workers[resourceName];
+  }
+
+  function addHours(resourceName, weekKey, project, hours) {
+    if (!hours) return;
+    const w = ensureWorker(resourceName);
+    w.workerWeekly[weekKey] = (w.workerWeekly[weekKey] || 0) + hours;
+    const proj = project || 'Unassigned';
+    if (!w.projects[proj]) w.projects[proj] = {};
+    w.projects[proj][weekKey] = (w.projects[proj][weekKey] || 0) + hours;
+  }
+
+  // 1) PSA allocations -- native weekly grain, no rollup needed.
+  alloc.forEach(a => {
+    if (!a.resource_name || !a.week_key) return;
+    if (a.allocation_type === 'PTO_Holiday' && !includePto) return;
+    const h = Number(a.hours) || 0;
+    if (!h) return;
+    addHours(a.resource_name, a.week_key, a.project_name, h);
+  });
+
+  // 2) Assignments -- weekly expansion aligned to the real calendar grid.
+  if (viewMode !== 'Actual') {
+    assigns.forEach(a => {
+      if (!a.resource_name) return;
+      const isCommitted = (a.status === 'Committed');
+      const isScenario = (a.status === 'Modeled');
+      const include = isCommitted ||
+        (viewMode === 'Scenario' && isScenario &&
+         (!params.scenarioId || a.scenario_id === params.scenarioId));
+      if (!include) return;
+      const label = 'Assignment' + (a.opportunity_id ? (' — ' + a.opportunity_id) : '');
+      expandAssignmentToWeekly_(a, calendar).forEach(w => {
+        addHours(a.resource_name, w.week_key, label, w.hours);
+      });
+    });
+  }
+
+  // 2.5) Capacity adjustments (signed: positive = reduce, so we subtract).
+  if (viewMode !== 'Actual') {
+    let adjRows = [];
+    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
+    adjRows.forEach(adj => {
+      if (!adj.resource_name) return;
+      if (excluded.has(adj.resource_name)) return;
+      const isCommitted = (adj.status === 'Committed');
+      const isModeled   = (adj.status === 'Modeled');
+      const include = isCommitted ||
+        (viewMode === 'Scenario' && isModeled &&
+         (!params.scenarioId || adj.scenario_id === params.scenarioId));
+      if (!include) return;
+      expandAdjustmentToWeekly_(adj, calendar).forEach(w => {
+        addHours(adj.resource_name, w.week_key, 'Capacity Adjustment', -w.hours_reduction);
+      });
+    });
+  }
+
+  // 3) Apply manager + Team filters (same semantics as computeUtilization).
+  const filteredWorkers = Object.values(workers).filter(w => {
+    if (effectiveManagers) {
+      const mgrNorm = normalizeManagerName_(w.managerOrg || '');
+      if (!effectiveManagers[mgrNorm]) return false;
+    }
+    if (teamLabelFilter) {
+      const t = w.teamLabel || 'Unclassified';
+      if (t !== teamLabelFilter) return false;
+    }
+    return true;
+  });
+
+  // Default sort: Worker ascending.
+  filteredWorkers.sort((a, b) => String(a.resource).localeCompare(String(b.resource)));
+
+  return {
+    weeks: calendar.weeks,
+    workers: filteredWorkers,
+    icp: icp
+  };
+}
+
 function computeResourceDetail(params) {
   params = params || {};
   const resource = params.resource;
@@ -1000,6 +1309,8 @@ function computeResourceDetail(params) {
   const alloc = cachedRead_(ALLOC_NORM).filter(a => a.resource_name === resource);
   const assigns = cachedRead_(ASSIGNMENTS).filter(a => a.resource_name === resource);
   const calendar = readCalendar_();
+  const settings = readSettings_();
+  const splitBasis = String(settings.week_month_split_basis || 'calendar');
   const months = {};
 
   function ensureMonth_(k) {
@@ -1010,14 +1321,23 @@ function computeResourceDetail(params) {
     };
   }
 
+  // weekly-forecast-migration: alloc rows are weekly (week_start/hours);
+  // roll each week's hours up to the calendar month(s) it overlaps via
+  // splitWeekAcrossMonths_ so this Explorer chart's monthly shape is
+  // unchanged (out of scope for redesign) while being fed by real weekly
+  // source data.
   alloc.forEach(a => {
-    const k = monthKey_(a.period_start);
-    ensureMonth_(k);
+    if (!a.week_start) return;
     const h = Number(a.hours) || 0;
-    if (a.allocation_type === 'Billable') months[k].billable += h;
-    else if (a.allocation_type === 'Internal') months[k].internal += h;
-    else if (a.allocation_type === 'Education') months[k].education += h;
-    else if (a.allocation_type === 'PTO_Holiday') months[k].pto += h;
+    if (!h) return;
+    splitWeekAcrossMonths_(a.week_start, h, splitBasis).forEach(sp => {
+      const k = sp.monthKey;
+      ensureMonth_(k);
+      if (a.allocation_type === 'Billable') months[k].billable += sp.hours;
+      else if (a.allocation_type === 'Internal') months[k].internal += sp.hours;
+      else if (a.allocation_type === 'Education') months[k].education += sp.hours;
+      else if (a.allocation_type === 'PTO_Holiday') months[k].pto += sp.hours;
+    });
   });
 
   if (viewMode !== 'Actual') {
@@ -1028,14 +1348,16 @@ function computeResourceDetail(params) {
         (viewMode === 'Scenario' && isScenario &&
          (!params.scenarioId || a.scenario_id === params.scenarioId));
       if (!include) return;
-      expandAssignmentToMonthly_(a, calendar).forEach(m => {
-        const k = monthKey_(m.period_start);
-        ensureMonth_(k);
-        if (isCommitted) {
-          months[k].billable += m.hours;
-        } else if (isScenario) {
-          months[k].scenario += m.hours;
-        }
+      expandAssignmentToWeekly_(a, calendar).forEach(w => {
+        splitWeekAcrossMonths_(w.week_start, w.hours, splitBasis).forEach(sp => {
+          const k = sp.monthKey;
+          ensureMonth_(k);
+          if (isCommitted) {
+            months[k].billable += sp.hours;
+          } else if (isScenario) {
+            months[k].scenario += sp.hours;
+          }
+        });
       });
     });
   }
@@ -1047,16 +1369,18 @@ function computeResourceDetail(params) {
   try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET).filter(a => a.resource_name === resource); } catch (e) { adjRows = []; }
   adjRows.forEach(adj => {
     const status = String(adj.status || 'Modeled');
-    expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
-      const k = monthKey_(m.period_start);
-      ensureMonth_(k);
-      const hrs = Number(m.hours_reduction) || 0;
-      months[k].reduction += hrs;
-      if (status === 'Committed') {
-        months[k].reductionByStatus.committed += hrs;
-      } else {
-        months[k].reductionByStatus.modeled += hrs;
-      }
+    expandAdjustmentToWeekly_(adj, calendar).forEach(w => {
+      splitWeekAcrossMonths_(w.week_start, w.hours_reduction, splitBasis).forEach(sp => {
+        const k = sp.monthKey;
+        ensureMonth_(k);
+        const hrs = sp.hours;
+        months[k].reduction += hrs;
+        if (status === 'Committed') {
+          months[k].reductionByStatus.committed += hrs;
+        } else {
+          months[k].reductionByStatus.modeled += hrs;
+        }
+      });
     });
   });
 
@@ -1099,13 +1423,17 @@ function computeResourceDetail(params) {
   }
 
   alloc.forEach(a => {
-    const k = monthKey_(a.period_start);
-    _ensureSm_(k);
+    if (!a.week_start) return;
     const h = Number(a.hours) || 0;
-    if (a.allocation_type === 'Billable')     _sm[k].psaBillable  += h;
-    else if (a.allocation_type === 'Internal')  _sm[k].psaInternal  += h;
-    else if (a.allocation_type === 'Education') _sm[k].psaEducation += h;
-    else if (a.allocation_type === 'PTO_Holiday') _sm[k].psaPto    += h;
+    if (!h) return;
+    splitWeekAcrossMonths_(a.week_start, h, splitBasis).forEach(sp => {
+      const k = sp.monthKey;
+      _ensureSm_(k);
+      if (a.allocation_type === 'Billable')     _sm[k].psaBillable  += sp.hours;
+      else if (a.allocation_type === 'Internal')  _sm[k].psaInternal  += sp.hours;
+      else if (a.allocation_type === 'Education') _sm[k].psaEducation += sp.hours;
+      else if (a.allocation_type === 'PTO_Holiday') _sm[k].psaPto    += sp.hours;
+    });
   });
 
   // Include ALL assignments (Committed + Modeled) regardless of viewMode.
@@ -1113,22 +1441,26 @@ function computeResourceDetail(params) {
   // accumulate — worst-case semantics for the "see everything" summary.
   assigns.forEach(a => {
     if (a.status !== 'Committed' && a.status !== 'Modeled') return;
-    expandAssignmentToMonthly_(a, calendar).forEach(m => {
-      const k = monthKey_(m.period_start);
-      _ensureSm_(k);
-      if (a.status === 'Committed') _sm[k].committedAssign += m.hours;
-      else _sm[k].modeledAssign += m.hours;
+    expandAssignmentToWeekly_(a, calendar).forEach(w => {
+      splitWeekAcrossMonths_(w.week_start, w.hours, splitBasis).forEach(sp => {
+        const k = sp.monthKey;
+        _ensureSm_(k);
+        if (a.status === 'Committed') _sm[k].committedAssign += sp.hours;
+        else _sm[k].modeledAssign += sp.hours;
+      });
     });
   });
 
   adjRows.forEach(adj => {
     const status = String(adj.status || 'Modeled');
-    expandAdjustmentToMonthly_(adj, calendar).forEach(m => {
-      const k = monthKey_(m.period_start);
-      _ensureSm_(k);
-      const hrs = Number(m.hours_reduction) || 0;
-      if (status === 'Committed') _sm[k].committedReduction += hrs;
-      else _sm[k].modeledReduction += hrs;
+    expandAdjustmentToWeekly_(adj, calendar).forEach(w => {
+      splitWeekAcrossMonths_(w.week_start, w.hours_reduction, splitBasis).forEach(sp => {
+        const k = sp.monthKey;
+        _ensureSm_(k);
+        const hrs = sp.hours;
+        if (status === 'Committed') _sm[k].committedReduction += hrs;
+        else _sm[k].modeledReduction += hrs;
+      });
     });
   });
 

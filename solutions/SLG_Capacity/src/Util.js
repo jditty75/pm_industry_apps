@@ -20,6 +20,18 @@ function monthKey_(d) {
   return Utilities.formatString('%04d-%02d', x.getFullYear(), x.getMonth() + 1);
 }
 
+/**
+ * Inverse of monthKey_: parse a 'YYYY-MM' string back to the 1st of that
+ * month. Used when rolling weekly data up to monthly buckets via
+ * splitWeekAcrossMonths_ (weekly-forecast-migration).
+ * @param {string} mk
+ * @return {Date}
+ */
+function monthKeyToDate_(mk) {
+  const parts = String(mk).split('-');
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
+}
+
 function monthsBetween_(start, end) {
   const out = [];
   let cur = firstOfMonth_(start);
@@ -31,28 +43,147 @@ function monthsBetween_(start, end) {
   return out;
 }
 
-function quarterKey_(d) {
+// ============================================================
+// Week + fiscal helpers (weekly-forecast-migration)
+//
+// Calendar-quarter logic (quarterKey_ / quarterMonths_) has been removed
+// per the weekly-forecast-migration spec (LOCKED: Workday fiscal quarters
+// everywhere, Feb-anchored). Use fiscalQuarter_ / fiscalYear_ /
+// fiscalQuarterKey_ below instead. Do not reintroduce calendar-quarter
+// (Math.floor(month/3)) logic anywhere in this codebase.
+// ============================================================
+
+/**
+ * Normalize a date to its week's canonical start. The export column date
+ * is used AS-IS (sample exports start weeks on Saturday) -- this does NOT
+ * snap to the ISO Monday week start. Only strips the time-of-day component.
+ * @param {Date|string|number} d
+ * @return {Date} midnight local time on the same calendar day as d
+ */
+function weekStart_(d) {
   const x = new Date(d);
-  return x.getFullYear() + '-Q' + (Math.floor(x.getMonth() / 3) + 1);
+  return new Date(x.getFullYear(), x.getMonth(), x.getDate());
 }
 
-function quarterMonths_(quarterKey) {
-  const m = String(quarterKey).match(/^(\d{4})-Q([1-4])$/);
-  if (!m) return [];
-  const year = +m[1], q = +m[2];
-  const startMonth = (q - 1) * 3;
-  return [0,1,2].map(i => new Date(year, startMonth + i, 1));
+/**
+ * Canonical week id: 'YYYY-MM-DD' of weekStart_(d). Sortable, unambiguous,
+ * identical server- and client-side. LOCKED format -- see Constants.gs.
+ * Always a string -- see writeTable_'s week_key plain-text guard (WFM.13):
+ * without it, Sheets silently auto-converts an ISO-date-shaped string back
+ * into a real Date serial on write, so a later String(dateCell) read
+ * produces a locale toString ('Sat Jul 04 2026 00:00:00 GMT-0400...')
+ * instead of this canonical form. That auto-conversion, not this function,
+ * was WFM.13's defect #1.
+ * @param {Date|string|number} d
+ * @return {string}
+ */
+function weekKey_(d) {
+  const x = weekStart_(d);
+  if (!(x instanceof Date) || isNaN(x.getTime())) return '';
+  return Utilities.formatDate(x, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
-function workdaysInMonth_(year, monthIdx /*0-11*/) {
-  const first = new Date(year, monthIdx, 1);
-  const last  = new Date(year, monthIdx + 1, 0);
-  let count = 0;
-  for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
-    const wd = d.getDay();
-    if (wd !== 0 && wd !== 6) count++;
+/**
+ * Enumerate 7-day-step week starts from weekStart_(start) through
+ * weekStart_(end) inclusive, anchored on start's own day-of-week (NOT
+ * snapped to Monday -- matches weekStart_'s as-is semantics).
+ *
+ * NOTE: callers that must align to the REAL PSA week grid (e.g. Engine.gs
+ * assignment/adjustment expansion, which needs calendar[weekKey] lookups
+ * to hit) should prefer filtering the actual Config_Calendar rows that
+ * fall within [start, end] over this naive stepper, since an arbitrary
+ * start date will not in general land on the same weekday as the
+ * ingested PSA week columns.
+ *
+ * @param {Date|string|number} start
+ * @param {Date|string|number} end
+ * @return {Date[]}
+ */
+function weeksBetween_(start, end) {
+  const out = [];
+  let cur = weekStart_(start);
+  const last = weekStart_(end);
+  while (cur <= last) {
+    out.push(new Date(cur));
+    cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 7);
   }
-  return count;
+  return out;
+}
+
+/**
+ * Workday fiscal year number for a date (February-anchored). Months
+ * Feb-Dec roll into the FOLLOWING calendar year's fiscal year; January
+ * belongs to the fiscal year that started the previous February.
+ * E.g. Jul 2026 -> 2027 ("FY27"); Jan 2027 -> 2027 ("FY27").
+ * @param {Date|string|number} d
+ * @return {number} full 4-digit fiscal year
+ */
+function fiscalYear_(d) {
+  const x = new Date(d);
+  const y = x.getFullYear();
+  const m = x.getMonth() + 1; // 1-indexed
+  return (m >= FISCAL_YEAR_START_MONTH) ? y + 1 : y;
+}
+
+/**
+ * Workday fiscal quarter ('Q1'..'Q4') for a date, per
+ * FISCAL_QUARTER_BY_CALENDAR_MONTH (Constants.gs): Feb-Apr=Q1,
+ * May-Jul=Q2, Aug-Oct=Q3, Nov-Jan=Q4.
+ * @param {Date|string|number} d
+ * @return {string}
+ */
+function fiscalQuarter_(d) {
+  const x = new Date(d);
+  return FISCAL_QUARTER_BY_CALENDAR_MONTH[x.getMonth() + 1];
+}
+
+/**
+ * Combined fiscal-quarter label, e.g. 'FY27-Q2'. LOCKED format -- server
+ * and client must produce byte-identical labels for the same date.
+ * @param {Date|string|number} d
+ * @return {string}
+ */
+function fiscalQuarterKey_(d) {
+  const fy = fiscalYear_(d);
+  const q = fiscalQuarter_(d);
+  return 'FY' + String(fy % 100).padStart(2, '0') + '-' + q;
+}
+
+/**
+ * Split a week's hours across the calendar month(s) it overlaps,
+ * proportional to day count. Sum of returned hours always equals the
+ * input hours exactly -- no rounding here (round only at display time).
+ *
+ * @param {Date|string|number} weekStart the week's start date (as-is, not Monday-snapped)
+ * @param {number} hours total hours for the week
+ * @param {string} [basis] 'calendar' (all 7 days, default) | 'weekday' (Mon-Fri only)
+ * @return {Array<{monthKey:string, hours:number}>}
+ */
+function splitWeekAcrossMonths_(weekStart, hours, basis) {
+  basis = basis || 'calendar';
+  const start = weekStart_(weekStart);
+  const dayKeys = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const dow = d.getDay();
+    const isWeekday = dow !== 0 && dow !== 6;
+    if (basis === 'weekday' && !isWeekday) continue;
+    dayKeys.push(monthKey_(d));
+  }
+  const totalDays = dayKeys.length;
+  if (totalDays === 0) return [];
+
+  const order = [];
+  const counts = {};
+  dayKeys.forEach(mk => {
+    if (!counts[mk]) { counts[mk] = 0; order.push(mk); }
+    counts[mk]++;
+  });
+
+  return order.map(mk => ({
+    monthKey: mk,
+    hours: hours * (counts[mk] / totalDays)
+  }));
 }
 
 // ============================================================
@@ -85,6 +216,16 @@ function writeTable_(name, headers, rows) {
   const lastCol = Math.max(sh.getLastColumn(), headers.length);
   if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, lastCol).clearContent();
   if (rows && rows.length) {
+    // WFM.13: force any week_key column to Plain Text BEFORE setValues().
+    // Sheets auto-detects ISO-date-shaped strings ('2026-07-04') and
+    // silently rewrites them as real Date serials on write unless the
+    // cell's number format is already '@' -- the actual source of the
+    // week_key locale-string corruption (weekKey_ itself already returned
+    // a canonical string; the sheet reinterpreted it on write).
+    const wkCol = headers.indexOf('week_key');
+    if (wkCol !== -1) {
+      sh.getRange(2, wkCol + 1, rows.length, 1).setNumberFormat('@');
+    }
     sh.getRange(2, 1, rows.length, headers.length).setValues(rows);
   }
   invalidateCache_(name);
@@ -110,7 +251,72 @@ function appendRow_(name, rowObj, headers) {
   const sh = getOrCreateSheet_(name, headers);
   const row = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
   sh.appendRow(row);
+  // WFM.13: same week_key plain-text guard as writeTable_ (see there for
+  // why) -- no current appendRow_ caller writes week_key, but this keeps
+  // the guarantee in force for any future one.
+  const wkCol = headers.indexOf('week_key');
+  if (wkCol !== -1) {
+    sh.getRange(sh.getLastRow(), wkCol + 1, 1, 1).setNumberFormat('@');
+  }
   invalidateCache_(name);
+}
+
+/**
+ * Ensure every date in weekStarts has a matching row in Config_Calendar,
+ * appending any that are missing (workdays_in_week=5, holiday_hours=0
+ * defaults; fiscal_year/fiscal_quarter computed).
+ *
+ * WFM.13: this is now the SOLE populator of Config_Calendar -- Bootstrap.gs
+ * no longer pre-seeds a speculative week grid (that Monday-anchored,
+ * multi-year generator was WFM.13's defect #2: it didn't match the export's
+ * actual Saturday anchor, and the upload's real weeks piled up alongside it
+ * instead of replacing it, producing a duplicate/interleaved week set).
+ * The anchor here is whatever the export's week columns actually use --
+ * never hardcoded -- so Config_Calendar can only ever contain real weeks.
+ *
+ * Every existing row's key is unconditionally RECOMPUTED from week_start
+ * (never trusted from the stored week_key cell): a corrupted week_key cell
+ * would otherwise both (a) fail to match a freshly computed canonical key,
+ * causing this function to treat an existing week as "new" and re-add it
+ * -- the mechanism behind defect #2's duplicate columns -- and (b) get
+ * written back out as the same corrupted value. Recomputing here makes
+ * this function self-healing for any legacy rows.
+ *
+ * @param {Date[]} weekStarts
+ * @return {number} count of newly-appended calendar weeks
+ */
+function ensureCalendarWeeks_(weekStarts) {
+  const existing = readTable_(CFG_CAL) || [];
+  const byKey = {};
+  const rows = existing.map(r => {
+    const ws  = r.week_start ? new Date(r.week_start) : null;
+    const key = ws ? weekKey_(ws) : '';
+    if (key) byKey[key] = true;
+    return [
+      ws,
+      key,
+      Number(r.fiscal_year) || (ws ? fiscalYear_(ws) : ''),
+      r.fiscal_quarter || (ws ? fiscalQuarter_(ws) : ''),
+      Number(r.workdays_in_week) || 5,
+      Number(r.holiday_hours) || 0
+    ];
+  });
+
+  let added = 0;
+  (weekStarts || []).forEach(d => {
+    if (!d) return;
+    const ws  = weekStart_(d);
+    const key = weekKey_(ws);
+    if (byKey[key]) return;
+    byKey[key] = true;
+    rows.push([ws, key, fiscalYear_(ws), fiscalQuarter_(ws), 5, 0]);
+    added++;
+  });
+
+  if (!added) return 0;
+  rows.sort((a, b) => a[0] - b[0]);
+  writeTable_(CFG_CAL, CAL_HEADERS, rows);
+  return added;
 }
 
 function updateRow_(name, idField, idValue, patch, headers) {
@@ -133,14 +339,25 @@ function updateRow_(name, idField, idValue, patch, headers) {
   return false;
 }
 
-function logRefresh_(source, rowsIn, rowsOut, monthsDetected) {
+/**
+ * Log one ingest run to Normalization_Log.
+ * @param {string} source 'staff' | 'opps'
+ * @param {number} rowsIn
+ * @param {number} rowsOut
+ * @param {number} weeksDetected count of weekly columns detected (was
+ *   months_detected pre-weekly-forecast-migration; see REFRESH_HEADERS)
+ * @param {string} [warnings] pipe-joined contiguity/duplicate warnings from
+ *   detectWeekColumns_, for Admin surfacing (Normalization_Log.warnings)
+ */
+function logRefresh_(source, rowsIn, rowsOut, weeksDetected, warnings) {
   appendRow_(REFRESH_LOG, {
     timestamp: now_(),
     source: source,
     rows_in: rowsIn,
     rows_out: rowsOut,
-    months_detected: monthsDetected,
-    user: getUserEmail_()
+    weeks_detected: weeksDetected,
+    user: getUserEmail_(),
+    warnings: warnings || ''
   }, REFRESH_HEADERS);
 }
 

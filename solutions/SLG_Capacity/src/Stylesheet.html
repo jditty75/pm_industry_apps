@@ -175,12 +175,22 @@ code {
 
 /* ============================================================
    Main
+   ------------------------------------------------------------
+   Desktop-first (weekly-forecast-migration §11): capped
+   full-bleed width -- fills the viewport (minus the sidebar) up
+   to 1920px, then centers with auto margins on wider monitors.
+   min-width holds the usable floor at ~1280px; below that the
+   app scrolls horizontally rather than reflowing (mobile /
+   responsive-below-1100px support is explicitly out of scope).
    ============================================================ */
 .main {
   flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 1920px;
+  min-width: 1280px;
+  margin: 0 auto;
 }
 
 /* ------------------------------------------------------------
@@ -216,8 +226,6 @@ code {
   align-items: center;
   flex-shrink: 0;
 }
-.hamburger { display: none; }
-
 /* "Filters" button with active count badge */
 .btn-filters {
   position: relative;
@@ -652,58 +660,102 @@ textarea.input {
 }
 
 /* ============================================================
-   Heatmap
+   Weekly Forecast Table (weekly-forecast-migration §9/§11)
+   ------------------------------------------------------------
+   Replaces the removed Utilization Heatmap grid. Bounded-height
+   scroll box (like .table-wrap/.heatmap-scroll before it) so both
+   axes scroll internally; sticky Worker/Level/Manager(/Manager's
+   Manager) identity columns stay pinned on horizontal scroll, and
+   .data-table's existing `th { position: sticky; top: 0 }` keeps
+   the header row pinned on vertical scroll -- combined, header
+   cells that are ALSO sticky columns (the identity <th>s) stick to
+   both edges, forming a frozen top-left corner. Per-cell
+   utilization-vs-ICP background/color is set inline via
+   cellColor() in JavaScript.html, reusing the same heat tokens as
+   the legend below (unchanged from the old heatmap).
    ============================================================ */
-.heatmap-scroll {
+.weekly-forecast-tools {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--laptop);
+}
+.check-row input[type="checkbox"] { margin: 0; }
+
+.weekly-forecast-scroll {
   overflow: auto;
-  max-height: 480px;
+  max-height: 640px;
   border: 1px solid var(--business-card);
   border-radius: 8px;
 }
-.heatmap {
-  display: grid;
-  min-width: 100%;
+.weekly-forecast-table { min-width: 100%; }
+.weekly-forecast-table th,
+.weekly-forecast-table td {
+  white-space: nowrap;
+}
+
+/* Sticky identity columns -- left offsets are cumulative fixed
+   column widths (Worker 220 / Level 60 / Manager 160 / Manager's
+   Manager 160). Header <th> cells need a higher z-index than body
+   <td> cells so the frozen corner renders correctly on top. */
+.wf-col-sticky {
+  position: sticky;
   background: #fff;
 }
-.heatmap-row { display: contents; }
-.heatmap-cell, .heatmap-head, .heatmap-label {
-  padding: 8px 10px;
-  font-size: 12px;
-  border-right: 1px solid var(--business-card);
-  border-bottom: 1px solid var(--business-card);
-  white-space: nowrap;
+.weekly-forecast-table th.wf-col-sticky {
+  background: var(--keyboard);
+  z-index: 3;
+}
+.weekly-forecast-table td.wf-col-sticky { z-index: 2; }
+.wf-col-worker  { left: 0;     min-width: 220px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.wf-col-level   { left: 220px; min-width: 60px;  max-width: 60px;  text-align: center; }
+.wf-col-manager { left: 280px; min-width: 160px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--desk); }
+.wf-col-mgrmgr  { left: 440px; min-width: 160px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--desk); }
+.wf-col-mgrmgr[hidden] { display: none; }
+
+.wf-col-week {
+  min-width: 68px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.wf-cell { cursor: help; font-weight: 500; }
+.wf-cell-project { color: var(--staple); font-weight: 400; }
+
+.wf-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: var(--after-hours);
+  font-weight: 500;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.heatmap-head {
-  background: var(--keyboard);
-  color: var(--after-hours);
-  font-weight: 600;
-  text-align: center;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-.heatmap-label {
-  background: #fff;
-  color: var(--after-hours);
-  font-weight: 500;
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  border-right: 1px solid var(--desk);
-}
-.heatmap-cell {
-  text-align: center;
-  color: var(--after-hours);
-  font-variant-numeric: tabular-nums;
-  cursor: default;
-}
-.heatmap-cell.empty {
-  background: var(--business-card);
+.wf-expand-toggle:hover { color: var(--ballpoint); }
+.wf-expand-chev {
+  display: inline-block;
+  width: 12px;
+  flex-shrink: 0;
   color: var(--staple);
+  font-size: 11px;
 }
-.heatmap-cell[title] { cursor: help; }
+.wf-row-project td.wf-col-sticky { background: var(--paper); }
+.wf-project-name {
+  color: var(--laptop);
+  font-size: 12px;
+}
 .legend {
   display: flex;
   gap: 14px;
@@ -1215,31 +1267,6 @@ textarea.input {
   .grid-explorer { grid-template-columns: 1fr; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
 }
-@media (max-width: 900px) {
-  .drill-grid { grid-template-columns: 1fr; }
-  .drill-pane + .drill-pane {
-    border-left: 0;
-    border-top: 1px solid var(--business-card);
-    margin-top: 8px;
-    padding-top: 8px;
-  }
-}
-@media (max-width: 768px) {
-  .sidebar {
-    position: fixed;
-    left: -100%;
-    transition: left .2s;
-    z-index: 50;
-  }
-  .sidebar.open { left: 0; }
-  .hamburger { display: inline-flex; }
-  .topbar-row { flex-wrap: wrap; gap: 10px; }
-  .topbar-pinned { flex-wrap: wrap; }
-  .kpi-row { grid-template-columns: 1fr; }
-  .drawer-panel { width: 100%; }
-  .filters-drawer .drawer-panel { width: 100%; }
-}
-
 /* ============================================================
    Reporting & Metrics view  (Drop 3 additions)
    ------------------------------------------------------------
@@ -1266,17 +1293,6 @@ textarea.input {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-@media (max-width: 900px) {
-  .kpi-row.kpi-row-6 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (max-width: 568px) {
-  .kpi-row.kpi-row-6 {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Worker-class-tinted KPI cards (left border accent in class color) */
 .kpi-card.kpi-class-slg     { box-shadow: var(--shadow-sm), inset 4px 0 0 var(--wc-slg); }
 .kpi-card.kpi-class-nonslg  { box-shadow: var(--shadow-sm), inset 4px 0 0 var(--wc-nonslg); }
@@ -1367,9 +1383,6 @@ textarea.input {
   grid-template-columns: 200px 1fr;
   gap: var(--space-4);
   align-items: center;
-}
-@media (max-width: 768px) {
-  .composition-body { grid-template-columns: 1fr; }
 }
 .composition-chart {
   position: relative;
@@ -1485,9 +1498,6 @@ textarea.input {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-4);
-}
-@media (max-width: 900px) {
-  .grid-top5 { grid-template-columns: 1fr; }
 }
 .top5-pane {
   display: flex;
@@ -1753,10 +1763,6 @@ td.cell-with-bar {
   flex-direction: column;
   gap: var(--space-4);
 }
-@media (max-width: 768px) {
-  .admin-tab { flex: 1 1 auto; justify-content: center; }
-}
-
 /* ============================================================
    Override Hygiene tiles (Drop 4)
    ============================================================ */
@@ -1765,12 +1771,6 @@ td.cell-with-bar {
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   padding: 16px 20px;
-}
-@media (max-width: 900px) {
-  .hygiene-tiles { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 568px) {
-  .hygiene-tiles { grid-template-columns: 1fr; }
 }
 .hygiene-tile {
   background: var(--paper);
@@ -1924,9 +1924,6 @@ td.cell-with-bar {
   gap: var(--space-4);
   padding: 8px 0 12px;
   border-bottom: 1px solid var(--business-card);
-}
-@media (max-width: 768px) {
-  .util-headline-row { grid-template-columns: 1fr; }
 }
 .util-headline-cell { display: flex; flex-direction: column; gap: 2px; }
 .util-headline-label {

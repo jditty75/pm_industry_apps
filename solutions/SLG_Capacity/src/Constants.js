@@ -19,6 +19,18 @@ const CFG_TEAMS         = 'Config_Teams';
 const CFG_INGEST        = 'Config_Ingest_Filters';     // ingest filters config
 const CFG_SLG_MGRS = 'Config_SLG_Managers';     // SLG manager list (+ hierarchy)
 const CFG_SETTINGS = 'Config_Settings';         // key/value settings
+// New keys added by weekly-forecast-migration (seeded by bootstrap() if
+// missing; read via readSettings_() in Engine.gs like all other settings):
+//   weekly_target_default   -- default weekly capacity target hours (32.8)
+//   weekly_target_P6        -- weekly capacity target hours for P6-level
+//                               workers, i.e. Level === 'P6' (26.0)
+//   week_month_split_basis  -- 'calendar' | 'weekday'; basis for the
+//                               proportional week-to-month hours split
+//                               (default 'calendar')
+//   fiscal_year_start_month -- 1-indexed calendar month the fiscal year
+//                               starts in (2 = February; keep in sync with
+//                               FISCAL_YEAR_START_MONTH above)
+// Existing keys (planning_window_months, etc.) are unchanged.
 const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
 const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership
 const CFG_WORKER_ROLE_OVERRIDES = 'Config_Worker_Role_Overrides'; // per-worker ICP role override (applied at ingest time)
@@ -32,6 +44,12 @@ const SF_PIPELINE_REFRESH_LOG = 'Auto Refresh Execution Log 1';
 
 // --- Table headers ---
 
+// Weekly grain (weekly-forecast-migration). Replaces the old monthly
+// 'period_start' field with 'week_start' (Date, export column date as-is,
+// NOT snapped to Monday) + 'week_key' (canonical 'YYYY-MM-DD' string id
+// of week_start -- see weekKey_ in Util.gs). Clean cutover: no monthly
+// back-compat; Allocations_Normalized is wiped and re-ingested at weekly
+// grain.
 const ALLOC_HEADERS = [
   'resource_name',
   'team',
@@ -47,8 +65,9 @@ const ALLOC_HEADERS = [
   'allocation_type',
   'engagement_manager',
   'manager',
-  'period_start',
-  'hours',
+  'week_start',             // Date -- the week's column date, as-is from export
+  'week_key',               // string -- 'YYYY-MM-DD' of week_start; canonical, sortable
+  'hours',                  // number -- forecast hours for that week
   'source_row'
 ];
 
@@ -91,11 +110,44 @@ const SCENARIO_HEADERS = [
 
 const ICP_HEADERS    = ['role','target_utilization','red_threshold'];
 const ROLE_HEADERS   = ['role','monthly_capacity_hours'];
-const CAL_HEADERS    = ['period_start','year','month','quarter','workdays'];
+
+// Weekly grain (weekly-forecast-migration). Config_Calendar now carries one
+// row per week. Monthly/fiscal-quarter capacity is derived on demand via
+// splitWeekAcrossMonths_ / fiscalQuarter_ (Util.gs) -- there is no separate
+// monthly calendar table.
+const CAL_HEADERS = [
+  'week_start',        // Date -- matches Allocations_Normalized.week_start
+  'week_key',          // string -- same canonical 'YYYY-MM-DD' week id
+  'fiscal_year',       // number
+  'fiscal_quarter',    // 'Q1'..'Q4' per FISCAL_QUARTER_BY_CALENDAR_MONTH below
+  'workdays_in_week',  // number (default 5)
+  'holiday_hours'      // number (default 0) -- for capacity netting if needed
+];
+
 const ALIAS_HEADERS  = ['logical','actual','notes'];
 const REFRESH_HEADERS = [
-  'timestamp','source','rows_in','rows_out','months_detected','user'
+  'timestamp','source','rows_in','rows_out','weeks_detected','user','warnings'
 ];
+
+// ------------------------------------------------------------
+// Fiscal calendar (Workday fiscal year, February-anchored).
+// LOCKED per weekly-forecast-migration spec -- do not reimplement this
+// mapping elsewhere; always go through fiscalQuarter_/fiscalYear_/
+// fiscalQuarterKey_ in Util.gs.
+//   Q1 = Feb, Mar, Apr
+//   Q2 = May, Jun, Jul
+//   Q3 = Aug, Sep, Oct
+//   Q4 = Nov, Dec, Jan   (January belongs to the PRIOR fiscal year's Q4)
+// fiscalQuarterKey_ label format: 'FY<yy>-Q<n>', e.g. 'FY27-Q2'.
+// ------------------------------------------------------------
+const FISCAL_YEAR_START_MONTH = 2; // 1-indexed calendar month (February)
+const FISCAL_QUARTER_BY_CALENDAR_MONTH = {
+  1:  'Q4', // January -> prior fiscal year's Q4
+  2:  'Q1', 3:  'Q1', 4:  'Q1',
+  5:  'Q2', 6:  'Q2', 7:  'Q2',
+  8:  'Q3', 9:  'Q3', 10: 'Q3',
+  11: 'Q4', 12: 'Q4'
+};
 
 const TEAM_HEADERS = [
   'project_role_pattern',
@@ -164,7 +216,13 @@ const DEFAULT_ALIASES = [
 ];
 
 const ALLOC_TYPES   = ['Billable','Internal','Education','PTO_Holiday','Unassigned'];
-const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded','Custom'];
+// Allowed distribution modes. 'Custom' removed in WFM.12 (weekly-forecast-
+// migration): client collected month-keyed custom_monthly_json while the
+// weekly expansion functions look up week_key, silently zeroing every week.
+// Returns later as its own week-grid feature. custom_monthly_json /
+// custom_weekly_json columns remain in the schema, dormant and unwritten,
+// for that future feature to reuse.
+const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded'];
 const ASSIGN_STATUSES = ['Modeled','Committed','Archived'];
 
 // --- Drop 6: Capacity Adjustments schema ---

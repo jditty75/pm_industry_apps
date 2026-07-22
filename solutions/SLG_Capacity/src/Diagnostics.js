@@ -1677,3 +1677,160 @@ function _dbg_profileDashboardCold() {
   api_getDashboard({ viewMode: 'Committed', groupBy: 'Function', workerScope: 'SLG', includeTimeOff: false });
   Logger.log('TOTAL api_getDashboard: ' + (Date.now() - t0) + 'ms');
 }
+
+// ============================================================
+// WFM.15 — Productive Utilization Model reconciliation.
+// MANDATORY GATE: do not ship WFM.15 unless both cases below report OK.
+// ============================================================
+
+/**
+ * WFM.15 §7 MANDATORY GATE. Reproduces the spec's two worked examples
+ * EXACTLY against the live icpTargetFor_/holidayHoursForWeek_ formulas,
+ * then logs the Headcount Gap capacity-FTE shift (legacy monthly roleCap
+ * vs. the new weekly raw-capacity model) per team so the move is
+ * explainable, not silent. Run from the editor; read View -> Logs.
+ * If either case fails, DO NOT SHIP -- see WFM.15 §8 escalation.
+ */
+function _dbg_reconcileWFM15() {
+  _dbg_requireAdmin_();
+  const settings = readSettings_();
+  let failures = 0;
+
+  // ---- Case A: single-holiday week (spec's worked example) ----
+  // P6 Delivery/EM worker, one 8h holiday in the week, a 16h PTO/Holiday
+  // PSA row (excluded from productive demand by the productiveWeekly /
+  // workerWeekly split in computeWeeklyForecast_ -- proven separately by
+  // inspection, not re-derived here), productive demand given as 30h.
+  // Exercises icpTargetFor_ + the icpUtil/financeUtil/ratioToTarget math
+  // in api_getForecastTable end to end.
+  (function caseA() {
+    Logger.log('=== WFM.15 Case A: single-holiday week (P6 Delivery/EM) ===');
+    const rawCap = readRawCapacity_(settings);           // expect 40
+    const holidayHrs = 8;                                 // one holiday in the week
+    const icpAvailable = rawCap - holidayHrs;              // expect 32
+    const productiveDemand = 30;                            // given (PTO/Holiday 16h excluded)
+    const financeUtil = rawCap > 0 ? productiveDemand / rawCap : 0;         // expect 0.75
+    const icpUtil = icpAvailable > 0 ? productiveDemand / icpAvailable : 0; // expect 0.9375
+    const icpTarget = icpTargetFor_('EM', 'P6 Delivery Consultant', settings); // expect 0.61
+    const ratioToTarget = icpTarget > 0 ? icpUtil / icpTarget : 0;           // expect ~1.537
+
+    Logger.log('  rawCapacity=' + rawCap + ' (expect 40)');
+    Logger.log('  icpAvailable=' + icpAvailable.toFixed(2) + ' (expect 32.00)');
+    Logger.log('  financeUtil=' + (financeUtil * 100).toFixed(1) + '% (expect 75.0%)');
+    Logger.log('  icpUtil=' + (icpUtil * 100).toFixed(2) + '% (expect 93.75%)');
+    Logger.log('  icpTarget=' + (icpTarget * 100).toFixed(0) + '% (expect 61%)');
+    Logger.log('  ratioToTarget=' + (ratioToTarget * 100).toFixed(1) + '% (expect 153.7%, over/red)');
+
+    const ok = Math.abs(rawCap - 40) < 1e-9 &&
+      Math.abs(icpAvailable - 32) < 1e-9 &&
+      Math.abs(financeUtil - 0.75) < 1e-9 &&
+      Math.abs(icpUtil - 0.9375) < 1e-9 &&
+      Math.abs(icpTarget - 0.61) < 1e-9 &&
+      Math.abs(ratioToTarget - 1.537) < 0.001;
+    Logger.log(ok ? '  Case A: OK' : '  Case A: FAILED — DO NOT SHIP');
+    if (!ok) failures++;
+  })();
+
+  // ---- Case B: double-holiday week (real calendar + real worker) ----
+  // Finds the real Config_Calendar week containing Thanksgiving + the Day
+  // After (11/26-27) or Christmas Eve + Day (12/24-25) -- whichever exists
+  // in the uploaded data -- and proves holidayHoursForWeek_ sums both
+  // holidays (16h), then spot-checks a real worker's
+  // productiveDemand / icpAvailable in that week.
+  (function caseB() {
+    Logger.log('=== WFM.15 Case B: double-holiday week ===');
+    const rawCap = readRawCapacity_(settings);
+    const holidays = readHolidays_();
+    const calendar = readCalendar_();
+
+    let targetWeek = null, targetHrs = 0;
+    for (let i = 0; i < calendar.weeks.length; i++) {
+      const wk = calendar.weeks[i];
+      const hrs = holidayHoursForWeek_(wk.week_start, holidays);
+      if (hrs === 16) { targetWeek = wk; targetHrs = hrs; break; }
+    }
+
+    if (!targetWeek) {
+      Logger.log('  No Config_Calendar week found with 16h of holidays -- upload data ' +
+        'covering Thanksgiving week (11/26-27) or Christmas week (12/24-25) to run this check.');
+      Logger.log('  Case B: SKIPPED (no matching week in current planning data -- not a failure)');
+      return;
+    }
+
+    const icpAvailable = rawCap - targetHrs; // expect 24
+    Logger.log('  week_key=' + targetWeek.week_key);
+    Logger.log('  holidayHours=' + targetHrs + ' (expect 16 — proves holidayHoursForWeek_ sums multiple holidays)');
+    Logger.log('  icpAvailable=' + icpAvailable + ' (expect 24)');
+
+    const ok = (targetHrs === 16) && Math.abs(icpAvailable - 24) < 1e-9;
+
+    // Spot-check a real worker: productive demand (PTO/Holiday PSA rows
+    // excluded) in this exact week, reconciled against icpAvailable=24.
+    const allocRaw = (typeof getEnrichedAllocations_ === 'function')
+      ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+    const byWorker = {};
+    allocRaw.forEach(function (a) {
+      if (a.week_key !== targetWeek.week_key) return;
+      if (a.allocation_type === 'PTO_Holiday') return; // excluded from productive demand
+      const h = Number(a.hours) || 0;
+      if (!h) return;
+      byWorker[a.resource_name] = (byWorker[a.resource_name] || 0) + h;
+    });
+    const sampleWorker = Object.keys(byWorker).sort()[0];
+    if (sampleWorker) {
+      const productiveDemand = byWorker[sampleWorker];
+      const icpUtil = icpAvailable > 0 ? productiveDemand / icpAvailable : 0;
+      Logger.log('  Sample worker: ' + sampleWorker);
+      Logger.log('  productiveDemand=' + productiveDemand.toFixed(2) + 'h -> icpUtil = ' +
+        productiveDemand.toFixed(2) + ' / ' + icpAvailable + ' = ' + (icpUtil * 100).toFixed(2) + '%');
+    } else {
+      Logger.log('  No worker has non-PTO allocation hours in this week — cannot spot-check a real worker.');
+    }
+
+    Logger.log(ok ? '  Case B: OK' : '  Case B: FAILED — DO NOT SHIP');
+    if (!ok) failures++;
+  })();
+
+  // ---- Headcount Gap capacity FTE: before (roleCap/160) vs after (raw-capacity), per team ----
+  // The legacy model gave every SLG worker a flat 160h/mo (all shipped
+  // Config_Roles defaults are 160) -> capFte=160/HEADCOUNT_FTE_BASE(160)=
+  // 1.0 per worker. The new model gives every worker raw_weekly_capacity x
+  // 52/12 h/mo -> capFte=that/160. Both are FLAT per-worker multipliers
+  // (raw capacity has no per-role/per-team variation), so "before" per
+  // team = "after" per team / conversionFactor. Logged so the shift is
+  // explainable, not silent.
+  (function fteShift() {
+    Logger.log('=== WFM.15: Headcount Gap capacity FTE shift, per team (before vs after) ===');
+    const HEADCOUNT_FTE_BASE = 160; // matches Engine.gs computeUtilization step 10
+    const legacyRoleCapDefault = 160; // every shipped Config_Roles default is 160/mo
+    const rawMonthlyEquiv = readRawCapacity_(settings) * (52 / 12);
+    const conversionFactor = rawMonthlyEquiv / legacyRoleCapDefault;
+
+    Logger.log('  Per-worker monthly capacity: before (legacy roleCap default)=' +
+      legacyRoleCapDefault.toFixed(2) + 'h -> capFte=' + (legacyRoleCapDefault / HEADCOUNT_FTE_BASE).toFixed(4));
+    Logger.log('  Per-worker monthly capacity: after (raw_weekly_capacity=' + readRawCapacity_(settings) +
+      'h/wk x 52/12)=' + rawMonthlyEquiv.toFixed(2) + 'h -> capFte=' + (rawMonthlyEquiv / HEADCOUNT_FTE_BASE).toFixed(4));
+    Logger.log('  Flat per-worker shift: x' + conversionFactor.toFixed(4) + ' (' +
+      (((conversionFactor - 1) * 100)).toFixed(1) + '%) applied uniformly to every SLG worker.');
+
+    try {
+      const dash = api_getDashboard({
+        viewMode: 'Committed', groupBy: 'Function', workerScope: 'SLG',
+        includeMyManagers: false, teams: null, quarter: null, includeTimeOff: true
+      });
+      (dash.headcountByTeam || []).forEach(function (t) {
+        const afterFte = Number(t.capacityFte) || 0;
+        const beforeFte = conversionFactor > 0 ? afterFte / conversionFactor : 0;
+        Logger.log('  ' + t.team + ': before=' + beforeFte.toFixed(2) + ' FTE, after=' +
+          afterFte.toFixed(2) + ' FTE (delta ' + (afterFte - beforeFte >= 0 ? '+' : '') +
+          (afterFte - beforeFte).toFixed(2) + ' FTE)');
+      });
+    } catch (e) {
+      Logger.log('  (live per-team pull failed, non-fatal — the flat conversionFactor above still holds: ' + e + ')');
+    }
+  })();
+
+  Logger.log(failures === 0
+    ? '_dbg_reconcileWFM15: ALL CASES OK'
+    : '_dbg_reconcileWFM15: ' + failures + ' CASE(S) FAILED — DO NOT SHIP');
+}

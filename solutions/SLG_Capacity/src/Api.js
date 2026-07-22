@@ -440,12 +440,22 @@ function _deriveVisibleWeeks_(weeks, windowMonths) {
 }
 
 /**
+ * WFM.15: cell metrics are now the Productive Utilization Model --
+ * icpUtil (PRIMARY, nets holiday hours out of available capacity) and
+ * financeUtil (SECONDARY, no holiday netting) computed from productive
+ * demand (PTO/Holiday allocation rows excluded from the numerator).
+ * ratioToTarget = icpUtil / icpTarget drives client coloring (bands
+ * unchanged; WFM.14 moves them to config later). Displayed `hours` stays
+ * PTO/Holiday-inclusive per the includeTimeOff toggle -- calc/display
+ * divergence is intentional.
  * @param {Object} params same shape as api_getDashboard's params
  * @return {{
  *   weeks: Array<{weekKey:string, weekStart:string, label:string, fiscalQuarter:string, fiscalQuarterKey:string}>,
  *   rows: Array<{worker:string, level:string, jobProfile:string, manager:string, managersManager:string,
- *                weeklyTarget:number,
- *                workerWeekly: Array<{weekKey:string, hours:number, util:number, icpTarget:number}>,
+ *                icpTarget:number, rawCapacity:number,
+ *                workerWeekly: Array<{weekKey:string, hours:number, icpUtil:number, financeUtil:number,
+ *                                     icpTarget:number, ratioToTarget:number, icpAvailable:number,
+ *                                     holidayHours:number}>,
  *                projects: Array<{project:string, weekly: Array<{weekKey:string, hours:number}>}>}>,
  *   planningWindowWeeks: number
  * }}
@@ -476,18 +486,28 @@ function api_getForecastTable(params) {
     fiscalQuarterKey: fiscalQuarterKey_(w.week_start)
   }));
 
-  const icp = forecast.icp || {};
+  const rawCapacity = Number(forecast.rawCapacity) || 40;
+  const holidayHoursByWeek = forecast.holidayHoursByWeek || {};
 
   const rowsOut = forecast.workers.map(w => {
-    const icpTarget = (icp[w.icpRole] && isFinite(icp[w.icpRole].target)) ? icp[w.icpRole].target : 0.70;
+    const icpTarget = Number(w.icpTarget) || 0;
     const workerWeekly = visibleWeeks.map(vw => {
       const hours = Number(w.workerWeekly[vw.week_key] || 0);
-      const util = w.weeklyTarget > 0 ? (hours / w.weeklyTarget) : 0;
+      const productiveDemand = Number(w.productiveWeekly[vw.week_key] || 0);
+      const holidayHours = Number(holidayHoursByWeek[vw.week_key] || 0);
+      const icpAvailable = rawCapacity - holidayHours;
+      const icpUtil = icpAvailable > 0 ? (productiveDemand / icpAvailable) : 0;
+      const financeUtil = rawCapacity > 0 ? (productiveDemand / rawCapacity) : 0;
+      const ratioToTarget = icpTarget > 0 ? (icpUtil / icpTarget) : 0;
       return {
-        weekKey:   String(vw.week_key),
-        hours:     Number(hours) || 0,
-        util:      Number(util) || 0,
-        icpTarget: Number(icpTarget) || 0
+        weekKey:       String(vw.week_key),
+        hours:         Number(hours) || 0,
+        icpUtil:       Number(icpUtil) || 0,
+        financeUtil:   Number(financeUtil) || 0,
+        icpTarget:     Number(icpTarget) || 0,
+        ratioToTarget: Number(ratioToTarget) || 0,
+        icpAvailable:  Number(icpAvailable) || 0,
+        holidayHours:  Number(holidayHours) || 0
       };
     });
     const projects = Object.keys(w.projects).sort().map(proj => ({
@@ -503,7 +523,8 @@ function api_getForecastTable(params) {
       jobProfile:      String(w.jobProfile || ''),
       manager:         String(w.managerOrg || ''),
       managersManager: String(w.managersManager || ''),
-      weeklyTarget:    Number(w.weeklyTarget) || 0,
+      icpTarget:       icpTarget,
+      rawCapacity:     rawCapacity,
       workerWeekly:    workerWeekly,
       projects:        projects
     };

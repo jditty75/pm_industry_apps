@@ -1286,14 +1286,23 @@
         '</td>'
       );
       weeks.forEach(w => {
-        const cell = weekByKey[w.weekKey] || { hours: 0, util: 0, icpTarget: 0.70 };
-        const color = cellColor(cell.util, cell.icpTarget);
+        const cell = weekByKey[w.weekKey] ||
+          { hours: 0, icpUtil: 0, financeUtil: 0, icpTarget: r.icpTarget || 0.72,
+            icpAvailable: r.rawCapacity || 40, holidayHours: 0 };
+        // WFM.15: color by ICP utilization vs. the worker's role-family x
+        // level target (cellColor divides internally -- equivalent to the
+        // server's ratioToTarget). Bands unchanged (WFM.14 later).
+        const color = cellColor(cell.icpUtil, cell.icpTarget);
+        const holidayNote = cell.holidayHours
+          ? ' (raw ' + Math.round(r.rawCapacity) + 'h − ' + Math.round(cell.holidayHours) + 'h holiday)'
+          : '';
         const title = [
           r.worker + ' · ' + w.label,
           'Hours: ' + Math.round(cell.hours) + 'h',
-          'Weekly target: ' + Math.round(r.weeklyTarget) + 'h',
-          'Utilization: ' + fmtPct(cell.util),
-          'ICP target: ' + fmtPct(cell.icpTarget)
+          'ICP available: ' + Math.round(cell.icpAvailable) + 'h' + holidayNote,
+          'ICP utilization: ' + fmtPct(cell.icpUtil),
+          'ICP target: ' + fmtPct(cell.icpTarget),
+          'Finance utilization: ' + fmtPct(cell.financeUtil)
         ].join('\n');
         html.push(
           '<td class="wf-col-week wf-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +

@@ -84,6 +84,111 @@ function weeklyTargetFor_(jobProfile, weeklyTargets) {
   return deriveLevel_(jobProfile) === 'P6' ? weeklyTargets.p6 : weeklyTargets.default;
 }
 
+// ============================================================
+// Productive Utilization Model (WFM.15).
+//
+// Supersedes the conflated weekly_target_* model above (readWeeklyTargets_/
+// weeklyTargetFor_ are left defined but UNCALLED per WFM.15 §6 -- deprecated,
+// not removed, so the sheet keys and rollback path stay intact) with
+// decoupled raw capacity + a per-role-family x level target table, plus a
+// holiday calendar that reduces available hours. Two metrics:
+//   ICP util     = productive demand / ICP available (available nets out
+//                  holiday hours -- the PRIMARY metric, drives coloring)
+//   Finance util = productive demand / raw capacity (no holiday netting --
+//                  SECONDARY, for future Reporting use)
+// "Productive demand" excludes PTO_Holiday allocation rows from the
+// numerator; the visual layer (weekly table cells, heatmap, Explorer)
+// still displays PTO/Holiday hours per the existing includeTimeOff toggle
+// -- that calc/display divergence is intentional (WFM.15 spec).
+// ============================================================
+
+/**
+ * Raw weekly capacity hours, same for every worker. Config_Settings key
+ * raw_weekly_capacity, falling back to the LOCKED default (40) when
+ * missing or non-numeric.
+ * @param {Object} [settings] output of readSettings_(); read fresh if omitted
+ * @return {number}
+ */
+function readRawCapacity_(settings) {
+  settings = settings || readSettings_();
+  const c = Number(settings.raw_weekly_capacity);
+  return (isFinite(c) && c > 0) ? c : 40;
+}
+
+/**
+ * Role family for the WFM.15 target table. Consulting = {CS_FUNC, CS_TECH};
+ * Delivery = {EM, DA, PD}. Everything else (blank/Unclassified/etc.) has no
+ * family -- icpTargetFor_ falls back to icp_target_default for those.
+ * @param {string} icpRole
+ * @return {string} 'consulting' | 'delivery' | ''
+ */
+function roleFamily_(icpRole) {
+  const r = String(icpRole || '').trim().toUpperCase();
+  if (r === 'CS_FUNC' || r === 'CS_TECH') return 'consulting';
+  if (r === 'EM' || r === 'DA' || r === 'PD') return 'delivery';
+  return '';
+}
+
+/**
+ * ICP target utilization for a worker, per the WFM.15 4-cell table
+ * (role family x level), read from Config_Settings:
+ *   icp_target_consulting_P3_P5, icp_target_consulting_P6,
+ *   icp_target_delivery_P3_P5,   icp_target_delivery_P6,
+ *   icp_target_default (fallback when no role family resolves; logs a
+ *   warning since that's the "should not normally happen" path).
+ * @param {string} icpRole
+ * @param {string} jobProfile
+ * @param {Object} [settings] output of readSettings_(); read fresh if omitted
+ * @return {number}
+ */
+function icpTargetFor_(icpRole, jobProfile, settings) {
+  settings = settings || readSettings_();
+  const fam = roleFamily_(icpRole);
+  const isP6 = deriveLevel_(jobProfile) === 'P6';
+  function num(k, d) { const v = Number(settings[k]); return (isFinite(v) && v > 0) ? v : d; }
+  if (fam === 'consulting') return isP6 ? num('icp_target_consulting_P6', 0.61) : num('icp_target_consulting_P3_P5', 0.77);
+  if (fam === 'delivery')   return isP6 ? num('icp_target_delivery_P6', 0.61)   : num('icp_target_delivery_P3_P5', 0.69);
+  Logger.log('icpTargetFor_: no role family for icp="' + icpRole + '" — using icp_target_default');
+  return num('icp_target_default', 0.72);
+}
+
+/**
+ * Read the active Config_Holidays rows. Each holiday's date is normalized
+ * via weekStart_ (local midnight, no snapping) so date-range comparisons
+ * in holidayHoursForWeek_ are exact-day matches, not off by time-of-day.
+ * @return {Array<{date:Date, hours:number}>}
+ */
+function readHolidays_() {
+  let rows;
+  try { rows = cachedRead_(CFG_HOLIDAYS); } catch (e) { return []; }
+  const TRUTHY = { 'yes':1,'y':1,'true':1,'t':1,'1':1,'x':1,'active':1,'on':1 };
+  return (rows || []).map(function (r) {
+    const active = String(r.active === '' || r.active == null ? 'true' : r.active).trim().toLowerCase();
+    if (!TRUTHY[active]) return null;
+    const d = r.holiday_date ? new Date(r.holiday_date) : null;
+    if (!d || isNaN(d.getTime())) return null;
+    const h = Number(r.hours);
+    return { date: weekStart_(d), hours: (isFinite(h) && h > 0) ? h : 8 };
+  }).filter(Boolean);
+}
+
+/**
+ * Total holiday hours falling within a week's [week_start, week_start+6]
+ * range. Multiple holidays in the same week SUM (e.g. Thanksgiving + the
+ * Day After = 16h; Christmas Eve + Christmas Day = 16h). Flat hours per
+ * holiday, applied to every worker -- no per-worker eligibility.
+ * @param {Date|string|number} weekStartDate
+ * @param {Array<{date:Date, hours:number}>} holidays output of readHolidays_()
+ * @return {number}
+ */
+function holidayHoursForWeek_(weekStartDate, holidays) {
+  const ws = weekStart_(weekStartDate);
+  const we = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 6);
+  let total = 0;
+  (holidays || []).forEach(function (h) { if (h.date >= ws && h.date <= we) total += h.hours; });
+  return total;   // sums multiple holidays in one week (Thanksgiving+Day After = 16)
+}
+
 function readRoleTeamLabels_() {
   const rows = cachedRead_(CFG_ROLES);
   const m = {};
@@ -963,6 +1068,17 @@ function computeUtilization(params) {
   // a single-row card. No special-case code needed.
   // ============================================================
   const HEADCOUNT_FTE_BASE = 160;
+  // WFM.15 §6: Headcount Gap FTE capacity converges onto the weekly
+  // raw-capacity model (Config_Settings.raw_weekly_capacity, 40/wk default)
+  // instead of the legacy monthly roleCap (Config_Roles, 160/mo default),
+  // via the standard 52/12 weeks-per-month conversion. Every SLG_Real/
+  // SLG_Generic worker contributes the SAME flat monthly-equivalent -- raw
+  // capacity has no per-role/per-worker variation (WFM.15 locked design).
+  // This WILL move FTE numbers vs. pre-WFM.15 (see _dbg_reconcileWFM15's
+  // before/after log, Diagnostics.gs) -- HEADCOUNT_FTE_BASE (the demand-
+  // side FTE-hours convention) is unchanged; only the capacity-hours
+  // SOURCE converges.
+  const rawCapacityMonthlyEquiv = readRawCapacity_(settings) * (52 / 12);
   const teamMonthAgg = {};
 
   filtered.forEach(b => {
@@ -984,7 +1100,7 @@ function computeUtilization(params) {
     const committedWork = Number(b.committed) || 0;
     const timeOff = Number(b.timeOff) || 0;
     const scen = Number(b.scenario) || 0;
-    const cap = Number(b.capacity) || 0;
+    const cap = rawCapacityMonthlyEquiv;
 
     let demandHrs = committedWork;
     if (viewMode === 'Scenario') demandHrs += scen;
@@ -1116,8 +1232,9 @@ function computeUtilization(params) {
 // Powers api_getForecastTable / the redesigned Dashboard weekly table.
 // Distinct from computeUtilization above (which stays monthly-shaped for
 // the out-of-scope legacy Explorer/Reporting views). Buckets by
-// resource_name + '|' + week_key using WEEKLY capacity targets
-// (weeklyTargetFor_), not the monthly roleCap model.
+// resource_name + '|' + week_key using the WFM.15 Productive Utilization
+// Model (readRawCapacity_/icpTargetFor_/readHolidays_), not the monthly
+// roleCap model and not the deprecated weekly_target_* model.
 //
 // Applies the same filter pipeline as computeUtilization: exclusions,
 // manager hierarchy (+descendants), Team override, worker scope,
@@ -1131,11 +1248,14 @@ function computeUtilization(params) {
  *   workers: Array<{
  *     resource:string, jobProfile:string, level:string, managerOrg:string,
  *     managersManager:string, teamLabel:string, icpRole:string,
- *     weeklyTarget:number,
+ *     icpTarget:number,
  *     workerWeekly: Object<string, number>,
+ *     productiveWeekly: Object<string, number>,
  *     projects: Object<string, Object<string, number>>
  *   }>,
- *   icp: Object
+ *   icp: Object,
+ *   rawCapacity: number,
+ *   holidayHoursByWeek: Object<string, number>
  * }}
  */
 function computeWeeklyForecast_(params) {
@@ -1150,7 +1270,11 @@ function computeWeeklyForecast_(params) {
   const rtTeamMap = _readResourceTypeTeamMap_();
   const settings = readSettings_();
   const hideAllExternal = String(settings['hide_all_external'] || '').trim().toLowerCase() === 'true';
-  const weeklyTargets = readWeeklyTargets_(settings);
+  // WFM.15: raw capacity + holiday calendar replace the weekly_target_*
+  // model for this path (readWeeklyTargets_/weeklyTargetFor_ deprecated,
+  // left defined but uncalled -- see §6 of the WFM.15 spec).
+  const rawCapacity = readRawCapacity_(settings);
+  const holidays = readHolidays_();
 
   const mgrRows = readConfigSlgManagers_();
   const managerDescendants = buildManagerDescendants_(mgrRows);
@@ -1196,6 +1320,15 @@ function computeWeeklyForecast_(params) {
   const icp = readIcp_();
   const calendar = readCalendar_();
 
+  // WFM.15: precompute {week_key: holidayHours} once from the real
+  // calendar weeks (never a naive 7-day stepper) so per-worker per-week
+  // ICP-available math below is a cheap lookup, not a re-scan of
+  // Config_Holidays per cell.
+  const holidayHoursByWeek = {};
+  calendar.weeks.forEach(function (wk) {
+    holidayHoursByWeek[wk.week_key] = holidayHoursForWeek_(wk.week_start, holidays);
+  });
+
   const _resolverCtx_ = (typeof resolveTeamLabel_ === 'function')
     ? resolveTeamLabel_.buildCtx_(roleTeamLabels, rtTeamMap)
     : null;
@@ -1228,18 +1361,25 @@ function computeWeeklyForecast_(params) {
         icpRole: info.icp || '',
         teamLabel: teamLabel,
         workerClass: info.worker_class || '',
-        weeklyTarget: weeklyTargetFor_(info.job_profile || '', weeklyTargets),
-        workerWeekly: {},  // weekKey -> hours
-        projects: {}       // project -> { weekKey -> hours }
+        icpTarget: icpTargetFor_(info.icp || '', info.job_profile || '', settings),
+        workerWeekly: {},     // weekKey -> hours (DISPLAY: PTO/Holiday-inclusive per toggle)
+        productiveWeekly: {}, // weekKey -> hours (CALC: excludes PTO_Holiday -- WFM.15)
+        projects: {}          // project -> { weekKey -> hours }
       };
     }
     return workers[resourceName];
   }
 
-  function addHours(resourceName, weekKey, project, hours) {
+  // isProductive: false only for PSA PTO_Holiday rows -- assignments and
+  // capacity adjustments are inherently committed/billable (never PTO), so
+  // they always count toward productive demand (WFM.15).
+  function addHours(resourceName, weekKey, project, hours, isProductive) {
     if (!hours) return;
     const w = ensureWorker(resourceName);
     w.workerWeekly[weekKey] = (w.workerWeekly[weekKey] || 0) + hours;
+    if (isProductive) {
+      w.productiveWeekly[weekKey] = (w.productiveWeekly[weekKey] || 0) + hours;
+    }
     const proj = project || 'Unassigned';
     if (!w.projects[proj]) w.projects[proj] = {};
     w.projects[proj][weekKey] = (w.projects[proj][weekKey] || 0) + hours;
@@ -1251,7 +1391,7 @@ function computeWeeklyForecast_(params) {
     if (a.allocation_type === 'PTO_Holiday' && !includePto) return;
     const h = Number(a.hours) || 0;
     if (!h) return;
-    addHours(a.resource_name, a.week_key, a.project_name, h);
+    addHours(a.resource_name, a.week_key, a.project_name, h, a.allocation_type !== 'PTO_Holiday');
   });
 
   // 2) Assignments -- weekly expansion aligned to the real calendar grid.
@@ -1266,7 +1406,7 @@ function computeWeeklyForecast_(params) {
       if (!include) return;
       const label = 'Assignment' + (a.opportunity_id ? (' — ' + a.opportunity_id) : '');
       expandAssignmentToWeekly_(a, calendar).forEach(w => {
-        addHours(a.resource_name, w.week_key, label, w.hours);
+        addHours(a.resource_name, w.week_key, label, w.hours, true);
       });
     });
   }
@@ -1285,7 +1425,7 @@ function computeWeeklyForecast_(params) {
          (!params.scenarioId || adj.scenario_id === params.scenarioId));
       if (!include) return;
       expandAdjustmentToWeekly_(adj, calendar).forEach(w => {
-        addHours(adj.resource_name, w.week_key, 'Capacity Adjustment', -w.hours_reduction);
+        addHours(adj.resource_name, w.week_key, 'Capacity Adjustment', -w.hours_reduction, true);
       });
     });
   }
@@ -1309,7 +1449,9 @@ function computeWeeklyForecast_(params) {
   return {
     weeks: calendar.weeks,
     workers: filteredWorkers,
-    icp: icp
+    icp: icp,
+    rawCapacity: rawCapacity,
+    holidayHoursByWeek: holidayHoursByWeek
   };
 }
 

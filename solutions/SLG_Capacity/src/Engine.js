@@ -236,6 +236,7 @@ function readConfigSlgManagers_() {
   var iIncDesc = header.indexOf('include_descendants');
   var iSource = header.indexOf('hierarchy_source');
   var iEmail = header.indexOf('email');
+  var iTeamLabel = header.indexOf('team_label');
 
   if (iName < 0) {
     Logger.log(
@@ -264,7 +265,8 @@ function readConfigSlgManagers_() {
       parent_manager: iParent >= 0 ? _normCell_(row[iParent]) : '',
       include_descendants: iIncDesc >= 0 ? _normCell_(row[iIncDesc]) : '',
       hierarchy_source: iSource >= 0 ? _normCell_(row[iSource]) : '',
-      email: email
+      email: email,
+      team_label: iTeamLabel >= 0 ? _normCell_(row[iTeamLabel]) : ''
     });
   }
   return out;
@@ -302,18 +304,26 @@ function buildManagerDescendants_(mgrRows) {
   return descendants;
 }
 
+/**
+ * WFM-FIX.1: expand descendants whenever includeMyManagers is set, for
+ * ANY selected manager -- the prior per-row include_descendants === 'Y'
+ * gate meant managers without that flag (e.g. Steve, Roman, Lakshmi)
+ * could never see their full org, and it was also the reason a manager
+ * with the flag set (Marie, Katie) still appeared direct-reports-only
+ * whenever a stale includeMyManagers:false slipped through from a prior
+ * drawer Apply / Clear All. The include_descendants column stays in the
+ * sheet (still read by readConfigSlgManagers_) but no longer gates this.
+ * managersByName is retained in the signature so call sites need no change,
+ * even though it is no longer read.
+ */
 function buildEffectiveManagers_(selectedName, includeMyManagers, managersByName, managerDescendants) {
   var name = (selectedName || '').trim();
   if (!name) return null;
   var set = {};
   set[name] = true;
-  var row = managersByName[name];
-  if (includeMyManagers && row) {
-    var flag = String(row.include_descendants || '').toUpperCase();
-    if (flag === 'Y') {
-      var desc = managerDescendants[name] || [];
-      desc.forEach(function(m) { set[m] = true; });
-    }
+  if (includeMyManagers) {
+    var desc = managerDescendants[name] || [];
+    desc.forEach(function (m) { set[m] = true; });
   }
   return set;
 }

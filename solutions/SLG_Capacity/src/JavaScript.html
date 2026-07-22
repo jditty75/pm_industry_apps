@@ -686,22 +686,36 @@
 
   // ============================================================
   // Priority 1: Auto-set Manager filter from logged-in user
+  //
+  // WFM-FIX.1: personalized boot default. default_team_filter previously
+  // hardcoded 'Delivery' for everyone, which was wrong for most users and
+  // (because the Team filter suppresses the Manager filter) actively
+  // masked the manager hierarchy for those users. Boot behavior is now:
+  //   - Recognized manager  -> their own FULL org (self + descendants),
+  //                            no team filter.
+  //   - Admin / unrecognized-but-authorized -> all workers, all teams,
+  //                            no filters.
   // ============================================================
   function applyAutoManagerDefaults_() {
     const ref = State.ref || {};
     const matched = ref.matchedManager || null;
 
-    if (matched) {
+    // Never set a team filter on boot — the manager hierarchy is the scope.
+    State.filters.teamLabel = null;
+
+    if (ref.userIsAdmin || !matched) {
+      // Admin (Jeff, Windsel) or unrecognized → all workers, all teams, no filter.
+      State.filters.managers = [];
+    } else {
+      // Recognized manager → boot into their FULL org (self + descendants).
       State.filters.managers = [matched];
       State.filters.includeMyManagers = true;
-      const sel = $('#teamsSelect');
-      if (sel) sel.value = matched;
-      return;
     }
 
-    State.filters.managers = [];
-    const sel = $('#teamsSelect');
-    if (sel) sel.value = '';
+    const mgrSel = $('#teamsSelect');
+    if (mgrSel) mgrSel.value = State.filters.managers[0] || '';
+    const teamSel = $('#teamLabelFilter');
+    if (teamSel) teamSel.value = '';
   }
 
   function onAppliedFiltersChanged_() {
@@ -771,6 +785,11 @@
     sel.onchange = () => {
       const val = sel.value;
       State.filters.managers = val ? [val] : [];
+      // WFM-FIX.1: selecting a manager from the topbar defaults to their
+      // full reporting hierarchy (see all by default, then filter down).
+      // Prevents a stale includeMyManagers=false from a prior drawer
+      // Apply / Clear All from collapsing the view to direct reports only.
+      if (val) State.filters.includeMyManagers = true;
       onAppliedFiltersChanged_();
     };
   }
@@ -791,13 +810,8 @@
     sel.innerHTML = `<option value="">All teams</option>` + opts;
     sel.value = State.filters.teamLabel || '';
 
-    // Phase 6: default to ref.defaultTeamFilter on first load only.
-    // Reads once; subsequent manual changes are preserved via userTouched.
-    if (State.ref && State.ref.defaultTeamFilter &&
-        !sel.dataset.userTouched && !State.filters.teamLabel) {
-      sel.value = State.ref.defaultTeamFilter;
-      State.filters.teamLabel = State.ref.defaultTeamFilter;
-    }
+    // WFM-FIX.1: no team filter is forced at boot (see
+    // applyAutoManagerDefaults_) — the manager hierarchy is the scope.
 
     // Use onchange (not addEventListener) so re-renders don't stack listeners.
     sel.onchange = () => {

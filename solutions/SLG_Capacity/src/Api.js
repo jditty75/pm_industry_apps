@@ -156,55 +156,65 @@ function _classifyAnyTeam_(row, rtMap) {
 /**
  * Resolve the logged-in user's identity for the client.
  *
- * Three outcomes, in priority order:
- *   1) Email matches a row in Config_SLG_Managers.email
- *      → { email, matchedManager: '<name>', recognized: true }
- *   2) Email is listed in Config_Settings.recognized_non_manager_emails
- *      (comma-separated, case-insensitive)
- *      → { email, matchedManager: null, recognized: true }
- *   3) Neither match
- *      → { email, matchedManager: null, recognized: false }
+ * WFM-FIX.1: rewritten to (a) read Config_Settings.admin_emails instead of
+ * the legacy recognized_non_manager_emails key -- AccessControl.gs's
+ * isAuthorized_ and _migrateAdminEmailsSetting_ already moved to
+ * admin_emails; this function had been left behind reading the old key --
+ * and (b) surface teamLabel/isAdmin so the client can boot into a
+ * personalized default (see applyAutoManagerDefaults_, JavaScript.html)
+ * instead of the old hardcoded default_team_filter.
+ *
+ * Matching no longer short-circuits on the manager match: an admin who
+ * also happens to have a Config_SLG_Managers row still gets isAdmin=true.
+ *
+ *   { email, matchedManager, teamLabel, isAdmin, recognized }
  */
 function _resolveLoggedInUser_() {
   var email = '';
-  try { email = (getUserEmail_ ? getUserEmail_() : '') || ''; } catch (e) { email = ''; }
+  try { email = (getUserEmail_ ? getUserEmail_() : '') || ''; }
+  catch (e) { email = ''; }
   var emailLc = String(email || '').trim().toLowerCase();
 
-  var result = { email: email, matchedManager: null, recognized: false };
-
+  var result = {
+    email: email,
+    matchedManager: null,
+    teamLabel: '',      // NEW — matched manager's Config_SLG_Managers.team_label
+    isAdmin: false,     // NEW — email is in Config_Settings.admin_emails
+    recognized: false
+  };
   if (!emailLc) return result;
 
+  // 1) Match against Config_SLG_Managers (name + team_label).
   try {
-    var mgrRows = (typeof readConfigSlgManagers_ === 'function')
-      ? readConfigSlgManagers_() : [];
+    var mgrRows = (typeof readConfigSlgManagers_ === 'function') ? readConfigSlgManagers_() : [];
     for (var i = 0; i < mgrRows.length; i++) {
       var rowEmail = String(mgrRows[i].email || '').trim().toLowerCase();
       if (rowEmail && rowEmail === emailLc) {
         result.matchedManager = mgrRows[i].manager_name;
+        result.teamLabel = String(mgrRows[i].team_label || '').trim(); // NEW
         result.recognized = true;
-        return result;
+        break; // do not return — still resolve admin flag below
       }
     }
   } catch (e) {
     Logger.log('_resolveLoggedInUser_: manager lookup failed — ' + e);
   }
 
+  // 2) Admin check: Config_Settings.admin_emails (comma-separated, case-insensitive).
   try {
     var settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
-    var raw = String(settings['recognized_non_manager_emails'] || '');
+    var raw = String(settings['admin_emails'] || '');
     if (raw) {
-      var allowSet = {};
-      raw.split(',').forEach(function (e) {
-        var v = String(e || '').trim().toLowerCase();
-        if (v) allowSet[v] = true;
+      var isAdmin = raw.split(',').some(function (e) {
+        return String(e || '').trim().toLowerCase() === emailLc;
       });
-      if (allowSet[emailLc]) {
+      if (isAdmin) {
+        result.isAdmin = true;
         result.recognized = true;
-        return result;
       }
     }
   } catch (e) {
-    Logger.log('_resolveLoggedInUser_: settings lookup failed — ' + e);
+    Logger.log('_resolveLoggedInUser_: admin lookup failed — ' + e);
   }
 
   return result;
@@ -1335,6 +1345,8 @@ function api_getReference() {
   const response = {
     user: userResolution.email,
     matchedManager: userResolution.matchedManager,
+    userTeamLabel: userResolution.teamLabel || '',   // NEW
+    userIsAdmin: !!userResolution.isAdmin,            // NEW
     recognized: !!userResolution.recognized,
     resources: resources,
     managerOrgs: managerOrgs,
@@ -1347,6 +1359,10 @@ function api_getReference() {
     icp: icp,
     roles: roles,
     planningWindowMonths: planningWindowMonths,
+    // WFM-FIX.1: no longer used to drive boot behavior (see
+    // applyAutoManagerDefaults_, JavaScript.html, which now personalizes
+    // the boot default off matchedManager/userIsAdmin instead). Left in
+    // the response for backward-compat.
     defaultTeamFilter: (function () {
       try {
         const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};

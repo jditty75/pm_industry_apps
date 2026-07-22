@@ -5,25 +5,6 @@
 function uuid_() { return Utilities.getUuid(); }
 function now_()  { return new Date(); }
 
-/**
- * WFM-PERF.1 (throwaway diagnostic): perf timer. _perfStart_(tag) starts a
- * timer; .mark(label) logs the delta since the last mark plus the
- * cumulative elapsed time. Used to break down the cold api_getDashboard
- * path into per-step timings so the real fix can be targeted instead of
- * guessed at. Strip / revert this instrumentation once the real fix ships
- * -- see Section 6 of the WFM-PERF.1 spec.
- * @param {string} tag
- * @return {{tag:string, t0:number, last:number, mark:function(string)}}
- */
-function _perfStart_(tag) {
-  return { tag: tag, t0: Date.now(), last: Date.now(),
-    mark: function (label) {
-      var now = Date.now();
-      Logger.log('[PERF ' + this.tag + '] ' + label + ': ' + (now - this.last) + 'ms (cum ' + (now - this.t0) + 'ms)');
-      this.last = now;
-    } };
-}
-
 function getUserEmail_() {
   try { return Session.getActiveUser().getEmail() || 'unknown'; }
   catch (e) { return 'unknown'; }

@@ -246,9 +246,7 @@ function getEnrichedAllocations_() {
   var cacheKey = 'enriched:alloc:v2:' + version;
 
   var cached = _enrichedCacheRead_(cacheKey);
-  // WFM-PERF.1 (throwaway diagnostic instrumentation).
-  if (cached) { Logger.log('[PERF getEnrichedAllocations_] CACHE HIT'); return cached; }
-  var _t = Date.now();
+  if (cached) return cached;
 
   var rows = cachedRead_(ALLOC_NORM);
   var ctx  = resolveTeamLabel_.buildCtx_();
@@ -272,7 +270,6 @@ function getEnrichedAllocations_() {
     row.team_label = resolveTeamLabel_(row, ctx);
     return row;
   });
-  Logger.log('[PERF getEnrichedAllocations_] COLD REBUILD: ' + (Date.now() - _t) + 'ms');
 
   _enrichedCacheWrite_(cacheKey, enriched);
   return enriched;
@@ -287,9 +284,7 @@ function getEnrichedAssignments_() {
   var cacheKey = 'enriched:assign:v1:' + version;
 
   var cached = _enrichedCacheRead_(cacheKey);
-  // WFM-PERF.1 (throwaway diagnostic instrumentation).
-  if (cached) { Logger.log('[PERF getEnrichedAssignments_] CACHE HIT'); return cached; }
-  var _t = Date.now();
+  if (cached) return cached;
 
   var assigns = cachedRead_(ASSIGNMENTS);
   var resIdx  = getResourceIndex_();
@@ -315,7 +310,6 @@ function getEnrichedAssignments_() {
     assign.resource_type  = assign.resource_type  || info.resource_type || '';
     return assign;
   });
-  Logger.log('[PERF getEnrichedAssignments_] COLD REBUILD: ' + (Date.now() - _t) + 'ms');
 
   _enrichedCacheWrite_(cacheKey, enriched);
   return enriched;
@@ -332,9 +326,7 @@ function getResourceIndex_() {
   var cacheKey = 'enriched:resindex:v1:' + version;
 
   var cached = _enrichedCacheRead_(cacheKey);
-  // WFM-PERF.1 (throwaway diagnostic instrumentation).
-  if (cached) { Logger.log('[PERF getResourceIndex_] CACHE HIT'); return cached; }
-  var _t = Date.now();
+  if (cached) return cached;
 
   // _resourceIndex_ is defined in Engine.gs and takes the alloc array.
   var alloc = cachedRead_(ALLOC_NORM);
@@ -355,7 +347,6 @@ function getResourceIndex_() {
       }, ctx);
     });
   }
-  Logger.log('[PERF getResourceIndex_] COLD REBUILD: ' + (Date.now() - _t) + 'ms');
 
   _enrichedCacheWrite_(cacheKey, idx);
   return idx;

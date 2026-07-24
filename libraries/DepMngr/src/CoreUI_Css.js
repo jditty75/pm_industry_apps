@@ -1869,7 +1869,12 @@ function _CoreUI_Css_getStylesheet() {
     '.trends-drilldown-close  { background:none; border:none; font-size:18px; cursor:pointer; color:var(--color-text-subtle); line-height:1; padding:0 4px; }',
 
     /* Disclaimer / footnote */
-    '.trends-footnote { font-size:11px; color:var(--color-text-subtle); font-style:italic; margin-top:var(--space-2,8px); }'
+    '.trends-footnote { font-size:11px; color:var(--color-text-subtle); font-style:italic; margin-top:var(--space-2,8px); }',
+
+    /* N1: Notable Restricted rows */
+    '.notable-row-restricted { opacity: 0.5; background: var(--color-surface-alt); }',
+    '.notable-row-restricted td { color: var(--color-text-muted); }',
+    '#notable-restricted-toggle.active { background: var(--color-primary-muted, #e0e7ff); border-color: var(--color-primary, #4f46e5); color: var(--color-primary, #4f46e5); }'
 
   ].join('\n');
 

@@ -401,6 +401,10 @@ var CoreConfig = (function () {
       cfg.notable.notify.slackWebhookUrl = '';
     if (cfg.notable.notify.slackWebhookUrlTest === undefined)
       cfg.notable.notify.slackWebhookUrlTest = '';
+    if (cfg.notable.restrictedHideEnabled === undefined || cfg.notable.restrictedHideEnabled === null)
+      cfg.notable.restrictedHideEnabled = true;
+    if (cfg.notable.pickerLookbackDays === undefined || cfg.notable.pickerLookbackDays === null)
+      cfg.notable.pickerLookbackDays = 180;
 
     // -------------------------------------------------------------------------
     // UI

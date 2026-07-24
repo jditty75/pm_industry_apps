@@ -1477,16 +1477,20 @@ var CoreData = (function () {
    *   }
    *
    * @param {AppConfig} config
-   * @param {Object=}   viewModeOpts  Phase 2 viewMode options (same shape as getUpcomingGoLives).
+   * @param {Object=}   viewModeOpts       Phase 2 viewMode options (same shape as getUpcomingGoLives).
+   * @param {number=}   windowDaysOverride When positive, overrides the config-derived window (e.g. 180
+   *                                       for the Notable picker). Absent/null/0 → today's behavior.
    * @return {Array<Object>}
    */
-  function getRecentGoLives(config, viewModeOpts) {
+  function getRecentGoLives(config, viewModeOpts, windowDaysOverride) {
     var cfg = CoreConfig.withDefaults(config);
 
-    // Recent window: default 60 days (matches ui.goLivesTab.recentWindowDays).
-    var recentWindowDays = (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
-                           (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) ||
-                           60;
+    // Recent window: positive windowDaysOverride wins; otherwise fall back to config / 60-day default.
+    var recentWindowDays =
+      (typeof windowDaysOverride === 'number' && windowDaysOverride > 0)
+        ? windowDaysOverride
+        : (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
+          (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) || 60;
 
     var now = new Date();
     now.setHours(0, 0, 0, 0);

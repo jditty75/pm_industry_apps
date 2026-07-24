@@ -137,7 +137,7 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
-      { id: 'mgmPgl',      label: 'MGM / PGL' },
+      { id: 'mgmPgl',      label: 'MDS / PGL' },
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' },
       { id: 'trends',      label: 'Trends' }

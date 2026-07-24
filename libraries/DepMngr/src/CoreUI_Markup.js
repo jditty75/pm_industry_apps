@@ -125,7 +125,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if (tabIds.indexOf('mgmPgl') !== -1 && ui.mgmPglTab && ui.mgmPglTab.enabled) parts.push(_CoreUI_Markup_buildMgmPglTab_(filteredUi));
   if (tabIds.indexOf('execsummary') !== -1 || tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportingTab_(filteredUi, cfg));
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi, cfg));
-  if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi));
+  if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi, cfg));
   if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
   if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi));
   if (tabIds.indexOf('student') !== -1) parts.push(_CoreUI_Markup_buildStudentTab_(filteredUi, cfg));
@@ -1503,7 +1503,12 @@ function _CoreUI_Markup_buildTrendsTab_(ui) {
  * @param {Object} ui  cfg.ui (already filtered)
  * @return {string}
  */
-function _CoreUI_Markup_buildNotableTab_(ui) {
+function _CoreUI_Markup_buildNotableTab_(ui, cfg) {
+  var notableCfg = (cfg && cfg.notable) || {};
+  var showRestrictedToggle = notableCfg.restrictedHideEnabled !== false;
+  var restrictedToggleBtn = showRestrictedToggle
+    ? '        <button id="notable-restricted-toggle" class="btn btn-secondary" onclick="toggleNotableRestricted()">Show Region Restricted</button>'
+    : '';
   var tab = [
     '<div id="notable-tab" class="tab-content">',
     '  <div class="info-banner">',
@@ -1515,6 +1520,7 @@ function _CoreUI_Markup_buildNotableTab_(ui) {
     '      <span id="notable-count" style="font-size: 13px; color: var(--color-text-muted);"></span>',
     '      <div class="filter-group">',
     '        <button class="btn btn-secondary" onclick="loadNotableTab()">&#x1F504; Refresh</button>',
+    restrictedToggleBtn,
     '        <button class="btn btn-primary" onclick="openNotableAddPicker()">+ Add Notable Deployment</button>',
     '      </div>',
     '    </div>',

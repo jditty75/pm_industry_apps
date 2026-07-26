@@ -442,8 +442,10 @@ function addNotable(deploymentId, fieldUpdates, notes) {
  *                 view:string}>}
  */
 function getGoLivesForNotablePicker() {
-  var recent = CoreLib.CoreData.getRecentGoLives(APP_CONFIG, {}) || [];
-  var upcoming = CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, {}) || [];
+  var _cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  var _lookback = (_cfg.notable && _cfg.notable.pickerLookbackDays) || 180;
+  var recent = CoreLib.CoreData.getRecentGoLivesForNotablePicker(APP_CONFIG, {}, _lookback) || [];
+  var upcoming = CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, {}) || [];  // unchanged
 
   var results = [];
 

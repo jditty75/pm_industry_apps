@@ -156,13 +156,14 @@ var APP_CONFIG = {
     tabs: [
       { id: 'deployments', label: 'Deployments' },
       { id: 'golives',     label: 'Go Lives' },
-      { id: 'mgmPgl',      label: 'MGM / PGL' },
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
+      { id: 'trends',      label: 'Trends' },
+      { id: 'mgmPgl',      label: 'MGM / PGL' },
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' },
-      { id: 'trends',      label: 'Trends' }
+      
     ],
 
     // MGM / PGL tab configuration (feature/mgm-pgl).

@@ -516,11 +516,12 @@ function _resourceIndex_(alloc) {
     if (!a.resource_name) return;
     const k = a.resource_name;
     map[k] = map[k] || {
-      name: k, icp: '', resource_type: '', worker_class: '',
+      name: k, employee_id: '', icp: '', resource_type: '', worker_class: '',
       teamCounts: {}, mgrCounts: {}, practiceCounts: {},
       teamTypeCounts: {}, subteamCounts: {},
       jobProfileCounts: {}, roleCategoryCounts: {}
     };
+    if (a.employee_id) map[k].employee_id = map[k].employee_id || a.employee_id;
     if (a.ICP_role) map[k].icp = map[k].icp || a.ICP_role;
     if (a.resource_type) map[k].resource_type = map[k].resource_type || a.resource_type;
     if (a.worker_class) map[k].worker_class = map[k].worker_class || a.worker_class;

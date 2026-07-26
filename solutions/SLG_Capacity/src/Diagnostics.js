@@ -1834,3 +1834,37 @@ function _dbg_reconcileWFM15() {
     ? '_dbg_reconcileWFM15: ALL CASES OK'
     : '_dbg_reconcileWFM15: ' + failures + ' CASE(S) FAILED — DO NOT SHIP');
 }
+/**
+ * Phase 0 gate: verify every non-excluded SLG worker got an employee_id
+ * after re-normalize. A blank ID would silently fail the Phase 1 actuals join.
+ */
+function _dbg_verifyEmployeeIds() {
+  _dbg_requireAdmin_();
+  var rows = readTable_(ALLOC_NORM);
+  var excluded = (typeof readExclusions_ === 'function') ? readExclusions_() : new Set();
+  var byWorker = {};      // name -> { id, wc }
+  rows.forEach(function (r) {
+    var nm = String(r.resource_name || '').trim();
+    if (!nm) return;
+    if (!byWorker[nm]) byWorker[nm] = { id: String(r.employee_id || '').trim(), wc: String(r.worker_class || '') };
+    else if (!byWorker[nm].id && r.employee_id) byWorker[nm].id = String(r.employee_id).trim();
+  });
+  var total = 0, withId = 0, blanks = [];
+  Object.keys(byWorker).forEach(function (nm) {
+    var w = byWorker[nm];
+    var isSlg = (w.wc === 'SLG_Real' || w.wc === 'SLG_Generic');
+    if (!isSlg) return;
+    // Skip excluded workers (managers/on-leave) — they need no join.
+    var key = (typeof _exclusionKey_ === 'function') ? _exclusionKey_(nm) : nm.toLowerCase();
+    if (excluded.has(key)) return;
+    total++;
+    if (w.id) withId++; else blanks.push(nm);
+  });
+  Logger.log('_dbg_verifyEmployeeIds: ' + withId + ' / ' + total + ' non-excluded SLG workers have an employee_id');
+  if (blanks.length) {
+    Logger.log('  BLANKS (' + blanks.length + ') — investigate: ' + JSON.stringify(blanks));
+    Logger.log('  RESULT: FAILED — these will not join to actuals in Phase 1');
+  } else {
+    Logger.log('  RESULT: OK — every non-excluded SLG worker has an employee_id');
+  }
+}

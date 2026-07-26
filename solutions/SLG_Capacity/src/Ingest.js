@@ -602,8 +602,9 @@ function normalizeStaff() {
   const workerIcpOverrides = readWorkerRoleOverrides_();
 
   // Resolve logical -> actual column indices, using aliases where present
-  const iWorker     = idx[aliasMap['resource_name']  || 'Worker']                    ?? -1;
-  const iTeam       = idx[aliasMap['team']           || 'Specialty Practice']        ?? -1;
+  const iEmpId      = idx[aliasMap['employee_id'] || 'Employee ID'] ?? -1;
+  const iWorker     = idx[aliasMap['resource_name'] || 'Worker'] ?? -1;
+  const iTeam       = idx[aliasMap['team'] || 'Specialty Practice'] ?? -1;
   const iPract      = idx[aliasMap['practice']       || 'Customer Segment Practice'] ?? -1;
   const iMgr        = idx[aliasMap['manager']        || "Worker's Manager"]          ?? -1;
   const iJob        = idx[aliasMap['job_profile']    || 'Job Profile']               ?? -1;
@@ -736,8 +737,9 @@ function normalizeStaff() {
     const onLeave = _deriveOnLeave_(workerName);
 
     const base = [
-      row[iWorker],                          // resource_name
-      iTeam    >= 0 ? row[iTeam]    : '',    // team (Specialty Practice)
+      iEmpId >= 0 ? String(row[iEmpId] || '').trim() : '',  // employee_id (Phase 0) — trimmed string for cross-source join
+      row[iWorker],                            // resource_name
+      iTeam >= 0 ? row[iTeam] : '',            // team (Specialty Practice)
       iPract   >= 0 ? row[iPract]   : '',    // practice (Customer Segment Practice)
       managerOrg,                            // manager_org (Worker's Manager) - RAW, with "(On Leave)" if present
       iJob     >= 0 ? row[iJob]     : '',    // job_profile

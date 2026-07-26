@@ -58,6 +58,7 @@ const SF_PIPELINE_REFRESH_LOG = 'Auto Refresh Execution Log 1';
 // back-compat; Allocations_Normalized is wiped and re-ingested at weekly
 // grain.
 const ALLOC_HEADERS = [
+  'employee_id',
   'resource_name',
   'team',
   'practice',               // SLG worker's practice as reported by PSA (External rows are unreliable; see Config_Practice_Managers)
@@ -240,6 +241,7 @@ const DEFAULT_ROLES = [
 
 // Default column aliases
 const DEFAULT_ALIASES = [
+  ['employee_id','Employee ID','stable worker join key (Phase 0)'],
   ['resource_name','Worker',''],
   ['team','Specialty Practice','primary grouping'],
   ['practice','Customer Segment Practice',''],

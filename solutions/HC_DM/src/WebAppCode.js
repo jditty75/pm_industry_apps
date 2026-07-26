@@ -233,8 +233,8 @@ function addNotable(deploymentId, fieldUpdates, notes) {
 function getGoLivesForNotablePicker() {
   var _cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
   var _lookback = (_cfg.notable && _cfg.notable.pickerLookbackDays) || 180;
-  var recent = CoreLib.CoreData.getRecentGoLives(APP_CONFIG, {}, _lookback) || [];
-  var upcoming = CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, {}) || [];
+  var recent = CoreLib.CoreData.getRecentGoLivesForNotablePicker(APP_CONFIG, {}, _lookback) || [];
+  var upcoming = CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, {}) || [];  // unchanged
 
   var results = [];
 
@@ -507,4 +507,26 @@ function getTrendsGoLiveOutcomeData(viewModeOpts) {
     viewModeOpts || {},
     CacheService.getScriptCache()
   );
+}
+
+function _diag_montefiore5() {
+  var full = 'a0rVT00000sqHQiYAM';
+  var eff = CoreLib.CoreData.getAllEffectiveDeployments(APP_CONFIG) || [];
+  var r = eff.filter(function(x){ return String(x.deploymentId||'') === full; })[0];
+  if (!r) { Logger.log('not found (unexpected)'); return; }
+  Logger.log('mtpDate=[' + r.mtpDate + '] typeof=' + (typeof r.mtpDate) + ' len=' + String(r.mtpDate||'').length);
+  Logger.log('overallStatus=[' + r.overallStatus + '] status=[' + r.status + ']');
+  Logger.log('excludeFromReport=' + r.excludeFromReport + ' accountName=[' + r.accountName + ']');
+
+  // Simulate the fallback window test exactly
+  var tz = Session.getScriptTimeZone();
+  var now = new Date(); now.setHours(0,0,0,0);
+  var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  var wsKey = Utilities.formatDate(new Date(now.getTime()-180*864e5), tz, 'yyyy-MM-dd');
+
+  var sliceKey = String(r.mtpDate||'').slice(0,10);
+  var normKey = (function(v){ if(!v) return ''; var d=(v instanceof Date)?v:new Date(String(v)); return isNaN(d.getTime())?'':Utilities.formatDate(d,tz,'yyyy-MM-dd'); })(r.mtpDate);
+  Logger.log('window=[' + wsKey + ' .. ' + todayKey + ']');
+  Logger.log('slice(0,10)=[' + sliceKey + '] passes=' + (sliceKey>=wsKey && sliceKey<=todayKey));
+  Logger.log('normalized =[' + normKey + '] passes=' + (normKey>=wsKey && normKey<=todayKey));
 }

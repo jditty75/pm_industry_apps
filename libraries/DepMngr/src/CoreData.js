@@ -1583,6 +1583,120 @@ var CoreData = (function () {
     return applyViewModeFilter_(cfg, results, viewModeOpts);
   }
 
+// ===========================================================================
+// N1.1: RECENT GO-LIVES FOR NOTABLE PICKER (Actual dates + past-MTP fallback)
+// ===========================================================================
+/**
+ * Picker-only variant of getRecentGoLives. Returns confirmed recent go-lives
+ * (from getRecentGoLives, Actual-date driven) PLUS deployments whose
+ * Current_MTP_Date is in the past and within the lookback window but have no
+ * confirmed Actual date yet.
+ *
+ * Rationale (N1.1): an Engagement Manager may not have set the Actual go-live
+ * date in the source system yet, but the deployment is still a valid Notable
+ * candidate. Used ONLY by the Notable add picker — does NOT change
+ * getRecentGoLives, so the Go Lives tab, monthly report, Portfolio Health, and
+ * Trends are unaffected.
+ *
+ * Confirmed Actual-date rows always win over an MTP-based candidate (dedup by
+ * full deploymentId). MTP-based candidates carry
+ * dateSource:'Current MTP (not confirmed actual)'.
+ *
+ * NOTE: the effective view's mtpDate is frequently a Date.toString() rendering
+ * (e.g. "Mon Jul 06 2026 00:00:00 GMT-0400 ..."), NOT ISO. slice(0,10) is
+ * therefore unsafe; _toKey_() normalizes any date-ish value to 'YYYY-MM-DD'.
+ *
+ * @param {AppConfig} config
+ * @param {Object=} viewModeOpts
+ * @param {number=} lookbackDays Positive window override; defaults to
+ *                               cfg.notable.pickerLookbackDays (180).
+ * @return {Array<Object>}
+ */
+function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
+  var cfg = CoreConfig.withDefaults(config);
+  var windowDays = (typeof lookbackDays === 'number' && lookbackDays > 0)
+    ? lookbackDays
+    : ((cfg.notable && cfg.notable.pickerLookbackDays) || 180);
+
+  var tz = Session.getScriptTimeZone();
+  var now = new Date(); now.setHours(0, 0, 0, 0);
+  var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  var windowStart = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
+  var windowStartKey = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
+
+  // Normalize any date-ish value (Date object, Date.toString(), ISO, or locale
+  // string) to 'YYYY-MM-DD'. Returns '' on empty/invalid input.
+  function _toKey_(v) {
+    if (!v) return '';
+    var d = (v instanceof Date) ? v : new Date(String(v));
+    if (isNaN(d.getTime())) return '';
+    return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+  }
+
+  // 1) Confirmed recent go-lives (Actual dates). Unchanged behavior, widened
+  //    window. These already carry recentDates[] + lastGoLiveDate.
+  var confirmed = getRecentGoLives(cfg, viewModeOpts, windowDays) || [];
+
+  var seen = {};
+  confirmed.forEach(function (r) {
+    if (r && r.deploymentId) seen[r.deploymentId] = true;
+    r.dateSource = 'Actual';
+  });
+
+  // 2) Past-MTP fallback: deployments with a past Current MTP in-window and NOT
+  //    already present via a confirmed Actual date.
+  var effective = [];
+  try {
+    effective = getAllEffectiveDeployments(cfg) || [];
+  } catch (err) {
+    Logger.log('CoreData.getRecentGoLivesForNotablePicker: ' +
+      'getAllEffectiveDeployments failed: ' + err);
+    effective = [];
+  }
+
+  var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+  var fallbackRows = [];
+
+  effective.forEach(function (dep) {
+    if (!dep || !dep.deploymentId) return;
+    if (seen[dep.deploymentId]) return;          // confirmed Actual already covers it
+
+    var ov = goLivesOverrides[dep.accountName] || {};
+    if (ov.exclude) return;
+
+    var mtpKey = ov.overrideDate ? _toKey_(ov.overrideDate) : _toKey_(dep.mtpDate);
+    if (!mtpKey) return;
+    if (mtpKey < windowStartKey || mtpKey > todayKey) return;  // past + in-window only
+
+    seen[dep.deploymentId] = true;
+    fallbackRows.push({
+      deploymentId: dep.deploymentId,
+      accountId: dep.accountId,
+      accountName: dep.accountName,
+      deploymentName: dep.deploymentName,
+      partner: ov.overridePartner || dep.partner,
+      industry: dep.industry,
+      status: dep.overallStatus || dep.status || '',
+      recentDates: [{ date: mtpKey, products: [] }],
+      lastGoLiveDate: mtpKey,
+      dateSource: 'Current MTP (not confirmed actual)'
+    });
+  });
+
+  var combined = confirmed.concat(fallbackRows);
+  combined.sort(function (a, b) {
+    if (a.lastGoLiveDate < b.lastGoLiveDate) return -1;
+    if (a.lastGoLiveDate > b.lastGoLiveDate) return 1;
+    return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+  });
+
+  Logger.log('CoreData.getRecentGoLivesForNotablePicker: ' + confirmed.length +
+    ' confirmed + ' + fallbackRows.length + ' past-MTP fallback = ' +
+    combined.length + ' (window ' + windowDays + 'd).');
+
+  return applyViewModeFilter_(cfg, combined, viewModeOpts);
+}
+
     // ===========================================================================
   // PUBLIC: META & OVERRIDES UPDATES (Phase 2 — wrapped with audit writes)
   // ===========================================================================
@@ -3939,6 +4053,8 @@ var CoreData = (function () {
 
     // Phase 3i additions
     getRecentGoLives:            getRecentGoLives,
+
+    getRecentGoLivesForNotablePicker: getRecentGoLivesForNotablePicker,
 
     // MDS / PGL redesign (2026-06) — replaces getUpcomingSurveys
     getMdsPglBatchView:          getMdsPglBatchView,

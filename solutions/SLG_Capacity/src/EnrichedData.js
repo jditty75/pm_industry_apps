@@ -351,3 +351,25 @@ function getResourceIndex_() {
   _enrichedCacheWrite_(cacheKey, idx);
   return idx;
 }
+
+/**
+ * Actuals keyed for blend: { employee_id: { week_key: actual_icp_hours } }.
+ * Cached on the config-version stamp like the other enriched getters.
+ */
+function getActualsByWorkerWeek_() {
+  var version = _getEnrichedCacheVersion_();
+  var cacheKey = 'enriched:actuals:v1:' + version;
+  var cached = _enrichedCacheRead_(cacheKey);
+  if (cached) return cached;
+  var rows = cachedRead_(ACTUALS_NORM);
+  var map = {};
+  rows.forEach(function (r) {
+    var eid = String(r.employee_id || '').trim();
+    var wk = r.week_key ? String(r.week_key) : (r.week_start ? weekKey_(r.week_start) : '');
+    if (!eid || !wk) return;
+    if (!map[eid]) map[eid] = {};
+    map[eid][wk] = (map[eid][wk] || 0) + (Number(r.actual_icp_hours) || 0);
+  });
+  _enrichedCacheWrite_(cacheKey, map);
+  return map;
+}

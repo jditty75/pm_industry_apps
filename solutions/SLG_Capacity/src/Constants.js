@@ -82,6 +82,24 @@ const ALLOC_HEADERS = [
                              // _deriveOnLeave_ (Ingest.gs) and reconcileWorkerExclusions_.
 ];
 
+const ACTUALS_NORM = 'Actuals_Normalized';
+const ACTUALS_HEADERS = [
+  'employee_id',   // trimmed string — join key
+  'resource_name', // Worker (display/fallback only)
+  'week_start',    // Date, Saturday anchor (matches Allocations_Normalized)
+  'week_key',      // canonical 'YYYY-MM-DD' string of week_start (weekKey_)
+  'actual_icp_hours', // number — the actual ICP hours for that worker×week
+  'source_row'     // number — source row index (diagnostics)
+];
+
+const ACTUALS_SUMMARY = 'Actuals_Worker_Summary';
+const ACTUALS_SUMMARY_HEADERS = [
+  'employee_id',            // trimmed string
+  'resource_name',          // Worker
+  'qtd_actual_icp_hours',   // number — the source 'QTD actual ICP hours' column, stored verbatim
+  'source_row'
+];
+
 const OPP_HEADERS = [
   'opportunity_id','opportunity_name','account','stage','stage_num',
   'probability','acv','expected_start','expected_end','ee_count',

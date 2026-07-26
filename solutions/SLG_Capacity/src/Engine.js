@@ -1300,6 +1300,8 @@ function computeWeeklyForecast_(params) {
   const resIndex = (typeof getResourceIndex_ === 'function')
     ? getResourceIndex_() : _resourceIndex_(allocRaw);
 
+  var actualsByWorker = (typeof getActualsByWorkerWeek_ === 'function') ? getActualsByWorkerWeek_() : {};
+
   function inScope(workerName) {
     const info = resIndex[workerName] || {};
     const cls = String(info.worker_class || '');
@@ -1363,6 +1365,7 @@ function computeWeeklyForecast_(params) {
         teamLabel: teamLabel,
         workerClass: info.worker_class || '',
         icpTarget: icpTargetFor_(info.icp || '', info.job_profile || '', settings),
+        employeeId: info.employee_id || '',
         workerWeekly: {},     // weekKey -> hours (DISPLAY: PTO/Holiday-inclusive per toggle)
         productiveWeekly: {}, // weekKey -> hours (CALC: excludes PTO_Holiday -- WFM.15)
         projects: {}          // project -> { weekKey -> hours }
@@ -1430,6 +1433,22 @@ function computeWeeklyForecast_(params) {
       });
     });
   }
+
+  // Blend actuals at read time: additive blendedWeekly alongside intact workerWeekly.
+  Object.values(workers).forEach(function (w) {
+    var wActuals = (w.employeeId && actualsByWorker[w.employeeId]) ? actualsByWorker[w.employeeId] : {};
+    w.blendedWeekly = {};
+    var allWeekKeys = {};
+    Object.keys(w.workerWeekly).forEach(function (k) { allWeekKeys[k] = true; });
+    Object.keys(wActuals).forEach(function (k) { allWeekKeys[k] = true; });
+    Object.keys(allWeekKeys).forEach(function (wk) {
+      if (wActuals.hasOwnProperty(wk)) {
+        w.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
+      } else {
+        w.blendedWeekly[wk] = { hours: w.workerWeekly[wk] || 0, isActual: false };
+      }
+    });
+  });
 
   // 3) Apply manager + Team filters (same semantics as computeUtilization).
   const filteredWorkers = Object.values(workers).filter(w => {

@@ -122,6 +122,7 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report', label: 'Monthly Report Preview' },
       { id: 'portfolio', label: 'Portfolio Health' },
+      { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides', label: 'Manage Overrides' },
       { id: 'trends',    label: 'Trends' }
     ],
@@ -129,7 +130,7 @@ var APP_CONFIG = {
     mgmPglTab: { enabled: false },
     // T1: Trends tab.
     trendsTab: { enabled: true },
-    notable: { enabled: false },
+    notable: { enabled: true },
     deploymentsTable: {
       showIndustry: false,
       showEmColumn: false,

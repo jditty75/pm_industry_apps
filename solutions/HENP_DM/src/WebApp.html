@@ -14,7 +14,13 @@
   <? } else { ?>
     <?!= CoreLib.CoreUI.getAppShell(APP_CONFIG, __userAccess) ?>
     <script>
-      window.APP_UI_CONFIG = <?!= JSON.stringify(APP_CONFIG.ui) ?>;
+      <? var __uiCfg = JSON.parse(JSON.stringify(APP_CONFIG.ui || {}));
+         var __cfgN1 = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+         __uiCfg.notable = {
+           restrictedHideEnabled: __cfgN1.notable.restrictedHideEnabled,
+           restrictedLabel: (__cfgN1.notable.validationStatusOptions && __cfgN1.notable.validationStatusOptions[2]) || 'Region Restricted'
+         }; ?>
+      window.APP_UI_CONFIG = <?!= JSON.stringify(__uiCfg) ?>;
       window.__USER_ACCESS__ = <?!= JSON.stringify(__userAccess) ?>;
     </script>
     <script><?!= CoreLib.CoreUI.getJsBundle() ?></script>

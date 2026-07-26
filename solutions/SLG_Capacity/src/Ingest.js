@@ -80,6 +80,134 @@ function uploadStaffFile(base64, filename) {
 }
 
 /**
+ * Ingest an uploaded actuals .xlsx file (base64) into the active spreadsheet,
+ * replacing the Actuals sheet, then normalize it.
+ *
+ * Returns: { filename, rowsIn, rowsOut, weeksDetected, warnings }
+ */
+function uploadActualsFile(base64, filename) {
+  if (!base64) {
+    throw new Error('No file content received.');
+  }
+
+  var bytes = Utilities.base64Decode(base64);
+  var blob = Utilities.newBlob(
+    bytes,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    filename || 'actuals_upload.xlsx'
+  );
+
+  var gsFile = Drive.Files.insert(
+    {
+      title: filename || 'Actuals Upload',
+      mimeType: 'application/vnd.google-apps.spreadsheet'
+    },
+    blob
+  );
+  var gsId = gsFile.id;
+
+  try {
+    var tempSs = SpreadsheetApp.openById(gsId);
+
+    var srcSheet = tempSs.getSheetByName('Actuals') || tempSs.getSheets()[0];
+    if (!srcSheet) {
+      throw new Error('Uploaded file has no sheets.');
+    }
+
+    var destSs = SpreadsheetApp.getActiveSpreadsheet();
+    var destSheet = destSs.getSheetByName('Actuals');
+    if (!destSheet) {
+      destSheet = destSs.insertSheet('Actuals');
+    } else {
+      destSheet.clear();
+    }
+
+    var values = srcSheet.getDataRange().getValues();
+    var rowsIn = Math.max((values.length || 0) - 1, 0);
+
+    if (values.length) {
+      destSheet
+        .getRange(1, 1, values.length, values[0].length)
+        .setValues(values);
+    }
+
+    var normResult = normalizeActuals();
+    return {
+      filename: filename || gsFile.title,
+      rowsIn: rowsIn,
+      rowsOut: normResult.rowsOut || 0,
+      weeksDetected: normResult.weeksDetected || 0,
+      warnings: normResult.warnings || []
+    };
+  } finally {
+    try {
+      DriveApp.getFileById(gsId).setTrashed(true);
+    } catch (e) {
+      // ignore cleanup failures
+    }
+  }
+}
+
+/**
+ * Normalize actuals from the Actuals sheet to Actuals_Normalized and
+ * Actuals_Worker_Summary.
+ */
+function normalizeActuals() {
+  const ss = SpreadsheetApp.getActive();
+  const src = ss.getSheetByName('Actuals');
+  if (!src) throw new Error('Missing sheet: Actuals');
+  const values = src.getDataRange().getValues();
+  if (values.length < 2) {
+    writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, []);
+    invalidateCache_(ACTUALS_NORM);
+    try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e){}
+    return { rowsIn: 0, rowsOut: 0, weeksDetected: 0, warnings: [] };
+  }
+  const header = values.shift();
+  const idx = {};
+  header.forEach((h, i) => { idx[String(h).trim()] = i; });
+
+  const iEmpId  = idx['Employee ID'] ?? -1;
+  const iWorker = idx['Worker'] ?? -1;
+  if (iEmpId < 0) throw new Error('Actuals: no "Employee ID" column found.');
+
+  const iQtd = idx['QTD actual ICP hours'] ?? -1;
+
+  const weekDetection = detectWeekColumns_(header);
+  const weeks = weekDetection.weeks;
+  if (!weeks.length) {
+    throw new Error('Actuals: no weekly columns detected (expected Date/MM-DD-YYYY headers).');
+  }
+  weekDetection.warnings.forEach(w => Logger.log('normalizeActuals: ' + w));
+
+  try {
+    const added = ensureCalendarWeeks_(weeks.map(w => w.weekStart));
+    if (added) Logger.log('normalizeActuals: added ' + added + ' week(s) to Config_Calendar');
+  } catch (e) { Logger.log('normalizeActuals: ensureCalendarWeeks_ failed — ' + e); }
+
+  const out = [];
+  const summaryOut = [];
+  for (let r = 0; r < values.length; r++) {
+    const row = values[r];
+    if (iEmpId < 0 || (!row[iEmpId] && row[iEmpId] !== 0)) continue;
+    const empId = String(row[iEmpId]).trim();
+    const worker = iWorker >= 0 ? String(row[iWorker] || '').trim() : '';
+    summaryOut.push([empId, worker, (iQtd >= 0 ? Number(row[iQtd]) || 0 : ''), r + 2]);
+    for (let k = 0; k < weeks.length; k++) {
+      const wc = weeks[k];
+      const hrs = Number(row[wc.index]);
+      if (!hrs) continue;
+      out.push([ empId, worker, wc.weekStart, weekKey_(wc.weekStart), hrs, r + 2 ]);
+    }
+  }
+  writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, out);
+  writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, summaryOut);
+  invalidateCache_(ACTUALS_NORM);
+  try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e){}
+  return { rowsIn: values.length, rowsOut: out.length, weeksDetected: weeks.length, warnings: weekDetection.warnings };
+}
+
+/**
  * Build a logical->actual column name map from Config_ColumnAliases.
  * Each row in Config_ColumnAliases should have:
  *   logical | actual

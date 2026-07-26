@@ -1868,3 +1868,169 @@ function _dbg_verifyEmployeeIds() {
     Logger.log('  RESULT: OK — every non-excluded SLG worker has an employee_id');
   }
 }
+
+/**
+ * WFM.16 §9 MANDATORY GATE. Proves ingest reconcile, join, blend precedence,
+ * seam correctness, and forecast data retention. Run from the editor;
+ * read View -> Logs. Do not ship if any check fails.
+ */
+function _dbg_reconcileActualsBlend() {
+  _dbg_requireAdmin_();
+  var failures = [];
+
+  // 1) Ingest reconciles: weekly sum == QTD from Actuals_Worker_Summary.
+  try {
+    var summaryRows = readTable_(ACTUALS_SUMMARY);
+    if (!summaryRows.length) {
+      failures.push('Check 1: Actuals_Worker_Summary is empty');
+    } else {
+      var sample = summaryRows[0];
+      var empId = String(sample.employee_id || '').trim();
+      var qtdExpected = Number(sample.qtd_actual_icp_hours) || 0;
+      var normRows = readTable_(ACTUALS_NORM);
+      var weekSum = 0;
+      normRows.forEach(function (r) {
+        if (String(r.employee_id || '').trim() === empId) {
+          weekSum += Number(r.actual_icp_hours) || 0;
+        }
+      });
+      Logger.log('Check 1 ingest reconcile: employee_id=' + empId +
+        ' weekSum=' + weekSum.toFixed(2) + ' qtd=' + qtdExpected.toFixed(2));
+      if (Math.abs(weekSum - qtdExpected) > 0.01) {
+        failures.push('Check 1: week sum ' + weekSum + ' != qtd ' + qtdExpected + ' for ' + empId);
+      }
+    }
+  } catch (e) {
+    failures.push('Check 1: ' + e.message);
+  }
+
+  // 2) Join works: Actuals employee_ids match Allocations employee_ids.
+  try {
+    var actualEmpIds = {};
+    var actualIdToName = {};
+    readTable_(ACTUALS_SUMMARY).forEach(function (r) {
+      var eid = String(r.employee_id || '').trim();
+      if (!eid) return;
+      actualEmpIds[eid] = true;
+      actualIdToName[eid] = String(r.resource_name || '').trim();
+    });
+    var allocEmpIds = {};
+    readTable_(ALLOC_NORM).forEach(function (r) {
+      var eid = String(r.employee_id || '').trim();
+      if (eid) allocEmpIds[eid] = true;
+    });
+    var excluded = (typeof readExclusions_ === 'function') ? readExclusions_() : new Set();
+    var matched = 0, unmatchedNonExcluded = 0, unmatchedIds = [];
+    Object.keys(actualEmpIds).forEach(function (eid) {
+      if (allocEmpIds[eid]) {
+        matched++;
+        return;
+      }
+      var name = actualIdToName[eid];
+      if (name && excluded.has(_exclusionKey_(name))) return;
+      unmatchedNonExcluded++;
+      unmatchedIds.push(eid);
+    });
+    Logger.log('Check 2 join: matched=' + matched + ' unmatched (non-excluded)=' + unmatchedNonExcluded);
+    if (unmatchedIds.length) {
+      Logger.log('  unmatched employee_ids: ' + JSON.stringify(unmatchedIds));
+    }
+    if (unmatchedNonExcluded > 0) {
+      failures.push('Check 2: ' + unmatchedNonExcluded + ' non-excluded actual employee_id(s) unmatched');
+    }
+  } catch (e) {
+    failures.push('Check 2: ' + e.message);
+  }
+
+  // 3) Blend precedence: actual wins when both actual and forecast exist.
+  try {
+    var forecast = computeWeeklyForecast_({ workerScope: 'All' });
+    var actualsMap = (typeof getActualsByWorkerWeek_ === 'function') ? getActualsByWorkerWeek_() : {};
+    var blendChecked = false;
+    forecast.workers.forEach(function (w) {
+      if (!w.employeeId || !w.blendedWeekly || !actualsMap[w.employeeId]) return;
+      var wActuals = actualsMap[w.employeeId];
+      Object.keys(wActuals).forEach(function (wk) {
+        if (!w.workerWeekly[wk]) return;
+        var cell = w.blendedWeekly[wk];
+        var expected = Number(wActuals[wk]) || 0;
+        if (!cell || !cell.isActual || Number(cell.hours) !== expected) {
+          failures.push('Check 3: blend precedence failed for ' + w.resource + ' week ' + wk);
+        } else {
+          blendChecked = true;
+          Logger.log('Check 3 blend precedence: worker=' + w.resource + ' week=' + wk +
+            ' actual=' + cell.hours + ' isActual=true');
+        }
+      });
+    });
+    if (!blendChecked) {
+      Logger.log('Check 3: no overlapping actual+forecast week found to spot-check');
+    }
+  } catch (e) {
+    failures.push('Check 3: ' + e.message);
+  }
+
+  // 4) Seam correctness.
+  try {
+    var forecast2 = computeWeeklyForecast_({ workerScope: 'All' });
+    var visibleWeeks = _deriveVisibleWeeksFiscal_(forecast2.weeks);
+    var seamWeekKey = '';
+    visibleWeeks.forEach(function (vw) {
+      var wk = String(vw.week_key);
+      var hasActual = forecast2.workers.some(function (w) {
+        var cell = w.blendedWeekly && w.blendedWeekly[wk];
+        return cell && cell.isActual;
+      });
+      if (hasActual) seamWeekKey = wk;
+    });
+    Logger.log('Check 4 seamWeekKey=' + seamWeekKey);
+    visibleWeeks.forEach(function (vw) {
+      var wk = String(vw.week_key);
+      var anyActual = forecast2.workers.some(function (w) {
+        var cell = w.blendedWeekly && w.blendedWeekly[wk];
+        return cell && cell.isActual;
+      });
+      if (seamWeekKey && wk <= seamWeekKey && !anyActual) {
+        failures.push('Check 4: week ' + wk + ' <= seam but no worker has isActual');
+      }
+      if (seamWeekKey && wk > seamWeekKey && anyActual) {
+        failures.push('Check 4: week ' + wk + ' > seam but has actual');
+      }
+    });
+  } catch (e) {
+    failures.push('Check 4: ' + e.message);
+  }
+
+  // 5) No forecast data loss: workerWeekly intact alongside blendedWeekly.
+  try {
+    var forecast3 = computeWeeklyForecast_({ workerScope: 'All' });
+    var lossCount = 0;
+    forecast3.workers.forEach(function (w) {
+      if (!w.blendedWeekly || typeof w.workerWeekly !== 'object') {
+        lossCount++;
+        return;
+      }
+      Object.keys(w.workerWeekly).forEach(function (wk) {
+        var cell = w.blendedWeekly[wk];
+        if (!cell || cell.isActual) return;
+        if (Number(cell.hours) !== Number(w.workerWeekly[wk])) {
+          lossCount++;
+        }
+      });
+    });
+    Logger.log('Check 5: workerWeekly intact alongside blendedWeekly for ' +
+      forecast3.workers.length + ' workers');
+    if (lossCount > 0) {
+      failures.push('Check 5: ' + lossCount + ' worker(s) missing or mismatched forecast data');
+    }
+  } catch (e) {
+    failures.push('Check 5: ' + e.message);
+  }
+
+  if (failures.length) {
+    failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+    Logger.log('_dbg_reconcileActualsBlend: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+  } else {
+    Logger.log('_dbg_reconcileActualsBlend: ALL CHECKS OK');
+  }
+}

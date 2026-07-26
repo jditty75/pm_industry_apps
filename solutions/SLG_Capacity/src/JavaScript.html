@@ -1219,7 +1219,8 @@
   // ============================================================
   const WeeklyForecastState = {
     expanded: new Set(),   // worker names with project rows currently shown
-    showManagersManager: false
+    showManagersManager: false,
+    expandNextQuarter: false
   };
 
   async function loadWeeklyForecastTable() {
@@ -1239,35 +1240,127 @@
     }
   }
 
+  function buildWeeklyForecastColumns_(weeks) {
+    const curQ = fiscalQuarterKey_(new Date());
+    const nextQDate = new Date(new Date().getFullYear(), new Date().getMonth() + 3, 1);
+    const nextQ = fiscalQuarterKey_(nextQDate);
+    const currentQuarterWeeks = weeks.filter(function (w) { return w.fiscalQuarterKey === curQ; });
+    const nextQuarterWeeks = weeks.filter(function (w) { return w.fiscalQuarterKey === nextQ; });
+    const columns = [];
+    currentQuarterWeeks.forEach(function (w) { columns.push({ type: 'week', week: w }); });
+    if (nextQuarterWeeks.length) {
+      if (WeeklyForecastState.expandNextQuarter) {
+        nextQuarterWeeks.forEach(function (w) { columns.push({ type: 'week', week: w }); });
+      } else {
+        columns.push({
+          type: 'collapsed',
+          quarterKey: nextQ,
+          weeks: nextQuarterWeeks,
+          label: nextQ + ' (forecast)'
+        });
+      }
+    }
+    return { columns: columns, curQ: curQ, nextQ: nextQ };
+  }
+
+  function findSeamColumnIndex_(columns, seamWeekKey) {
+    if (!seamWeekKey) return -1;
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      if (col.type === 'week' && col.week.weekKey === seamWeekKey) return i + 1;
+    }
+    return -1;
+  }
+
+  function aggregateNextQuarterCell_(weekCells, icpTarget) {
+    let sumHours = 0;
+    let sumIcpAvailable = 0;
+    weekCells.forEach(function (cell) {
+      const hours = Number(cell.hours) || 0;
+      const util = Number(cell.icpUtil) || 0;
+      const icpAvailableForWeek = util > 0 ? (hours / util) : 0;
+      sumHours += hours;
+      sumIcpAvailable += icpAvailableForWeek;
+    });
+    const aggUtil = sumIcpAvailable > 0 ? (sumHours / sumIcpAvailable) : 0;
+    return {
+      hours: sumHours,
+      aggUtil: aggUtil,
+      color: cellColor(aggUtil, icpTarget)
+    };
+  }
+
   function renderWeeklyForecastTable_(forecast) {
+    const table = $('#weeklyForecastTable');
     const headerRow = $('#weeklyForecastHeaderRow');
     const body = $('#weeklyForecastBody');
     if (!headerRow || !body) return;
 
     const weeks = (forecast && forecast.weeks) || [];
     const rows = (forecast && forecast.rows) || [];
+    const seamWeekKey = (forecast && forecast.seamWeekKey) || '';
+    const columnPlan = buildWeeklyForecastColumns_(weeks);
+    const columns = columnPlan.columns;
+    const seamColIdx = findSeamColumnIndex_(columns, seamWeekKey);
+    const stickyColCount = WeeklyForecastState.showManagersManager ? 4 : 3;
 
-    $$('.wf-col-week', headerRow).forEach(el => el.remove());
-    weeks.forEach(w => {
+    let zoneRow = $('#weeklyForecastZoneHeaderRow');
+    if (seamWeekKey && columns.length) {
+      if (!zoneRow && table) {
+        zoneRow = document.createElement('tr');
+        zoneRow.id = 'weeklyForecastZoneHeaderRow';
+        zoneRow.className = 'wf-zone-header';
+        headerRow.parentNode.insertBefore(zoneRow, headerRow);
+      }
+      if (zoneRow) {
+        let actualSpan = 0;
+        let forecastSpan = 0;
+        columns.forEach(function (col, idx) {
+          if (idx < seamColIdx) actualSpan++;
+          else forecastSpan++;
+        });
+        zoneRow.innerHTML =
+          '<th class="wf-col-sticky" colspan="' + stickyColCount + '"></th>' +
+          (actualSpan ? '<th class="wf-zone-actual" colspan="' + actualSpan + '">actual</th>' : '') +
+          (forecastSpan ? '<th class="wf-zone-forecast" colspan="' + forecastSpan + '">forecast</th>' : '');
+        zoneRow.hidden = false;
+      }
+    } else if (zoneRow) {
+      zoneRow.hidden = true;
+      zoneRow.innerHTML = '';
+    }
+
+    $$('.wf-col-week, .wf-col-collapsed', headerRow).forEach(function (el) { el.remove(); });
+    columns.forEach(function (col, idx) {
       const th = document.createElement('th');
-      th.className = 'wf-col-week';
-      th.textContent = w.label + ' · ' + w.fiscalQuarter;
-      th.title = w.fiscalQuarterKey;
+      if (col.type === 'collapsed') {
+        th.className = 'wf-col-collapsed';
+        th.textContent = col.label;
+        th.title = col.label;
+      } else {
+        th.className = 'wf-col-week' + (idx === seamColIdx ? ' wf-seam-divider' : '');
+        const zoneTag = seamWeekKey
+          ? (idx < seamColIdx ? '<span class="wf-header-tag">actual</span>' : '<span class="wf-header-tag">forecast</span>')
+          : '';
+        th.innerHTML = col.week.label + ' · ' + col.week.fiscalQuarter +
+          (zoneTag ? '<br>' + zoneTag : '');
+        th.title = col.week.fiscalQuarterKey;
+      }
       headerRow.appendChild(th);
     });
 
     if (!rows.length) {
-      body.innerHTML = '<tr><td class="muted" style="padding:12px" colspan="' + (4 + weeks.length) + '">' +
+      body.innerHTML = '<tr><td class="muted" style="padding:12px" colspan="' + (stickyColCount + columns.length) + '">' +
         'No forecast data in current scope.</td></tr>';
       return;
     }
 
     const showMgrMgr = WeeklyForecastState.showManagersManager;
     const html = [];
-    rows.forEach(r => {
+    rows.forEach(function (r) {
       const isOpen = WeeklyForecastState.expanded.has(r.worker);
       const weekByKey = {};
-      (r.workerWeekly || []).forEach(w => { weekByKey[w.weekKey] = w; });
+      (r.workerWeekly || []).forEach(function (w) { weekByKey[w.weekKey] = w; });
 
       html.push('<tr class="wf-row-worker' + (isOpen ? ' wf-open' : '') + '" data-worker="' + escapeHtml_(r.worker) + '">');
       html.push(
@@ -1285,42 +1378,75 @@
           escapeHtml_(r.managersManager || '') +
         '</td>'
       );
-      weeks.forEach(w => {
+
+      columns.forEach(function (col, idx) {
+        if (col.type === 'collapsed') {
+          const weekCells = col.weeks.map(function (w) {
+            return weekByKey[w.weekKey] || {
+              hours: 0, icpUtil: 0, icpTarget: r.icpTarget || 0.72
+            };
+          });
+          const agg = aggregateNextQuarterCell_(weekCells, r.icpTarget || 0.72);
+          const title = [
+            r.worker + ' · ' + col.label,
+            'Total forecast hours: ' + Math.round(agg.hours) + 'h',
+            'Aggregate ICP utilization: ' + fmtPct(agg.aggUtil),
+            'ICP target: ' + fmtPct(r.icpTarget || 0.72)
+          ].join('\n');
+          html.push(
+            '<td class="wf-col-collapsed wf-cell wf-cell-forecast" style="background:' + agg.color.bg +
+            ';color:' + agg.color.fg + '" title="' + escapeHtml_(title) + '">' +
+            Math.round(agg.hours) + '</td>'
+          );
+          return;
+        }
+
+        const w = col.week;
         const cell = weekByKey[w.weekKey] ||
           { hours: 0, icpUtil: 0, financeUtil: 0, icpTarget: r.icpTarget || 0.72,
-            icpAvailable: r.rawCapacity || 40, holidayHours: 0 };
-        // WFM.15: color by ICP utilization vs. the worker's role-family x
-        // level target (cellColor divides internally -- equivalent to the
-        // server's ratioToTarget). Bands unchanged (WFM.14 later).
+            icpAvailable: r.rawCapacity || 40, holidayHours: 0, isActual: false };
         const color = cellColor(cell.icpUtil, cell.icpTarget);
         const holidayNote = cell.holidayHours
           ? ' (raw ' + Math.round(r.rawCapacity) + 'h − ' + Math.round(cell.holidayHours) + 'h holiday)'
           : '';
+        const actualLabel = cell.isActual ? 'Actual' : 'Forecast';
         const title = [
           r.worker + ' · ' + w.label,
+          actualLabel,
           'Hours: ' + Math.round(cell.hours) + 'h',
           'ICP available: ' + Math.round(cell.icpAvailable) + 'h' + holidayNote,
           'ICP utilization: ' + fmtPct(cell.icpUtil),
           'ICP target: ' + fmtPct(cell.icpTarget),
           'Finance utilization: ' + fmtPct(cell.financeUtil)
         ].join('\n');
+        const seamCls = idx === seamColIdx ? ' wf-seam-divider' : '';
+        const forecastCls = cell.isActual ? '' : ' wf-cell-forecast';
         html.push(
-          '<td class="wf-col-week wf-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
-          escapeHtml_(title) + '">' + Math.round(cell.hours) + '</td>'
+          '<td class="wf-col-week wf-cell' + seamCls + forecastCls + '" style="background:' + color.bg +
+          ';color:' + color.fg + '" title="' + escapeHtml_(title) + '">' + Math.round(cell.hours) + '</td>'
         );
       });
       html.push('</tr>');
 
-      (r.projects || []).forEach(p => {
+      (r.projects || []).forEach(function (p) {
         const projByKey = {};
-        (p.weekly || []).forEach(w => { projByKey[w.weekKey] = w; });
+        (p.weekly || []).forEach(function (w) { projByKey[w.weekKey] = w; });
         html.push('<tr class="wf-row-project"' + (isOpen ? '' : ' hidden') + ' data-worker="' + escapeHtml_(r.worker) + '">');
         html.push('<td class="wf-col-sticky wf-col-worker wf-project-name">↳ ' + escapeHtml_(p.project) + '</td>');
         html.push('<td class="wf-col-sticky wf-col-level"></td>');
         html.push('<td class="wf-col-sticky wf-col-manager"></td>');
         html.push('<td class="wf-col-sticky wf-col-mgrmgr"' + (showMgrMgr ? '' : ' hidden') + '></td>');
-        weeks.forEach(w => {
-          const cell = projByKey[w.weekKey];
+        columns.forEach(function (col) {
+          if (col.type === 'collapsed') {
+            let sumHrs = 0;
+            col.weeks.forEach(function (w) {
+              const cell = projByKey[w.weekKey];
+              sumHrs += cell ? Number(cell.hours) || 0 : 0;
+            });
+            html.push('<td class="wf-col-collapsed wf-cell-project">' + (sumHrs ? Math.round(sumHrs) : '—') + '</td>');
+            return;
+          }
+          const cell = projByKey[col.week.weekKey];
           const hrs = cell ? Math.round(cell.hours) : 0;
           html.push('<td class="wf-col-week wf-cell-project">' + (hrs || '—') + '</td>');
         });
@@ -1329,6 +1455,13 @@
     });
 
     body.innerHTML = html.join('');
+
+    const expandNextBtn = $('#wfExpandNextQuarterBtn');
+    if (expandNextBtn) {
+      expandNextBtn.textContent = WeeklyForecastState.expandNextQuarter
+        ? 'Collapse next quarter'
+        : 'Expand next quarter';
+    }
   }
 
   document.addEventListener('click', (e) => {
@@ -1352,7 +1485,12 @@
   document.addEventListener('DOMContentLoaded', () => {
     const expandBtn = $('#wfExpandAllBtn');
     const collapseBtn = $('#wfCollapseAllBtn');
+    const expandNextBtn = $('#wfExpandNextQuarterBtn');
     const mgrMgrToggle = $('#wfShowManagersManager');
+    if (expandNextBtn) expandNextBtn.addEventListener('click', () => {
+      WeeklyForecastState.expandNextQuarter = !WeeklyForecastState.expandNextQuarter;
+      renderWeeklyForecastTable_(State.weeklyForecast);
+    });
     if (expandBtn) expandBtn.addEventListener('click', () => {
       const forecast = State.weeklyForecast;
       if (forecast && forecast.rows) forecast.rows.forEach(r => WeeklyForecastState.expanded.add(r.worker));
@@ -4959,6 +5097,45 @@ async function _qaRefreshPsaHours_() {
       try {
         const base64 = reader.result.split(',')[1];
         const result = await call('api_uploadStaffFile', base64, file.name);
+        status.className = 'status ok';
+        const warnCount = (result.warnings || []).length;
+        status.textContent = 'Uploaded: ' + result.rowsOut + ' rows normalized · ' + result.weeksDetected + ' weeks' +
+          (warnCount ? ' · ' + warnCount + ' warning' + (warnCount === 1 ? '' : 's') + ' (see Admin → Normalization Log)' : '');
+        State.ref = await call('api_getReference');
+        if (State.currentView === 'dashboard') loadDashboard();
+      } catch (err) {
+        status.className = 'status err';
+        status.textContent = 'Upload failed: ' + err.message;
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Actuals upload
+  const actualsUploadZone = $('#actualsUploadZone');
+  const actualsFile = $('#actualsFile');
+  $('#actualsBrowseBtn')?.addEventListener('click', () => actualsFile.click());
+  actualsUploadZone?.addEventListener('dragover', (e) => { e.preventDefault(); actualsUploadZone.classList.add('drag'); });
+  actualsUploadZone?.addEventListener('dragleave', () => actualsUploadZone.classList.remove('drag'));
+  actualsUploadZone?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    actualsUploadZone.classList.remove('drag');
+    if (e.dataTransfer.files.length) handleActualsFile_(e.dataTransfer.files[0]);
+  });
+  actualsFile?.addEventListener('change', () => {
+    if (actualsFile.files.length) handleActualsFile_(actualsFile.files[0]);
+  });
+
+  function handleActualsFile_(file) {
+    const status = $('#actualsUploadStatus');
+    status.hidden = false;
+    status.className = 'status info';
+    status.textContent = 'Uploading ' + file.name + '…';
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result.split(',')[1];
+        const result = await call('api_uploadActualsFile', base64, file.name);
         status.className = 'status ok';
         const warnCount = (result.warnings || []).length;
         status.textContent = 'Uploaded: ' + result.rowsOut + ' rows normalized · ' + result.weeksDetected + ' weeks' +

@@ -440,6 +440,23 @@ function _deriveVisibleWeeks_(weeks, windowMonths) {
 }
 
 /**
+ * Visible weeks for the blended forecast table: current fiscal quarter
+ * (captures QTD actuals) through the end of the next fiscal quarter.
+ * Fiscal quarters are Feb-anchored (see fiscalQuarterKey_ / Constants).
+ */
+function _deriveVisibleWeeksFiscal_(weeks) {
+  const today = new Date();
+  const curQ = fiscalQuarterKey_(today);          // e.g. 'FY27-Q2'
+  // Next fiscal quarter key: advance ~3 months and recompute.
+  const nextQDate = new Date(today.getFullYear(), today.getMonth() + 3, 1);
+  const nextQ = fiscalQuarterKey_(nextQDate);
+  return (weeks || []).filter(function (w) {
+    const qk = fiscalQuarterKey_(w.week_start);
+    return qk === curQ || qk === nextQ;
+  });
+}
+
+/**
  * WFM.15: cell metrics are now the Productive Utilization Model --
  * icpUtil (PRIMARY, nets holiday hours out of available capacity) and
  * financeUtil (SECONDARY, no holiday netting) computed from productive
@@ -476,7 +493,7 @@ function api_getForecastTable(params) {
 
   const windowMonths = (typeof readPlanningWindowMonths_ === 'function')
     ? readPlanningWindowMonths_() : 6;
-  const visibleWeeks = _deriveVisibleWeeks_(forecast.weeks, windowMonths);
+  const visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
 
   const weeksOut = visibleWeeks.map(w => {
     // Display label shows the SUNDAY of the week (week_start is the Saturday
@@ -501,12 +518,12 @@ function api_getForecastTable(params) {
   const rowsOut = forecast.workers.map(w => {
     const icpTarget = Number(w.icpTarget) || 0;
     const workerWeekly = visibleWeeks.map(vw => {
-      const hours = Number(w.workerWeekly[vw.week_key] || 0);
-      const productiveDemand = Number(w.productiveWeekly[vw.week_key] || 0);
+      const cell = (w.blendedWeekly && w.blendedWeekly[vw.week_key]) || { hours: 0, isActual: false };
+      const hours = Number(cell.hours) || 0;
       const holidayHours = Number(holidayHoursByWeek[vw.week_key] || 0);
       const icpAvailable = rawCapacity - holidayHours;
-      const icpUtil = icpAvailable > 0 ? (productiveDemand / icpAvailable) : 0;
-      const financeUtil = rawCapacity > 0 ? (productiveDemand / rawCapacity) : 0;
+      const icpUtil = icpAvailable > 0 ? (hours / icpAvailable) : 0;
+      const financeUtil = rawCapacity > 0 ? (hours / rawCapacity) : 0;
       const ratioToTarget = icpTarget > 0 ? (icpUtil / icpTarget) : 0;
       return {
         weekKey:       String(vw.week_key),
@@ -516,7 +533,8 @@ function api_getForecastTable(params) {
         icpTarget:     Number(icpTarget) || 0,
         ratioToTarget: Number(ratioToTarget) || 0,
         icpAvailable:  Number(icpAvailable) || 0,
-        holidayHours:  Number(holidayHours) || 0
+        holidayHours:  Number(holidayHours) || 0,
+        isActual:      !!cell.isActual
       };
     });
     const projects = Object.keys(w.projects).sort().map(proj => ({
@@ -539,10 +557,21 @@ function api_getForecastTable(params) {
     };
   });
 
+  let seamWeekKey = '';
+  visibleWeeks.forEach(function (vw) {
+    const wk = String(vw.week_key);
+    const hasActual = rowsOut.some(function (row) {
+      const cell = row.workerWeekly.find(function (c) { return c.weekKey === wk; });
+      return cell && cell.isActual;
+    });
+    if (hasActual) seamWeekKey = wk;
+  });
+
   return {
     weeks:               weeksOut,
     rows:                rowsOut,
-    planningWindowWeeks: visibleWeeks.length
+    planningWindowWeeks: visibleWeeks.length,
+    seamWeekKey:         seamWeekKey
   };
 }
 
@@ -2493,6 +2522,11 @@ function api_listAllWorkers() {
 function api_uploadStaffFile(base64, filename) {
   _requireAuthorized_();
   return uploadStaffFile(base64, filename);
+}
+
+function api_uploadActualsFile(base64, filename) {
+  _requireAuthorized_();
+  return uploadActualsFile(base64, filename);
 }
 
 function api_refreshOpportunities() {

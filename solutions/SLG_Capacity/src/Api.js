@@ -478,13 +478,22 @@ function api_getForecastTable(params) {
     ? readPlanningWindowMonths_() : 6;
   const visibleWeeks = _deriveVisibleWeeks_(forecast.weeks, windowMonths);
 
-  const weeksOut = visibleWeeks.map(w => ({
-    weekKey:          String(w.week_key),
-    weekStart:        _toIso_(w.week_start),
-    label:            Utilities.formatDate(w.week_start, Session.getScriptTimeZone() || 'Etc/UTC', 'MM/dd/yy'),
-    fiscalQuarter:    String(w.fiscal_quarter || ''),
-    fiscalQuarterKey: fiscalQuarterKey_(w.week_start)
-  }));
+  const weeksOut = visibleWeeks.map(w => {
+    // Display label shows the SUNDAY of the week (week_start is the Saturday
+    // export anchor). Data stays Saturday-anchored; this is display-only.
+    const labelDate = new Date(
+      w.week_start.getFullYear(),
+      w.week_start.getMonth(),
+      w.week_start.getDate() + 1
+    );
+    return {
+      weekKey: String(w.week_key),
+      weekStart: _toIso_(w.week_start),
+      label: Utilities.formatDate(labelDate, Session.getScriptTimeZone() || 'Etc/UTC', 'MM/dd/yy'),
+      fiscalQuarter: String(w.fiscal_quarter || ''),
+      fiscalQuarterKey: fiscalQuarterKey_(w.week_start)
+    };
+  });
 
   const rawCapacity = Number(forecast.rawCapacity) || 40;
   const holidayHoursByWeek = forecast.holidayHoursByWeek || {};

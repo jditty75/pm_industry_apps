@@ -158,6 +158,7 @@
               <input type="checkbox" id="wfShowManagersManager">
               Manager's Manager
             </label>
+            <button type="button" class="btn-ghost btn-ghost-sm" id="wfExpandNextQuarterBtn">Expand next quarter</button>
             <button type="button" class="btn-ghost btn-ghost-sm" id="wfExpandAllBtn">Expand All</button>
             <button type="button" class="btn-ghost btn-ghost-sm" id="wfCollapseAllBtn">Collapse All</button>
           </div>
@@ -798,6 +799,21 @@
             <button class="btn-primary" id="browseBtn">Choose file</button>
           </div>
           <div id="uploadStatus" class="status" hidden></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Upload Actuals</div>
+          </div>
+          <div class="upload-zone" id="actualsUploadZone">
+            <input type="file" id="actualsFile" accept=".xlsx" hidden>
+            <div class="upload-hint">
+              <div class="upload-title">Actuals (QTD ICP hours)</div>
+              <div class="muted">Replaces <code>Actuals</code> and re-normalizes.</div>
+            </div>
+            <button class="btn-primary" id="actualsBrowseBtn">Choose file</button>
+          </div>
+          <div id="actualsUploadStatus" class="status" hidden></div>
         </div>
 
         <div class="card">

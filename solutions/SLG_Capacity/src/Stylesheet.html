@@ -773,6 +773,57 @@ textarea.input {
   vertical-align: middle;
 }
 
+/* WFM.16 Phase 1 — seam, actual/forecast texture, collapsed quarter */
+.wf-seam-divider {
+  border-left: 3px solid var(--ballpoint) !important;
+}
+.wf-cell-forecast {
+  position: relative;
+}
+.wf-cell-forecast::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.06) 3px,
+    rgba(0, 0, 0, 0.06) 6px
+  );
+}
+.wf-col-collapsed {
+  min-width: 88px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--paper);
+}
+.wf-col-collapsed.wf-cell {
+  font-weight: 600;
+}
+.wf-zone-header th {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--staple);
+  padding: 2px 6px 4px;
+  border-bottom: none;
+  text-align: center;
+}
+.wf-zone-actual { color: var(--laptop); }
+.wf-zone-forecast { color: var(--staple); }
+.wf-header-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--staple);
+  margin-top: 2px;
+}
+
 /* ============================================================
    Tables
    ============================================================ */

@@ -520,7 +520,7 @@
             </button>
             <button id="tabBtnQualtrix" class="tab-button"
                     onclick="setAgendaTab('QUALTRIX')">
-              Qualtrix
+              Qualtrics
             </button>
             <button id="tabBtnManual" class="tab-button"
                     onclick="setAgendaTab('MANUAL')">
@@ -580,9 +580,9 @@
           <!-- Qualtrix Modal -->
           <div id="qualtrixModalBackdrop" class="modal-backdrop">
             <div class="modal">
-              <h3>Qualtrix Agenda Item</h3>
+              <h3>Qualtrics Agenda Item</h3>
               <div class="modal-subtitle">
-                Provide context for why this Qualtrix item belongs on
+                Provide context for why this Qualtrics item belongs on
                 the Healthcare Wellness Leadership agenda.
                 <br>
                 Fields marked <span class="required">*</span> are required.
@@ -615,7 +615,7 @@
                   <select id="manualCategory">
                     <option value="DEPLOYMENT">Deployment</option>
                     <option value="CSAT">CSAT</option>
-                    <option value="QUALTRIX">Qualtrix</option>
+                    <option value="QUALTRIX">Qualtrics</option>
                     <option value="BUDGET_EAC">EAC / Budget</option>
                   </select>
                 </div>
@@ -1061,7 +1061,7 @@
             const topicLabelMap = {
               'DEPLOYMENT': 'Deployment',
               'CSAT': 'CSAT',
-              'QUALTRIX': 'Qualtrix',
+              'QUALTRIX': 'Qualtrics',
               'BUDGET_EAC': 'Budget / EAC',
               'MANUAL': 'Manual'
             };
@@ -1145,7 +1145,7 @@
                     ${q.account}
                   </div>
                   <div class="item-meta">
-                    <span class="pill">Source: Qualtrix</span>
+                    <span class="pill">Source: Qualtrics</span>
                     ${
                       q.detail
                         ? `<span class="pill">Detail: ${q.detail}</span>`
@@ -1586,7 +1586,7 @@
 
             google.script.run
               .withFailureHandler(err => {
-                alert('Error removing Qualtrix item from agenda: ' + err.message);
+                alert('Error removing Qualtrics item from agenda: ' + err.message);
               })
               .removeAgendaItem('QUALTRIX', id);
           }
@@ -2097,7 +2097,7 @@ ${existing.futureState || ''}</textarea>
             if (!lead || !desiredOutcome || !futureState) {
               alert(
                 'Please enter Lead, Desired Outcome, and Future State before ' +
-                'saving this Qualtrix item to the agenda.'
+                'saving this Qualtrics item to the agenda.'
               );
             } else {
               const existingSel =
@@ -2141,7 +2141,7 @@ ${existing.futureState || ''}</textarea>
 
               google.script.run
                 .withFailureHandler(err => {
-                  alert('Error saving Qualtrix item to agenda: ' + err.message);
+                  alert('Error saving Qualtrics item to agenda: ' + err.message);
                 })
                 .upsertAgendaItem(agendaItem);
 

@@ -145,10 +145,46 @@ function parseCsmName_(raw) {
 }
 
 /**
- * Read Qualtrix items from an external Google Sheet.
+ * Read a key/value setting from the "Settings" sheet (Column A = key, Column B = value).
+ * Returns the trimmed string value, or '' if the sheet/key is missing.
+ */
+function getSetting_(key) {
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getSheetByName('Settings');
+  if (!sheet) return '';
+  var values = sheet.getDataRange().getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]).trim() === String(key).trim()) {
+      return String(values[i][1] == null ? '' : values[i][1]).trim();
+    }
+  }
+  return '';
+}
+
+/**
+ * Resolve the set of quarters used to filter the Qualtrics "Detractor Tracker".
+ * Source of truth: Settings sheet, key "Qualtrix Quarters" (comma-separated, e.g. "Q1,Q2").
+ * Falls back to DEFAULT_QUALTRIX_QUARTERS if unset/blank.
+ * Values are normalized (trimmed + uppercased).
+ */
+var DEFAULT_QUALTRIX_QUARTERS = 'Q1';
+
+function getQualtrixQuarters_() {
+  var raw = getSetting_('Qualtrix Quarters');
+  if (!raw) raw = DEFAULT_QUALTRIX_QUARTERS;
+  var set = {};
+  raw.split(',').forEach(function (q) {
+    var norm = String(q).trim().toUpperCase();
+    if (norm) set[norm] = true;
+  });
+  return set;
+}
+
+/**
+ * Read Qualtrics items from an external Google Sheet.
  * URL: https://docs.google.com/spreadsheets/d/1VyC60G5qVYT_ALVzVMh1LCQvS-7jcmDXc85gh2XpAKI/edit?gid=1274570197#gid=1274570197
  * Sheet: "Detractor Tracker"
- * Filter: Column A == "Q1"
+ * Filter: Column A is one of the quarters in the Settings sheet ("Qualtrix Quarters"), default "Q1".
  */
 function getQualtrixItems_() {
   const url = 'https://docs.google.com/spreadsheets/d/1VyC60G5qVYT_ALVzVMh1LCQvS-7jcmDXc85gh2XpAKI/edit#gid=1274570197';
@@ -159,13 +195,15 @@ function getQualtrixItems_() {
   const values = sheet.getDataRange().getValues();
   if (!values || values.length < 2) return [];
 
+  const quarterSet = getQualtrixQuarters_();
+
   const rows = values.slice(1);
   const items = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const quarter = row[0]; // Column A
-    if (String(quarter) !== 'Q1') continue;
+    const quarter = String(row[0] || '').trim().toUpperCase(); // Column A, normalized
+    if (!quarterSet[quarter]) continue;
 
     const colB = row[1];  // B
     const colC = row[2];  // C
@@ -1296,7 +1334,7 @@ function generateAgendaItemHtml(item, number, type) {
     var topicLabelMap = {
       'DEPLOYMENT': 'Deployment',
       'CSAT': 'CSAT',
-      'QUALTRIX': 'Qualtrix',
+      'QUALTRIX': 'Qualtrics',
       'BUDGET_EAC': 'Budget / EAC',
       'MANUAL': 'Manual'
     };

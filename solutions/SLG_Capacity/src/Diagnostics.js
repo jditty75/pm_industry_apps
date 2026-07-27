@@ -2034,3 +2034,213 @@ function _dbg_reconcileActualsBlend() {
     Logger.log('_dbg_reconcileActualsBlend: ALL CHECKS OK');
   }
 }
+
+// ============================================================
+// WFM.17 — Quarterly scorecard + dashboard KPI reconciliation.
+// MANDATORY GATE: do not ship WFM.17 unless ALL CHECKS OK.
+// ============================================================
+
+/**
+ * WFM.17 mandatory gate. Validates quarterly targets, source reconciliation,
+ * team aggregation, worker scope, and dashboard KPI alignment.
+ */
+function _dbg_reconcileWFM17() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var settings = readSettings_();
+  var holidays = readHolidays_();
+
+  // Ensure January 2027 holidays are present.
+  if (typeof ensureHolidays2027Jan_ === 'function') ensureHolidays2027Jan_();
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  holidays = readHolidays_();
+
+  var hasJan2027 = holidays.some(function (h) {
+    return h.date.getFullYear() === 2027 && h.date.getMonth() === 0;
+  });
+  if (!hasJan2027) {
+    failures.push('January 2027 holidays missing from Config_Holidays');
+  }
+
+  // ---- Target reconciliation: Consulting P3–P5 (Aidan) ----
+  (function consultingTargets() {
+    Logger.log('=== WFM.17 Consulting P3–P5 target reconciliation (Aidan profile) ===');
+    var expected = { 'FY27-Q2': 375.76, 'FY27-Q3': 388.08, 'FY27-Q4': 357.28 };
+    var staleQ4 = 369.6;
+    Object.keys(expected).forEach(function (qk) {
+      var got = quarterTargetHoursFor_('CS_FUNC', 'P4 Consulting', qk, holidays, settings);
+      var exp = expected[qk];
+      var ok = Math.abs(got - exp) < 0.02;
+      Logger.log('  ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('Consulting target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
+      if (qk === 'FY27-Q4') {
+        Logger.log('  FY27-Q4 stale workbook target=' + staleQ4 + ' (expected difference — Jan 2027 holidays applied)');
+      }
+    });
+  })();
+
+  // ---- Target reconciliation: P6 (Larry / Phil profile) ----
+  (function p6Targets() {
+    Logger.log('=== WFM.17 P6 target reconciliation ===');
+    var expected = { 'FY27-Q2': 297.68, 'FY27-Q3': 307.44, 'FY27-Q4': 283.04 };
+    Object.keys(expected).forEach(function (qk) {
+      var got = quarterTargetHoursFor_('EM', 'P6 Delivery Consultant', qk, holidays, settings);
+      var exp = expected[qk];
+      var ok = Math.abs(got - exp) < 0.02;
+      Logger.log('  ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('P6 target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
+    });
+  })();
+
+  // ---- Current-quarter source reconciliation ----
+  (function currentQuarterSource() {
+    Logger.log('=== WFM.17 current-quarter source reconciliation ===');
+    var summaryRows = readTable_(ACTUALS_SUMMARY);
+    var sample = summaryRows.find(function (r) {
+      return Number(r.qtd_icp_plus_forecast_hours) > 0 &&
+        Number(r.bonus_target_billable_hours_eoq) > 0;
+    });
+    if (!sample) {
+      Logger.log('  SKIPPED — no worker with qtd_icp_plus_forecast + bonus target in Actuals_Worker_Summary');
+      return;
+    }
+    var prod = Number(sample.qtd_icp_plus_forecast_hours);
+    var tgt = Number(sample.bonus_target_billable_hours_eoq);
+    var attainment = tgt > 0 ? prod / tgt : 0;
+    Logger.log('  sample worker=' + sample.resource_name + ' empId=' + sample.employee_id);
+    Logger.log('  qtd_icp_plus_forecast_hours=' + prod + ' bonus_target=' + tgt +
+      ' attainment=' + (attainment * 100).toFixed(2) + '%');
+
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var workerRow = (scorecard.workers || []).find(function (w) {
+      return w.employeeId === String(sample.employee_id).trim();
+    });
+    if (!workerRow) {
+      failures.push('Current-quarter sample worker not in scorecard');
+      return;
+    }
+    var curQ = fiscalQuarterKey_(new Date());
+    var curQuarter = (workerRow.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+    if (!curQuarter) {
+      failures.push('Current quarter missing from scorecard sample worker');
+      return;
+    }
+    var ok = Math.abs(curQuarter.bonusAttainment - attainment) < 1e-6;
+    Logger.log('  scorecard bonusAttainment=' + (curQuarter.bonusAttainment * 100).toFixed(2) + '%' +
+      (ok ? ' OK' : ' FAILED'));
+    if (!ok) failures.push('Current-quarter bonus attainment mismatch for ' + sample.resource_name);
+  })();
+
+  // ---- Future-quarter formula reconciliation ----
+  (function futureQuarterFormula() {
+    Logger.log('=== WFM.17 future-quarter formula reconciliation ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var curQ = fiscalQuarterKey_(new Date());
+    var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) { return qk !== curQ; });
+    if (!futureKeys.length) {
+      Logger.log('  SKIPPED — no future quarters');
+      return;
+    }
+    var fk = futureKeys[0];
+    var sample = (scorecard.workers || []).find(function (w) {
+      var q = (w.quarters || []).find(function (qq) { return qq.quarterKey === fk; });
+      return q && q.productiveHours > 0 && q.source === 'forecast';
+    });
+    if (!sample) {
+      Logger.log('  SKIPPED — no worker with forecast productive hours in ' + fk);
+      return;
+    }
+    var q = sample.quarters.find(function (qq) { return qq.quarterKey === fk; });
+    Logger.log('  worker=' + sample.worker + ' quarter=' + fk);
+    Logger.log('  forecast productive=' + q.productiveHours.toFixed(2) +
+      ' target=' + q.targetHours.toFixed(2) +
+      ' tracking=' + q.trackingHours.toFixed(2));
+    Logger.log('  bonusAttainment=' + (q.bonusAttainment * 100).toFixed(2) + '%' +
+      ' icpUtil=' + (q.icpUtil * 100).toFixed(2) + '%' +
+      ' financeUtil=' + (q.financeUtil * 100).toFixed(2) + '%' +
+      ' ratioToTarget=' + (q.ratioToTarget * 100).toFixed(2) + '%');
+    var expBonus = q.targetHours > 0 ? q.productiveHours / q.targetHours : 0;
+    if (Math.abs(q.bonusAttainment - expBonus) > 1e-6) {
+      failures.push('Future-quarter bonus attainment formula mismatch for ' + sample.worker);
+    }
+  })();
+
+  // ---- Team aggregation reconciliation ----
+  (function teamAgg() {
+    Logger.log('=== WFM.17 team aggregation reconciliation ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    (scorecard.quarterKeys || []).forEach(function (qk, qi) {
+      var sumProd = 0, sumIcpAvail = 0, sumRawCap = 0, sumTarget = 0;
+      (scorecard.workers || []).forEach(function (w) {
+        var q = w.quarters[qi];
+        if (!q) return;
+        sumProd += q.productiveHours;
+        sumIcpAvail += q.icpAvailableHours;
+        sumRawCap += q.rawCapacityHours;
+        sumTarget += q.targetHours;
+      });
+      var team = scorecard.teamSummary[qi];
+      var icpOk = Math.abs(team.icpUtil - (sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0)) < 1e-9;
+      var finOk = Math.abs(team.financeUtil - (sumRawCap > 0 ? sumProd / sumRawCap : 0)) < 1e-9;
+      var bonusOk = Math.abs(team.bonusAttainment - (sumTarget > 0 ? sumProd / sumTarget : 0)) < 1e-9;
+      Logger.log('  ' + qk + ': team icp=' + (team.icpUtil * 100).toFixed(2) + '%' +
+        ' finance=' + (team.financeUtil * 100).toFixed(2) + '%' +
+        ' bonus=' + (team.bonusAttainment * 100).toFixed(2) + '%' +
+        (icpOk && finOk && bonusOk ? ' OK' : ' FAILED'));
+      if (!icpOk || !finOk || !bonusOk) failures.push('Team summary mismatch for ' + qk);
+    });
+  })();
+
+  // ---- Dashboard KPI alignment (Stage 2 gate) ----
+  (function dashboardKpiAlign() {
+    Logger.log('=== WFM.17 dashboard KPI alignment (blended fiscal window) ===');
+    var params = { viewMode: 'Committed', groupBy: 'Function', workerScope: 'SLG' };
+    var filterParams = dashboardKpiFilterParams_(params);
+    var dash = api_getDashboard(params);
+    var blended = computeBlendedWindowKpis_(filterParams);
+    var icpOk = Math.abs(dash.kpis.avgIcpProductiveUtilization - blended.avgIcpProductiveUtilization) < 1e-9;
+    var finOk = Math.abs(dash.kpis.avgFinancialUtilization - blended.avgFinancialUtilization) < 1e-9;
+    var prodOk = Math.abs(dash.kpis.totalProductiveHours - blended.totalProductiveHours) < 0.01;
+    Logger.log('  dashboard avgIcp=' + (dash.kpis.avgIcpProductiveUtilization * 100).toFixed(2) + '%' +
+      ' blended=' + (blended.avgIcpProductiveUtilization * 100).toFixed(2) + '%' + (icpOk ? ' OK' : ' MISMATCH'));
+    Logger.log('  dashboard avgFin=' + (dash.kpis.avgFinancialUtilization * 100).toFixed(2) + '%' +
+      ' blended=' + (blended.avgFinancialUtilization * 100).toFixed(2) + '%' + (finOk ? ' OK' : ' MISMATCH'));
+    Logger.log('  dashboard totalProductive=' + dash.kpis.totalProductiveHours +
+      ' blended=' + blended.totalProductiveHours + (prodOk ? ' OK' : ' MISMATCH'));
+    if (!icpOk) failures.push('Dashboard avgIcpProductiveUtilization != computeBlendedWindowKpis_');
+    if (!finOk) failures.push('Dashboard avgFinancialUtilization != computeBlendedWindowKpis_');
+    if (!prodOk) failures.push('Dashboard totalProductiveHours != computeBlendedWindowKpis_');
+  })();
+
+  // ---- No invalid workers ----
+  (function workerValidity() {
+    Logger.log('=== WFM.17 worker validity ===');
+    var excluded = readExclusions_();
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var blankIds = [];
+    var blankRoles = [];
+    (scorecard.workers || []).forEach(function (w) {
+      if (excluded.has(_exclusionKey_(w.worker))) {
+        failures.push('Excluded worker in scorecard: ' + w.worker);
+      }
+      if (!w.employeeId) blankIds.push(w.worker);
+      if (!w.icpRole) blankRoles.push(w.worker);
+    });
+    if (blankIds.length) {
+      Logger.log('  Workers with blank Employee ID (' + blankIds.length + '): ' +
+        JSON.stringify(blankIds.slice(0, 5)));
+      failures.push(blankIds.length + ' worker(s) with blank Employee ID');
+    } else {
+      Logger.log('  No non-excluded worker has blank Employee ID — OK');
+    }
+    if (blankRoles.length) {
+      Logger.log('  Workers with blank ICP role (fallback target warning): ' +
+        JSON.stringify(blankRoles.slice(0, 5)));
+    }
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM17: ALL CHECKS OK'
+    : '_dbg_reconcileWFM17: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}

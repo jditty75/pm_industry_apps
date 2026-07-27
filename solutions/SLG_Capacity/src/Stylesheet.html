@@ -756,6 +756,106 @@ textarea.input {
   color: var(--laptop);
   font-size: 12px;
 }
+
+/* ============================================================
+   Team Quarterly Scorecard (WFM.17)
+   ============================================================ */
+.quarterly-scorecard-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.metric-toggle {
+  display: inline-flex;
+  border: 1px solid var(--desk);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.metric-toggle .btn-toggle {
+  border: 0;
+  background: #fff;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--laptop);
+}
+.metric-toggle .btn-toggle.active {
+  background: var(--ballpoint);
+  color: #fff;
+}
+.metric-toggle .btn-toggle:hover:not(.active) {
+  background: var(--keyboard);
+}
+.qs-summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--business-card);
+  margin-bottom: 12px;
+}
+.qs-summary-quarter {
+  flex: 1 1 200px;
+  min-width: 180px;
+  padding: 8px 12px;
+  background: var(--paper);
+  border-radius: 6px;
+  border: 1px solid var(--business-card);
+}
+.qs-summary-qlabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--after-hours);
+  margin-bottom: 4px;
+}
+.qs-cur-tag {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ballpoint);
+  text-transform: uppercase;
+}
+.qs-summary-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--laptop);
+}
+.quarterly-scorecard-scroll {
+  overflow: auto;
+  max-height: 640px;
+  border: 1px solid var(--business-card);
+  border-radius: 8px;
+}
+.quarterly-scorecard-table { min-width: 100%; }
+.quarterly-scorecard-table th,
+.quarterly-scorecard-table td {
+  white-space: nowrap;
+  text-align: center;
+}
+.quarterly-scorecard-table th.qs-col-sticky,
+.quarterly-scorecard-table td.qs-col-sticky {
+  text-align: left;
+}
+.qs-col-sticky {
+  position: sticky;
+  background: #fff;
+}
+.quarterly-scorecard-table th.qs-col-sticky {
+  background: var(--keyboard);
+  z-index: 3;
+}
+.quarterly-scorecard-table td.qs-col-sticky { z-index: 2; }
+.qs-col-worker  { left: 0;     min-width: 200px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.qs-col-level   { left: 200px; min-width: 56px;  max-width: 56px;  text-align: center; }
+.qs-col-manager { left: 256px; min-width: 140px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.qs-col-team    { left: 396px; min-width: 140px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; border-right: 1px solid var(--desk); }
+.qs-col-quarter { min-width: 88px; font-variant-numeric: tabular-nums; }
+.qs-cell { cursor: help; font-weight: 500; font-variant-numeric: tabular-nums; }
+.qs-cell-neutral { color: var(--staple); }
+.qs-total-row td { font-weight: 600; background: var(--keyboard); }
+.qs-total-row .qs-col-sticky { background: var(--keyboard); }
+
 .legend {
   display: flex;
   gap: 14px;
@@ -1330,6 +1430,23 @@ textarea.input {
   --wc-slg-generic: #5BB5C4;               /* SLG_Generic — tinted teal */
   --wc-nonslg:      var(--happy-hour);    /* External_NonSLG */
   --wc-partner:     var(--thumbtack);     /* External_Contractor */
+}
+
+/* ------------------------------------------------------------
+   Five-card KPI row (Dashboard WFM.17)
+   ------------------------------------------------------------ */
+.kpi-row.kpi-row-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+@media (max-width: 1400px) {
+  .kpi-row.kpi-row-5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 900px) {
+  .kpi-row.kpi-row-5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* ------------------------------------------------------------

@@ -67,6 +67,8 @@ function bootstrap() {
     writeTable_(CFG_HOLIDAYS, HOLIDAY_HEADERS, DEFAULT_HOLIDAYS_2026);
     Logger.log('bootstrap: seeded Config_Holidays with the 2026 Workday schedule (16 rows). ' +
       '2027 holiday dates are NOT included -- add them to Config_Holidays manually once published.');
+  } else {
+    ensureHolidays2027Jan_();
   }
 
   // Clear Config_Calendar to headers-only, zero data rows (weekly-forecast-
@@ -141,4 +143,49 @@ function ensureTrigger_(handler, minutes) {
     .filter(t => t.getHandlerFunction() === handler);
   if (existing.length) return;
   ScriptApp.newTrigger(handler).timeBased().everyMinutes(minutes).create();
+}
+
+/**
+ * WFM.17: ensure January 2027 holidays exist in Config_Holidays without
+ * overwriting existing rows. Idempotent — safe to call on every bootstrap.
+ * Seeds 2027-01-01 (New Year's Day) and 2027-01-18 (MLK Day — Monday);
+ * never 2027-01-19.
+ */
+function ensureHolidays2027Jan_() {
+  const JAN19_KEY = '2027-0-19';
+  const existing = readTable_(CFG_HOLIDAYS);
+  const have = {};
+  let removedJan19 = false;
+  const kept = [];
+  existing.forEach(function (r) {
+    const d = r.holiday_date ? new Date(r.holiday_date) : null;
+    if (!d || isNaN(d.getTime())) {
+      kept.push(r);
+      return;
+    }
+    const key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+    if (key === JAN19_KEY) {
+      removedJan19 = true;
+      return;
+    }
+    have[key] = true;
+    kept.push(r);
+  });
+  const toAdd = [];
+  DEFAULT_HOLIDAYS_2027_JAN.forEach(function (row) {
+    const d = row[0];
+    const key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+    if (!have[key]) toAdd.push(row);
+  });
+  if (!toAdd.length && !removedJan19) return 0;
+  const merged = kept.map(function (r) {
+    return [r.holiday_date, r.holiday_name, r.hours, r.active];
+  }).concat(toAdd);
+  writeTable_(CFG_HOLIDAYS, HOLIDAY_HEADERS, merged);
+  invalidateCache_(CFG_HOLIDAYS);
+  Logger.log('ensureHolidays2027Jan_: added ' + toAdd.length + ' January 2027 holiday row(s).');
+  if (removedJan19) {
+    Logger.log('ensureHolidays2027Jan_: removed erroneous 2027-01-19 holiday row.');
+  }
+  return toAdd.length + (removedJan19 ? 1 : 0);
 }

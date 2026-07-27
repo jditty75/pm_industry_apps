@@ -373,3 +373,31 @@ function getActualsByWorkerWeek_() {
   _enrichedCacheWrite_(cacheKey, map);
   return map;
 }
+
+/**
+ * Actuals worker summary keyed by employee_id. Cached on config version.
+ * @return {Object<string, {employee_id:string, resource_name:string,
+ *   qtd_actual_icp_hours:number, qtd_icp_plus_forecast_hours:number,
+ *   bonus_target_billable_hours_eoq:number}>}
+ */
+function getActualsSummaryByEmployee_() {
+  var version = _getEnrichedCacheVersion_();
+  var cacheKey = 'enriched:actuals_summary:v1:' + version;
+  var cached = _enrichedCacheRead_(cacheKey);
+  if (cached) return cached;
+  var rows = cachedRead_(ACTUALS_SUMMARY);
+  var map = {};
+  rows.forEach(function (r) {
+    var eid = String(r.employee_id || '').trim();
+    if (!eid) return;
+    map[eid] = {
+      employee_id: eid,
+      resource_name: String(r.resource_name || '').trim(),
+      qtd_actual_icp_hours: Number(r.qtd_actual_icp_hours) || 0,
+      qtd_icp_plus_forecast_hours: Number(r.qtd_icp_plus_forecast_hours) || 0,
+      bonus_target_billable_hours_eoq: Number(r.bonus_target_billable_hours_eoq) || 0
+    };
+  });
+  _enrichedCacheWrite_(cacheKey, map);
+  return map;
+}

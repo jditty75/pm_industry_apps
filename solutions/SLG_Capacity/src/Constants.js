@@ -97,6 +97,8 @@ const ACTUALS_SUMMARY_HEADERS = [
   'employee_id',            // trimmed string
   'resource_name',          // Worker
   'qtd_actual_icp_hours',   // number — the source 'QTD actual ICP hours' column, stored verbatim
+  'qtd_icp_plus_forecast_hours',       // WFM.17: QTD ICP Hours + Forecast Hours
+  'bonus_target_billable_hours_eoq',   // WFM.17: Bonus target billable hours at EoQ
   'source_row'
 ];
 
@@ -243,6 +245,12 @@ const DEFAULT_HOLIDAYS_2026 = [
   [new Date(2026, 10, 27), 'Thanksgiving Day After',  8, true],
   [new Date(2026, 11, 24), 'Christmas Eve',           8, true],
   [new Date(2026, 11, 25), 'Christmas Day',           8, true]
+];
+
+// WFM.17: January 2027 holidays required for FY27-Q4 target reconciliation.
+const DEFAULT_HOLIDAYS_2027_JAN = [
+  [new Date(2027, 0, 1),  "New Year's Day",             8, true],
+  [new Date(2027, 0, 18), 'Martin Luther King Jr. Day', 8, true]
 ];
 
 const DEFAULT_ROLES = [

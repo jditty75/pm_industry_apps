@@ -22,6 +22,9 @@
       <button class="nav-item active" data-view="dashboard">
         <span class="nav-icon">◦</span><span>Dashboard</span>
       </button>
+      <button class="nav-item" data-view="quarterly-scorecard">
+        <span class="nav-icon">◫</span><span>Team Quarterly Scorecard</span>
+      </button>
       <button class="nav-item" data-view="explorer">
         <span class="nav-icon">▿</span><span>Capacity Explorer</span>
       </button>
@@ -90,26 +93,31 @@
 
     <!-- ============ View: Dashboard ============ -->
     <section class="view view-dashboard" data-view="dashboard">
-      <div class="kpi-row">
+      <div class="kpi-row kpi-row-5">
         <div class="kpi-card">
-          <div class="kpi-label">Avg Utilization</div>
-          <div class="kpi-value" id="kpiUtil">—</div>
-          <div class="kpi-sub" id="kpiUtilSub">vs ICP</div>
+          <div class="kpi-label">Avg ICP Productive Utilization</div>
+          <div class="kpi-value" id="kpiIcpUtil">—</div>
+          <div class="kpi-sub" id="kpiIcpUtilSub">Actuals to date + forecast forward · holiday-adjusted</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Total Committed Hours</div>
-          <div class="kpi-value" id="kpiCommitted">—</div>
-          <div class="kpi-sub" id="kpiCommittedSub">Includes PTO/Holiday</div>
+          <div class="kpi-label">Avg Financial Utilization</div>
+          <div class="kpi-value" id="kpiFinUtil">—</div>
+          <div class="kpi-sub" id="kpiFinUtilSub">Actuals to date + forecast forward · raw capacity</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Total Productive Hours</div>
+          <div class="kpi-value" id="kpiProductive">—</div>
+          <div class="kpi-sub" id="kpiProductiveSub">Excludes PTO/Holiday</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Scenario Demand (Hours)</div>
           <div class="kpi-value" id="kpiScenario">—</div>
-          <div class="kpi-sub">All scenarios in scope</div>
+          <div class="kpi-sub" id="kpiScenarioSub">All scenarios in scope</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Over / Under Utilized Staff</div>
           <div class="kpi-value" id="kpiOverUnder">—</div>
-          <div class="kpi-sub" id="kpiOverUnderSub">Hover for details</div>
+          <div class="kpi-sub" id="kpiOverUnderSub" title="ICP-target-based signal">ICP-target-based · hover for details</div>
         </div>
       </div>
       <!-- SLG Headcount Gap by Role (FTE) -->
@@ -186,6 +194,40 @@
           <span class="legend-swatch" style="background:var(--pencil)"></span><span>At ICP</span>
           <span class="legend-swatch" style="background:var(--happy-hour)"></span><span>Over ICP</span>
           <span class="legend-swatch" style="background:var(--thumbtack)"></span><span>Red threshold</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ View: Team Quarterly Scorecard (WFM.17) ============ -->
+    <section class="view" data-view="quarterly-scorecard" hidden>
+      <div class="card card-quarterly-scorecard">
+        <div class="card-header">
+          <div class="card-title">Team Quarterly Scorecard</div>
+          <div class="quarterly-scorecard-tools">
+            <div class="metric-toggle" id="qsMetricToggle">
+              <button type="button" class="btn-toggle active" data-metric="icp">ICP Utilization</button>
+              <button type="button" class="btn-toggle" data-metric="bonus">Bonus Attainment</button>
+            </div>
+          </div>
+        </div>
+        <div class="qs-summary-strip" id="qsSummaryStrip">
+          <span class="muted">Loading…</span>
+        </div>
+        <div class="quarterly-scorecard-scroll" id="qsScroll">
+          <table class="data-table quarterly-scorecard-table" id="qsTable">
+            <thead>
+              <tr id="qsHeaderRow">
+                <th class="qs-col-sticky qs-col-worker">Worker</th>
+                <th class="qs-col-sticky qs-col-level">Level</th>
+                <th class="qs-col-sticky qs-col-manager">Manager</th>
+                <th class="qs-col-sticky qs-col-team">Team</th>
+              </tr>
+            </thead>
+            <tbody id="qsBody">
+              <tr><td colspan="8" class="muted" style="padding:12px">Loading…</td></tr>
+            </tbody>
+            <tfoot id="qsFoot"></tfoot>
+          </table>
         </div>
       </div>
     </section>

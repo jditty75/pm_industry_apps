@@ -1211,8 +1211,10 @@ function computeUtilization(params) {
     managerFilterSuppressed: !!teamLabelFilter && !!selectedManager,
     kpis: {
       avgUtilization: Number(avgUtil) || 0,
-      availableFte: Number(availableFte) || 0,
+      totalCommittedHours: Number(usedForKpi) || 0,
+      scenarioDemandHours: Number(totScenario) || 0,
       scenarioDemandFte: Number(scenarioFte) || 0,
+      availableFte: Number(availableFte) || 0,
       gapFte: Number(gapFte) || 0,
       headcount: Object.keys(seenRes).length
     },
@@ -1719,4 +1721,391 @@ function computeResourceDetail(params) {
   };
 
   return { months: monthsArr, summary: summary };
+}
+
+// ============================================================
+// WFM.17 — Quarterly scorecard + blended-window dashboard KPIs.
+// ============================================================
+
+/**
+ * Return { start: Date, end: Date } for FYxx-Qn using the February-anchored
+ * fiscal calendar (Constants.gs / Util.gs).
+ * @param {string} quarterKey e.g. 'FY27-Q2'
+ * @return {{start:Date, end:Date}}
+ */
+function fiscalQuarterBounds_(quarterKey) {
+  const m = String(quarterKey || '').match(/^FY(\d{2})-(Q[1-4])$/);
+  if (!m) throw new Error('fiscalQuarterBounds_: invalid quarter key "' + quarterKey + '"');
+  const fy = 2000 + Number(m[1]);
+  const q = m[2];
+  const fyStartYear = fy - 1;
+  let startYear, startMonth, endYear, endMonth;
+  if (q === 'Q1') {
+    startYear = fyStartYear; startMonth = 1;
+    endYear = fyStartYear; endMonth = 3;
+  } else if (q === 'Q2') {
+    startYear = fyStartYear; startMonth = 4;
+    endYear = fyStartYear; endMonth = 6;
+  } else if (q === 'Q3') {
+    startYear = fyStartYear; startMonth = 7;
+    endYear = fyStartYear; endMonth = 9;
+  } else {
+    startYear = fyStartYear; startMonth = 10;
+    endYear = fy; endMonth = 0;
+  }
+  const start = new Date(startYear, startMonth, 1);
+  const end = new Date(endYear, endMonth + 1, 0);
+  return { start: start, end: end };
+}
+
+/**
+ * Count Monday–Friday days inclusive between two dates.
+ * @param {Date} start
+ * @param {Date} end
+ * @return {number}
+ */
+function countWeekdaysInRange_(start, end) {
+  let count = 0;
+  const d = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  while (d <= last) {
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return count;
+}
+
+/**
+ * Workday summary for a fiscal quarter.
+ * @param {string} quarterKey
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @return {{workdays:number, holidayHours:number, holidayDays:number,
+ *           netWorkdays:number, rawCapacityHours:number, icpAvailableHours:number}}
+ */
+function quarterWorkdaySummary_(quarterKey, holidays) {
+  const bounds = fiscalQuarterBounds_(quarterKey);
+  const workdays = countWeekdaysInRange_(bounds.start, bounds.end);
+  let holidayHours = 0;
+  (holidays || []).forEach(function (h) {
+    const hd = h.date;
+    if (hd >= bounds.start && hd <= bounds.end) holidayHours += h.hours;
+  });
+  const holidayDays = holidayHours / 8;
+  const netWorkdays = Math.max(0, workdays - holidayDays);
+  const rawCapacityHours = workdays * 8;
+  const icpAvailableHours = rawCapacityHours - holidayHours;
+  return {
+    workdays: workdays,
+    holidayHours: holidayHours,
+    holidayDays: holidayDays,
+    netWorkdays: netWorkdays,
+    rawCapacityHours: rawCapacityHours,
+    icpAvailableHours: icpAvailableHours
+  };
+}
+
+/**
+ * Quarterly target hours per WFM.15/WFM.17:
+ * daily target = (raw_weekly_capacity × icp target %) ÷ 5
+ * quarter target = daily target × net workdays (Mon–Fri minus holidays).
+ * @param {string} icpRole
+ * @param {string} jobProfile
+ * @param {string} quarterKey
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @param {Object} [settings]
+ * @return {number}
+ */
+function quarterTargetHoursFor_(icpRole, jobProfile, quarterKey, holidays, settings) {
+  settings = settings || readSettings_();
+  const summary = quarterWorkdaySummary_(quarterKey, holidays);
+  const rawWeekly = readRawCapacity_(settings);
+  const icpTarget = icpTargetFor_(icpRole, jobProfile, settings);
+  const weeklyTarget = rawWeekly * icpTarget;
+  const dailyTarget = weeklyTarget / 5;
+  return dailyTarget * summary.netWorkdays;
+}
+
+/**
+ * Rolling fiscal quarter keys starting from the quarter containing today.
+ * @param {number} [count] default 4
+ * @return {string[]}
+ */
+function rollingQuarterKeys_(count) {
+  count = count || 4;
+  const keys = [];
+  let qk = fiscalQuarterKey_(new Date());
+  for (let i = 0; i < count; i++) {
+    keys.push(qk);
+    const bounds = fiscalQuarterBounds_(qk);
+    const nextStart = new Date(bounds.end.getFullYear(), bounds.end.getMonth() + 1, 1);
+    qk = fiscalQuarterKey_(nextStart);
+  }
+  return keys;
+}
+
+/**
+ * Productive hours for one worker-week (actuals win; forecast excludes PTO).
+ * @param {Object} worker computeWeeklyForecast_ worker object
+ * @param {string} weekKey
+ * @return {number}
+ */
+function productiveHoursForWeek_(worker, weekKey) {
+  const blended = worker.blendedWeekly && worker.blendedWeekly[weekKey];
+  if (blended && blended.isActual) return Number(blended.hours) || 0;
+  return Number(worker.productiveWeekly && worker.productiveWeekly[weekKey]) || 0;
+}
+
+/**
+ * Sum forecast-side productive hours for a worker in a fiscal quarter.
+ * @param {Object} worker
+ * @param {string} quarterKey
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @return {number}
+ */
+function sumForecastProductiveForQuarter_(worker, quarterKey, weeks) {
+  let sum = 0;
+  (weeks || []).forEach(function (wk) {
+    if (fiscalQuarterKey_(wk.week_start) !== quarterKey) return;
+    sum += productiveHoursForWeek_(worker, wk.week_key);
+  });
+  return sum;
+}
+
+/**
+ * Fiscal-quarter blended window label shared by dashboard KPIs and scorecard.
+ * @return {string}
+ */
+function blendedFiscalWindowLabel_() {
+  const today = new Date();
+  const curQ = fiscalQuarterKey_(today);
+  const nextQDate = new Date(today.getFullYear(), today.getMonth() + 3, 1);
+  const nextQ = fiscalQuarterKey_(nextQDate);
+  return curQ + ' + ' + nextQ + ' (actuals + forecast)';
+}
+
+/**
+ * Normalize dashboard filter params shared by api_getDashboard and
+ * computeBlendedWindowKpis_. includeTimeOff defaults false (matches
+ * api_getDashboard / computeUtilization).
+ * @param {Object} params
+ * @return {Object}
+ */
+function dashboardKpiFilterParams_(params) {
+  params = params || {};
+  return {
+    viewMode: params.viewMode,
+    groupBy: params.groupBy,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: !!params.includeTimeOff
+  };
+}
+
+/**
+ * Sum modeled assignment hours in the blended fiscal window for workers
+ * already in the filtered forecast worker set.
+ * @param {Object} params
+ * @param {Array<{week_key:string}>} visibleWeeks
+ * @param {Array<{resource:string}>} workers
+ * @return {number}
+ */
+function sumScenarioDemandHoursInWindow_(params, visibleWeeks, workers) {
+  const workerSet = {};
+  (workers || []).forEach(function (w) { workerSet[w.resource] = true; });
+  const weekSet = {};
+  (visibleWeeks || []).forEach(function (vw) { weekSet[vw.week_key] = true; });
+  if (!Object.keys(workerSet).length || !Object.keys(weekSet).length) return 0;
+
+  const calendar = readCalendar_();
+  let assignsRaw = [];
+  try { assignsRaw = cachedRead_(ASSIGNMENTS); } catch (e) { assignsRaw = []; }
+  const excluded = readExclusions_();
+  let sum = 0;
+  assignsRaw.forEach(function (a) {
+    if (!a.resource_name || !workerSet[a.resource_name]) return;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return;
+    if (a.status !== 'Modeled') return;
+    if (params.scenarioId && a.scenario_id !== params.scenarioId) return;
+    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+      if (weekSet[w.week_key]) sum += Number(w.hours) || 0;
+    });
+  });
+  return sum;
+}
+
+/**
+ * Hours-weighted dashboard KPIs over current + next fiscal quarter using
+ * blended actuals/forecast weekly data (WFM.16 window).
+ * @param {Object} params same shape as computeUtilization
+ * @return {Object}
+ */
+function computeBlendedWindowKpis_(params) {
+  params = dashboardKpiFilterParams_(params);
+  const forecast = computeWeeklyForecast_(params);
+  const visibleWeeks = (typeof _deriveVisibleWeeksFiscal_ === 'function')
+    ? _deriveVisibleWeeksFiscal_(forecast.weeks)
+    : forecast.weeks;
+  const rawCapacity = Number(forecast.rawCapacity) || readRawCapacity_();
+  const holidayHoursByWeek = forecast.holidayHoursByWeek || {};
+
+  let totalProductive = 0;
+  let totalIcpAvailable = 0;
+  let totalRawCapacity = 0;
+  const overUtilized = [];
+  const underUtilized = [];
+
+  forecast.workers.forEach(function (w) {
+    let wProd = 0;
+    let wIcpAvail = 0;
+    let wRawCap = 0;
+    visibleWeeks.forEach(function (vw) {
+      const wk = vw.week_key;
+      const prod = productiveHoursForWeek_(w, wk);
+      const holidayHrs = Number(holidayHoursByWeek[wk] || 0);
+      const icpAvail = rawCapacity - holidayHrs;
+      wProd += prod;
+      wIcpAvail += icpAvail;
+      wRawCap += rawCapacity;
+      totalProductive += prod;
+      totalIcpAvailable += icpAvail;
+      totalRawCapacity += rawCapacity;
+    });
+    if (!wIcpAvail) return;
+    const icpUtil = wProd / wIcpAvail;
+    const icpTarget = Number(w.icpTarget) || 0;
+    const ratio = icpTarget > 0 ? icpUtil / icpTarget : 0;
+    if (ratio > 1.05) overUtilized.push({ name: w.resource, avgUtil: icpUtil, ratioToTarget: ratio });
+    else if (ratio < 0.75) underUtilized.push({ name: w.resource, avgUtil: icpUtil, ratioToTarget: ratio });
+  });
+
+  const windowLabel = blendedFiscalWindowLabel_();
+  const scenarioDemandHours = sumScenarioDemandHoursInWindow_(params, visibleWeeks, forecast.workers);
+  return {
+    avgIcpProductiveUtilization: totalIcpAvailable > 0 ? totalProductive / totalIcpAvailable : 0,
+    avgFinancialUtilization: totalRawCapacity > 0 ? totalProductive / totalRawCapacity : 0,
+    totalProductiveHours: totalProductive,
+    totalIcpAvailableHours: totalIcpAvailable,
+    totalRawCapacityHours: totalRawCapacity,
+    scenarioDemandHours: scenarioDemandHours,
+    overUtilized: overUtilized,
+    underUtilized: underUtilized,
+    overUtilizedCount: overUtilized.length,
+    underUtilizedCount: underUtilized.length,
+    windowLabel: windowLabel,
+    headcount: forecast.workers.length
+  };
+}
+
+/**
+ * Team quarterly scorecard: rolling four fiscal quarters per worker plus
+ * hours-weighted team summaries.
+ * @param {Object} params same shape as computeUtilization
+ * @return {Object}
+ */
+function computeQuarterlyScorecard_(params) {
+  params = params || {};
+  const settings = readSettings_();
+  const holidays = readHolidays_();
+  const forecast = computeWeeklyForecast_(params);
+  const actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  const quarterKeys = rollingQuarterKeys_(4);
+  const curQ = fiscalQuarterKey_(new Date());
+  const weeks = forecast.weeks || [];
+
+  const workersOut = forecast.workers.map(function (w) {
+    const quarters = quarterKeys.map(function (qk) {
+      const wd = quarterWorkdaySummary_(qk, holidays);
+      const isCurrent = (qk === curQ);
+      const appTarget = quarterTargetHoursFor_(w.icpRole, w.jobProfile, qk, holidays, settings);
+      const summary = w.employeeId ? actualsSummary[w.employeeId] : null;
+      let productiveHours = 0;
+      let targetHours = appTarget;
+      let bonusAttainment = 0;
+      let source = 'forecast';
+
+      if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0) {
+        productiveHours = summary.qtd_icp_plus_forecast_hours;
+        if (summary.bonus_target_billable_hours_eoq > 0) {
+          targetHours = summary.bonus_target_billable_hours_eoq;
+          bonusAttainment = productiveHours / targetHours;
+        }
+        source = 'actuals_plus_forecast';
+      } else {
+        productiveHours = sumForecastProductiveForQuarter_(w, qk, weeks);
+        targetHours = appTarget;
+        bonusAttainment = appTarget > 0 ? productiveHours / appTarget : 0;
+        source = 'forecast';
+      }
+
+      const icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
+      const financeUtil = wd.rawCapacityHours > 0 ? productiveHours / wd.rawCapacityHours : 0;
+      const icpTarget = Number(w.icpTarget) || 0;
+      const ratioToTarget = icpTarget > 0 ? icpUtil / icpTarget : 0;
+      const trackingHours = productiveHours - targetHours;
+
+      return {
+        quarterKey: qk,
+        quarterLabel: qk,
+        isCurrentQuarter: isCurrent,
+        productiveHours: Number(productiveHours) || 0,
+        rawCapacityHours: wd.rawCapacityHours,
+        icpAvailableHours: wd.icpAvailableHours,
+        targetHours: Number(targetHours) || 0,
+        appTargetHours: Number(appTarget) || 0,
+        trackingHours: Number(trackingHours) || 0,
+        icpUtil: Number(icpUtil) || 0,
+        financeUtil: Number(financeUtil) || 0,
+        ratioToTarget: Number(ratioToTarget) || 0,
+        bonusAttainment: Number(bonusAttainment) || 0,
+        source: source
+      };
+    });
+
+    return {
+      employeeId: String(w.employeeId || ''),
+      worker: String(w.resource),
+      manager: String(w.managerOrg || ''),
+      teamLabel: String(w.teamLabel || ''),
+      icpRole: String(w.icpRole || ''),
+      level: String(w.level || ''),
+      icpTarget: Number(w.icpTarget) || 0,
+      quarters: quarters
+    };
+  });
+
+  const teamSummary = quarterKeys.map(function (qk, qi) {
+    let sumProd = 0, sumIcpAvail = 0, sumRawCap = 0, sumTarget = 0, sumTracking = 0;
+    workersOut.forEach(function (wr) {
+      const q = wr.quarters[qi];
+      if (!q) return;
+      sumProd += q.productiveHours;
+      sumIcpAvail += q.icpAvailableHours;
+      sumRawCap += q.rawCapacityHours;
+      sumTarget += q.targetHours;
+      sumTracking += q.trackingHours;
+    });
+    return {
+      quarterKey: qk,
+      quarterLabel: qk,
+      isCurrentQuarter: qk === curQ,
+      icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
+      financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+      bonusAttainment: sumTarget > 0 ? sumProd / sumTarget : 0,
+      trackingHours: sumTracking,
+      productiveHours: sumProd,
+      targetHours: sumTarget
+    };
+  });
+
+  return {
+    quarterKeys: quarterKeys,
+    workers: workersOut,
+    teamSummary: teamSummary,
+    windowLabel: blendedFiscalWindowLabel_()
+  };
 }

@@ -542,6 +542,7 @@
     }
 
     if (name === 'dashboard') loadDashboard();
+    if (name === 'quarterly-scorecard') loadQuarterlyScorecard();
     if (name === 'explorer') renderResourceList();
     if (name === 'pipeline') loadOpportunities();
     if (name === 'deployments') loadDeployments();
@@ -727,6 +728,7 @@
 
   async function reloadCurrentView_() {
     if (State.currentView === 'dashboard')    return loadDashboard();
+    if (State.currentView === 'quarterly-scorecard') return loadQuarterlyScorecard();
     if (State.currentView === 'pipeline')     return loadOpportunities();
     if (State.currentView === 'deployments')  return loadDeployments();
     if (State.currentView === 'scenarios')    return loadScenarios();
@@ -1144,11 +1146,15 @@
   const DASHBOARD_LOADING_MSG = 'Computing capacity forecast\u2026 (first load after an upload can take a moment)';
 
   function showDashboardLoading_() {
-    $('#kpiUtil').textContent = '\u2026';
-    $('#kpiUtilSub').textContent = DASHBOARD_LOADING_MSG;
-    $('#kpiCommitted').textContent = '\u2026';
+    $('#kpiIcpUtil').textContent = '\u2026';
+    $('#kpiFinUtil').textContent = '\u2026';
+    $('#kpiProductive').textContent = '\u2026';
     $('#kpiScenario').textContent = '\u2026';
     $('#kpiOverUnder').textContent = '\u2026';
+    const loadingSub = DASHBOARD_LOADING_MSG;
+    $('#kpiIcpUtilSub').textContent = loadingSub;
+    $('#kpiFinUtilSub').textContent = loadingSub;
+    $('#kpiProductiveSub').textContent = loadingSub;
     const headcountBody = $('#kpiHeadcountBody');
     if (headcountBody) {
       headcountBody.innerHTML = '<tr><td colspan="10" class="muted" style="padding:12px">' +
@@ -1171,10 +1177,7 @@
       d = applyPlanningWindow(d);
       State.dashboard = d;
 
-      const quarterFilter = State.filters.quarter;
-      const kpis = recomputeKpisForClient(d, quarterFilter);
-
-      renderKpis(kpis);
+      renderKpis(d.kpis || null);
       renderHeadcountGap(d.headcountByTeam || []);
     } catch (err) {
       toast('Dashboard load failed: ' + err.message, 'err');
@@ -1185,30 +1188,195 @@
   }
 
   function renderKpis(k) {
-    $('#kpiUtil').textContent = k ? fmtPct(k.avgUtilization) : '—';
-    $('#kpiUtilSub').textContent = k ? ((k.headcount || 0) + ' resources in scope') : '';
-    $('#kpiCommitted').textContent = k ? Math.round(k.totalCommittedHours).toLocaleString() : '—';
-    $('#kpiCommittedSub').textContent = State.filters.includeTimeOff
-      ? 'Includes PTO/Holiday'
-      : 'Excludes PTO/Holiday';
-    $('#kpiScenario').textContent = k ? Math.round(k.scenarioDemandHours).toLocaleString() : '—';
+    const windowLabel = (k && k.windowLabel) ? k.windowLabel : '';
+    const windowSuffix = windowLabel ? ' · ' + windowLabel : '';
 
-    const overCount = k ? k.overUtilized.length : 0;
-    const underCount = k ? k.underUtilized.length : 0;
+    $('#kpiIcpUtil').textContent = k ? fmtPct(k.avgIcpProductiveUtilization) : '—';
+    $('#kpiIcpUtilSub').textContent = k
+      ? ('Actuals to date + forecast forward · holiday-adjusted' + windowSuffix)
+      : '';
+
+    $('#kpiFinUtil').textContent = k ? fmtPct(k.avgFinancialUtilization) : '—';
+    $('#kpiFinUtilSub').textContent = k
+      ? ('Actuals to date + forecast forward · raw capacity' + windowSuffix)
+      : '';
+
+    $('#kpiProductive').textContent = k ? Math.round(k.totalProductiveHours).toLocaleString() : '—';
+    $('#kpiProductiveSub').textContent = k
+      ? ('Excludes PTO/Holiday' + windowSuffix)
+      : '';
+
+    $('#kpiScenario').textContent = k ? Math.round(k.scenarioDemandHours).toLocaleString() : '—';
+    $('#kpiScenarioSub').textContent = k ? ('All scenarios in scope' + windowSuffix) : '';
+
+    const overList = (k && k.overUtilized) ? k.overUtilized : [];
+    const underList = (k && k.underUtilized) ? k.underUtilized : [];
+    const overCount = overList.length;
+    const underCount = underList.length;
     $('#kpiOverUnder').textContent = overCount + ' / ' + underCount;
 
-    const overNames = (k ? k.overUtilized : []).map(o => o.name + ' (' + fmtPct(o.avgUtil) + ')');
-    const underNames = (k ? k.underUtilized : []).map(u => u.name + ' (' + fmtPct(u.avgUtil) + ')');
+    const overNames = overList.map(o => o.name + ' (' + fmtPct(o.avgUtil) + ')');
+    const underNames = underList.map(u => u.name + ' (' + fmtPct(u.avgUtil) + ')');
     const tooltipLines = [];
-    if (overNames.length) { tooltipLines.push('Over-utilized:'); tooltipLines.push(...overNames); }
+    if (overNames.length) { tooltipLines.push('Over-utilized (ICP-target-based):'); tooltipLines.push(...overNames); }
     if (underNames.length) {
       if (tooltipLines.length) tooltipLines.push('');
-      tooltipLines.push('Under-utilized:'); tooltipLines.push(...underNames);
+      tooltipLines.push('Under-utilized (ICP-target-based):'); tooltipLines.push(...underNames);
     }
     const tooltipText = tooltipLines.join('\n') || 'No over/under-utilization in current view';
     $('#kpiOverUnder').title = tooltipText;
     $('#kpiOverUnderSub').title = tooltipText;
   }
+
+  // ============================================================
+  // Team Quarterly Scorecard (WFM.17)
+  // ============================================================
+  const QuarterlyScorecardState = {
+    metric: 'icp',
+    data: null
+  };
+
+  function bonusCellColor_(attainment) {
+    if (!attainment && attainment !== 0) {
+      return { bg: 'var(--business-card)', fg: 'var(--staple)' };
+    }
+    if (attainment >= 1.0) return { bg: '#c8e6c9', fg: '#1b5e20' };
+    if (attainment >= 0.85) return { bg: '#fff3e0', fg: '#e65100' };
+    return { bg: '#ffcdd2', fg: '#b71c1c' };
+  }
+
+  function renderQuarterlySummaryStrip_(data) {
+    const strip = $('#qsSummaryStrip');
+    if (!strip) return;
+    const summary = (data && data.teamSummary) || [];
+    if (!summary.length) {
+      strip.innerHTML = '<span class="muted">No data</span>';
+      return;
+    }
+    strip.innerHTML = summary.map(function (q) {
+      const curTag = q.isCurrentQuarter ? ' <span class="qs-cur-tag">current</span>' : '';
+      return '<div class="qs-summary-quarter">' +
+        '<div class="qs-summary-qlabel">' + escapeHtml_(q.quarterLabel) + curTag + '</div>' +
+        '<div class="qs-summary-metrics">' +
+          '<span>ICP ' + fmtPct(q.icpUtil) + '</span>' +
+          '<span>Fin ' + fmtPct(q.financeUtil) + '</span>' +
+          '<span>Bonus ' + fmtPct(q.bonusAttainment) + '</span>' +
+          '<span>Track ' + Math.round(q.trackingHours).toLocaleString() + 'h</span>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  function renderQuarterlyScorecardTable_(data) {
+    const headerRow = $('#qsHeaderRow');
+    const body = $('#qsBody');
+    const foot = $('#qsFoot');
+    if (!headerRow || !body) return;
+
+    const quarterKeys = (data && data.quarterKeys) || [];
+    const workers = (data && data.workers) || [];
+    const metric = QuarterlyScorecardState.metric;
+
+    $$('.qs-col-quarter', headerRow).forEach(function (el) { el.remove(); });
+    quarterKeys.forEach(function (qk) {
+      const th = document.createElement('th');
+      th.className = 'qs-col-quarter';
+      th.textContent = qk;
+      headerRow.appendChild(th);
+    });
+
+    if (!workers.length) {
+      body.innerHTML = '<tr><td colspan="' + (4 + quarterKeys.length) +
+        '" class="muted" style="padding:12px">No workers in scope</td></tr>';
+      if (foot) foot.innerHTML = '';
+      return;
+    }
+
+    body.innerHTML = workers.map(function (w) {
+      const cells = (w.quarters || []).map(function (q) {
+        if (metric === 'bonus') {
+          if (!q.targetHours) {
+            return '<td class="qs-cell qs-cell-neutral" title="No target">—</td>';
+          }
+          const color = bonusCellColor_(q.bonusAttainment);
+          const tip = [
+            'Projected/productive: ' + q.productiveHours.toFixed(1) + 'h',
+            'Quarter target: ' + q.targetHours.toFixed(1) + 'h',
+            'Tracking: ' + (q.trackingHours >= 0 ? '+' : '') + q.trackingHours.toFixed(1) + 'h',
+            'Bonus attainment: ' + fmtPct(q.bonusAttainment)
+          ].join('\n');
+          return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
+            escapeHtml_(tip) + '">' + fmtPct(q.bonusAttainment) + '</td>';
+        }
+        const color = cellColor(q.icpUtil, w.icpTarget);
+        const tip = [
+          'Productive: ' + q.productiveHours.toFixed(1) + 'h',
+          'ICP available: ' + q.icpAvailableHours.toFixed(1) + 'h',
+          'ICP target: ' + fmtPct(w.icpTarget),
+          'Ratio to target: ' + (q.ratioToTarget * 100).toFixed(1) + '%',
+          'Tracking: ' + (q.trackingHours >= 0 ? '+' : '') + q.trackingHours.toFixed(1) + 'h'
+        ].join('\n');
+        return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
+          escapeHtml_(tip) + '">' + fmtPct(q.icpUtil) + '</td>';
+      }).join('');
+      return '<tr>' +
+        '<td class="qs-col-sticky qs-col-worker">' + escapeHtml_(w.worker) + '</td>' +
+        '<td class="qs-col-sticky qs-col-level">' + escapeHtml_(w.level) + '</td>' +
+        '<td class="qs-col-sticky qs-col-manager">' + escapeHtml_(w.manager) + '</td>' +
+        '<td class="qs-col-sticky qs-col-team">' + escapeHtml_(w.teamLabel) + '</td>' +
+        cells + '</tr>';
+    }).join('');
+
+    if (foot) {
+      const summary = (data && data.teamSummary) || [];
+      const totalCells = summary.map(function (q) {
+        if (metric === 'bonus') {
+          return '<td class="qs-cell qs-total">' + fmtPct(q.bonusAttainment) + '</td>';
+        }
+        return '<td class="qs-cell qs-total">' + fmtPct(q.icpUtil) + '</td>';
+      }).join('');
+      foot.innerHTML = '<tr class="qs-total-row">' +
+        '<td class="qs-col-sticky" colspan="4"><strong>TOTAL</strong></td>' +
+        totalCells + '</tr>';
+    }
+  }
+
+  function renderQuarterlyScorecard_(data) {
+    QuarterlyScorecardState.data = data;
+    renderQuarterlySummaryStrip_(data);
+    renderQuarterlyScorecardTable_(data);
+  }
+
+  async function loadQuarterlyScorecard() {
+    const body = $('#qsBody');
+    const strip = $('#qsSummaryStrip');
+    if (body) body.innerHTML = '<tr><td colspan="8" class="muted" style="padding:12px">' +
+      escapeHtml_(DASHBOARD_LOADING_MSG) + '</td></tr>';
+    if (strip) strip.innerHTML = '<span class="muted">' + escapeHtml_(DASHBOARD_LOADING_MSG) + '</span>';
+    try {
+      const params = buildServerParams_();
+      const data = await call('api_getQuarterlyScorecard', params);
+      renderQuarterlyScorecard_(data);
+    } catch (err) {
+      if (body) {
+        body.innerHTML = '<tr><td class="muted" style="padding:12px;color:var(--thumbtack)">' +
+          'Failed to load scorecard: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
+      }
+      console.error('loadQuarterlyScorecard failed:', err);
+    }
+  }
+
+  (function initQuarterlyScorecard_() {
+    const toggle = $('#qsMetricToggle');
+    if (!toggle) return;
+    toggle.querySelectorAll('.btn-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        toggle.querySelectorAll('.btn-toggle').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        QuarterlyScorecardState.metric = btn.dataset.metric || 'icp';
+        if (QuarterlyScorecardState.data) renderQuarterlyScorecardTable_(QuarterlyScorecardState.data);
+      });
+    });
+  })();
 
   // ============================================================
   // Weekly Forecast Table (weekly-forecast-migration §10) -- replaces

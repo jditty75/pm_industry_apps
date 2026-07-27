@@ -395,22 +395,40 @@ function api_flushCaches() {
 function api_getDashboard(params) {
   _requireAuthorized_();
   params = params || {};
-  return computeUtilization({
-    viewMode: params.viewMode,
-    groupBy: params.groupBy,
-    scenarioId: params.scenarioId,
-    teams: params.teams,
-    teamLabel: params.teamLabel,                    // Priority 2 pass-through
-    workerScope: params.workerScope,
-    includeMyManagers: params.includeMyManagers,
-    quarter: params.quarter,
-    includeTimeOff: !!params.includeTimeOff
+  const filterParams = dashboardKpiFilterParams_(params);
+  const result = computeUtilization(Object.assign({}, filterParams, {
+    quarter: params.quarter
+  }));
+  const blendedKpis = computeBlendedWindowKpis_(filterParams);
+  result.kpis = Object.assign({}, result.kpis, {
+    avgIcpProductiveUtilization: Number(blendedKpis.avgIcpProductiveUtilization) || 0,
+    avgFinancialUtilization: Number(blendedKpis.avgFinancialUtilization) || 0,
+    totalProductiveHours: Number(blendedKpis.totalProductiveHours) || 0,
+    totalIcpAvailableHours: Number(blendedKpis.totalIcpAvailableHours) || 0,
+    totalRawCapacityHours: Number(blendedKpis.totalRawCapacityHours) || 0,
+    scenarioDemandHours: Number(blendedKpis.scenarioDemandHours) || 0,
+    overUtilized: blendedKpis.overUtilized || [],
+    underUtilized: blendedKpis.underUtilized || [],
+    overUtilizedCount: Number(blendedKpis.overUtilizedCount) || 0,
+    underUtilizedCount: Number(blendedKpis.underUtilizedCount) || 0,
+    windowLabel: String(blendedKpis.windowLabel || '')
   });
+  return result;
 }
 
 function api_getResourceDetail(params) {
   _requireAuthorized_();
   return computeResourceDetail(params);
+}
+
+/**
+ * WFM.17: Team quarterly scorecard (rolling four fiscal quarters).
+ * @param {Object} params same shape as api_getDashboard
+ * @return {Object}
+ */
+function api_getQuarterlyScorecard(params) {
+  _requireAuthorized_();
+  return computeQuarterlyScorecard_(params || {});
 }
 
 // ------------------------------------------------------------

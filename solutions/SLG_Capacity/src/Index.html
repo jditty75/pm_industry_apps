@@ -234,56 +234,37 @@
 
     <!-- ============ View: Capacity Explorer ============ -->
     <section class="view" data-view="explorer" hidden>
-      <div class="grid-explorer">
-        <div class="card">
+      <div class="grid-explorer explorer-list-collapsed" id="explorerGrid">
+        <div class="card explorer-list-card" id="explorerListCard">
           <div class="card-header">
             <div class="card-title">Resources</div>
-            <input type="text" class="input search" id="resourceSearch" placeholder="Search by name…">
+            <button type="button" class="btn-ghost" id="explorerListToggle" title="Hide browse list">◀ Hide list</button>
           </div>
+          <input type="text" class="input search" id="resourceSearch" placeholder="Search by name…">
           <div class="resource-list" id="resourceList"></div>
         </div>
         <div class="explorer-right-col">
-          <!-- Worker title strip shared by chart + summary -->
-          <div class="card">
-            <div class="card-header">
-              <div>
+          <div class="card explorer-detail-card">
+            <div class="card-header explorer-detail-header">
+              <div class="explorer-worker-nav" id="explorerWorkerNav">
+                <button type="button" class="btn-ghost" id="explorerPrevWorker" title="Previous worker" aria-label="Previous worker">◀</button>
+                <select class="select explorer-worker-picker" id="explorerWorkerPicker" aria-label="Select worker">
+                  <option value="">Select a worker…</option>
+                </select>
+                <button type="button" class="btn-ghost" id="explorerNextWorker" title="Next worker" aria-label="Next worker">▶</button>
+              </div>
+              <div class="explorer-detail-identity">
                 <div class="card-title" id="resourceTitle">Select a resource</div>
                 <div class="muted" id="resourceSub"></div>
               </div>
               <button class="btn-ghost" id="adjustHoursBtn" hidden>Adjust hours</button>
             </div>
-            <div style="position:relative;height:320px;width:100%">
-              <canvas id="resourceChart"></canvas>
+            <div class="explorer-detail-pane" id="explorerDetailPane">
+              <div class="muted explorer-empty-msg">Select a resource to view capacity detail.</div>
             </div>
           </div>
 
-          <!-- Utilization Summary card — hidden until worker selected -->
-          <div class="card" id="utilizationSummaryCard" hidden>
-            <div class="card-header">
-              <div class="card-title">Utilization Summary</div>
-            </div>
-            <div class="util-headline-row">
-              <div class="util-headline-cell">
-                <div class="util-headline-label">Committed</div>
-                <div class="util-headline-value" id="utilCommittedAvg">—</div>
-                <div class="util-headline-sub" id="utilCommittedPeak">—</div>
-              </div>
-              <div class="util-headline-cell">
-                <div class="util-headline-label">Scenario</div>
-                <div class="util-headline-value" id="utilScenarioAvg">—</div>
-                <div class="util-headline-sub" id="utilScenarioPeak">—</div>
-              </div>
-              <div class="util-headline-cell">
-                <div class="util-headline-label">Capacity</div>
-                <div class="util-headline-value" id="utilCapacity">—</div>
-                <div class="util-headline-sub" id="utilCapacityWindow">—</div>
-              </div>
-            </div>
-            <div class="util-components" id="utilComponents"></div>
-            <div class="util-status" id="utilStatus" hidden></div>
-          </div>
-
-          <!-- Project Allocation card — appears when a billable bar is clicked -->
+          <!-- Project Allocation card — legacy month drill-down; hidden unless opened elsewhere -->
           <div class="card" id="projectAllocationCard" hidden>
             <div class="card-header">
               <div>

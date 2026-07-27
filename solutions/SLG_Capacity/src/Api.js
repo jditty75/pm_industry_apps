@@ -416,9 +416,155 @@ function api_getDashboard(params) {
   return result;
 }
 
+// WFM.18-deprecated: legacy Explorer endpoint. Retained for rollback;
+// no callers after WFM.18. Use api_getResourceDetailV2 instead.
 function api_getResourceDetail(params) {
   _requireAuthorized_();
   return computeResourceDetail(params);
+}
+
+/**
+ * WFM.18: Capacity Explorer detail on the canonical weekly/quarter path.
+ * @param {Object} params resource + standard filter shape
+ * @return {Object}
+ */
+function api_getResourceDetailV2(params) {
+  _requireAuthorized_();
+  params = params || {};
+  const resourceName = String(params.resource || '');
+
+  const emptyPayload = {
+    resource: resourceName,
+    found: false,
+    weeks: [],
+    quarters: [],
+    projects: [],
+    blendedSummary: null
+  };
+  if (!resourceName) return emptyPayload;
+
+  const forecast = computeWeeklyForecast_({
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  });
+
+  const w = (forecast.workers || []).find(function (worker) {
+    return worker.resource === resourceName;
+  });
+  if (!w) return emptyPayload;
+
+  const visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
+  const rawCapacity = Number(forecast.rawCapacity) || 40;
+  const holidayHoursByWeek = forecast.holidayHoursByWeek || {};
+  const icpTarget = Number(w.icpTarget) || 0;
+
+  const weeksOut = visibleWeeks.map(function (vw) {
+    const labelDate = new Date(
+      vw.week_start.getFullYear(),
+      vw.week_start.getMonth(),
+      vw.week_start.getDate() + 1
+    );
+    const cell = (w.blendedWeekly && w.blendedWeekly[vw.week_key]) || { hours: 0, isActual: false };
+    const hours = Number(cell.hours) || 0;
+    const holidayHours = Number(holidayHoursByWeek[vw.week_key] || 0);
+    const icpAvailable = rawCapacity - holidayHours;
+    const icpUtil = icpAvailable > 0 ? (hours / icpAvailable) : 0;
+    const financeUtil = rawCapacity > 0 ? (hours / rawCapacity) : 0;
+    const ratioToTarget = icpTarget > 0 ? (icpUtil / icpTarget) : 0;
+    return {
+      weekKey: String(vw.week_key),
+      weekStart: _toIso_(vw.week_start),
+      label: Utilities.formatDate(labelDate, Session.getScriptTimeZone() || 'Etc/UTC', 'MM/dd/yy'),
+      fiscalQuarter: String(vw.fiscal_quarter || ''),
+      fiscalQuarterKey: String(fiscalQuarterKey_(vw.week_start) || ''),
+      hours: Number(hours) || 0,
+      icpUtil: Number(icpUtil) || 0,
+      financeUtil: Number(financeUtil) || 0,
+      icpTarget: Number(icpTarget) || 0,
+      ratioToTarget: Number(ratioToTarget) || 0,
+      icpAvailable: Number(icpAvailable) || 0,
+      holidayHours: Number(holidayHours) || 0,
+      isActual: !!cell.isActual
+    };
+  });
+
+  const holidays = readHolidays_();
+  const actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  const settings = readSettings_();
+  const curQ = fiscalQuarterKey_(new Date());
+  const quartersOut = buildWorkerQuarters_(
+    w,
+    rollingQuarterKeys_(4),
+    forecast.weeks,
+    holidays,
+    actualsSummary,
+    settings,
+    curQ
+  );
+
+  const projectsOut = Object.keys(w.projects || {}).sort().map(function (proj) {
+    return {
+      project: String(proj),
+      weekly: visibleWeeks.map(function (vw) {
+        return {
+          weekKey: String(vw.week_key),
+          hours: Number((w.projects[proj] || {})[vw.week_key] || 0) || 0
+        };
+      })
+    };
+  });
+
+  let totalProductive = 0;
+  let totalIcpAvailable = 0;
+  let totalRawCapacity = 0;
+  visibleWeeks.forEach(function (vw) {
+    const wk = vw.week_key;
+    const prod = productiveHoursForWeek_(w, wk);
+    const holidayHrs = Number(holidayHoursByWeek[wk] || 0);
+    const icpAvail = rawCapacity - holidayHrs;
+    totalProductive += prod;
+    totalIcpAvailable += icpAvail;
+    totalRawCapacity += rawCapacity;
+  });
+
+  let peakWeekKey = '';
+  let peakIcpUtil = 0;
+  weeksOut.forEach(function (cell) {
+    if (cell.icpUtil > peakIcpUtil) {
+      peakIcpUtil = cell.icpUtil;
+      peakWeekKey = cell.weekKey;
+    }
+  });
+
+  const avgIcpProductiveUtilization = totalIcpAvailable > 0 ? totalProductive / totalIcpAvailable : 0;
+  const avgFinancialUtilization = totalRawCapacity > 0 ? totalProductive / totalRawCapacity : 0;
+  const blendedRatioToTarget = icpTarget > 0 ? avgIcpProductiveUtilization / icpTarget : 0;
+
+  return {
+    resource: resourceName,
+    found: true,
+    weeks: weeksOut,
+    quarters: quartersOut,
+    projects: projectsOut,
+    blendedSummary: {
+      avgIcpProductiveUtilization: Number(avgIcpProductiveUtilization) || 0,
+      avgFinancialUtilization: Number(avgFinancialUtilization) || 0,
+      totalProductiveHours: Number(totalProductive) || 0,
+      isOverUtilized: blendedRatioToTarget > 1.05,
+      isUnderUtilized: blendedRatioToTarget < 0.75,
+      peakWeek: {
+        weekKey: String(peakWeekKey || ''),
+        icpUtil: Number(peakIcpUtil) || 0
+      },
+      windowLabel: String(blendedFiscalWindowLabel_() || '')
+    }
+  };
 }
 
 /**

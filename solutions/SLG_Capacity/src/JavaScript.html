@@ -45,7 +45,10 @@
     scenarios: [],
     currentView: 'dashboard',
     selectedResource: null,
+    selectedResourceDetail: null,
     selectedScenario: null,
+    explorerListCollapsed: true,
+    explorerReqId: 0,
     workerPlanning: null,      // Drop 7: { rows, summary } for Planning Detail card
     reporting: null,
     rpAccountsAll: [],
@@ -735,12 +738,7 @@
     if (State.currentView === 'reporting')    return loadReporting();
     if (State.currentView === 'admin')        return loadAdmin();
     if (State.currentView === 'explorer') {
-      renderResourceList();
-      // If a worker is currently selected, re-fetch their detail so
-      // the chart reflects current View Mode / scenarioId filters.
-      if (State.selectedResource) {
-        await loadResourceDetail_(State.selectedResource);
-      }
+      await refreshExplorer_({ reason: 'filters' });
     }
   }
 
@@ -2731,22 +2729,20 @@
 
 <script>
   // ============================================================
-  // Capacity Explorer
+  // Capacity Explorer (WFM.18)
   //
-  // Priority 3: resource list now respects Worker Scope (defaults
-  // to SLG for this view) + Team filter + Manager filter. All
-  // filtering is client-side against State.ref.resources (which
-  // includes pre-computed resolvedTeam) and the search box.
-  // Auto-updates on filter change because reloadCurrentView_
-  // calls renderResourceList() when current view is 'explorer'.
+  // Priority 3: resource list respects Worker Scope + Team + Manager
+  // filters client-side against State.ref.resources. Detail pane
+  // consumes api_getResourceDetailV2 (weekly/quarter canonical path).
+  // Hybrid list defaults collapsed; dropdown + stepper when collapsed.
   // ============================================================
-  function renderResourceList() {
-    const list = $('#resourceList');
-    const search = ($('#resourceSearch').value || '').toLowerCase();
+  const ExplorerQuarterState = { metric: 'icp' };
+  const ExplorerProjectState = { expanded: new Set() };
+
+  function getFilteredExplorerResources_() {
+    const search = ($('#resourceSearch') && $('#resourceSearch').value || '').toLowerCase();
     const resources = (State.ref && State.ref.resources) || [];
     const f = State.filters;
-
-    // Build effective manager set (Manager + descendants if include-reports)
     const managerDescendants = (State.ref && State.ref.managerDescendants) || {};
     let effectiveManagers = null;
     if (f.managers && f.managers.length && !f.teamLabel) {
@@ -2754,7 +2750,7 @@
       const selected = f.managers[0];
       effectiveManagers[selected] = true;
       if (f.includeMyManagers && managerDescendants[selected]) {
-        managerDescendants[selected].forEach(m => { effectiveManagers[m] = true; });
+        managerDescendants[selected].forEach(function (m) { effectiveManagers[m] = true; });
       }
     }
 
@@ -2773,297 +2769,531 @@
       }
     }
 
-    const filtered = resources.filter(r => {
-      // Search filter
+    return resources.filter(function (r) {
       if (search && r.name.toLowerCase().indexOf(search) < 0) return false;
-
-      // Worker Scope filter
       if (!workerInScope_(r.worker_class)) return false;
-
-      // Team filter (overrides Manager)
-      if (f.teamLabel) {
-        if (r.resolvedTeam !== f.teamLabel) return false;
-        return true;
-      }
-
-      // Manager filter (only when Team is not set)
-      if (effectiveManagers) {
-        if (!effectiveManagers[r.manager_org]) return false;
-      }
-
+      if (f.teamLabel) return r.resolvedTeam === f.teamLabel;
+      if (effectiveManagers && !effectiveManagers[r.manager_org]) return false;
       return true;
     });
+  }
+
+  function updateExplorerLayout_() {
+    const grid = $('#explorerGrid');
+    const toggle = $('#explorerListToggle');
+    const nav = $('#explorerWorkerNav');
+    const collapsed = !!State.explorerListCollapsed;
+    if (grid) grid.classList.toggle('explorer-list-collapsed', collapsed);
+    if (nav) nav.hidden = !collapsed;
+    if (toggle) toggle.textContent = collapsed ? '▶ Browse list' : '◀ Hide list';
+  }
+
+  function updateExplorerWorkerPicker_() {
+    const picker = $('#explorerWorkerPicker');
+    if (!picker) return;
+    const filtered = getFilteredExplorerResources_();
+    const current = State.selectedResource || '';
+    picker.innerHTML = '<option value="">Select a worker…</option>' +
+      filtered.map(function (r) {
+        return '<option value="' + escapeHtml_(r.name) + '"' +
+          (r.name === current ? ' selected' : '') + '>' + escapeHtml_(r.name) + '</option>';
+      }).join('');
+    const prevBtn = $('#explorerPrevWorker');
+    const nextBtn = $('#explorerNextWorker');
+    const names = filtered.map(function (r) { return r.name; });
+    const idx = names.indexOf(current);
+    if (prevBtn) prevBtn.disabled = idx <= 0;
+    if (nextBtn) nextBtn.disabled = idx < 0 || idx >= names.length - 1;
+  }
+
+  function highlightExplorerListSelection_() {
+    $$('#resourceList .resource-item').forEach(function (el) {
+      el.classList.toggle('active', el.dataset.resource === State.selectedResource);
+    });
+  }
+
+  function selectExplorerResource_(name) {
+    if (!name) {
+      _hidePlanningCard_();
+      return;
+    }
+    State.selectedResource = name;
+    State.projectAllocation = null;
+    const allocCard = $('#projectAllocationCard');
+    if (allocCard) allocCard.hidden = true;
+    highlightExplorerListSelection_();
+    updateExplorerWorkerPicker_();
+    refreshExplorer_({ reason: 'select' });
+  }
+
+  function explorerStepWorker_(delta) {
+    const names = getFilteredExplorerResources_().map(function (r) { return r.name; });
+    const idx = names.indexOf(State.selectedResource);
+    if (idx < 0) return;
+    const next = names[idx + delta];
+    if (next) selectExplorerResource_(next);
+  }
+
+  function renderResourceList() {
+    const list = $('#resourceList');
+    if (!list) return;
+    const filtered = getFilteredExplorerResources_();
+
+    updateExplorerLayout_();
+    updateExplorerWorkerPicker_();
 
     if (!filtered.length) {
       list.innerHTML = '<div class="muted" style="padding:16px;text-align:center;">No resources match the current filters.</div>';
       return;
     }
 
-    list.innerHTML = filtered.map(r => `
-      <div class="resource-item" data-resource="${escapeHtml_(r.name)}">
-        <div>
-          <div class="resource-name">${escapeHtml_(r.name)}</div>
-          <div class="resource-meta">${escapeHtml_(r.manager_org || '—')} · ${escapeHtml_(r.resolvedTeam || r.icp || '—')}</div>
-        </div>
-      </div>
-    `).join('');
+    list.innerHTML = filtered.map(function (r) {
+      return '<div class="resource-item' + (r.name === State.selectedResource ? ' active' : '') +
+        '" data-resource="' + escapeHtml_(r.name) + '">' +
+        '<div><div class="resource-name">' + escapeHtml_(r.name) + '</div>' +
+        '<div class="resource-meta">' + escapeHtml_(r.manager_org || '—') + ' · ' +
+        escapeHtml_(r.resolvedTeam || r.icp || '—') + '</div></div></div>';
+    }).join('');
 
-    $$('#resourceList .resource-item').forEach(el => {
-      el.addEventListener('click', () => {
-        $$('#resourceList .resource-item').forEach(x => x.classList.remove('active'));
-        el.classList.add('active');
-        State.selectedResource = el.dataset.resource;
-        State.projectAllocation = null;
-        $('#projectAllocationCard').hidden = true;
-        loadResourceDetail_(State.selectedResource);
+    $$('#resourceList .resource-item').forEach(function (el) {
+      el.addEventListener('click', function () {
+        selectExplorerResource_(el.dataset.resource);
       });
     });
   }
 
   $('#resourceSearch')?.addEventListener('input', debounce_(renderResourceList, 200));
 
-  // Hide the planning + summary cards whenever no worker is selected.
   function _hidePlanningCard_() {
     const card = $('#workerPlanningCard');
     if (card) card.hidden = true;
-    const sumCard = $('#utilizationSummaryCard');
-    if (sumCard) sumCard.hidden = true;
     const allocCard = $('#projectAllocationCard');
     if (allocCard) allocCard.hidden = true;
     State.workerPlanning = null;
     State.selectedResource = null;
+    State.selectedResourceDetail = null;
     State.projectAllocation = null;
+    if (State.charts.resource) {
+      State.charts.resource.destroy();
+      State.charts.resource = null;
+    }
+    const title = $('#resourceTitle');
+    if (title) title.textContent = 'Select a resource';
+    const sub = $('#resourceSub');
+    if (sub) sub.textContent = '';
+    const pane = $('#explorerDetailPane');
+    if (pane) {
+      pane.innerHTML = '<div class="muted explorer-empty-msg">Select a resource to view capacity detail.</div>';
+    }
+    const adjustBtn = $('#adjustHoursBtn');
+    if (adjustBtn) adjustBtn.hidden = true;
+    highlightExplorerListSelection_();
+    updateExplorerWorkerPicker_();
+  }
+
+  function renderExplorerSummaryStrip_(detail, meta) {
+    const bs = detail.blendedSummary || {};
+    const peak = bs.peakWeek || {};
+    const peakWeek = (detail.weeks || []).find(function (w) { return w.weekKey === peak.weekKey; });
+    const peakLabel = peakWeek ? peakWeek.label : (peak.weekKey || '—');
+    let statusLabel = 'On track';
+    let statusClass = 'explorer-status-ok';
+    if (bs.isOverUtilized) {
+      statusLabel = 'Over target';
+      statusClass = 'explorer-status-over';
+    } else if (bs.isUnderUtilized) {
+      statusLabel = 'Under target';
+      statusClass = 'explorer-status-under';
+    }
+    const windowLabel = bs.windowLabel ? (' · ' + bs.windowLabel) : '';
+    return '<div class="qs-summary-strip explorer-summary-strip">' +
+      '<div class="qs-summary-quarter explorer-summary-identity">' +
+        '<div class="qs-summary-qlabel">' + escapeHtml_(detail.resource || '') + '</div>' +
+        '<div class="qs-summary-metrics">' +
+          '<span>' + escapeHtml_(meta.job_profile || '—') + '</span>' +
+          '<span>' + escapeHtml_(meta.manager_org || '—') + '</span>' +
+          '<span>' + escapeHtml_(meta.resolvedTeam || meta.icp || '—') + '</span>' +
+        '</div></div>' +
+      '<div class="qs-summary-quarter">' +
+        '<div class="qs-summary-qlabel">Avg ICP Util' + escapeHtml_(windowLabel) + '</div>' +
+        '<div class="qs-summary-metrics"><span>' + fmtPct(bs.avgIcpProductiveUtilization) + '</span></div></div>' +
+      '<div class="qs-summary-quarter">' +
+        '<div class="qs-summary-qlabel">Avg Finance Util</div>' +
+        '<div class="qs-summary-metrics"><span>' + fmtPct(bs.avgFinancialUtilization) + '</span></div></div>' +
+      '<div class="qs-summary-quarter">' +
+        '<div class="qs-summary-qlabel">Productive Hours</div>' +
+        '<div class="qs-summary-metrics"><span>' + fmtHours(bs.totalProductiveHours) + 'h</span></div></div>' +
+      '<div class="qs-summary-quarter">' +
+        '<div class="qs-summary-qlabel">Status</div>' +
+        '<div class="qs-summary-metrics"><span class="' + statusClass + '">' + statusLabel + '</span></div></div>' +
+      '<div class="qs-summary-quarter explorer-peak-badge">' +
+        '<div class="qs-summary-qlabel">Peak week</div>' +
+        '<div class="qs-summary-metrics"><span>' + escapeHtml_(peakLabel) + ' · ' +
+          fmtPct(peak.icpUtil) + '</span></div></div>' +
+    '</div>';
+  }
+
+  function renderExplorerWeeklyStrip_(weeks) {
+    if (!weeks || !weeks.length) {
+      return '<div class="explorer-section"><div class="explorer-section-title">Weekly capacity</div>' +
+        '<div class="muted">No weeks in scope.</div></div>';
+    }
+    let seamWeekKey = '';
+    weeks.forEach(function (w) { if (w.isActual) seamWeekKey = w.weekKey; });
+    let seamIdx = -1;
+    weeks.forEach(function (w, idx) { if (w.weekKey === seamWeekKey) seamIdx = idx; });
+    const seamColIdx = seamIdx >= 0 ? seamIdx + 1 : -1;
+    const actualSpan = seamColIdx >= 0 ? seamColIdx : 0;
+    const forecastSpan = seamColIdx >= 0 ? weeks.length - seamColIdx : weeks.length;
+
+    let html = '<div class="explorer-section"><div class="explorer-section-title">Weekly capacity</div>' +
+      '<div class="explorer-weekly-scroll"><table class="data-table explorer-weekly-table"><thead>';
+    if (seamWeekKey && seamColIdx > 0) {
+      html += '<tr class="wf-zone-header">' +
+        (actualSpan ? '<th class="wf-zone-actual" colspan="' + actualSpan + '">actual</th>' : '') +
+        (forecastSpan ? '<th class="wf-zone-forecast" colspan="' + forecastSpan + '">forecast</th>' : '') +
+        '</tr>';
+    }
+    html += '<tr>';
+    weeks.forEach(function (w, idx) {
+      const seamCls = idx === seamIdx ? ' wf-seam-divider' : '';
+      const zoneTag = seamColIdx >= 0
+        ? (idx < seamColIdx ? '<span class="wf-header-tag">actual</span>' : '<span class="wf-header-tag">forecast</span>')
+        : '';
+      html += '<th class="wf-col-week' + seamCls + '">' + escapeHtml_(w.label) +
+        (w.fiscalQuarter ? ' · ' + escapeHtml_(w.fiscalQuarter) : '') +
+        (zoneTag ? '<br>' + zoneTag : '') + '</th>';
+    });
+    html += '</tr></thead><tbody><tr>';
+    weeks.forEach(function (cell, idx) {
+      const color = cellColor(cell.icpUtil, cell.icpTarget);
+      const rawCap = Number(cell.icpAvailable || 0) + Number(cell.holidayHours || 0);
+      const holidayNote = cell.holidayHours
+        ? ' (raw ' + Math.round(rawCap) + 'h − ' + Math.round(cell.holidayHours) + 'h holiday)'
+        : '';
+      const actualLabel = cell.isActual ? 'Actual' : 'Forecast';
+      const title = [
+        (State.selectedResource || '') + ' · ' + cell.label,
+        actualLabel,
+        'Hours: ' + Math.round(cell.hours) + 'h',
+        'ICP available: ' + Math.round(cell.icpAvailable) + 'h' + holidayNote,
+        'ICP utilization: ' + fmtPct(cell.icpUtil),
+        'ICP target: ' + fmtPct(cell.icpTarget),
+        'Finance utilization: ' + fmtPct(cell.financeUtil)
+      ].join('\n');
+      const seamCls = idx === seamIdx ? ' wf-seam-divider' : '';
+      const forecastCls = cell.isActual ? '' : ' wf-cell-forecast';
+      html += '<td class="wf-col-week wf-cell' + seamCls + forecastCls + '" style="background:' +
+        color.bg + ';color:' + color.fg + '" title="' + escapeHtml_(title) + '">' +
+        Math.round(cell.hours) + '</td>';
+    });
+    html += '</tr></tbody></table></div></div>';
+    return html;
+  }
+
+  function renderExplorerQuarterSection_(quarters, icpTarget) {
+    const metric = ExplorerQuarterState.metric;
+    let cells = (quarters || []).map(function (q) {
+      const curTag = q.isCurrentQuarter ? ' <span class="qs-cur-tag">current</span>' : '';
+      if (metric === 'bonus') {
+        if (!q.targetHours) {
+          return '<td class="qs-cell qs-cell-neutral" title="No target">—</td>';
+        }
+        const color = bonusCellColor_(q.bonusAttainment);
+        const tip = [
+          'Projected/productive: ' + q.productiveHours.toFixed(1) + 'h',
+          'Quarter target: ' + q.targetHours.toFixed(1) + 'h',
+          'Tracking: ' + (q.trackingHours >= 0 ? '+' : '') + q.trackingHours.toFixed(1) + 'h',
+          'Bonus attainment: ' + fmtPct(q.bonusAttainment)
+        ].join('\n');
+        return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
+          escapeHtml_(tip) + '">' + fmtPct(q.bonusAttainment) + '</td>';
+      }
+      const color = cellColor(q.icpUtil, icpTarget);
+      const tip = [
+        'Productive: ' + q.productiveHours.toFixed(1) + 'h',
+        'ICP available: ' + q.icpAvailableHours.toFixed(1) + 'h',
+        'ICP target: ' + fmtPct(icpTarget),
+        'Ratio to target: ' + (q.ratioToTarget * 100).toFixed(1) + '%',
+        'Tracking: ' + (q.trackingHours >= 0 ? '+' : '') + q.trackingHours.toFixed(1) + 'h'
+      ].join('\n');
+      return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
+        escapeHtml_(tip) + '">' + fmtPct(q.icpUtil) + '</td>';
+    }).join('');
+
+    const headerCells = (quarters || []).map(function (q) {
+      const curTag = q.isCurrentQuarter ? ' <span class="qs-cur-tag">current</span>' : '';
+      return '<th class="qs-col-quarter">' + escapeHtml_(q.quarterLabel || q.quarterKey) + curTag + '</th>';
+    }).join('');
+
+    const activeIcp = metric === 'icp' ? ' active' : '';
+    const activeBonus = metric === 'bonus' ? ' active' : '';
+
+    return '<div class="explorer-section explorer-quarter-section">' +
+      '<div class="explorer-section-head">' +
+        '<div class="explorer-section-title">Rolling four-quarter scorecard</div>' +
+        '<div class="metric-toggle" id="explorerQsMetricToggle">' +
+          '<button type="button" class="btn-toggle' + activeIcp + '" data-metric="icp">ICP Utilization</button>' +
+          '<button type="button" class="btn-toggle' + activeBonus + '" data-metric="bonus">Bonus Attainment</button>' +
+        '</div></div>' +
+      '<div class="explorer-quarter-scroll"><table class="data-table quarterly-scorecard-table explorer-quarter-table">' +
+        '<thead><tr>' + headerCells + '</tr></thead>' +
+        '<tbody><tr>' + cells + '</tr></tbody></table></div></div>';
+  }
+
+  function renderExplorerProjectsSection_(projects, weeks) {
+    const worker = State.selectedResource || '';
+    const isOpen = ExplorerProjectState.expanded.has(worker);
+    let html = '<div class="explorer-section explorer-projects-section">' +
+      '<div class="explorer-section-head">' +
+        '<button type="button" class="wf-expand-toggle explorer-projects-toggle" aria-expanded="' + isOpen + '">' +
+          '<span class="wf-expand-chev">' + (isOpen ? '▾' : '▸') + '</span> Projects</button>' +
+      '</div>';
+    if (!isOpen) {
+      html += '<div class="muted explorer-projects-collapsed">Expand to view week-keyed project hours.</div>';
+    } else if (!projects || !projects.length) {
+      html += '<div class="muted">No project hours in scope.</div>';
+    } else {
+      html += '<div class="explorer-weekly-scroll"><table class="data-table explorer-weekly-table"><thead><tr>' +
+        '<th class="explorer-project-col">Project</th>';
+      (weeks || []).forEach(function (w) {
+        html += '<th class="wf-col-week">' + escapeHtml_(w.label) + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+      projects.forEach(function (p) {
+        const projByKey = {};
+        (p.weekly || []).forEach(function (w) { projByKey[w.weekKey] = w; });
+        html += '<tr><td class="wf-project-name explorer-project-col">↳ ' + escapeHtml_(p.project) + '</td>';
+        (weeks || []).forEach(function (w) {
+          const cell = projByKey[w.weekKey];
+          const hrs = cell ? Math.round(cell.hours) : 0;
+          html += '<td class="wf-col-week wf-cell-project">' + (hrs || '—') + '</td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderExplorerDetailPane_(detail) {
+    const pane = $('#explorerDetailPane');
+    if (!pane) return;
+    if (!detail || !detail.found) {
+      pane.innerHTML = '<div class="muted explorer-empty-msg">This worker is not in the current filter scope.</div>';
+      return;
+    }
+    const meta = (State.ref && State.ref.resources || []).find(function (r) {
+      return r.name === detail.resource;
+    }) || {};
+    const icpTarget = (detail.weeks && detail.weeks[0]) ? detail.weeks[0].icpTarget : 0.72;
+    const html =
+      renderExplorerSummaryStrip_(detail, meta) +
+      renderExplorerWeeklyStrip_(detail.weeks || []) +
+      renderExplorerQuarterSection_(detail.quarters || [], icpTarget) +
+      renderExplorerProjectsSection_(detail.projects || [], detail.weeks || []);
+    pane.innerHTML = html;
+
+    const toggle = $('#explorerQsMetricToggle');
+    if (toggle) {
+      toggle.querySelectorAll('.btn-toggle').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          ExplorerQuarterState.metric = btn.dataset.metric || 'icp';
+          renderExplorerDetailPane_(State.selectedResourceDetail);
+        });
+      });
+    }
+    const projToggle = pane.querySelector('.explorer-projects-toggle');
+    if (projToggle) {
+      projToggle.addEventListener('click', function () {
+        const w = State.selectedResource || '';
+        if (ExplorerProjectState.expanded.has(w)) ExplorerProjectState.expanded.delete(w);
+        else ExplorerProjectState.expanded.add(w);
+        renderExplorerDetailPane_(State.selectedResourceDetail);
+      });
+    }
+  }
+
+  function renderExplorerResourceHeader_(name, detail) {
+    const meta = (State.ref && State.ref.resources || []).find(function (r) { return r.name === name; });
+    const title = $('#resourceTitle');
+    const sub = $('#resourceSub');
+    if (title) title.textContent = name || 'Select a resource';
+    if (sub) {
+      if (!meta) {
+        sub.textContent = '';
+      } else {
+        const parts = [
+          meta.job_profile || meta.level || '',
+          meta.manager_org || '—',
+          meta.resolvedTeam || meta.icp || '—'
+        ].filter(Boolean);
+        sub.textContent = parts.join(' · ');
+      }
+    }
+  }
+
+  const EXPLORER_LOAD_MIN_MS = 350;
+
+  function explorerLoadingHtml_(compact) {
+    const compactCls = compact ? ' explorer-loading-compact' : '';
+    return '<div class="explorer-loading' + compactCls + '" role="status" aria-live="polite">' +
+      '<div class="explorer-loading-spinner" aria-hidden="true"></div>' +
+      '<div class="explorer-loading-label">Loading worker…</div>' +
+      '</div>';
   }
 
   /**
-   * Render the Utilization Summary card from the summary object returned by
-   * computeResourceDetail.
-   * @param {Object|null} summary
+   * Show unified Explorer loading state across detail, Planning, and (when
+   * expanded) the worker list. Returns timestamp for minimum-display timing.
+   * @return {number}
    */
-  function renderUtilizationSummary_(summary) {
-    const card = $('#utilizationSummaryCard');
-    if (!card) return;
-    if (!summary) {
-      card.hidden = true;
-      return;
-    }
-    card.hidden = false;
+  function showExplorerSkeleton_() {
+    const loadingHtml = explorerLoadingHtml_(false);
+    const listLoadingHtml = explorerLoadingHtml_(true);
 
-    const cap = summary.capacity || {};
-    const comm = summary.committed || {};
-    const scen = summary.scenario  || {};
-    const comp = summary.components || {};
-    const flags = summary.flags || {};
+    const pane = $('#explorerDetailPane');
+    if (pane) pane.innerHTML = loadingHtml;
 
-    function fmtUtil(v) { return Math.round((v || 0) * 100) + '%'; }
-    function utilClass(v) {
-      if (v > 1.0) return 'util-red';
-      if (v >= 0.85) return 'util-amber';
-      return 'util-green';
+    const list = $('#resourceList');
+    if (list && !State.explorerListCollapsed) {
+      list.innerHTML = listLoadingHtml;
     }
 
-    // Committed avg
-    const cAvgEl = $('#utilCommittedAvg');
-    if (cAvgEl) {
-      cAvgEl.textContent = fmtUtil(comm.avgUtilization);
-      cAvgEl.className = 'util-headline-value ' + utilClass(comm.avgUtilization);
-    }
-    const cPeakEl = $('#utilCommittedPeak');
-    if (cPeakEl) {
-      const peakLabel = comm.peakMonthKey ? fmtMonth(comm.peakMonthKey) : '—';
-      cPeakEl.textContent = `peak ${fmtUtil(comm.peakUtilization)} (${peakLabel})`;
-    }
-
-    // Scenario avg
-    const sAvgEl = $('#utilScenarioAvg');
-    if (sAvgEl) {
-      sAvgEl.textContent = fmtUtil(scen.avgUtilization);
-      sAvgEl.className = 'util-headline-value ' + utilClass(scen.avgUtilization);
-    }
-    const sPeakEl = $('#utilScenarioPeak');
-    if (sPeakEl) {
-      const peakLabel = scen.peakMonthKey ? fmtMonth(scen.peakMonthKey) : '—';
-      sPeakEl.textContent = `peak ${fmtUtil(scen.peakUtilization)} (${peakLabel})`;
-    }
-
-    // Capacity
-    const capEl = $('#utilCapacity');
-    if (capEl) capEl.textContent = (cap.monthlyHours || 0) + 'h/mo';
-    const winEl = $('#utilCapacityWindow');
-    if (winEl) winEl.textContent = (cap.planningWindowMonths || 0) + ' months';
-
-    // Components
-    const incTO = State.filters.includeTimeOff;
-    const totalCap = (cap.monthlyHours || 160) * (cap.planningWindowMonths || 1);
-    function pct(v) { return totalCap > 0 ? Math.round((v || 0) / totalCap * 100) + '%' : '0%'; }
-    function compRow(dot, label, hours, negative) {
-      if (!hours) return '';
-      const hoursDisplay = negative ? `-${Math.abs(hours)}h` : `${hours}h`;
-      return `<div class="util-component-row${negative ? ' reduction' : ''}">
-        <span class="util-component-dot" style="background:${dot}"></span>
-        <span class="util-component-label">${escapeHtml_(label)}</span>
-        <span class="util-component-hours">${hoursDisplay}</span>
-        <span class="util-component-pct">${pct(hours)}</span>
-      </div>`;
-    }
-
-    const compHtml = [
-      compRow('var(--ballpoint)',   'PSA Billable',         comp.psaBillable,          false),
-      incTO ? compRow('var(--water-cooler)', 'PSA Internal', comp.psaInternal,          false) : '',
-      incTO ? compRow('var(--tack)',         'PSA Education', comp.psaEducation,         false) : '',
-      incTO ? compRow('var(--pencil)',       'PSA PTO/Holiday', comp.psaPto,             false) : '',
-      compRow('var(--smoothie)',    'Committed Assigns',    comp.committedAssignments,  false),
-      compRow('var(--happy-hour)', 'Modeled Assigns',      comp.modeledAssignments,    false),
-      comp.committedReductions ? compRow('var(--thumbtack)', 'Committed Reductions',  comp.committedReductions, true) : '',
-      comp.modeledReductions   ? compRow('var(--thumbtack)', 'Modeled Reductions',    comp.modeledReductions,   true) : ''
-    ].join('');
-    const compEl = $('#utilComponents');
-    if (compEl) compEl.innerHTML = compHtml || '<div class="util-component-row"><span class="util-component-label muted">No data in planning window.</span></div>';
-
-    // Status line
-    const statusEl = $('#utilStatus');
-    if (statusEl) {
-      let statusText = '', statusClass = '';
-      if (flags.overCapacityScenario) {
-        const mo = scen.peakMonthKey ? fmtMonth(scen.peakMonthKey) : '';
-        statusText = `⚠ Over capacity by ${flags.overCapacityHours}h in scenario view — peak ${fmtUtil(scen.peakUtilization)}${mo ? ' in ' + mo : ''}`;
-        statusClass = 'warn';
-      } else if (flags.overCapacityCommitted) {
-        const mo = comm.peakMonthKey ? fmtMonth(comm.peakMonthKey) : '';
-        statusText = `⚠ Over capacity by ${flags.overCapacityHours}h in committed view — peak ${fmtUtil(comm.peakUtilization)}${mo ? ' in ' + mo : ''}`;
-        statusClass = 'warn';
-      } else if (flags.peakIsScenario && scen.peakUtilization > 0.9) {
-        const mo = scen.peakMonthKey ? fmtMonth(scen.peakMonthKey) : '';
-        statusText = `Near capacity in scenario view — peak ${fmtUtil(scen.peakUtilization)}${mo ? ' in ' + mo : ''}`;
-        statusClass = 'amber';
-      } else if (flags.isUnderutilized) {
-        statusText = `Underutilized — committed avg ${fmtUtil(comm.avgUtilization)}`;
-        statusClass = 'info';
-      }
-      if (statusText) {
-        statusEl.textContent = statusText;
-        statusEl.className = 'util-status ' + statusClass;
-        statusEl.hidden = false;
-      } else {
-        statusEl.hidden = true;
+    // Planning card: clear stale content and show unified loading
+    State.workerPlanning = null;
+    const planCard = $('#workerPlanningCard');
+    if (planCard) {
+      planCard.hidden = false;
+      const nameEl = $('#planningWorkerName');
+      if (nameEl) nameEl.textContent = '…';
+      const sub = $('#planningSubtitle');
+      if (sub) sub.textContent = '';
+      const footer = $('#planningFooter');
+      if (footer) footer.hidden = true;
+      const body = $('#workerPlanningBody');
+      if (body) {
+        body.innerHTML = '<tr><td colspan="8" class="explorer-loading-planning-cell">' +
+          loadingHtml + '</td></tr>';
       }
     }
+
+    return Date.now();
   }
 
-  async function loadResourceDetail_(name) {
-    if (!name) {
-      _hidePlanningCard_();
+  /**
+   * Defer paint until minimum load duration elapses; stale reqId never paints.
+   * @param {number} loadShownAt
+   * @param {number} reqId
+   * @param {function(): void} paintFn
+   */
+  function explorerDeferPaint_(loadShownAt, reqId, paintFn) {
+    const waitMs = Math.max(0, EXPLORER_LOAD_MIN_MS - (Date.now() - loadShownAt));
+    const run = function () {
+      if (reqId !== State.explorerReqId) return;
+      paintFn();
+    };
+    if (waitMs > 0) setTimeout(run, waitMs);
+    else run();
+  }
+
+  /**
+   * Single orchestrator for Explorer roster + detail refresh.
+   * Shows unified skeleton, fetches once, paints detail atomically.
+   * @param {{ reason?: string }} opts
+   */
+  async function refreshExplorer_({ reason } = {}) {
+    if (State.currentView !== 'explorer') return;
+
+    const reqId = ++State.explorerReqId;
+    const resource = State.selectedResource;
+
+    if (!resource) {
+      renderResourceList();
+      const pane = $('#explorerDetailPane');
+      if (pane) {
+        pane.innerHTML = '<div class="muted explorer-empty-msg">Select a resource to view capacity detail.</div>';
+      }
+      State.workerPlanning = null;
+      const planCard = $('#workerPlanningCard');
+      if (planCard) planCard.hidden = true;
       return;
     }
+
+    const loadShownAt = showExplorerSkeleton_();
+    updateExplorerLayout_();
+    updateExplorerWorkerPicker_();
+
     try {
-      const detail = await call('api_getResourceDetail', {
-        resource: name,
-        viewMode: State.filters.viewMode,
-        scenarioId: State.filters.scenarioId,
-        includeTimeOff: State.filters.includeTimeOff
+      const [detail, planningRows, planningSummary] = await Promise.all([
+        call('api_getResourceDetailV2', buildServerParams_({ resource: resource })),
+        call('api_getWorkerPlanning', resource, {}),
+        call('api_getWorkerPlanningSummary', resource)
+      ]);
+      if (reqId !== State.explorerReqId) return;
+
+      explorerDeferPaint_(loadShownAt, reqId, function () {
+        State.selectedResourceDetail = detail;
+        if (State.charts.resource) {
+          State.charts.resource.destroy();
+          State.charts.resource = null;
+        }
+        renderResourceList();
+        renderExplorerResourceHeader_(resource, detail);
+        const adjustBtn = $('#adjustHoursBtn');
+        if (adjustBtn) {
+          adjustBtn.hidden = !detail.found;
+          adjustBtn.onclick = function () { openAdjustHoursDrawer_(null, resource); };
+        }
+        renderExplorerDetailPane_(detail);
+        if (detail.found) {
+          applyWorkerPlanning_(resource, planningRows, planningSummary);
+        } else {
+          State.workerPlanning = null;
+          const planCard = $('#workerPlanningCard');
+          if (planCard) planCard.hidden = true;
+        }
       });
-      // Patch: detail now has shape { months, summary }
-      const months = detail && detail.months ? detail.months : detail;
-      renderResourceChart_(name, months);
-      renderUtilizationSummary_(detail && detail.summary ? detail.summary : null);
-      // Show "Adjust hours" button now that a resource is selected
-      const adjustBtn = $('#adjustHoursBtn');
-      if (adjustBtn) {
-        adjustBtn.hidden = false;
-        adjustBtn.onclick = () => openAdjustHoursDrawer_(null, name);
-      }
-      // Drop 7: load Worker Planning Detail card in parallel
-      loadWorkerPlanning_(name);
     } catch (err) {
-      toast('Resource detail failed: ' + err.message, 'err');
+      if (reqId !== State.explorerReqId) return;
+      explorerDeferPaint_(loadShownAt, reqId, function () {
+        State.selectedResourceDetail = null;
+        State.workerPlanning = null;
+        const planCard = $('#workerPlanningCard');
+        if (planCard) planCard.hidden = true;
+        renderResourceList();
+        const pane = $('#explorerDetailPane');
+        if (pane) {
+          pane.innerHTML = '<div class="muted explorer-empty-msg" style="color:var(--thumbtack)">Failed to load: ' +
+            escapeHtml_(err.message || String(err)) + '</div>';
+        }
+        toast('Resource detail failed: ' + err.message, 'err');
+      });
     }
   }
 
-  function renderResourceChart_(name, months) {
-    $('#resourceTitle').textContent = name;
-    const meta = (State.ref.resources || []).find(r => r.name === name);
-    $('#resourceSub').textContent = meta
-      ? (meta.manager_org || '—') + ' · ' + (meta.resolvedTeam || meta.icp || meta.role_category || '—')
-      : '';
-
-    const ctx = $('#resourceChart').getContext('2d');
-    if (State.charts.resource) State.charts.resource.destroy();
-    // Positive series stacked above x-axis (stack 'a').
-    // Reduction series rendered as negative values below x-axis (stack 'b').
-    // Two distinct datasets: Committed (solid red) + Modeled (lighter red).
-    const datasets = [
-      { label: 'Billable',    data: months.map(m => m.billable),   backgroundColor: cssVar_('--ballpoint'),    stack: 'a' },
-      { label: 'Internal',    data: months.map(m => m.internal),   backgroundColor: cssVar_('--water-cooler'), stack: 'a' },
-      { label: 'Education',   data: months.map(m => m.education),  backgroundColor: cssVar_('--tack'),         stack: 'a' },
-      { label: 'PTO/Holiday', data: months.map(m => m.pto),        backgroundColor: cssVar_('--pencil'),       stack: 'a' },
-      { label: 'Scenario',    data: months.map(m => m.scenario),   backgroundColor: cssVar_('--happy-hour'),   stack: 'a' },
-      {
-        label: 'Reductions (Committed)',
-        data: months.map(m => -((m.reductionByStatus && m.reductionByStatus.committed) || 0)),
-        backgroundColor: cssVar_('--thumbtack'),
-        stack: 'b'
-      },
-      {
-        label: 'Reductions (Modeled)',
-        data: months.map(m => -((m.reductionByStatus && m.reductionByStatus.modeled) || 0)),
-        backgroundColor: '#e74c3c55',
-        borderColor: cssVar_('--thumbtack'),
-        borderWidth: 1,
-        borderDash: [4, 4],
-        stack: 'b'
-      }
-    ];
-    State.charts.resource = new Chart(ctx, {
-      type: 'bar',
-      data: { labels: months.map(m => fmtMonth(m.monthKey)), datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        plugins: {
-          legend: { position: 'bottom' },
-          tooltip: { mode: 'index' }
-        },
-        scales: {
-          x: { stacked: true, grid: { display: false } },
-          y: { stacked: true, beginAtZero: false }
-        },
-        onClick: function(event, elements) {
-          if (!elements || elements.length === 0) return;
-          const el = elements[0];
-          const dataset = this.data.datasets[el.datasetIndex];
-          if (!dataset || dataset.label !== 'Billable') return;
-          const rawValue = dataset.data[el.index];
-          if (!rawValue || rawValue <= 0) return;
-          const monthKey = months[el.index].monthKey;
-          if (
-            State.projectAllocation &&
-            State.projectAllocation.resource === name &&
-            State.projectAllocation.monthKey === monthKey
-          ) {
-            State.projectAllocation = null;
-            $('#projectAllocationCard').hidden = true;
-            return;
-          }
-          State.projectAllocation = { resource: name, monthKey: monthKey };
-          loadProjectAllocationCard_(name, monthKey);
-        }
-      }
-    });
-
-    const canvas = $('#resourceChart');
-    canvas.addEventListener('mousemove', function(e) {
-      const chart = State.charts.resource;
-      if (!chart) return;
-      const els = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
-      if (els.length > 0 && chart.data.datasets[els[0].datasetIndex].label === 'Billable') {
-        canvas.style.cursor = 'pointer';
-      } else {
-        canvas.style.cursor = '';
-      }
-    });
-    canvas.addEventListener('mouseleave', function() {
-      canvas.style.cursor = '';
-    });
-  }
+  (function initExplorerControls_() {
+    const listToggle = $('#explorerListToggle');
+    if (listToggle) {
+      listToggle.addEventListener('click', function () {
+        State.explorerListCollapsed = !State.explorerListCollapsed;
+        updateExplorerLayout_();
+        refreshExplorer_({ reason: 'layout' });
+      });
+    }
+    const picker = $('#explorerWorkerPicker');
+    if (picker) {
+      picker.addEventListener('change', function () {
+        if (picker.value) selectExplorerResource_(picker.value);
+      });
+    }
+    const prevBtn = $('#explorerPrevWorker');
+    if (prevBtn) prevBtn.addEventListener('click', function () { explorerStepWorker_(-1); });
+    const nextBtn = $('#explorerNextWorker');
+    if (nextBtn) nextBtn.addEventListener('click', function () { explorerStepWorker_(1); });
+    updateExplorerLayout_();
+  })();
 
   async function loadProjectAllocationCard_(resourceName, monthKey) {
     const card  = $('#projectAllocationCard');
@@ -4125,7 +4355,7 @@
  */
 function refreshExplorerSurfaces_(workerName) {
   if (State.currentView === 'explorer' && State.selectedResource === workerName) {
-    loadResourceDetail_(workerName);
+    refreshExplorer_({ reason: 'surface-refresh' });
   }
   if (State.projectAllocation && State.projectAllocation.resource === workerName) {
     loadProjectAllocationCard_(State.projectAllocation.resource, State.projectAllocation.monthKey);
@@ -4288,6 +4518,20 @@ async function _qaRefreshPsaHours_() {
   // ============================================================
 
   /**
+   * Paint Planning card from already-fetched data (no server round-trip).
+   * @param {string} resourceName
+   * @param {Object[]} rows
+   * @param {Object} summary
+   */
+  function applyWorkerPlanning_(resourceName, rows, summary) {
+    State.workerPlanning = { rows: rows || [], summary: summary || {}, resource: resourceName };
+    _populatePlanningScenarioFilter_();
+    renderWorkerPlanning_();
+    const card = $('#workerPlanningCard');
+    if (card) card.hidden = false;
+  }
+
+  /**
    * Fetch api_getWorkerPlanning + api_getWorkerPlanningSummary in parallel.
    * Shows the planning card, populates State.workerPlanning.
    */
@@ -4302,11 +4546,7 @@ async function _qaRefreshPsaHours_() {
         call('api_getWorkerPlanning', resourceName, {}),
         call('api_getWorkerPlanningSummary', resourceName)
       ]);
-      State.workerPlanning = { rows: rows || [], summary: summary || {}, resource: resourceName };
-      _populatePlanningScenarioFilter_();
-      renderWorkerPlanning_();
-      const card = $('#workerPlanningCard');
-      if (card) card.hidden = false;
+      applyWorkerPlanning_(resourceName, rows, summary);
     } catch (err) {
       toast('Planning load failed: ' + err.message, 'err');
     }
@@ -4528,6 +4768,9 @@ async function _qaRefreshPsaHours_() {
     if (ok) {
       toast('Committed', 'ok');
       await loadWorkerPlanning_(State.selectedResource);
+      if (State.currentView === 'explorer') {
+        await refreshExplorer_({ reason: 'commit' });
+      }
     }
   }
 

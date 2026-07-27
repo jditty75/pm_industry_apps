@@ -117,6 +117,7 @@ function saveAssignment_(a) {
   }
 
   invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   return a;
 }
 
@@ -126,6 +127,7 @@ function setAssignmentStatus_(assignment_id, status) {
     status: status, modified_by: user, modified_at: now_()
   }, ASSIGN_HEADERS);
   invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   return { assignment_id: assignment_id, status: status };
 }
 

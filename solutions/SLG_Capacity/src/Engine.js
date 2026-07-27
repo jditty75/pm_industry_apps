@@ -1477,6 +1477,8 @@ function computeWeeklyForecast_(params) {
   };
 }
 
+// WFM.18-deprecated: legacy Explorer monthly path. Retained for rollback;
+// no callers after WFM.18. Use api_getResourceDetailV2 instead.
 function computeResourceDetail(params) {
   params = params || {};
   const resource = params.resource;
@@ -2000,6 +2002,56 @@ function computeBlendedWindowKpis_(params) {
   };
 }
 
+function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
+  return quarterKeys.map(function (qk) {
+    const wd = quarterWorkdaySummary_(qk, holidays);
+    const isCurrent = (qk === curQ);
+    const appTarget = quarterTargetHoursFor_(worker.icpRole, worker.jobProfile, qk, holidays, settings);
+    const summary = worker.employeeId ? actualsSummary[worker.employeeId] : null;
+    let productiveHours = 0;
+    let targetHours = appTarget;
+    let bonusAttainment = 0;
+    let source = 'forecast';
+
+    if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0) {
+      productiveHours = summary.qtd_icp_plus_forecast_hours;
+      if (summary.bonus_target_billable_hours_eoq > 0) {
+        targetHours = summary.bonus_target_billable_hours_eoq;
+        bonusAttainment = productiveHours / targetHours;
+      }
+      source = 'actuals_plus_forecast';
+    } else {
+      productiveHours = sumForecastProductiveForQuarter_(worker, qk, weeks);
+      targetHours = appTarget;
+      bonusAttainment = appTarget > 0 ? productiveHours / appTarget : 0;
+      source = 'forecast';
+    }
+
+    const icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
+    const financeUtil = wd.rawCapacityHours > 0 ? productiveHours / wd.rawCapacityHours : 0;
+    const icpTarget = Number(worker.icpTarget) || 0;
+    const ratioToTarget = icpTarget > 0 ? icpUtil / icpTarget : 0;
+    const trackingHours = productiveHours - targetHours;
+
+    return {
+      quarterKey: qk,
+      quarterLabel: qk,
+      isCurrentQuarter: isCurrent,
+      productiveHours: Number(productiveHours) || 0,
+      rawCapacityHours: wd.rawCapacityHours,
+      icpAvailableHours: wd.icpAvailableHours,
+      targetHours: Number(targetHours) || 0,
+      appTargetHours: Number(appTarget) || 0,
+      trackingHours: Number(trackingHours) || 0,
+      icpUtil: Number(icpUtil) || 0,
+      financeUtil: Number(financeUtil) || 0,
+      ratioToTarget: Number(ratioToTarget) || 0,
+      bonusAttainment: Number(bonusAttainment) || 0,
+      source: source
+    };
+  });
+}
+
 /**
  * Team quarterly scorecard: rolling four fiscal quarters per worker plus
  * hours-weighted team summaries.
@@ -2018,53 +2070,7 @@ function computeQuarterlyScorecard_(params) {
   const weeks = forecast.weeks || [];
 
   const workersOut = forecast.workers.map(function (w) {
-    const quarters = quarterKeys.map(function (qk) {
-      const wd = quarterWorkdaySummary_(qk, holidays);
-      const isCurrent = (qk === curQ);
-      const appTarget = quarterTargetHoursFor_(w.icpRole, w.jobProfile, qk, holidays, settings);
-      const summary = w.employeeId ? actualsSummary[w.employeeId] : null;
-      let productiveHours = 0;
-      let targetHours = appTarget;
-      let bonusAttainment = 0;
-      let source = 'forecast';
-
-      if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0) {
-        productiveHours = summary.qtd_icp_plus_forecast_hours;
-        if (summary.bonus_target_billable_hours_eoq > 0) {
-          targetHours = summary.bonus_target_billable_hours_eoq;
-          bonusAttainment = productiveHours / targetHours;
-        }
-        source = 'actuals_plus_forecast';
-      } else {
-        productiveHours = sumForecastProductiveForQuarter_(w, qk, weeks);
-        targetHours = appTarget;
-        bonusAttainment = appTarget > 0 ? productiveHours / appTarget : 0;
-        source = 'forecast';
-      }
-
-      const icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
-      const financeUtil = wd.rawCapacityHours > 0 ? productiveHours / wd.rawCapacityHours : 0;
-      const icpTarget = Number(w.icpTarget) || 0;
-      const ratioToTarget = icpTarget > 0 ? icpUtil / icpTarget : 0;
-      const trackingHours = productiveHours - targetHours;
-
-      return {
-        quarterKey: qk,
-        quarterLabel: qk,
-        isCurrentQuarter: isCurrent,
-        productiveHours: Number(productiveHours) || 0,
-        rawCapacityHours: wd.rawCapacityHours,
-        icpAvailableHours: wd.icpAvailableHours,
-        targetHours: Number(targetHours) || 0,
-        appTargetHours: Number(appTarget) || 0,
-        trackingHours: Number(trackingHours) || 0,
-        icpUtil: Number(icpUtil) || 0,
-        financeUtil: Number(financeUtil) || 0,
-        ratioToTarget: Number(ratioToTarget) || 0,
-        bonusAttainment: Number(bonusAttainment) || 0,
-        source: source
-      };
-    });
+    const quarters = buildWorkerQuarters_(w, quarterKeys, weeks, holidays, actualsSummary, settings, curQ);
 
     return {
       employeeId: String(w.employeeId || ''),

@@ -2244,3 +2244,330 @@ function _dbg_reconcileWFM17() {
     : '_dbg_reconcileWFM17: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
+
+// ============================================================
+// WFM.18 mandatory gate: Resource Detail V2 cross-view parity.
+// MANDATORY GATE: do not ship WFM.18 unless ALL CHECKS OK.
+// ============================================================
+
+/**
+ * WFM.18 mandatory gate. Validates week/quarter/blended parity between
+ * api_getResourceDetailV2 and canonical forecast/scorecard paths, plus
+ * filter-pipeline behavior.
+ */
+function _dbg_reconcileWFM18() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.01;
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function resolveSampleWorkers_(rows) {
+    var names = [];
+    var aidan = (rows || []).find(function (r) { return r.worker === 'Aidan Votaw'; });
+    if (aidan) names.push(aidan.worker);
+    (rows || []).forEach(function (r) {
+      if (/^Chad\b/i.test(r.worker) && names.indexOf(r.worker) < 0) names.push(r.worker);
+      if (/^Galen\b/i.test(r.worker) && names.indexOf(r.worker) < 0) names.push(r.worker);
+    });
+    var p6 = (rows || []).find(function (r) {
+      return String(r.level || '') === 'P6' || /P6/i.test(String(r.jobProfile || ''));
+    });
+    if (p6 && names.indexOf(p6.worker) < 0) names.push(p6.worker);
+    return names;
+  }
+
+  function workerBlendedExpected_(worker, visibleWeeks, rawCapacity, holidayHoursByWeek) {
+    var wProd = 0;
+    var wIcpAvail = 0;
+    var wRawCap = 0;
+    (visibleWeeks || []).forEach(function (vw) {
+      var wk = vw.week_key;
+      var prod = productiveHoursForWeek_(worker, wk);
+      var holidayHrs = Number(holidayHoursByWeek[wk] || 0);
+      var icpAvail = rawCapacity - holidayHrs;
+      wProd += prod;
+      wIcpAvail += icpAvail;
+      wRawCap += rawCapacity;
+    });
+    return {
+      avgIcpProductiveUtilization: wIcpAvail > 0 ? wProd / wIcpAvail : 0,
+      avgFinancialUtilization: wRawCap > 0 ? wProd / wRawCap : 0,
+      totalProductiveHours: wProd
+    };
+  }
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+
+  // ---- Check 1: cross-view week parity ----
+  (function weekParity() {
+    Logger.log('=== WFM.18 Check 1: cross-view week parity ===');
+    var forecastTable = api_getForecastTable(baseParams);
+    var sampleWorkers = resolveSampleWorkers_(forecastTable.rows);
+    if (!sampleWorkers.length) {
+      failures.push('No sample workers found for week parity');
+      return;
+    }
+    sampleWorkers.forEach(function (workerName) {
+      var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, baseParams));
+      if (!v2.found) {
+        failures.push('Week parity: ' + workerName + ' not found in V2');
+        return;
+      }
+      var ftRow = (forecastTable.rows || []).find(function (r) { return r.worker === workerName; });
+      if (!ftRow) {
+        failures.push('Week parity: ' + workerName + ' not in forecast table');
+        return;
+      }
+      (v2.weeks || []).forEach(function (cell) {
+        var ftCell = (ftRow.workerWeekly || []).find(function (c) { return c.weekKey === cell.weekKey; });
+        if (!ftCell) {
+          failures.push(workerName + ' missing week ' + cell.weekKey + ' in forecast table');
+          return;
+        }
+        if (!near_(cell.hours, ftCell.hours)) {
+          failures.push(workerName + ' ' + cell.weekKey + ' hours: V2=' + cell.hours + ' FT=' + ftCell.hours);
+        }
+        if (!near_(cell.icpUtil, ftCell.icpUtil)) {
+          failures.push(workerName + ' ' + cell.weekKey + ' icpUtil: V2=' + cell.icpUtil + ' FT=' + ftCell.icpUtil);
+        }
+        if (!near_(cell.financeUtil, ftCell.financeUtil)) {
+          failures.push(workerName + ' ' + cell.weekKey + ' financeUtil: V2=' + cell.financeUtil + ' FT=' + ftCell.financeUtil);
+        }
+      });
+      Logger.log('  ' + workerName + (failures.length ? '' : ' OK'));
+    });
+  })();
+
+  // ---- Check 2: quarter parity + anchors ----
+  (function quarterParity() {
+    Logger.log('=== WFM.18 Check 2: quarter parity ===');
+    var scorecard = api_getQuarterlyScorecard(baseParams);
+    var forecastTable = api_getForecastTable(baseParams);
+    var sampleWorkers = resolveSampleWorkers_(forecastTable.rows);
+    var curQ = fiscalQuarterKey_(new Date());
+
+    sampleWorkers.forEach(function (workerName) {
+      var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, baseParams));
+      var scRow = (scorecard.workers || []).find(function (w) { return w.worker === workerName; });
+      if (!v2.found || !scRow) {
+        failures.push('Quarter parity: missing row for ' + workerName);
+        return;
+      }
+      (v2.quarters || []).forEach(function (q, qi) {
+        var scQ = (scRow.quarters || [])[qi];
+        if (!scQ) {
+          failures.push(workerName + ' missing scorecard quarter index ' + qi);
+          return;
+        }
+        ['productiveHours', 'targetHours', 'icpUtil', 'bonusAttainment'].forEach(function (field) {
+          if (!near_(q[field], scQ[field])) {
+            failures.push(workerName + ' ' + q.quarterKey + ' ' + field +
+              ': V2=' + q[field] + ' SC=' + scQ[field]);
+          }
+        });
+      });
+      Logger.log('  ' + workerName + ' quarter cells checked');
+    });
+
+    // Aidan current-quarter attainment anchor (87.63%)
+    var aidanV2 = api_getResourceDetailV2(Object.assign({ resource: 'Aidan Votaw' }, baseParams));
+    if (aidanV2.found) {
+      var aidanCur = (aidanV2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      if (!aidanCur) {
+        failures.push('Aidan current quarter missing from V2');
+      } else {
+        var aidanPct = aidanCur.bonusAttainment * 100;
+        var aidanOk = Math.abs(aidanPct - 87.63) <= TOL;
+        Logger.log('  Aidan current-quarter attainment=' + aidanPct.toFixed(2) + '% (expect 87.63%)' +
+          (aidanOk ? ' OK' : ' FAILED'));
+        if (!aidanOk) {
+          failures.push('Aidan current-quarter attainment: got ' + aidanPct.toFixed(2) + '% expect 87.63%');
+        }
+      }
+    } else {
+      failures.push('Aidan Votaw not found in V2 for attainment anchor');
+    }
+
+    // FY27 target anchors: Consulting (Aidan profile) and P6
+    var consultingTargets = { 'FY27-Q2': 375.76, 'FY27-Q3': 388.08, 'FY27-Q4': 357.28 };
+    var p6Targets = { 'FY27-Q2': 297.68, 'FY27-Q3': 307.44, 'FY27-Q4': 283.04 };
+    var holidays = readHolidays_();
+    var settings = readSettings_();
+
+    Logger.log('  Consulting FY27 target anchors (Aidan profile):');
+    Object.keys(consultingTargets).forEach(function (qk) {
+      var got = quarterTargetHoursFor_('CS_FUNC', 'P4 Consulting', qk, holidays, settings);
+      var exp = consultingTargets[qk];
+      var ok = Math.abs(got - exp) <= TOL;
+      Logger.log('    ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('Consulting target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
+    });
+
+    Logger.log('  P6 FY27 target anchors:');
+    Object.keys(p6Targets).forEach(function (qk) {
+      var got = quarterTargetHoursFor_('EM', 'P6 Delivery Consultant', qk, holidays, settings);
+      var exp = p6Targets[qk];
+      var ok = Math.abs(got - exp) <= TOL;
+      Logger.log('    ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('P6 target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
+    });
+
+    // V2 appTargetHours on sample workers should match anchors for future quarters
+    if (aidanV2.found) {
+      Object.keys(consultingTargets).forEach(function (qk) {
+        var q = (aidanV2.quarters || []).find(function (qq) { return qq.quarterKey === qk; });
+        if (!q) return;
+        if (!near_(q.appTargetHours, consultingTargets[qk])) {
+          failures.push('Aidan V2 appTargetHours ' + qk + ': got ' + q.appTargetHours +
+            ' expect ' + consultingTargets[qk]);
+        }
+      });
+    }
+    var p6Worker = (forecastTable.rows || []).find(function (r) {
+      return String(r.level || '') === 'P6' || /P6/i.test(String(r.jobProfile || ''));
+    });
+    if (p6Worker) {
+      var p6V2 = api_getResourceDetailV2(Object.assign({ resource: p6Worker.worker }, baseParams));
+      if (p6V2.found) {
+        Object.keys(p6Targets).forEach(function (qk) {
+          var q = (p6V2.quarters || []).find(function (qq) { return qq.quarterKey === qk; });
+          if (!q) return;
+          if (!near_(q.appTargetHours, p6Targets[qk])) {
+            failures.push(p6Worker.worker + ' V2 appTargetHours ' + qk + ': got ' + q.appTargetHours +
+              ' expect ' + p6Targets[qk]);
+          }
+        });
+      }
+    }
+  })();
+
+  // ---- Check 3: blended-summary parity ----
+  (function blendedParity() {
+    Logger.log('=== WFM.18 Check 3: blended-summary parity ===');
+    var forecast = computeWeeklyForecast_(baseParams);
+    var visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
+    var rawCapacity = Number(forecast.rawCapacity) || 40;
+    var holidayHoursByWeek = forecast.holidayHoursByWeek || {};
+    var forecastTable = api_getForecastTable(baseParams);
+    var sampleWorkers = resolveSampleWorkers_(forecastTable.rows);
+
+    sampleWorkers.forEach(function (workerName) {
+      var w = (forecast.workers || []).find(function (fw) { return fw.resource === workerName; });
+      var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, baseParams));
+      if (!w || !v2.found || !v2.blendedSummary) {
+        failures.push('Blended parity: missing data for ' + workerName);
+        return;
+      }
+      var expected = workerBlendedExpected_(w, visibleWeeks, rawCapacity, holidayHoursByWeek);
+      var bs = v2.blendedSummary;
+      if (!near_(bs.avgIcpProductiveUtilization, expected.avgIcpProductiveUtilization)) {
+        failures.push(workerName + ' avgIcp: V2=' + bs.avgIcpProductiveUtilization +
+          ' expected=' + expected.avgIcpProductiveUtilization);
+      }
+      if (!near_(bs.avgFinancialUtilization, expected.avgFinancialUtilization)) {
+        failures.push(workerName + ' avgFinance: V2=' + bs.avgFinancialUtilization +
+          ' expected=' + expected.avgFinancialUtilization);
+      }
+      Logger.log('  ' + workerName +
+        ' avgIcp=' + (bs.avgIcpProductiveUtilization * 100).toFixed(2) + '%' +
+        ' avgFin=' + (bs.avgFinancialUtilization * 100).toFixed(2) + '% OK');
+    });
+  })();
+
+  // ---- Check 4: filter-pipeline parity ----
+  (function filterPipeline() {
+    Logger.log('=== WFM.18 Check 4: filter-pipeline parity ===');
+    var ref = api_getReference();
+    var resources = ref.resources || [];
+    if (!resources.length) {
+      failures.push('Filter pipeline: no resources in reference');
+      return;
+    }
+
+    var byManager = {};
+    resources.forEach(function (r) {
+      if (!r.manager_org) return;
+      if (!byManager[r.manager_org]) byManager[r.manager_org] = [];
+      byManager[r.manager_org].push(r);
+    });
+    var mgrName = Object.keys(byManager).find(function (m) { return byManager[m].length >= 2; });
+    if (!mgrName) mgrName = resources[0].manager_org || '';
+    var teamLabel = (byManager[mgrName] && byManager[mgrName][0])
+      ? String(byManager[mgrName][0].resolvedTeam || '').trim()
+      : '';
+
+    var filterParams = {
+      viewMode: 'Scenario',
+      teams: mgrName ? [mgrName] : null,
+      teamLabel: teamLabel || null,
+      workerScope: 'SLG',
+      includeMyManagers: true,
+      includeTimeOff: false
+    };
+
+    var filteredTable = api_getForecastTable(filterParams);
+    var broadTable = api_getForecastTable({
+      viewMode: 'Scenario',
+      workerScope: 'All',
+      includeTimeOff: false
+    });
+    var filteredNames = {};
+    (filteredTable.rows || []).forEach(function (r) { filteredNames[r.worker] = true; });
+
+    var outWorker = (broadTable.rows || []).find(function (r) { return !filteredNames[r.worker]; });
+    var inWorker = (filteredTable.rows || [])[0];
+
+    if (outWorker) {
+      var v2Out = api_getResourceDetailV2(Object.assign({ resource: outWorker.worker }, filterParams));
+      var outOk = v2Out.found === false &&
+        (v2Out.weeks || []).length === 0 &&
+        (v2Out.quarters || []).length === 0 &&
+        (v2Out.projects || []).length === 0 &&
+        v2Out.blendedSummary === null;
+      Logger.log('  out-of-scope ' + outWorker.worker + ': found=' + v2Out.found +
+        (outOk ? ' OK' : ' FAILED'));
+      if (!outOk) {
+        failures.push('Out-of-scope worker ' + outWorker.worker + ' should return empty found:false payload');
+      }
+    } else {
+      Logger.log('  out-of-scope worker: SKIPPED (no worker outside filtered set)');
+    }
+
+    if (!inWorker) {
+      failures.push('Filter pipeline: no in-scope worker under filter params');
+      return;
+    }
+
+    var v2In = api_getResourceDetailV2(Object.assign({ resource: inWorker.worker }, filterParams));
+    if (!v2In.found) {
+      failures.push('In-scope worker ' + inWorker.worker + ' not found in V2 under filter');
+      return;
+    }
+    (v2In.weeks || []).forEach(function (cell) {
+      var ftCell = (inWorker.workerWeekly || []).find(function (c) { return c.weekKey === cell.weekKey; });
+      if (!ftCell) {
+        failures.push(inWorker.worker + ' missing filtered week ' + cell.weekKey);
+        return;
+      }
+      if (!near_(cell.hours, ftCell.hours) || !near_(cell.icpUtil, ftCell.icpUtil) ||
+          !near_(cell.financeUtil, ftCell.financeUtil)) {
+        failures.push('Filter pipeline week mismatch for ' + inWorker.worker + ' ' + cell.weekKey);
+      }
+    });
+    Logger.log('  in-scope ' + inWorker.worker + ' week cells match forecast table OK');
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM18: ALL CHECKS OK'
+    : '_dbg_reconcileWFM18: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}

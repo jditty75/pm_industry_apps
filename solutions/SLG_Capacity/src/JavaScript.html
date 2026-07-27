@@ -1019,6 +1019,24 @@
     return chips;
   }
 
+  /**
+   * Dashboard-only: show blended-window worker count in the chip strip row.
+   */
+  function renderStaffInView_() {
+    const el = $('#chipStripStaffCount');
+    if (!el) return;
+    const count = (State.currentView === 'dashboard' && State.dashboard && State.dashboard.kpis)
+      ? Number(State.dashboard.kpis.headcount) || 0
+      : 0;
+    if (count > 0) {
+      el.textContent = count + ' staff in view';
+      el.hidden = false;
+    } else {
+      el.textContent = '';
+      el.hidden = true;
+    }
+  }
+
   function renderChipStrip_() {
     const chips = getActiveFilterChips_();
     const strip = $('#chipStrip');
@@ -1029,6 +1047,7 @@
       strip.hidden = true;
       items.innerHTML = '';
       clearAll.hidden = true;
+      renderStaffInView_();
       return;
     }
 
@@ -1046,6 +1065,7 @@
         </span>`;
     }).join('');
     clearAll.hidden = false;
+    renderStaffInView_();
   }
 
   function onChipStripClick_(e) {
@@ -1177,6 +1197,7 @@
 
       renderKpis(d.kpis || null);
       renderHeadcountGap(d.headcountByTeam || []);
+      renderStaffInView_();
     } catch (err) {
       toast('Dashboard load failed: ' + err.message, 'err');
       console.error(err);

@@ -411,7 +411,8 @@ function api_getDashboard(params) {
     underUtilized: blendedKpis.underUtilized || [],
     overUtilizedCount: Number(blendedKpis.overUtilizedCount) || 0,
     underUtilizedCount: Number(blendedKpis.underUtilizedCount) || 0,
-    windowLabel: String(blendedKpis.windowLabel || '')
+    windowLabel: String(blendedKpis.windowLabel || ''),
+    headcount: Number(blendedKpis.headcount) || 0
   });
   return result;
 }

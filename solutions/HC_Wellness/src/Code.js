@@ -672,6 +672,21 @@ function renumberAgenda_() {
 }
 
 /**
+ * Classify an agenda item into one of three render buckets:
+ *   'DEPLOYMENT' — source is DEPLOYMENT and id does NOT start with MANUAL-
+ *   'CSAT'       — source is CSAT and id does NOT start with MANUAL-
+ *   'MANUAL'     — everything else (MANUAL- prefix IDs, QUALTRIX, BUDGET_EAC, MANUAL source, etc.)
+ */
+function classifyAgendaItem_(item) {
+  var id = String(item.id || '');
+  var src = String(item.source || '').toUpperCase();
+  if (id.indexOf('MANUAL-') === 0) return 'MANUAL';
+  if (src === 'DEPLOYMENT') return 'DEPLOYMENT';
+  if (src === 'CSAT') return 'CSAT';
+  return 'MANUAL';
+}
+
+/**
  * Generate full HTML for the agenda preview/export.
  * (Unchanged from your working version except for grouping logic if you add it.)
  */
@@ -683,10 +698,13 @@ function generateAgendaHtml(agendaItems) {
   );
 
   const deploymentItems = agendaItems.filter(
-    item => String(item.source || '').toUpperCase() === 'DEPLOYMENT'
+    item => classifyAgendaItem_(item) === 'DEPLOYMENT'
   );
   const csatItems = agendaItems.filter(
-    item => String(item.source || '').toUpperCase() === 'CSAT'
+    item => classifyAgendaItem_(item) === 'CSAT'
+  );
+  const manualItems = agendaItems.filter(
+    item => classifyAgendaItem_(item) === 'MANUAL'
   );
 
   let html = `
@@ -949,17 +967,168 @@ function generateAgendaHtml(agendaItems) {
       }
       .print-button:hover { background: #1e40af; }
       @media print {
-        body { background: #ffffff; padding: 0; }
-        .container { box-shadow: none; border-radius: 0; }
-        .print-button { display: none; }
-        .agenda-item { page-break-inside: avoid; }
+
+        /* ---- Page setup ---- */
+        @page {
+          size: Letter;
+          margin: 0.45in 0.5in;
+        }
+
+        html, body {
+          background: #ffffff !important;
+        }
+        body {
+          padding: 0;
+          font-size: 10px;
+          color: #111827;
+        }
+
+        /* ---- Container: kill the blue border that bleeds across pages ---- */
+        .container {
+          box-shadow: none !important;
+          border: none !important;
+          border-radius: 0 !important;
+          max-width: 100% !important;
+          margin: 0 !important;
+          overflow: visible !important;
+        }
+
+        /* ---- Hide UI chrome ---- */
+        .print-button,
+        .footer-main .print-button {
+          display: none !important;
+        }
+
+        /* ---- Header: condensed, page 1 only ---- */
+        .header {
+          padding: 10px 14px !important;
+          background: #1d4ed8 !important;
+          color: #ffffff !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .header-title {
+          font-size: 16px !important;
+          margin-bottom: 2px !important;
+        }
+        .header-subtitle {
+          font-size: 10.5px !important;
+          line-height: 1.3 !important;
+        }
+        .header-date {
+          font-size: 10px !important;
+          margin-top: 3px !important;
+        }
+        .header-logo svg {
+          width: 30px !important;
+          height: 30px !important;
+        }
+
+        /* ---- Summary bar: condensed, page 1 only ---- */
+        .summary {
+          padding: 8px 14px !important;
+        }
+        .summary-number { font-size: 16px !important; }
+        .summary-label  { font-size: 9px  !important; }
+
+        /* ---- Content padding ---- */
+        .content { padding: 10px 14px 14px 14px !important; }
+
+        /* ---- Section header: prevent orphan headers, tighten ---- */
+        .section {
+          margin-bottom: 12px !important;
+        }
+        .section-header {
+          padding: 6px 10px !important;
+          margin: 0 -10px 8px -10px !important;
+          background: #1d4ed8 !important;
+          color: #ffffff !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          break-after: avoid;
+          page-break-after: avoid;
+        }
+        .section-title { font-size: 11px !important; }
+        .section-count { font-size: 9px !important; padding: 1px 6px !important; }
+        .section-icon  { width: 18px !important; height: 18px !important; font-size: 11px !important; }
+
+        /* ---- New page per section (except the very first) ---- */
+        .section + .section {
+          break-before: page;
+          page-break-before: always;
+        }
+
+        /* ---- Agenda items: condensed executive layout ---- */
+        .agenda-item {
+          background: #ffffff !important;
+          border: 1px solid #d1d5db !important;
+          padding: 6px 9px !important;
+          margin-bottom: 6px !important;
+          break-inside: auto;
+          page-break-inside: auto;
+        }
+        .item-header { margin-bottom: 4px !important; }
+        .account-name { font-size: 12px !important; }
+        .item-number  { font-size: 10px !important; }
+
+        .item-meta {
+          gap: 6px !important;
+          margin-bottom: 5px !important;
+          font-size: 9.5px !important;
+        }
+
+        /* In print, the section header already labels the category.
+           Hide the per-item source badge to save vertical space. */
+        .item-meta .badge-deployment,
+        .item-meta .badge-csat {
+          display: none !important;
+        }
+
+        /* ---- Detail rows: tighten and forbid mid-row breaks ---- */
+        .item-details { gap: 3px !important; }
+        .detail-row {
+          background: #ffffff !important;
+          border: 1px solid #e5e7eb !important;
+          padding: 4px 7px !important;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        .detail-label {
+          font-size: 8.5px !important;
+          margin-bottom: 1px !important;
+        }
+        .detail-text {
+          font-size: 10px !important;
+          line-height: 1.35 !important;
+        }
+
+        /* Keep status pills colored in print */
+        .status-badge {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        /* ---- Footer ---- */
+        .footer {
+          border-top: 1px solid #e5e7eb !important;
+          padding: 6px 14px 8px 14px !important;
+          font-size: 8.5px !important;
+          break-before: avoid;
+          page-break-before: avoid;
+        }
+
+        /* Belt-and-suspenders: ensure no element repeats blue borders
+           across pages */
+        * {
+          box-shadow: none !important;
+        }
       }
     </style>
     </head>
     <body>
     <div class="container">
-      <div class="header">
-        <div class="header-inner">
+        <div class="header page-1-only">
+          <div class="header-inner">
           <div class="header-logo">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" width="40" height="40">
               <defs>
@@ -987,11 +1156,11 @@ function generateAgendaHtml(agendaItems) {
           </div>
         </div>
       </div>
-      <div class="summary">
-        <div class="summary-item">
-          <div class="summary-number">${agendaItems.length}</div>
-          <div class="summary-label">Total Items</div>
-        </div>
+        <div class="summary page-1-only">
+          <div class="summary-item">
+            <div class="summary-number">${agendaItems.length}</div>
+            <div class="summary-label">Total Items</div>
+          </div>
         <div class="summary-item">
           <div class="summary-number">${deploymentItems.length}</div>
           <div class="summary-label">Deployments</div>
@@ -999,6 +1168,10 @@ function generateAgendaHtml(agendaItems) {
         <div class="summary-item">
           <div class="summary-number">${csatItems.length}</div>
           <div class="summary-label">CSAT Issues</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-number">${manualItems.length}</div>
+          <div class="summary-label">Additional / Manual</div>
         </div>
       </div>
       <div class="content">
@@ -1038,12 +1211,29 @@ function generateAgendaHtml(agendaItems) {
     html += `</div>`;
   }
 
+  if (manualItems.length > 0) {
+    html += `
+      <div class="section">
+        <div class="section-header">
+          <div class="section-header-left">
+            <div class="section-icon">📝</div>
+            <div class="section-title">Additional / Manual Topics</div>
+          </div>
+          <div class="section-count">${manualItems.length} items</div>
+        </div>
+    `;
+    manualItems.forEach((item, i) => {
+      html += generateAgendaItemHtml(item, i + 1, 'manual');
+    });
+    html += `</div>`;
+  }
+
   if (agendaItems.length === 0) {
     html += `
       <div class="empty-state">
         <div class="empty-state-icon">📋</div>
         <div><strong>No agenda items</strong></div>
-        <div>Add selections or ensure Red deployments and Unfavorable CSAT issues are available.</div>
+        <div>Add Deployment, CSAT, or Additional / Manual topics to populate the agenda.</div>
       </div>
     `;
   }
@@ -1093,19 +1283,30 @@ function generateAgendaItemHtml(item, number, type) {
       escapeHtml_(user) + '</span></div>';
   }
 
-  var srcLabel =
-    (type === 'deployment')
-      ? 'Deployment'
-      : (type === 'csat'
-        ? 'CSAT'
-        : (item.source || 'Item'));
-
-  var srcClass =
-    (type === 'deployment')
-      ? 'badge-deployment'
-      : (type === 'csat'
-        ? 'badge-csat'
-        : 'badge-neutral');
+  var srcLabel;
+  var srcClass;
+  if (type === 'deployment') {
+    srcLabel = 'Deployment';
+    srcClass = 'badge-deployment';
+  } else if (type === 'csat') {
+    srcLabel = 'CSAT';
+    srcClass = 'badge-csat';
+  } else if (type === 'manual') {
+    var rawSrc = String(item.source || '').toUpperCase();
+    var topicLabelMap = {
+      'DEPLOYMENT': 'Deployment',
+      'CSAT': 'CSAT',
+      'QUALTRIX': 'Qualtrix',
+      'BUDGET_EAC': 'Budget / EAC',
+      'MANUAL': 'Manual'
+    };
+    var topicLabel = topicLabelMap[rawSrc] || (item.source || 'Manual');
+    srcLabel = (rawSrc === 'MANUAL') ? 'Manual' : (topicLabel + ' (Manual)');
+    srcClass = 'badge-neutral';
+  } else {
+    srcLabel = item.source || 'Item';
+    srcClass = 'badge-neutral';
+  }
 
   html += '<div class="meta-item"><span class="status-badge ' + srcClass + '">' +
     escapeHtml_(srcLabel) + '</span></div>';

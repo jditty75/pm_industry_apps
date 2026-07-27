@@ -172,6 +172,8 @@ function normalizeActuals() {
   if (iEmpId < 0) throw new Error('Actuals: no "Employee ID" column found.');
 
   const iQtd = idx['QTD actual ICP hours'] ?? -1;
+  const iQtdIcpPlusForecast = idx['QTD ICP Hours + Forecast Hours'] ?? -1;
+  const iBonusTarget = idx['Bonus target billable hours at EoQ'] ?? -1;
 
   const weekDetection = detectWeekColumns_(header);
   const weeks = weekDetection.weeks;
@@ -192,7 +194,14 @@ function normalizeActuals() {
     if (iEmpId < 0 || (!row[iEmpId] && row[iEmpId] !== 0)) continue;
     const empId = String(row[iEmpId]).trim();
     const worker = iWorker >= 0 ? String(row[iWorker] || '').trim() : '';
-    summaryOut.push([empId, worker, (iQtd >= 0 ? Number(row[iQtd]) || 0 : ''), r + 2]);
+    summaryOut.push([
+      empId,
+      worker,
+      iQtd >= 0 ? Number(row[iQtd]) || 0 : '',
+      iQtdIcpPlusForecast >= 0 ? Number(row[iQtdIcpPlusForecast]) || 0 : '',
+      iBonusTarget >= 0 ? Number(row[iBonusTarget]) || 0 : '',
+      r + 2
+    ]);
     for (let k = 0; k < weeks.length; k++) {
       const wc = weeks[k];
       const hrs = Number(row[wc.index]);
@@ -203,6 +212,7 @@ function normalizeActuals() {
   writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, out);
   writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, summaryOut);
   invalidateCache_(ACTUALS_NORM);
+  invalidateCache_(ACTUALS_SUMMARY);
   try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e){}
   return { rowsIn: values.length, rowsOut: out.length, weeksDetected: weeks.length, warnings: weekDetection.warnings };
 }

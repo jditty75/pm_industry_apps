@@ -501,8 +501,9 @@ function invalidateAllCaches_() {
   // Clear CacheService for every known config + data table.
   // Keep this list in sync with every sheet name read via cachedRead_.
   const keys = [
-    ALLOC_NORM, OPPS_NORM, ASSIGNMENTS, SCENARIOS,
-    CFG_ICP, CFG_ROLES, CFG_CAL, CFG_ALIAS,
+    ALLOC_NORM, OPPS_NORM, ACTUALS_NORM, ACTUALS_SUMMARY,
+    ASSIGNMENTS, SCENARIOS,
+    CFG_ICP, CFG_ROLES, CFG_CAL, CFG_ALIAS, CFG_HOLIDAYS,
     CFG_SETTINGS, CFG_GENERIC, CFG_SLG_MGRS,
     CFG_PRACTICE_MGRS,                     // NEW: practice -> manager ownership
     CFG_WORKER_EXCLUSIONS,

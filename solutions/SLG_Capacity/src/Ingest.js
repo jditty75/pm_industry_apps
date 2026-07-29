@@ -1,4 +1,5 @@
 /**
+ * WFM.21-deprecated: retained for rollback, no longer wired to primary Admin flow.
  * Ingest an uploaded PSA .xlsx file (base64) into the active spreadsheet,
  * replacing the PSA sheet, then normalize it.
  *
@@ -80,6 +81,7 @@ function uploadStaffFile(base64, filename) {
 }
 
 /**
+ * WFM.21-deprecated: retained for rollback, no longer wired to primary Admin flow.
  * Ingest an uploaded actuals .xlsx file (base64) into the active spreadsheet,
  * replacing the Actuals sheet, then normalize it.
  *
@@ -148,7 +150,954 @@ function uploadActualsFile(base64, filename) {
   }
 }
 
+/** @const {string[]} Staged actuals columns (source_row added at write time). */
+var ACTUALS_CURRENT_STAGED_HEADERS_ = ACTUALS_HEADERS.filter(function (h) {
+  return h !== 'source_row';
+});
+
+/** @const {string[]} Data sheets validated against _manifest (excludes _manifest). */
+var CONSOLIDATED_DATA_SHEETS_ = CONSOLIDATED_REQUIRED_SHEETS.filter(function (s) {
+  return s !== '_manifest';
+});
+
 /**
+ * PSA context columns required on wide Forecast_Staged (resolved via Config_ColumnAliases).
+ * @const {string[]}
+ */
+var FORECAST_STAGED_REQUIRED_LOGICAL_ = [
+  'employee_id', 'resource_name', 'team', 'practice', 'manager', 'job_profile',
+  'role_category', 'resource_type', 'project_role', 'account_name', 'project_name',
+  'engagement_manager', 'flag_customer', 'flag_internal', 'flag_education',
+  'region_worker', 'region_project'
+];
+
+/** @const {Object<string,string>} Default PSA header names when alias sheet is absent. */
+var FORECAST_STAGED_DEFAULT_ACTUAL_ = {
+  employee_id: 'Employee ID',
+  resource_name: 'Worker',
+  team: 'Specialty Practice',
+  practice: 'Customer Segment Practice',
+  manager: "Worker's Manager",
+  job_profile: 'Job Profile',
+  role_category: 'Project Role Category',
+  resource_type: 'Resource Type',
+  project_role: 'Project Role',
+  account_name: 'Account',
+  project_name: 'Project',
+  engagement_manager: 'Engagement Manager',
+  flag_customer: 'Customer Projects',
+  flag_internal: 'Internal Projects (Excludes Education)',
+  flag_education: 'Education Projects',
+  region_worker: 'Region - Worker',
+  region_project: 'Project Region'
+};
+
+/**
+ * Ingest a consolidated workbook (base64) with full preflight validation.
+ * Writes Forecast → PSA + normalizeStaff, actuals, summary, utilization
+ * quarterly, and history tables on success.
+ *
+ * @param {string} base64 uploaded .xlsx content
+ * @param {string} [filename] original filename
+ * @return {{success:boolean, filename:string,
+ *   preflight:{passed:boolean, checks:Object[]}, written:Object|null, warnings:string[]}}
+ */
+function uploadConsolidatedWorkbook(base64, filename) {
+  var safeName = String(filename || 'consolidated_upload.xlsx');
+  var warnings = [];
+  var gsId = null;
+
+  try {
+    if (!base64) {
+      return _buildConsolidatedResult_(false, safeName, {
+        passed: false,
+        checks: [{ label: 'Input', passed: false, detail: 'No file content received.' }]
+      }, null, warnings);
+    }
+
+    var bytes = Utilities.base64Decode(base64);
+    var blob = Utilities.newBlob(
+      bytes,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      safeName
+    );
+
+    var gsFile = Drive.Files.insert(
+      {
+        title: safeName,
+        mimeType: 'application/vnd.google-apps.spreadsheet'
+      },
+      blob
+    );
+    gsId = gsFile.id;
+    safeName = String(filename || gsFile.title || safeName);
+
+    var tempSs = SpreadsheetApp.openById(gsId);
+    var preflight = runConsolidatedPreflight_(tempSs, warnings);
+    if (!preflight.passed) {
+      return _buildConsolidatedResult_(false, safeName, preflight, null, warnings);
+    }
+
+    var written = writeConsolidatedWorkbook_(preflight.data, warnings);
+
+    try {
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+    } catch (e) {
+      Logger.log('uploadConsolidatedWorkbook: invalidateEnrichedCaches_ failed — ' + e);
+    }
+
+    return _buildConsolidatedResult_(true, safeName, preflight, written, warnings);
+  } catch (e) {
+    Logger.log('uploadConsolidatedWorkbook: unexpected error — ' + e);
+    return _buildConsolidatedResult_(false, safeName, {
+      passed: false,
+      checks: [{ label: 'Unexpected error', passed: false, detail: String(e) }]
+    }, null, warnings);
+  } finally {
+    if (gsId) {
+      try {
+        DriveApp.getFileById(gsId).setTrashed(true);
+      } catch (e) {
+        // ignore cleanup failures
+      }
+    }
+  }
+}
+
+/**
+ * Build the wire-safe consolidated-upload result (no sheet data, no Dates).
+ * @param {boolean} success
+ * @param {string} filename
+ * @param {{passed:boolean, checks:Object[]}} preflight
+ * @param {Object|null} written
+ * @param {string[]} warnings
+ * @return {Object}
+ * @private
+ */
+function _buildConsolidatedResult_(success, filename, preflight, written, warnings) {
+  var checks = (preflight && preflight.checks) ? preflight.checks.map(function (c) {
+    return {
+      label: String((c && (c.label || c.check)) || ''),
+      passed: !!(c && c.passed),
+      detail: String((c && c.detail) || '')
+    };
+  }) : [];
+  var result = {
+    success: !!success,
+    filename: String(filename || ''),
+    preflight: {
+      passed: !!(preflight && preflight.passed),
+      checks: checks
+    },
+    written: written ? {
+      forecastRowsOut: Number(written.forecastRowsOut) || 0,
+      actualsRowsOut: Number(written.actualsRowsOut) || 0,
+      summaryRowsOut: Number(written.summaryRowsOut) || 0,
+      utilQuarterlyRows: Number(written.utilQuarterlyRows) || 0,
+      historyRows: Number(written.historyRows) || 0
+    } : null,
+    warnings: (warnings || []).map(function (w) { return String(w); })
+  };
+  return _sanitizeConsolidatedResult_(result);
+}
+
+/**
+ * Recursively strip non-serializable values for google.script.run transport.
+ * @param {*} value
+ * @return {*}
+ * @private
+ */
+function _sanitizeWireValue_(value) {
+  if (value === undefined) return '';
+  if (value === null) return null;
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return isNaN(value.getTime()) ? '' : weekKey_(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(function (v) { return _sanitizeWireValue_(v); });
+  }
+  if (typeof value === 'object') {
+    var out = {};
+    Object.keys(value).forEach(function (k) {
+      out[k] = _sanitizeWireValue_(value[k]);
+    });
+    return out;
+  }
+  if (typeof value === 'number' && !isFinite(value)) return 0;
+  return value;
+}
+
+/**
+ * @param {Object} obj
+ * @return {Object}
+ * @private
+ */
+function _sanitizeConsolidatedResult_(obj) {
+  return _sanitizeWireValue_(obj);
+}
+
+/**
+ * Run all consolidated-workbook preflight checks. Does not write anything.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} tempSs converted upload
+ * @param {string[]} warnings non-fatal warnings collector
+ * @return {{passed:boolean, checks:Object[], data:Object}}
+ * @private
+ */
+function runConsolidatedPreflight_(tempSs, warnings) {
+  var checks = [];
+  var data = {};
+  var failed = false;
+
+  function recordCheck(name, passed, detail) {
+    checks.push({ label: name, passed: passed, detail: detail || '' });
+    if (!passed) failed = true;
+  }
+
+  CONSOLIDATED_REQUIRED_SHEETS.forEach(function (sheetName) {
+    var sh = tempSs.getSheetByName(sheetName);
+    var present = !!sh;
+    recordCheck('sheet_present:' + sheetName, present,
+      present ? '' : 'Missing required sheet "' + sheetName + '"');
+    if (present) {
+      data[sheetName] = sh.getDataRange().getValues();
+    }
+  });
+
+  if (failed) {
+    return { passed: false, checks: checks, data: data };
+  }
+
+  validateForecastStagedHeaders_(data.Forecast_Staged, recordCheck, warnings);
+  validateSheetHeadersStrict_(
+    'Actuals_Current_Normalized', data.Actuals_Current_Normalized,
+    ACTUALS_CURRENT_STAGED_HEADERS_, recordCheck
+  );
+  validateSheetHeadersStrict_(
+    'Utilization_Normalized', data.Utilization_Normalized,
+    UTIL_QUARTERLY_HEADERS, recordCheck
+  );
+  validateSheetHeadersStrict_(
+    'History_Normalized', data.History_Normalized,
+    ACTUALS_HISTORY_HEADERS, recordCheck
+  );
+
+  var manifestMap = parseConsolidatedManifest_(data._manifest, recordCheck);
+  if (!failed && manifestMap) {
+    validateConsolidatedManifestTotals_(
+      data, manifestMap, recordCheck, warnings
+    );
+  }
+
+  validateConsolidatedWeekKeys_(
+    data.Actuals_Current_Normalized, 'Actuals_Current_Normalized', recordCheck
+  );
+  validateForecastWeekColumns_(data.Forecast_Staged, recordCheck);
+  validateNoBlankEmployeeIds_(data, recordCheck);
+  validateUtilizationQuarterCount_(data.Utilization_Normalized, recordCheck);
+
+  return { passed: !failed, checks: checks, data: data };
+}
+
+/**
+ * @param {Array[]} values sheet values including header
+ * @param {Function} recordCheck
+ * @param {string[]} warnings
+ * @private
+ */
+function validateForecastStagedHeaders_(values, recordCheck, warnings) {
+  if (!values || values.length < 1) {
+    recordCheck('headers:Forecast_Staged', false, 'Sheet is empty');
+    return;
+  }
+  var header = values[0];
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var aliasMap = getAliasMap_();
+  var missing = [];
+  FORECAST_STAGED_REQUIRED_LOGICAL_.forEach(function (logical) {
+    var actual = aliasMap[logical] || FORECAST_STAGED_DEFAULT_ACTUAL_[logical] || logical;
+    if (!idx.hasOwnProperty(actual)) missing.push(actual);
+  });
+  recordCheck(
+    'headers:Forecast_Staged',
+    missing.length === 0,
+    missing.length ? 'Missing PSA columns: ' + missing.join(', ') : ''
+  );
+
+  var weekDetection = detectWeekColumns_(header);
+  weekDetection.warnings.forEach(function (w) {
+    warnings.push('Forecast_Staged: ' + w);
+  });
+  recordCheck(
+    'headers:Forecast_Staged_weeks',
+    weekDetection.weeks.length > 0,
+    'No weekly columns detected (expected MM/DD/YYYY week headers)'
+  );
+}
+
+/**
+ * @param {string} sheetName
+ * @param {Array[]} values
+ * @param {string[]} expectedHeaders
+ * @param {Function} recordCheck
+ * @private
+ */
+function validateSheetHeadersStrict_(sheetName, values, expectedHeaders, recordCheck) {
+  if (!values || values.length < 1) {
+    recordCheck('headers:' + sheetName, false, 'Sheet is empty');
+    return;
+  }
+  var header = values[0].map(function (h) { return String(h).trim(); });
+  var ok = header.length >= expectedHeaders.length;
+  var detail = '';
+  if (ok) {
+    for (var i = 0; i < expectedHeaders.length; i++) {
+      if (header[i] !== expectedHeaders[i]) {
+        ok = false;
+        detail = 'Column ' + (i + 1) + ' expected "' + expectedHeaders[i] +
+          '" got "' + header[i] + '"';
+        break;
+      }
+    }
+  } else {
+    detail = 'Expected ' + expectedHeaders.length + ' header columns, got ' + header.length;
+  }
+  recordCheck('headers:' + sheetName, ok, detail);
+}
+
+/**
+ * @param {Array[]} manifestValues
+ * @param {Function} recordCheck
+ * @return {Object<string,{rows:number, primary_measure:string, primary_total:number,
+ *   distinct_workers:number, min_period:string, max_period:string}>|null}
+ * @private
+ */
+function parseConsolidatedManifest_(manifestValues, recordCheck) {
+  if (!manifestValues || manifestValues.length < 2) {
+    recordCheck('manifest:parse', false, '_manifest has no data rows');
+    return null;
+  }
+  var header = manifestValues[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  var iSheet = header.indexOf('sheet');
+  var iRows = header.indexOf('rows');
+  var iMeasure = header.indexOf('primary_measure');
+  var iTotal = header.indexOf('primary_total');
+  var iWorkers = header.indexOf('distinct_workers');
+  var iMinPeriod = header.indexOf('min_period');
+  var iMaxPeriod = header.indexOf('max_period');
+  if (iSheet < 0 || iRows < 0 || iTotal < 0 || iMinPeriod < 0 || iMaxPeriod < 0) {
+    recordCheck(
+      'manifest:parse', false,
+      '_manifest must have sheet, rows, primary_total, min_period, max_period columns'
+    );
+    return null;
+  }
+
+  var map = {};
+  for (var r = 1; r < manifestValues.length; r++) {
+    var row = manifestValues[r];
+    var sheetKey = String(row[iSheet] || '').trim();
+    if (!sheetKey) continue;
+    map[sheetKey] = {
+      rows: Number(row[iRows]) || 0,
+      primary_measure: iMeasure >= 0 ? String(row[iMeasure] || '').trim() : '',
+      primary_total: Number(row[iTotal]) || 0,
+      distinct_workers: iWorkers >= 0 ? Number(row[iWorkers]) || 0 : 0,
+      min_period: normalizeManifestPeriod_(row[iMinPeriod], sheetKey),
+      max_period: normalizeManifestPeriod_(row[iMaxPeriod], sheetKey)
+    };
+  }
+  recordCheck('manifest:parse', true, Object.keys(map).length + ' sheet entries');
+  return map;
+}
+
+/**
+ * Normalize a _manifest min_period / max_period cell for comparison.
+ * Forecast/Actuals: canonical ISO date (YYYY-MM-DD). Utilization/History: fiscal-quarter key.
+ * @param {*} value manifest period cell
+ * @param {string} sheetName manifest sheet key
+ * @return {string}
+ * @private
+ */
+function normalizeManifestPeriod_(value, sheetName) {
+  if (!value && value !== 0) return '';
+  if (sheetName === 'Utilization_Normalized' || sheetName === 'History_Normalized') {
+    return String(value).trim();
+  }
+  return normalizeManifestWeek_(value);
+}
+
+/**
+ * @param {*} value manifest week cell
+ * @return {string} canonical YYYY-MM-DD or ''
+ * @private
+ */
+function normalizeManifestWeek_(value) {
+  if (!value && value !== 0) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return weekKey_(value);
+  }
+  var s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) {
+    return weekKey_(new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2])));
+  }
+  return s;
+}
+
+/**
+ * @param {Object} data parsed sheet values keyed by sheet name
+ * @param {Object} manifestMap
+ * @param {Function} recordCheck
+ * @param {string[]} warnings
+ * @private
+ */
+function validateConsolidatedManifestTotals_(data, manifestMap, recordCheck, warnings) {
+  CONSOLIDATED_DATA_SHEETS_.forEach(function (sheetName) {
+    var expected = manifestMap[sheetName];
+    if (!expected) {
+      recordCheck('manifest:entry:' + sheetName, false, 'No _manifest row for ' + sheetName);
+      return;
+    }
+    var values = data[sheetName];
+    var dataRows;
+    var actualTotal;
+    var actualMin = '';
+    var actualMax = '';
+
+    if (sheetName === 'Forecast_Staged') {
+      dataRows = countForecastDataRows_(values);
+      var weekStats = getForecastWeekStats_(values, warnings);
+      actualTotal = weekStats.total;
+      actualMin = weekStats.earliest;
+      actualMax = weekStats.latest;
+    } else if (sheetName === 'Actuals_Current_Normalized') {
+      dataRows = Math.max((values || []).length - 1, 0);
+      actualTotal = sumConsolidatedPrimary_(sheetName, values, warnings);
+      var actualsPeriod = getActualsPeriodRange_(values);
+      actualMin = actualsPeriod.min;
+      actualMax = actualsPeriod.max;
+    } else if (sheetName === 'Utilization_Normalized' || sheetName === 'History_Normalized') {
+      dataRows = Math.max((values || []).length - 1, 0);
+      actualTotal = sumConsolidatedPrimary_(sheetName, values, warnings);
+      var fqPeriod = getFiscalQuarterPeriodRange_(values);
+      actualMin = fqPeriod.min;
+      actualMax = fqPeriod.max;
+    } else {
+      dataRows = Math.max((values || []).length - 1, 0);
+      actualTotal = sumConsolidatedPrimary_(sheetName, values, warnings);
+    }
+
+    var rowsOk = dataRows === expected.rows;
+    var totalOk = compareManifestPrimaryTotal_(expected.primary_total, actualTotal);
+    recordCheck(
+      'manifest:rows:' + sheetName,
+      rowsOk,
+      'expected ' + expected.rows + ', actual ' + dataRows
+    );
+    recordCheck(
+      'manifest:primary_total:' + sheetName,
+      totalOk,
+      'expected ' + expected.primary_total + ', actual ' + actualTotal
+    );
+    recordCheck(
+      'manifest:min_period:' + sheetName,
+      !!expected.min_period && expected.min_period === actualMin,
+      'expected ' + expected.min_period + ', actual ' + actualMin
+    );
+    recordCheck(
+      'manifest:max_period:' + sheetName,
+      !!expected.max_period && expected.max_period === actualMax,
+      'expected ' + expected.max_period + ', actual ' + actualMax
+    );
+  });
+}
+
+/**
+ * Earliest/latest week_key from Actuals_Current_Normalized.
+ * @param {Array[]} values
+ * @return {{min:string, max:string}}
+ * @private
+ */
+function getActualsPeriodRange_(values) {
+  if (!values || values.length < 2) return { min: '', max: '' };
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var iWeekKey = idx.week_key;
+  var iWeekStart = idx.week_start;
+  var keys = [];
+  data.forEach(function (row) {
+    var k = '';
+    if (iWeekKey !== undefined) k = String(row[iWeekKey] || '').trim();
+    else if (iWeekStart !== undefined) k = weekKey_(row[iWeekStart]);
+    if (k) keys.push(k);
+  });
+  if (!keys.length) return { min: '', max: '' };
+  keys.sort();
+  return { min: keys[0], max: keys[keys.length - 1] };
+}
+
+/**
+ * Earliest/latest fiscal_quarter from Utilization_Normalized / History_Normalized.
+ * @param {Array[]} values
+ * @return {{min:string, max:string}}
+ * @private
+ */
+function getFiscalQuarterPeriodRange_(values) {
+  if (!values || values.length < 2) return { min: '', max: '' };
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var iFq = idx.fiscal_quarter;
+  if (iFq === undefined) return { min: '', max: '' };
+  var keys = [];
+  data.forEach(function (row) {
+    var fq = String(row[iFq] || '').trim();
+    if (fq) keys.push(fq);
+  });
+  if (!keys.length) return { min: '', max: '' };
+  keys.sort();
+  return { min: keys[0], max: keys[keys.length - 1] };
+}
+
+/**
+ * @param {string} sheetName
+ * @param {Array[]} values
+ * @param {string[]} warnings
+ * @return {number}
+ * @private
+ */
+function sumConsolidatedPrimary_(sheetName, values, warnings) {
+  if (!values || values.length < 2) return 0;
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+
+  if (sheetName === 'Forecast_Staged') {
+    var weekDetection = detectWeekColumns_(header);
+    weekDetection.warnings.forEach(function (w) { warnings.push(sheetName + ': ' + w); });
+    var total = 0;
+    data.forEach(function (row) {
+      weekDetection.weeks.forEach(function (wc) {
+        total += Number(row[wc.index]) || 0;
+      });
+    });
+    return total;
+  }
+
+  var colBySheet = {
+    Actuals_Current_Normalized: 'actual_icp_hours',
+    Utilization_Normalized: 'target_hours',
+    History_Normalized: 'worked_hours'
+  };
+  var col = colBySheet[sheetName];
+  if (!col || idx[col] === undefined) return 0;
+  var colIdx = idx[col];
+  var sum = 0;
+  data.forEach(function (row) {
+    sum += Number(row[colIdx]) || 0;
+  });
+  return sum;
+}
+
+/**
+ * Compare manifest primary_total (rounded to 1 decimal) against app sum.
+ * @param {number} expected manifest primary_total
+ * @param {number} actual app-computed sum
+ * @return {boolean}
+ * @private
+ */
+function compareManifestPrimaryTotal_(expected, actual) {
+  var e = Math.round(Number(expected) * 10) / 10;
+  var a = Math.round(Number(actual) * 10) / 10;
+  return Math.abs(e - a) <= 0.01;
+}
+
+/**
+ * Count non-footer Forecast_Staged rows (non-blank Employee ID).
+ * @param {Array[]} values
+ * @return {number}
+ * @private
+ */
+function countForecastDataRows_(values) {
+  if (!values || values.length < 2) return 0;
+  var header = values[0];
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var aliasMap = getAliasMap_();
+  var empCol = aliasMap.employee_id || FORECAST_STAGED_DEFAULT_ACTUAL_.employee_id;
+  var iEmp = idx[empCol];
+  if (iEmp === undefined) return 0;
+  var count = 0;
+  for (var r = 1; r < values.length; r++) {
+    var cell = values[r][iEmp];
+    if (cell !== '' && cell !== null && cell !== undefined) count++;
+  }
+  return count;
+}
+
+/**
+ * @param {Array[]} values
+ * @param {string[]} warnings
+ * @return {{weeks:Object[], total:number, earliest:string, latest:string}}
+ * @private
+ */
+function getForecastWeekStats_(values, warnings) {
+  if (!values || values.length < 1) {
+    return { weeks: [], total: 0, earliest: '', latest: '' };
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var weekDetection = detectWeekColumns_(header);
+  weekDetection.warnings.forEach(function (w) { warnings.push('Forecast_Staged: ' + w); });
+  var total = 0;
+  data.forEach(function (row) {
+    weekDetection.weeks.forEach(function (wc) {
+      total += Number(row[wc.index]) || 0;
+    });
+  });
+  var earliest = weekDetection.weeks.length
+    ? weekKey_(weekDetection.weeks[0].weekStart) : '';
+  var latest = weekDetection.weeks.length
+    ? weekKey_(weekDetection.weeks[weekDetection.weeks.length - 1].weekStart) : '';
+  return { weeks: weekDetection.weeks, total: total, earliest: earliest, latest: latest };
+}
+
+/**
+ * Validate Forecast_Staged weekly column headers are Saturday anchors.
+ * @param {Array[]} values
+ * @param {Function} recordCheck
+ * @private
+ */
+function validateForecastWeekColumns_(values, recordCheck) {
+  if (!values || values.length < 1) return;
+  var header = values[0];
+  var weekDetection = detectWeekColumns_(header);
+  if (!weekDetection.weeks.length) return;
+
+  for (var i = 0; i < weekDetection.weeks.length; i++) {
+    var wc = weekDetection.weeks[i];
+    var wsDate = weekStart_(wc.weekStart);
+    if (wsDate.getDay() !== 6) {
+      recordCheck(
+        'week_saturday:Forecast_Staged',
+        false,
+        'Week column ' + weekKey_(wsDate) + ' is not a Saturday'
+      );
+      return;
+    }
+  }
+  recordCheck(
+    'week_saturday:Forecast_Staged',
+    true,
+    weekDetection.weeks.length + ' week columns checked'
+  );
+}
+
+/**
+ * @param {Array[]} values
+ * @param {string} sheetName
+ * @param {Function} recordCheck
+ * @private
+ */
+function validateConsolidatedWeekKeys_(values, sheetName, recordCheck) {
+  if (!values || values.length < 2) return;
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var iWeekStart = idx.week_start;
+  var iWeekKey = idx.week_key;
+  if (iWeekStart === undefined || iWeekKey === undefined) return;
+
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    var ws = row[iWeekStart];
+    if (!ws && ws !== 0) continue;
+    var wsDate = weekStart_(ws);
+    if (wsDate.getDay() !== 6) {
+      recordCheck(
+        'week_saturday:' + sheetName,
+        false,
+        'Row ' + (r + 2) + ': week_start ' + ws + ' is not a Saturday'
+      );
+      return;
+    }
+    var expectedKey = weekKey_(wsDate);
+    var actualKey = String(row[iWeekKey] || '').trim();
+    if (actualKey !== expectedKey) {
+      recordCheck(
+        'week_key:' + sheetName,
+        false,
+        'Row ' + (r + 2) + ': week_key "' + actualKey +
+          '" does not match week_start "' + expectedKey + '"'
+      );
+      return;
+    }
+  }
+  recordCheck('week_saturday:' + sheetName, true, data.length + ' rows checked');
+  recordCheck('week_key:' + sheetName, true, data.length + ' rows checked');
+}
+
+/**
+ * @param {Object} data
+ * @param {Function} recordCheck
+ * @private
+ */
+function validateNoBlankEmployeeIds_(data, recordCheck) {
+  CONSOLIDATED_DATA_SHEETS_.forEach(function (sheetName) {
+    var values = data[sheetName];
+    if (!values || values.length < 2) {
+      recordCheck('employee_id:' + sheetName, true, 'no data rows');
+      return;
+    }
+    var header = values[0];
+    var dataRows = values.slice(1);
+    var idx = {};
+    header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+    var iEmp;
+    if (sheetName === 'Forecast_Staged') {
+      var aliasMap = getAliasMap_();
+      var empCol = aliasMap.employee_id || FORECAST_STAGED_DEFAULT_ACTUAL_.employee_id;
+      iEmp = idx[empCol];
+    } else {
+      iEmp = idx.employee_id;
+    }
+    if (iEmp === undefined) {
+      recordCheck('employee_id:' + sheetName, false, 'employee_id column not found');
+      return;
+    }
+    for (var r = 0; r < dataRows.length; r++) {
+      var cell = dataRows[r][iEmp];
+      if (cell === '' || cell === null || cell === undefined) {
+        recordCheck(
+          'employee_id:' + sheetName,
+          false,
+          'Blank employee_id at row ' + (r + 2)
+        );
+        return;
+      }
+    }
+    recordCheck('employee_id:' + sheetName, true, dataRows.length + ' rows checked');
+  });
+}
+
+/**
+ * @param {Array[]} values
+ * @param {Function} recordCheck
+ * @private
+ */
+function validateUtilizationQuarterCount_(values, recordCheck) {
+  if (!values || values.length < 2) {
+    recordCheck('utilization_quarters', false, 'Utilization_Normalized has no data rows');
+    return;
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var iFq = idx.fiscal_quarter;
+  if (iFq === undefined) {
+    recordCheck('utilization_quarters', false, 'fiscal_quarter column not found');
+    return;
+  }
+  var quarters = {};
+  data.forEach(function (row) {
+    var fq = String(row[iFq] || '').trim();
+    if (fq) quarters[fq] = true;
+  });
+  var count = Object.keys(quarters).length;
+  recordCheck(
+    'utilization_quarters',
+    count === 4,
+    'Expected 4 distinct fiscal_quarter values, found ' + count +
+      ' (' + Object.keys(quarters).join(', ') + ')'
+  );
+}
+
+/**
+ * Write consolidated workbook data after successful preflight.
+ * @param {Object} data parsed sheet values keyed by sheet name
+ * @param {string[]} warnings
+ * @return {Object}
+ * @private
+ */
+function writeConsolidatedWorkbook_(data, warnings) {
+  var destSs = SpreadsheetApp.getActiveSpreadsheet();
+  var forecastValues = data.Forecast_Staged;
+  var destSheet = destSs.getSheetByName(STAFF_SHEET);
+  if (!destSheet) {
+    destSheet = destSs.insertSheet(STAFF_SHEET);
+  } else {
+    destSheet.clear();
+  }
+  if (forecastValues.length) {
+    destSheet
+      .getRange(1, 1, forecastValues.length, forecastValues[0].length)
+      .setValues(forecastValues);
+  }
+  var normResult = normalizeStaff();
+  normResult.warnings.forEach(function (w) { warnings.push('normalizeStaff: ' + w); });
+
+  var actualsRowsOut = writeConsolidatedActuals_(data.Actuals_Current_Normalized);
+  var summaryRowsOut = writeConsolidatedActualsSummary_(data.Utilization_Normalized);
+  var utilQuarterlyRows = writeConsolidatedUtilQuarterly_(data.Utilization_Normalized);
+  var historyRows = writeConsolidatedHistory_(data.History_Normalized);
+
+  return {
+    forecastRowsOut: normResult.rowsOut || 0,
+    actualsRowsOut: actualsRowsOut,
+    summaryRowsOut: summaryRowsOut,
+    utilQuarterlyRows: utilQuarterlyRows,
+    historyRows: historyRows
+  };
+}
+
+/**
+ * @param {Array[]} values Actuals_Current_Normalized sheet values
+ * @return {number} rows written
+ * @private
+ */
+function writeConsolidatedActuals_(values) {
+  if (!values || values.length < 2) {
+    writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, []);
+    invalidateCache_(ACTUALS_NORM);
+    return 0;
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var out = [];
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    out.push([
+      String(row[idx.employee_id] || '').trim(),
+      String(row[idx.resource_name] || '').trim(),
+      row[idx.week_start],
+      String(row[idx.week_key] || '').trim(),
+      Number(row[idx.actual_icp_hours]) || 0,
+      r + 2
+    ]);
+  }
+  writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, out);
+  invalidateCache_(ACTUALS_NORM);
+  return out.length;
+}
+
+/**
+ * @param {Array[]} values Utilization_Normalized sheet values
+ * @return {number} rows written
+ * @private
+ */
+function writeConsolidatedActualsSummary_(values) {
+  var curQ = fiscalQuarterKey_(new Date());
+  if (!values || values.length < 2) {
+    writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, []);
+    invalidateCache_(ACTUALS_SUMMARY);
+    return 0;
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var out = [];
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    var fq = String(row[idx.fiscal_quarter] || '').trim();
+    if (fq !== curQ) continue;
+    out.push([
+      String(row[idx.employee_id] || '').trim(),
+      String(row[idx.resource_name] || '').trim(),
+      Number(row[idx.qtd_actual_icp]) || 0,
+      Number(row[idx.qtd_icp_plus_forecast]) || 0,
+      Number(row[idx.target_hours]) || 0,
+      r + 2
+    ]);
+  }
+  writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, out);
+  invalidateCache_(ACTUALS_SUMMARY);
+  return out.length;
+}
+
+/**
+ * @param {Array[]} values Utilization_Normalized sheet values
+ * @return {number} rows written
+ * @private
+ */
+function writeConsolidatedUtilQuarterly_(values) {
+  if (!values || values.length < 2) {
+    writeTable_(CFG_UTIL_QUARTERLY, UTIL_QUARTERLY_HEADERS, []);
+    invalidateCache_(CFG_UTIL_QUARTERLY);
+    return 0;
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var out = [];
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    out.push(UTIL_QUARTERLY_HEADERS.map(function (h) {
+      if (h === 'employee_id' || h === 'resource_name' || h === 'fiscal_quarter' || h === 'source_sheet') {
+        return String(row[idx[h]] || '').trim();
+      }
+      return row[idx[h]] !== undefined && row[idx[h]] !== '' ? row[idx[h]] : '';
+    }));
+  }
+  writeTable_(CFG_UTIL_QUARTERLY, UTIL_QUARTERLY_HEADERS, out);
+  invalidateCache_(CFG_UTIL_QUARTERLY);
+  return out.length;
+}
+
+/**
+ * @param {Array[]} values History_Normalized sheet values
+ * @return {number} rows written
+ * @private
+ */
+function writeConsolidatedHistory_(values) {
+  if (!values || values.length < 2) {
+    writeTable_(ACTUALS_HISTORY, ACTUALS_HISTORY_HEADERS, []);
+    invalidateCache_(ACTUALS_HISTORY);
+    return 0;
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var out = [];
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    out.push(ACTUALS_HISTORY_HEADERS.map(function (h) {
+      if (h === 'worked_hours') {
+        return Number(row[idx[h]]) || 0;
+      }
+      return String(row[idx[h]] || '').trim();
+    }));
+  }
+  writeTable_(ACTUALS_HISTORY, ACTUALS_HISTORY_HEADERS, out);
+  invalidateCache_(ACTUALS_HISTORY);
+  return out.length;
+}
+
+/**
+ * Authorized API entry for consolidated workbook upload (WFM.21).
+ * @param {string} base64 uploaded .xlsx content
+ * @param {string} [filename] original filename
+ * @return {Object}
+ */
+function api_uploadConsolidatedWorkbook(base64, filename) {
+  _requireAuthorized_();
+  return uploadConsolidatedWorkbook(base64, filename);
+}
+
+/**
+ * WFM.21-deprecated: retained for rollback, no longer wired to primary Admin flow.
  * Normalize actuals from the Actuals sheet to Actuals_Normalized and
  * Actuals_Worker_Summary.
  */

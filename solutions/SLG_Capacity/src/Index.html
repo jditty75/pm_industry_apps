@@ -812,33 +812,62 @@
       <div class="admin-panel" data-admin-panel="operations">
         <div class="card">
           <div class="card-header">
-            <div class="card-title">Upload PSA</div>
+            <div class="card-title">Upload Consolidated WoW Workbook</div>
           </div>
-          <div class="upload-zone" id="uploadZone">
-            <input type="file" id="staffFile" accept=".xlsx" hidden>
+          <div class="upload-zone" id="consolidatedUploadZone">
+            <input type="file" id="consolidatedFile" accept=".xlsx" hidden>
             <div class="upload-hint">
               <div class="upload-title">Drop .xlsx here or click to browse</div>
-              <div class="muted">Replaces <code>PSA</code> and re-normalizes allocations.</div>
+              <div class="muted">Single workbook ingest for forecast, actuals, utilization, and history.</div>
+              <div class="consolidated-sheet-list muted">
+                Required tabs:
+                <code>Forecast_Staged</code>,
+                <code>Actuals_Current_Normalized</code>,
+                <code>Utilization_Normalized</code>,
+                <code>History_Normalized</code>,
+                <code>_manifest</code>
+              </div>
             </div>
-            <button class="btn-primary" id="browseBtn">Choose file</button>
+            <button class="btn-primary" id="consolidatedBrowseBtn">Choose file</button>
           </div>
-          <div id="uploadStatus" class="status" hidden></div>
+          <div id="consolidatedUploadStatus" class="status" hidden></div>
+          <div id="consolidatedUploadResult" class="consolidated-upload-result" hidden></div>
         </div>
 
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Upload Actuals</div>
-          </div>
-          <div class="upload-zone" id="actualsUploadZone">
-            <input type="file" id="actualsFile" accept=".xlsx" hidden>
-            <div class="upload-hint">
-              <div class="upload-title">Actuals (QTD ICP hours)</div>
-              <div class="muted">Replaces <code>Actuals</code> and re-normalizes.</div>
+        <details class="legacy-upload-details">
+          <summary>Legacy rollback uploads</summary>
+          <div class="legacy-upload-cards">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Upload PSA</div>
+              </div>
+              <div class="upload-zone" id="uploadZone">
+                <input type="file" id="staffFile" accept=".xlsx" hidden>
+                <div class="upload-hint">
+                  <div class="upload-title">Drop .xlsx here or click to browse</div>
+                  <div class="muted">Replaces <code>PSA</code> and re-normalizes allocations.</div>
+                </div>
+                <button class="btn-primary" id="browseBtn">Choose file</button>
+              </div>
+              <div id="uploadStatus" class="status" hidden></div>
             </div>
-            <button class="btn-primary" id="actualsBrowseBtn">Choose file</button>
+
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title">Upload Actuals</div>
+              </div>
+              <div class="upload-zone" id="actualsUploadZone">
+                <input type="file" id="actualsFile" accept=".xlsx" hidden>
+                <div class="upload-hint">
+                  <div class="upload-title">Actuals (QTD ICP hours)</div>
+                  <div class="muted">Replaces <code>Actuals</code> and re-normalizes.</div>
+                </div>
+                <button class="btn-primary" id="actualsBrowseBtn">Choose file</button>
+              </div>
+              <div id="actualsUploadStatus" class="status" hidden></div>
+            </div>
           </div>
-          <div id="actualsUploadStatus" class="status" hidden></div>
-        </div>
+        </details>
 
         <div class="card">
           <div class="card-header">

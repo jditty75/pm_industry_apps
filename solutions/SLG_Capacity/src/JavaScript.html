@@ -5504,6 +5504,176 @@ async function _qaRefreshPsaHours_() {
     }
   });
 
+  // Consolidated workbook upload (WFM.21)
+  const consolidatedUploadZone = $('#consolidatedUploadZone');
+  const consolidatedFile = $('#consolidatedFile');
+  const consolidatedBrowseBtn = $('#consolidatedBrowseBtn');
+  const CONSOLIDATED_REQUIRED_SHEETS_UI = [
+    'Forecast_Staged',
+    'Actuals_Current_Normalized',
+    'Utilization_Normalized',
+    'History_Normalized',
+    '_manifest'
+  ];
+
+  consolidatedBrowseBtn?.addEventListener('click', () => consolidatedFile.click());
+  consolidatedUploadZone?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    consolidatedUploadZone.classList.add('drag');
+  });
+  consolidatedUploadZone?.addEventListener('dragleave', () => {
+    consolidatedUploadZone.classList.remove('drag');
+  });
+  consolidatedUploadZone?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    consolidatedUploadZone.classList.remove('drag');
+    if (e.dataTransfer.files.length) handleConsolidatedFile_(e.dataTransfer.files[0]);
+  });
+  consolidatedFile?.addEventListener('change', () => {
+    if (consolidatedFile.files.length) handleConsolidatedFile_(consolidatedFile.files[0]);
+  });
+
+  function setConsolidatedUploadBusy_(busy) {
+    consolidatedUploadZone?.classList.toggle('is-disabled', !!busy);
+    if (consolidatedBrowseBtn) consolidatedBrowseBtn.disabled = !!busy;
+    if (consolidatedFile) consolidatedFile.disabled = !!busy;
+  }
+
+  function renderConsolidatedUploadResult_(result) {
+    const panel = $('#consolidatedUploadResult');
+    if (!panel) return;
+    panel.hidden = false;
+
+    const passed = !!(result.preflight && result.preflight.passed);
+    const success = result.success !== false && passed;
+    panel.className = 'consolidated-upload-result ' + (success ? 'is-ok' : 'is-fail');
+
+    const checks = (result.preflight && result.preflight.checks) || [];
+    const sheetChecks = CONSOLIDATED_REQUIRED_SHEETS_UI.map(function (sheetName) {
+      const check = checks.find(function (c) {
+        return (c.label || c.check) === 'sheet_present:' + sheetName;
+      });
+      return {
+        sheet: sheetName,
+        passed: check ? !!check.passed : false,
+        detail: check ? check.detail : 'No preflight result'
+      };
+    });
+
+    const failedChecks = checks.filter(function (c) { return !c.passed; });
+    const written = result.written || {};
+    const warnings = result.warnings || [];
+
+    panel.innerHTML = `
+      <div class="consolidated-result-title">${success ? 'Ingest complete' : 'Preflight failed — no data written'}</div>
+      <div class="consolidated-metric">
+        <span class="consolidated-metric-label">Preflight</span>
+        <span class="consolidated-metric-value">${passed ? 'Passed' : 'Failed'}</span>
+      </div>
+      <div class="consolidated-result-title" style="margin-top:12px;">Required sheets</div>
+      <ul class="consolidated-check-list">
+        ${sheetChecks.map(function (item) {
+          return `<li>
+            <span class="consolidated-check-badge ${item.passed ? 'pass' : 'fail'}">${item.passed ? 'OK' : 'FAIL'}</span>
+            <span><code>${escapeHtml_(item.sheet)}</code>${item.detail ? ' — ' + escapeHtml_(item.detail) : ''}</span>
+          </li>`;
+        }).join('')}
+      </ul>
+      ${success ? `
+        <div class="consolidated-result-title">Rows written</div>
+        <div class="consolidated-written-grid">
+          <div class="consolidated-metric">
+            <span class="consolidated-metric-label">Forecast normalized</span>
+            <span class="consolidated-metric-value">${Number(written.forecastRowsOut || 0).toLocaleString()}</span>
+          </div>
+          <div class="consolidated-metric">
+            <span class="consolidated-metric-label">Actuals normalized</span>
+            <span class="consolidated-metric-value">${Number(written.actualsRowsOut || 0).toLocaleString()}</span>
+          </div>
+          <div class="consolidated-metric">
+            <span class="consolidated-metric-label">Worker summary</span>
+            <span class="consolidated-metric-value">${Number(written.summaryRowsOut || 0).toLocaleString()}</span>
+          </div>
+          <div class="consolidated-metric">
+            <span class="consolidated-metric-label">Utilization quarterly</span>
+            <span class="consolidated-metric-value">${Number(written.utilQuarterlyRows || 0).toLocaleString()}</span>
+          </div>
+          <div class="consolidated-metric">
+            <span class="consolidated-metric-label">History</span>
+            <span class="consolidated-metric-value">${Number(written.historyRows || 0).toLocaleString()}</span>
+          </div>
+        </div>
+      ` : `
+        <div class="consolidated-result-title">Failed checks</div>
+        <ul class="consolidated-check-list">
+          ${failedChecks.slice(0, 12).map(function (item) {
+            return `<li>
+              <span class="consolidated-check-badge fail">FAIL</span>
+              <span>${escapeHtml_(item.label || item.check)}${item.detail ? ' — ' + escapeHtml_(item.detail) : ''}</span>
+            </li>`;
+          }).join('')}
+          ${failedChecks.length > 12 ? `<li class="muted">…and ${failedChecks.length - 12} more</li>` : ''}
+        </ul>
+      `}
+      ${warnings.length ? `
+        <div class="consolidated-warnings">
+          <strong>Warnings (${warnings.length})</strong>
+          <ul style="margin:6px 0 0 18px;padding:0;">
+            ${warnings.slice(0, 8).map(function (w) { return '<li>' + escapeHtml_(w) + '</li>'; }).join('')}
+            ${warnings.length > 8 ? '<li>…and ' + (warnings.length - 8) + ' more</li>' : ''}
+          </ul>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  function handleConsolidatedFile_(file) {
+    const status = $('#consolidatedUploadStatus');
+    const resultPanel = $('#consolidatedUploadResult');
+    status.hidden = false;
+    resultPanel.hidden = true;
+    status.className = 'status info';
+    status.textContent = 'Validating and ingesting ' + file.name + '…';
+    setConsolidatedUploadBusy_(true);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result.split(',')[1];
+        const result = await call('api_uploadConsolidatedWorkbook', base64, file.name);
+        if (!result || typeof result !== 'object' || !result.preflight) {
+          throw new Error('Consolidated upload returned no readable result — check the server response contract.');
+        }
+        renderConsolidatedUploadResult_(result);
+
+        if (result.success && result.preflight.passed) {
+          status.className = 'status ok';
+          const warnCount = (result.warnings || []).length;
+          status.textContent = 'Consolidated workbook ingested successfully' +
+            (warnCount ? ' · ' + warnCount + ' warning' + (warnCount === 1 ? '' : 's') : '');
+          State.ref = await call('api_getReference');
+          if (State.currentView === 'dashboard') loadDashboard();
+          toast('Consolidated workbook ingested', 'ok');
+        } else {
+          status.className = 'status err';
+          status.textContent = 'Preflight failed — no destination data was written.';
+          toast('Consolidated workbook preflight failed', 'err');
+        }
+      } catch (err) {
+        status.className = 'status err';
+        status.textContent = 'Upload failed: ' + err.message;
+        resultPanel.hidden = false;
+        resultPanel.className = 'consolidated-upload-result is-fail';
+        resultPanel.innerHTML = '<div class="consolidated-result-title">Upload failed</div><div class="muted">' +
+          escapeHtml_(err.message) + '</div>';
+        toast('Consolidated upload failed', 'err');
+      } finally {
+        setConsolidatedUploadBusy_(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
   // PSA upload
   const uploadZone = $('#uploadZone');
   const staffFile = $('#staffFile');

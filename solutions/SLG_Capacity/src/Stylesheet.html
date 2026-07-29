@@ -1446,6 +1446,116 @@ textarea.input {
 .status.err { background: #fde4df; color: var(--thumbtack); }
 .status.info{ background: var(--blue-sky); color: var(--ink); }
 
+/* Consolidated workbook upload */
+.consolidated-sheet-list {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.consolidated-sheet-list code {
+  font-size: 11px;
+}
+.legacy-upload-details {
+  margin-bottom: 16px;
+}
+.legacy-upload-details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 8px 0;
+}
+.legacy-upload-cards {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+}
+.consolidated-upload-result {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--desk);
+  border-radius: 8px;
+  background: var(--paper);
+  font-size: 13px;
+}
+.consolidated-upload-result.is-fail {
+  border-color: #f0b8b0;
+  background: #fff8f7;
+}
+.consolidated-upload-result.is-ok {
+  border-color: #b9dfc8;
+  background: #f7fcf9;
+}
+.consolidated-result-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--after-hours);
+}
+.consolidated-preflight-grid,
+.consolidated-written-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.consolidated-metric {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--keyboard);
+}
+.consolidated-metric-label {
+  display: block;
+  font-size: 11px;
+  color: var(--laptop);
+  margin-bottom: 2px;
+}
+.consolidated-metric-value {
+  font-weight: 600;
+  color: var(--after-hours);
+}
+.consolidated-check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.consolidated-check-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--business-card);
+}
+.consolidated-check-list li:last-child {
+  border-bottom: none;
+}
+.consolidated-check-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.consolidated-check-badge.pass {
+  background: #e7f3ec;
+  color: #1e7a3c;
+}
+.consolidated-check-badge.fail {
+  background: #fde4df;
+  color: var(--thumbtack);
+}
+.consolidated-warnings {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff8e8;
+  color: #7a5b00;
+  font-size: 12px;
+}
+.upload-zone.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 /* Toasts */
 .toast-stack {
   position: fixed;

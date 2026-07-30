@@ -2593,6 +2593,34 @@ function _dbg_reconcileWFM18() {
 // ============================================================
 
 /**
+ * Runtime-pick a Director-scoped worker via api_projectSoftBookings baseline.
+ * Shared by WFM.23 gate checks 2 and 3.
+ * @param {Object} baseParams
+ * @return {{params:Object, worker:Object, mgrName:string}|null}
+ */
+function _dbg_wfm23PickDirectorScopeWorker_(baseParams) {
+  var mgrRows = readConfigSlgManagers_();
+  var descendants = buildManagerDescendants_(mgrRows);
+  var mgrName = '';
+  mgrRows.some(function (r) {
+    if ((descendants[r.manager_name] || []).length >= 1) {
+      mgrName = r.manager_name;
+      return true;
+    }
+    return false;
+  });
+  if (!mgrName) return null;
+  var params = Object.assign({}, baseParams, {
+    teams: [mgrName],
+    includeMyManagers: true
+  });
+  var baselineOnly = api_projectSoftBookings(params, []);
+  var workers = baselineOnly.baseline.worker || [];
+  if (!workers.length) return null;
+  return { params: params, worker: workers[0], mgrName: mgrName };
+}
+
+/**
  * WFM.23 Stage 1 gate. Self-computing checks; prints ALL CHECKS OK only
  * when every check passes. Run api_flushCaches first (check 5 does).
  */
@@ -2719,15 +2747,13 @@ function _dbg_reconcileWFM23() {
     var beforeAssign = snapshotAssignments_();
     var beforeAlloc = snapshotAllocations_();
 
-    var ref = api_getReference();
-    var resources = ref.resources || [];
-    var worker = resources.find(function (r) {
-      return r.name && r.employee_id && (r.worker_class === 'SLG_Real' || r.worker_class === 'SLG_Generic');
-    });
-    if (!worker) {
-      failures.push('Check 2: no SLG worker found for projection call');
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 2: no Director-scope worker found for projection call');
       return;
     }
+    var worker = picked.worker;
+    var params = picked.params;
 
     var futureQk = null;
     var today = new Date();
@@ -2742,13 +2768,13 @@ function _dbg_reconcileWFM23() {
     }
     var bounds = fiscalQuarterBounds_(futureQk);
     var booking = {
-      employee_id: String(worker.employee_id),
-      resource_name: String(worker.name),
+      employee_id: String(worker.employeeId),
+      resource_name: String(worker.resourceName),
       start_date: _toIso_(bounds.start),
       end_date: _toIso_(bounds.end),
       total_hours: 25
     };
-    api_projectSoftBookings(baseParams, [booking]);
+    api_projectSoftBookings(params, [booking]);
 
     var afterAssign = snapshotAssignments_();
     var afterAlloc = snapshotAllocations_();
@@ -2765,32 +2791,16 @@ function _dbg_reconcileWFM23() {
   // ---- Check 3: injection correctness (self-computing expected N) ----
   (function checkInjection() {
     Logger.log('=== WFM.23 Check 3: injection correctness ===');
-    var mgrRows = readConfigSlgManagers_();
-    var descendants = buildManagerDescendants_(mgrRows);
-    var mgrName = '';
-    mgrRows.some(function (r) {
-      if ((descendants[r.manager_name] || []).length >= 1) {
-        mgrName = r.manager_name;
-        return true;
-      }
-      return false;
-    });
-    if (!mgrName) {
-      failures.push('Check 3: no Director with descendants found');
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 3: no Director with descendants / in-scope workers found');
       return;
     }
-    var params = Object.assign({}, baseParams, {
-      teams: [mgrName],
-      includeMyManagers: true
-    });
-    var baselineOnly = api_projectSoftBookings(params, []);
-    var workers = baselineOnly.baseline.worker || [];
-    if (!workers.length) {
-      failures.push('Check 3: no in-scope workers under Director ' + mgrName);
-      return;
-    }
-    var targetWorker = workers[0];
+    var params = picked.params;
+    var targetWorker = picked.worker;
+    Logger.log('  Director scope: ' + picked.mgrName + ' worker: ' + targetWorker.resourceName);
 
+    var baselineOnly = api_projectSoftBookings(params, []);
     var futureQk = null;
     var today = new Date();
     rollingQuarterKeys_(8).forEach(function (qk) {

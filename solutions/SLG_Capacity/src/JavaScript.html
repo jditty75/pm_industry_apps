@@ -49,6 +49,7 @@
     selectedScenario: null,
     explorerListCollapsed: true,
     explorerReqId: 0,
+    explorerBaselineProjection: null,
     workerPlanning: null,      // Drop 7: { rows, summary } for Planning Detail card
     reporting: null,
     rpAccountsAll: [],
@@ -2759,6 +2760,150 @@
   // ============================================================
   const ExplorerQuarterState = { metric: 'icp' };
   const ExplorerProjectState = { expanded: new Set() };
+  const EXPLORER_TEAM_ORDER = [
+    'Functional Consulting',
+    'Technical Consulting',
+    'Delivery'
+  ];
+  const ExplorerGroupState = { collapsed: new Set() };
+
+  function deriveExplorerLevel_(jobProfile) {
+    return String(jobProfile || '').trim().substring(0, 2) || '—';
+  }
+
+  function getExplorerCurQuarter_() {
+    return fiscalQuarterKey_(new Date());
+  }
+
+  function getExplorerWorkerBaseline_(resourceName) {
+    const proj = State.explorerBaselineProjection;
+    if (!proj || !proj.baseline) return null;
+    return (proj.baseline.worker || []).find(function (w) {
+      return w.resourceName === resourceName;
+    }) || null;
+  }
+
+  function getExplorerWorkerBaselineUtil_(resourceName) {
+    const row = getExplorerWorkerBaseline_(resourceName);
+    if (!row) return null;
+    const curQ = getExplorerCurQuarter_();
+    const q = (row.quarters || []).find(function (qq) { return qq.quarterKey === curQ; });
+    return q ? q.icpUtil : null;
+  }
+
+  function getExplorerTeamBaselineUtil_(teamLabel) {
+    const proj = State.explorerBaselineProjection;
+    if (!proj || !proj.baseline) return null;
+    const org = (proj.baseline.orgTeams || []).find(function (o) {
+      return o.teamLabel === teamLabel;
+    });
+    if (!org) return null;
+    const curQ = getExplorerCurQuarter_();
+    const q = (org.quarters || []).find(function (qq) { return qq.quarterKey === curQ; });
+    return q ? q.icpUtil : null;
+  }
+
+  async function loadExplorerBaselineProjection_() {
+    try {
+      State.explorerBaselineProjection = await call(
+        'api_projectSoftBookings',
+        buildServerParams_(),
+        []
+      );
+    } catch (e) {
+      State.explorerBaselineProjection = null;
+    }
+  }
+
+  function groupExplorerResources_(resources) {
+    const groups = {};
+    resources.forEach(function (r) {
+      const label = r.resolvedTeam || 'Unclassified';
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(r);
+    });
+    const ordered = [];
+    EXPLORER_TEAM_ORDER.forEach(function (label) {
+      if (groups[label] && groups[label].length) {
+        ordered.push({ label: label, workers: groups[label] });
+        delete groups[label];
+      }
+    });
+    Object.keys(groups).sort().forEach(function (label) {
+      ordered.push({ label: label, workers: groups[label] });
+    });
+    return ordered;
+  }
+
+  function renderExplorerUtilPill_(util, icpTarget) {
+    const pct = util == null ? '—' : fmtPct1(util);
+    const color = util == null
+      ? { bg: 'var(--business-card)', fg: 'var(--staple)' }
+      : cellColor(util, icpTarget || 0.75);
+    return '<span class="explorer-util-pill" style="background:' + color.bg +
+      ';color:' + color.fg + '">' + pct + '</span>';
+  }
+
+  function renderExplorerTeamGroupHtml_(group) {
+    const collapsed = ExplorerGroupState.collapsed.has(group.label);
+    const teamUtil = getExplorerTeamBaselineUtil_(group.label);
+    const pill = renderExplorerUtilPill_(teamUtil, 0.75);
+    let html = '<div class="explorer-team-group" data-team="' + escapeHtml_(group.label) + '">' +
+      '<button type="button" class="explorer-team-header" data-team-toggle="' +
+        escapeHtml_(group.label) + '" aria-expanded="' + (!collapsed) + '">' +
+        '<span class="explorer-team-chevron">' + (collapsed ? '▶' : '▼') + '</span>' +
+        '<span class="explorer-team-name">' + escapeHtml_(group.label) + '</span>' +
+        '<span class="explorer-team-pill-wrap">' + pill + '</span>' +
+      '</button>';
+    if (!collapsed) {
+      html += '<div class="explorer-team-body">';
+      group.workers.forEach(function (r) {
+        const level = deriveExplorerLevel_(r.job_profile);
+        const util = getExplorerWorkerBaselineUtil_(r.name);
+        const workerPill = renderExplorerUtilPill_(util, 0.75);
+        const active = r.name === State.selectedResource ? ' active' : '';
+        html += '<div class="resource-item explorer-worker-row' + active +
+          '" data-resource="' + escapeHtml_(r.name) + '">' +
+          '<div class="explorer-worker-main" data-select-worker="' + escapeHtml_(r.name) + '">' +
+            '<div><div class="resource-name">' + escapeHtml_(r.name) + '</div>' +
+            '<div class="resource-meta">' + escapeHtml_(level) + ' · ' + workerPill + '</div></div>' +
+          '</div>' +
+          '<button type="button" class="btn-ghost explorer-softbook-btn" data-softbook="' +
+            escapeHtml_(r.name) + '">+ Soft book</button>' +
+        '</div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function wireExplorerResourceListEvents_() {
+    $$('#resourceList [data-team-toggle]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const team = btn.dataset.teamToggle;
+        if (ExplorerGroupState.collapsed.has(team)) {
+          ExplorerGroupState.collapsed.delete(team);
+        } else {
+          ExplorerGroupState.collapsed.add(team);
+        }
+        renderResourceList();
+      });
+    });
+    $$('#resourceList [data-select-worker]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        selectExplorerResource_(el.dataset.selectWorker);
+      });
+    });
+    $$('#resourceList .explorer-softbook-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        // Wired in WFM.23 Stage 2 soft-booking overlay.
+      });
+    });
+  }
 
   function getFilteredExplorerResources_() {
     const search = ($('#resourceSearch') && $('#resourceSearch').value || '').toLowerCase();
@@ -2858,28 +3003,31 @@
   function renderResourceList() {
     const list = $('#resourceList');
     if (!list) return;
-    const filtered = getFilteredExplorerResources_();
 
     updateExplorerLayout_();
     updateExplorerWorkerPicker_();
 
+    const filtered = getFilteredExplorerResources_();
     if (!filtered.length) {
       list.innerHTML = '<div class="muted" style="padding:16px;text-align:center;">No resources match the current filters.</div>';
       return;
     }
 
-    list.innerHTML = filtered.map(function (r) {
-      return '<div class="resource-item' + (r.name === State.selectedResource ? ' active' : '') +
-        '" data-resource="' + escapeHtml_(r.name) + '">' +
-        '<div><div class="resource-name">' + escapeHtml_(r.name) + '</div>' +
-        '<div class="resource-meta">' + escapeHtml_(r.manager_org || '—') + ' · ' +
-        escapeHtml_(r.resolvedTeam || r.icp || '—') + '</div></div></div>';
-    }).join('');
+    list.innerHTML = '<div class="explorer-loading-compact explorer-roster-loading">' +
+      '<div class="explorer-loading-spinner" aria-hidden="true"></div>' +
+      '<div class="explorer-loading-label">Loading roster…</div></div>';
 
-    $$('#resourceList .resource-item').forEach(function (el) {
-      el.addEventListener('click', function () {
-        selectExplorerResource_(el.dataset.resource);
-      });
+    loadExplorerBaselineProjection_().then(function () {
+      if (!list) return;
+      const currentFiltered = getFilteredExplorerResources_();
+      if (!currentFiltered.length) {
+        list.innerHTML = '<div class="muted" style="padding:16px;text-align:center;">No resources match the current filters.</div>';
+        return;
+      }
+      const groups = groupExplorerResources_(currentFiltered);
+      list.innerHTML = groups.map(renderExplorerTeamGroupHtml_).join('');
+      wireExplorerResourceListEvents_();
+      highlightExplorerListSelection_();
     });
   }
 

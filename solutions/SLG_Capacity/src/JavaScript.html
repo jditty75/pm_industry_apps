@@ -50,6 +50,8 @@
     explorerListCollapsed: true,
     explorerReqId: 0,
     explorerBaselineProjection: null,
+    softBookings: [],
+    explorerPopoverWorker: null,
     workerPlanning: null,      // Drop 7: { rows, summary } for Planning Detail card
     reporting: null,
     rpAccountsAll: [],
@@ -548,6 +550,9 @@
     if (name === 'dashboard') loadDashboard();
     if (name === 'quarterly-scorecard') loadQuarterlyScorecard();
     if (name === 'explorer') renderResourceList();
+    if (previousView === 'explorer' && name !== 'explorer') {
+      clearExplorerSoftBookings_('leave');
+    }
     if (name === 'pipeline') loadOpportunities();
     if (name === 'deployments') loadDeployments();
     if (name === 'scenarios') loadScenarios();
@@ -602,6 +607,7 @@
       $('#refreshBtn').addEventListener('click', async (e) => {
         const btn = e.currentTarget;
         State.dashboardCache = null;
+        if (State.currentView === 'explorer') clearExplorerSoftBookings_('refresh');
         await withLoading_(btn, async () => {
           await refreshReferenceData_();
           await reloadCurrentView_();
@@ -2900,9 +2906,129 @@
     $$('#resourceList .explorer-softbook-btn').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        // Wired in WFM.23 Stage 2 soft-booking overlay.
+        openSoftBookPopover_(btn.dataset.softbook, btn);
       });
     });
+  }
+
+  function formatSoftBookSpan_(booking) {
+    const s = booking.start_date || '';
+    const e = booking.end_date || '';
+    if (!s || !e) return '—';
+    return s + ' \u2192 ' + e;
+  }
+
+  function closeSoftBookPopover_() {
+    const pop = $('#explorerSoftBookPopover');
+    if (pop) pop.hidden = true;
+    State.explorerPopoverWorker = null;
+  }
+
+  function openSoftBookPopover_(resourceName, anchorEl) {
+    const pop = $('#explorerSoftBookPopover');
+    if (!pop) return;
+    State.explorerPopoverWorker = resourceName;
+    const workerInput = $('#sbPopoverWorker');
+    if (workerInput) workerInput.value = resourceName;
+    const today = new Date().toISOString().slice(0, 10);
+    const startInput = $('#sbPopoverStart');
+    const endInput = $('#sbPopoverEnd');
+    const hoursInput = $('#sbPopoverHours');
+    if (startInput) startInput.value = today;
+    if (endInput) endInput.value = today;
+    if (hoursInput) hoursInput.value = '';
+    pop.hidden = false;
+    if (anchorEl && anchorEl.getBoundingClientRect) {
+      const rect = anchorEl.getBoundingClientRect();
+      pop.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+      pop.style.left = Math.min(rect.left + window.scrollX, window.innerWidth - 300) + 'px';
+    }
+    if (hoursInput) hoursInput.focus();
+  }
+
+  function addSoftBookingFromPopover_() {
+    const resourceName = State.explorerPopoverWorker;
+    if (!resourceName) return;
+    const start = ($('#sbPopoverStart') && $('#sbPopoverStart').value) || '';
+    const end = ($('#sbPopoverEnd') && $('#sbPopoverEnd').value) || '';
+    const hours = Number($('#sbPopoverHours') && $('#sbPopoverHours').value);
+    if (!start || !end || !hours || hours <= 0) {
+      toast('Enter start date, end date, and total hours.', 'err');
+      return;
+    }
+    if (new Date(start) > new Date(end)) {
+      toast('Start date must be on or before end date.', 'err');
+      return;
+    }
+    const baseline = getExplorerWorkerBaseline_(resourceName);
+    State.softBookings.push({
+      employee_id: baseline ? (baseline.employeeId || '') : '',
+      resource_name: resourceName,
+      start_date: start,
+      end_date: end,
+      total_hours: hours
+    });
+    closeSoftBookPopover_();
+    onSoftBookingsChanged_();
+    toast('Soft booking added to basket.', '');
+  }
+
+  function clearExplorerSoftBookings_(reason) {
+    State.softBookings = [];
+    State.explorerPopoverWorker = null;
+    closeSoftBookPopover_();
+    renderExplorerSoftBookBasket_();
+    const band = $('#explorerImpactBand');
+    if (band) band.hidden = true;
+    if (typeof hideExplorerProjectionPending_ === 'function') hideExplorerProjectionPending_();
+    State.explorerProjection = null;
+  }
+
+  function onSoftBookingsChanged_() {
+    renderExplorerSoftBookBasket_();
+    if (typeof scheduleExplorerProjection_ === 'function') scheduleExplorerProjection_();
+  }
+
+  function renderExplorerSoftBookBasket_() {
+    const basket = $('#explorerSoftBookBasket');
+    const body = $('#explorerBasketBody');
+    const countEl = $('#explorerBasketCount');
+    if (!basket || !body) return;
+    const bookings = State.softBookings || [];
+    if (!bookings.length) {
+      basket.hidden = true;
+      body.innerHTML = '';
+      if (countEl) countEl.textContent = '0';
+      return;
+    }
+    basket.hidden = false;
+    if (countEl) countEl.textContent = String(bookings.length);
+    body.innerHTML = bookings.map(function (b, idx) {
+      return '<div class="explorer-basket-row">' +
+        '<div class="explorer-basket-row-main">' +
+          '<div class="explorer-basket-worker">' + escapeHtml_(b.resource_name) + '</div>' +
+          '<div class="explorer-basket-meta muted">' + escapeHtml_(formatSoftBookSpan_(b)) +
+            ' \u00b7 ' + fmtHours(b.total_hours) + 'h</div>' +
+        '</div>' +
+        '<button type="button" class="btn-ghost explorer-basket-remove" data-idx="' + idx +
+          '" aria-label="Remove booking">\u2715</button>' +
+      '</div>';
+    }).join('');
+    $$('#explorerBasketBody .explorer-basket-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const i = Number(btn.dataset.idx);
+        State.softBookings.splice(i, 1);
+        onSoftBookingsChanged_();
+      });
+    });
+    const commitW = $('#explorerCommitWorker');
+    const commitAll = $('#explorerCommitAll');
+    if (commitW) commitW.disabled = false;
+    if (commitAll) commitAll.disabled = false;
+  }
+
+  function stubExplorerCommit_() {
+    toast('Commit lands in Stage 3', '');
   }
 
   function getFilteredExplorerResources_() {
@@ -3461,6 +3587,42 @@
     if (prevBtn) prevBtn.addEventListener('click', function () { explorerStepWorker_(-1); });
     const nextBtn = $('#explorerNextWorker');
     if (nextBtn) nextBtn.addEventListener('click', function () { explorerStepWorker_(1); });
+
+    const sbCancel = $('#sbPopoverCancel');
+    if (sbCancel) sbCancel.addEventListener('click', closeSoftBookPopover_);
+    const sbAdd = $('#sbPopoverAdd');
+    if (sbAdd) sbAdd.addEventListener('click', addSoftBookingFromPopover_);
+    const sbHours = $('#sbPopoverHours');
+    if (sbHours) {
+      sbHours.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') addSoftBookingFromPopover_();
+      });
+    }
+    const sbEnd = $('#sbPopoverEnd');
+    if (sbEnd) {
+      sbEnd.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') addSoftBookingFromPopover_();
+      });
+    }
+    const basketWipe = $('#explorerBasketWipe');
+    if (basketWipe) {
+      basketWipe.addEventListener('click', function () {
+        clearExplorerSoftBookings_('wipe');
+      });
+    }
+    const commitW = $('#explorerCommitWorker');
+    if (commitW) commitW.addEventListener('click', stubExplorerCommit_);
+    const commitAll = $('#explorerCommitAll');
+    if (commitAll) commitAll.addEventListener('click', stubExplorerCommit_);
+
+    document.addEventListener('click', function (e) {
+      const pop = $('#explorerSoftBookPopover');
+      if (!pop || pop.hidden) return;
+      if (pop.contains(e.target)) return;
+      if (e.target.closest && e.target.closest('.explorer-softbook-btn')) return;
+      closeSoftBookPopover_();
+    });
+
     updateExplorerLayout_();
   })();
 

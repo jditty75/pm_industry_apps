@@ -235,6 +235,21 @@
 
     <!-- ============ View: Capacity Explorer ============ -->
     <section class="view" data-view="explorer" hidden>
+      <div class="explorer-softbook-popover" id="explorerSoftBookPopover" hidden>
+        <div class="explorer-popover-title">Soft book hours</div>
+        <label class="explorer-popover-label" for="sbPopoverWorker">Worker</label>
+        <input type="text" class="input" id="sbPopoverWorker" readonly>
+        <label class="explorer-popover-label" for="sbPopoverStart">Start date</label>
+        <input type="date" class="input" id="sbPopoverStart">
+        <label class="explorer-popover-label" for="sbPopoverEnd">End date</label>
+        <input type="date" class="input" id="sbPopoverEnd">
+        <label class="explorer-popover-label" for="sbPopoverHours">Total hours</label>
+        <input type="number" class="input" id="sbPopoverHours" min="1" step="1" placeholder="e.g. 40">
+        <div class="explorer-popover-actions">
+          <button type="button" class="btn-ghost" id="sbPopoverCancel">Cancel</button>
+          <button type="button" class="btn-primary" id="sbPopoverAdd">Add to basket</button>
+        </div>
+      </div>
       <div class="grid-explorer explorer-list-collapsed" id="explorerGrid">
         <div class="card explorer-list-card" id="explorerListCard">
           <div class="card-header">
@@ -242,6 +257,18 @@
             <button type="button" class="btn-ghost" id="explorerListToggle" title="Hide browse list">◀ Hide list</button>
           </div>
           <input type="text" class="input search" id="resourceSearch" placeholder="Search by name…">
+          <div class="explorer-softbook-basket" id="explorerSoftBookBasket" hidden>
+            <div class="explorer-basket-header">
+              <span class="explorer-basket-title">Pending soft bookings</span>
+              <span class="badge ghost" id="explorerBasketCount">0</span>
+              <button type="button" class="btn-ghost explorer-basket-wipe" id="explorerBasketWipe">Wipe all</button>
+            </div>
+            <div class="explorer-basket-body" id="explorerBasketBody"></div>
+            <div class="explorer-basket-commit">
+              <button type="button" class="btn-ghost" id="explorerCommitWorker" disabled>Commit worker</button>
+              <button type="button" class="btn-primary" id="explorerCommitAll" disabled>Submit all</button>
+            </div>
+          </div>
           <div class="resource-list" id="resourceList"></div>
         </div>
         <div class="explorer-right-col">

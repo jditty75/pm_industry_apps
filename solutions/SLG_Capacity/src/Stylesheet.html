@@ -1232,6 +1232,96 @@ textarea.input {
   padding: 16px 12px;
 }
 
+/* WFM.23 — soft-booking popover + pending basket */
+.explorer-softbook-popover {
+  position: absolute;
+  z-index: 1200;
+  width: 260px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--desk);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+}
+.explorer-popover-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--after-hours);
+  margin-bottom: 10px;
+}
+.explorer-popover-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--staple);
+  margin: 8px 0 4px;
+}
+.explorer-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.explorer-softbook-basket {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--desk);
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.explorer-basket-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.explorer-basket-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--after-hours);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.explorer-basket-wipe {
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.explorer-basket-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+}
+.explorer-basket-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid var(--business-card);
+  border-radius: 6px;
+}
+.explorer-basket-row-main { flex: 1; min-width: 0; }
+.explorer-basket-worker {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--after-hours);
+}
+.explorer-basket-meta { font-size: 11px; }
+.explorer-basket-remove {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+.explorer-basket-commit {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  justify-content: flex-end;
+}
+
 /* Scenario list */
 .scenario-list {
   display: flex;

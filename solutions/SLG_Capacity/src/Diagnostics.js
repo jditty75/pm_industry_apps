@@ -2571,3 +2571,348 @@ function _dbg_reconcileWFM18() {
     : '_dbg_reconcileWFM18: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
+
+// ============================================================
+// WFM.23 — Soft booking projection reconciliation (Stage 1).
+// MANDATORY GATE: checks 1, 2, 3, 5 (check 4 is Stage 3).
+// ============================================================
+
+/**
+ * WFM.23 Stage 1 gate. Self-computing checks; prints ALL CHECKS OK only
+ * when every check passes. Run api_flushCaches first (check 5 does).
+ */
+function _dbg_reconcileWFM23() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.01;
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function deepEqualProjection_(a, b, path) {
+    path = path || '';
+    if (a === b) return true;
+    if (a == null || b == null) return a === b;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object') return near_(a, b);
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b) || a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (!deepEqualProjection_(a[i], b[i], path + '[' + i + ']')) return false;
+      }
+      return true;
+    }
+    var keysA = Object.keys(a).sort();
+    var keysB = Object.keys(b).sort();
+    if (keysA.length !== keysB.length) return false;
+    for (var k = 0; k < keysA.length; k++) {
+      if (keysA[k] !== keysB[k]) return false;
+      if (!deepEqualProjection_(a[keysA[k]], b[keysB[k]], path + '.' + keysA[k])) return false;
+    }
+    return true;
+  }
+
+  function snapshotAssignments_() {
+    var rows = [];
+    try { rows = cachedRead_(ASSIGNMENTS); } catch (e) { rows = []; }
+    return JSON.stringify(rows.map(function (r) {
+      return {
+        assignment_id: String(r.assignment_id || ''),
+        resource_name: String(r.resource_name || ''),
+        status: String(r.status || ''),
+        estimated_hours: Number(r.estimated_hours) || 0,
+        start_date: r.start_date ? String(r.start_date) : '',
+        end_date: r.end_date ? String(r.end_date) : ''
+      };
+    }).sort(function (a, b) {
+      return String(a.assignment_id).localeCompare(String(b.assignment_id));
+    }));
+  }
+
+  function snapshotAllocations_() {
+    var rows = [];
+    try { rows = cachedRead_(ALLOC_NORM); } catch (e) { rows = []; }
+    return JSON.stringify(rows.map(function (r) {
+      return {
+        resource_name: String(r.resource_name || ''),
+        week_key: String(r.week_key || ''),
+        hours: Number(r.hours) || 0,
+        allocation_type: String(r.allocation_type || '')
+      };
+    }).sort(function (a, b) {
+      return String(a.resource_name + a.week_key).localeCompare(String(b.resource_name + b.week_key));
+    }));
+  }
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+
+  // ---- Check 1: empty-overlay neutrality ----
+  (function checkNeutrality() {
+    Logger.log('=== WFM.23 Check 1: empty-overlay neutrality ===');
+    var ref = api_getReference();
+    var resources = ref.resources || [];
+    var mgrRows = readConfigSlgManagers_();
+    var descendants = buildManagerDescendants_(mgrRows);
+    var mgrName = '';
+    mgrRows.some(function (r) {
+      if ((descendants[r.manager_name] || []).length >= 1) {
+        mgrName = r.manager_name;
+        return true;
+      }
+      return false;
+    });
+    var params = Object.assign({}, baseParams, {
+      teams: mgrName ? [mgrName] : null,
+      includeMyManagers: true
+    });
+    var result = api_projectSoftBookings(params, []);
+    if (!deepEqualProjection_(result.baseline, result.projected, 'root')) {
+      failures.push('Empty overlay: projected !== baseline');
+      Logger.log('  FAILED: projected !== baseline');
+      return;
+    }
+    var sampleWorkers = (result.baseline.worker || []).slice(0, 3);
+    if (!sampleWorkers.length && resources.length) {
+      Logger.log('  SKIPPED sample workers (no workers in scoped projection)');
+    } else {
+      sampleWorkers.forEach(function (w) {
+        var pw = (result.projected.worker || []).find(function (x) {
+          return x.resourceName === w.resourceName;
+        });
+        if (!pw || !deepEqualProjection_(w, pw, w.resourceName)) {
+          failures.push('Neutrality worker mismatch: ' + w.resourceName);
+        }
+      });
+    }
+    if (!deepEqualProjection_(result.baseline.team, result.projected.team, 'team')) {
+      failures.push('Empty overlay: team projected !== baseline');
+    }
+    if (!deepEqualProjection_(result.baseline.orgTeams, result.projected.orgTeams, 'orgTeams')) {
+      failures.push('Empty overlay: orgTeams projected !== baseline');
+    }
+    Logger.log(failures.length ? '  Check 1: FAILED' : '  Check 1: OK');
+  })();
+
+  // ---- Check 2: baseline untouched (nothing persisted) ----
+  (function checkBaselineUntouched() {
+    Logger.log('=== WFM.23 Check 2: baseline untouched ===');
+    var beforeAssign = snapshotAssignments_();
+    var beforeAlloc = snapshotAllocations_();
+
+    var ref = api_getReference();
+    var resources = ref.resources || [];
+    var worker = resources.find(function (r) {
+      return r.name && r.employee_id && (r.worker_class === 'SLG_Real' || r.worker_class === 'SLG_Generic');
+    });
+    if (!worker) {
+      failures.push('Check 2: no SLG worker found for projection call');
+      return;
+    }
+
+    var futureQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      if (futureQk) return;
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start > today) futureQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 2: no future fiscal quarter found');
+      return;
+    }
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var booking = {
+      employee_id: String(worker.employee_id),
+      resource_name: String(worker.name),
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: 25
+    };
+    api_projectSoftBookings(baseParams, [booking]);
+
+    var afterAssign = snapshotAssignments_();
+    var afterAlloc = snapshotAllocations_();
+    if (beforeAssign !== afterAssign) {
+      failures.push('Check 2: Opportunity_Assignments changed after projection');
+    }
+    if (beforeAlloc !== afterAlloc) {
+      failures.push('Check 2: Allocations_Normalized changed after projection');
+    }
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 2') === 0; })
+      ? '  Check 2: FAILED' : '  Check 2: OK');
+  })();
+
+  // ---- Check 3: injection correctness (self-computing expected N) ----
+  (function checkInjection() {
+    Logger.log('=== WFM.23 Check 3: injection correctness ===');
+    var mgrRows = readConfigSlgManagers_();
+    var descendants = buildManagerDescendants_(mgrRows);
+    var mgrName = '';
+    mgrRows.some(function (r) {
+      if ((descendants[r.manager_name] || []).length >= 1) {
+        mgrName = r.manager_name;
+        return true;
+      }
+      return false;
+    });
+    if (!mgrName) {
+      failures.push('Check 3: no Director with descendants found');
+      return;
+    }
+    var params = Object.assign({}, baseParams, {
+      teams: [mgrName],
+      includeMyManagers: true
+    });
+    var baselineOnly = api_projectSoftBookings(params, []);
+    var workers = baselineOnly.baseline.worker || [];
+    if (!workers.length) {
+      failures.push('Check 3: no in-scope workers under Director ' + mgrName);
+      return;
+    }
+    var targetWorker = workers[0];
+
+    var futureQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      if (futureQk) return;
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start > today) futureQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 3: no future fiscal quarter found');
+      return;
+    }
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var N = 40;
+    var booking = {
+      employee_id: targetWorker.employeeId,
+      resource_name: targetWorker.resourceName,
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: N
+    };
+
+    var calendar = readCalendar_();
+    var assignShape = {
+      resource_name: booking.resource_name,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: N,
+      distribution: 'Even',
+      status: 'Modeled'
+    };
+    var expectedN = 0;
+    expandAssignmentToWeekly_(assignShape, calendar).forEach(function (w) {
+      if (fiscalQuarterKey_(w.week_start) === futureQk) {
+        expectedN += Number(w.hours) || 0;
+      }
+    });
+    if (expectedN <= 0) {
+      failures.push('Check 3: expectedN recomputed as 0 for quarter ' + futureQk);
+      return;
+    }
+
+    var projected = api_projectSoftBookings(params, [booking]);
+    var baseW = (baselineOnly.baseline.worker || []).find(function (w) {
+      return w.resourceName === targetWorker.resourceName;
+    });
+    var projW = (projected.projected.worker || []).find(function (w) {
+      return w.resourceName === targetWorker.resourceName;
+    });
+    if (!baseW || !projW) {
+      failures.push('Check 3: worker row missing for ' + targetWorker.resourceName);
+      return;
+    }
+    var baseQ = (baseW.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+    var projQ = (projW.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+    if (!baseQ || !projQ) {
+      failures.push('Check 3: quarter cell missing for ' + futureQk);
+      return;
+    }
+    var delta = Number(projQ.productiveHours) - Number(baseQ.productiveHours);
+    if (!near_(delta, expectedN)) {
+      failures.push('Check 3: worker productiveHours delta=' + delta.toFixed(4) +
+        ' expected=' + expectedN.toFixed(4));
+    } else {
+      Logger.log('  worker ' + targetWorker.resourceName + ' delta=' + delta.toFixed(2) +
+        ' expected=' + expectedN.toFixed(2) + ' OK');
+    }
+
+    var baseTeamQ = (baselineOnly.baseline.team.quarters || []).find(function (q) {
+      return q.quarterKey === futureQk;
+    });
+    var projTeamQ = (projected.projected.team.quarters || []).find(function (q) {
+      return q.quarterKey === futureQk;
+    });
+    if (baseTeamQ && projTeamQ) {
+      var teamDelta = Number(projTeamQ.productiveHours) - Number(baseTeamQ.productiveHours);
+      if (!near_(teamDelta, expectedN)) {
+        failures.push('Check 3: team productiveHours delta=' + teamDelta.toFixed(4) +
+          ' expected=' + expectedN.toFixed(4));
+      } else {
+        Logger.log('  team aggregate delta=' + teamDelta.toFixed(2) + ' OK');
+      }
+    }
+
+    var teamLabel = targetWorker.teamLabel;
+    var baseOrg = (baselineOnly.baseline.orgTeams || []).find(function (o) {
+      return o.teamLabel === teamLabel;
+    });
+    var projOrg = (projected.projected.orgTeams || []).find(function (o) {
+      return o.teamLabel === teamLabel;
+    });
+    if (baseOrg && projOrg) {
+      var baseOrgQ = (baseOrg.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+      var projOrgQ = (projOrg.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+      if (baseOrgQ && projOrgQ) {
+        var orgDelta = Number(projOrgQ.productiveHours) - Number(baseOrgQ.productiveHours);
+        if (!near_(orgDelta, expectedN)) {
+          failures.push('Check 3: org-team ' + teamLabel + ' delta=' + orgDelta.toFixed(4) +
+            ' expected=' + expectedN.toFixed(4));
+        } else {
+          Logger.log('  org-team ' + teamLabel + ' delta=' + orgDelta.toFixed(2) + ' OK');
+        }
+      }
+    }
+  })();
+
+  // ---- Check 5: no regression (WFM.15 / 17 / 18) ----
+  (function checkNoRegression() {
+    Logger.log('=== WFM.23 Check 5: no regression ===');
+    if (typeof api_flushCaches === 'function') api_flushCaches();
+
+    function runGate_(fn, okToken) {
+      var before = Logger.getLog() || '';
+      try {
+        fn();
+      } catch (e) {
+        failures.push('Check 5: ' + fn.name + ' threw — ' + e);
+        return false;
+      }
+      var after = Logger.getLog() || '';
+      var slice = after.slice(before.length);
+      if (slice.indexOf(okToken) < 0) {
+        failures.push('Check 5: ' + fn.name + ' did not print ' + okToken);
+        return false;
+      }
+      return true;
+    }
+
+    var ok15 = runGate_(_dbg_reconcileWFM15, '_dbg_reconcileWFM15: ALL CASES OK');
+    var ok17 = runGate_(_dbg_reconcileWFM17, '_dbg_reconcileWFM17: ALL CHECKS OK');
+    var ok18 = runGate_(_dbg_reconcileWFM18, '_dbg_reconcileWFM18: ALL CHECKS OK');
+    Logger.log('  WFM.15=' + (ok15 ? 'OK' : 'FAIL') +
+      ' WFM.17=' + (ok17 ? 'OK' : 'FAIL') +
+      ' WFM.18=' + (ok18 ? 'OK' : 'FAIL'));
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM23: ALL CHECKS OK'
+    : '_dbg_reconcileWFM23: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}

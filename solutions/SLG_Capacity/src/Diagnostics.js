@@ -2378,23 +2378,38 @@ function _dbg_reconcileWFM18() {
       Logger.log('  ' + workerName + ' quarter cells checked');
     });
 
-    // Aidan current-quarter attainment anchor (87.63%)
+    // Aidan current-quarter attainment anchor — was hard-coded 87.63%; now
+    // self-computed from Actuals_Worker_Summary (qtd_icp_plus_forecast_hours /
+    // bonus_target_billable_hours_eoq) so the gate survives data refresh.
+    var ATTAIN_TOL = 0.001;
+    var aidanSc = (scorecard.workers || []).find(function (w) { return w.worker === 'Aidan Votaw'; });
     var aidanV2 = api_getResourceDetailV2(Object.assign({ resource: 'Aidan Votaw' }, baseParams));
-    if (aidanV2.found) {
-      var aidanCur = (aidanV2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
-      if (!aidanCur) {
-        failures.push('Aidan current quarter missing from V2');
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    if (!aidanSc || !aidanV2.found) {
+      failures.push('Aidan Votaw not found for attainment anchor');
+    } else {
+      var aidanCurSc = (aidanSc.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      var summary = actualsSummary[String(aidanSc.employeeId || '').trim()];
+      if (!aidanCurSc) {
+        failures.push('Aidan current quarter missing from scorecard');
+      } else if (!summary || !Number(summary.qtd_icp_plus_forecast_hours) ||
+          !Number(summary.bonus_target_billable_hours_eoq)) {
+        failures.push('Aidan actuals summary missing for current-quarter anchor');
       } else {
-        var aidanPct = aidanCur.bonusAttainment * 100;
-        var aidanOk = Math.abs(aidanPct - 87.63) <= TOL;
-        Logger.log('  Aidan current-quarter attainment=' + aidanPct.toFixed(2) + '% (expect 87.63%)' +
+        var expectedAttainment = Number(summary.qtd_icp_plus_forecast_hours) /
+          Number(summary.bonus_target_billable_hours_eoq);
+        var aidanPct = aidanCurSc.bonusAttainment * 100;
+        var expectedPct = expectedAttainment * 100;
+        var aidanOk = Math.abs(aidanCurSc.bonusAttainment - expectedAttainment) <= ATTAIN_TOL;
+        Logger.log('  Aidan current-quarter attainment=' + aidanPct.toFixed(2) +
+          '% (self-computed expect=' + expectedPct.toFixed(2) + '%)' +
           (aidanOk ? ' OK' : ' FAILED'));
         if (!aidanOk) {
-          failures.push('Aidan current-quarter attainment: got ' + aidanPct.toFixed(2) + '% expect 87.63%');
+          failures.push('Aidan current-quarter attainment: scorecard=' + aidanPct.toFixed(2) +
+            '% expected=' + expectedPct.toFixed(2) + '%');
         }
       }
-    } else {
-      failures.push('Aidan Votaw not found in V2 for attainment anchor');
     }
 
     // FY27 target anchors: Consulting (Aidan profile) and P6

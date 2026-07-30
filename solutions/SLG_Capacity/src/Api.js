@@ -583,15 +583,80 @@ function api_getQuarterlyScorecard(params) {
 // WFM.23 — Soft booking projection (Stage 1)
 // ------------------------------------------------------------
 
-/** Per-execution baseline forecast cache keyed on filter signature (§9a). */
+/** Per-execution L1 baseline forecast cache (L2 = CacheService). */
 var _softBookingBaselineCache_ = { signature: '', forecast: null };
 
 /**
- * Clear WFM.23 projection baseline cache (called from api_flushCaches).
+ * Clear WFM.23 projection L1 baseline cache (called from api_flushCaches).
+ * L2 entries are keyed on _getEnrichedCacheVersion_() and invalidate via
+ * invalidateEnrichedCaches_() version bump.
  */
 function invalidateSoftBookingBaselineCache_() {
   _softBookingBaselineCache_.signature = '';
   _softBookingBaselineCache_.forecast = null;
+}
+
+/**
+ * CacheService key for a projection baseline (version + filter signature).
+ * @param {Object} forecastParams
+ * @return {string}
+ */
+function _projectionBaselineCacheKey_(forecastParams) {
+  var sig = _projectionFilterSignature_(forecastParams);
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, sig, Utilities.Charset.UTF_8);
+  var hex = digest.map(function (b) {
+    return ('0' + (b < 0 ? b + 256 : b).toString(16)).slice(-2);
+  }).join('');
+  return 'wfm23:baseline:v' + _getEnrichedCacheVersion_() + ':' + hex;
+}
+
+/**
+ * JSON-safe forecast payload for CacheService (no Date objects).
+ * @param {Object} forecast
+ * @return {Object}
+ */
+function _serializeForecastForCache_(forecast) {
+  return {
+    weeks: (forecast.weeks || []).map(function (w) {
+      return {
+        week_start: _toIso_(w.week_start),
+        week_key: String(w.week_key || ''),
+        fiscal_year: Number(w.fiscal_year) || 0,
+        fiscal_quarter: String(w.fiscal_quarter || ''),
+        workdays_in_week: Number(w.workdays_in_week) || 5,
+        holiday_hours: Number(w.holiday_hours) || 0
+      };
+    }),
+    workers: JSON.parse(JSON.stringify(forecast.workers || [])),
+    icp: forecast.icp,
+    rawCapacity: Number(forecast.rawCapacity) || 40,
+    holidayHoursByWeek: forecast.holidayHoursByWeek || {}
+  };
+}
+
+/**
+ * Rehydrate a cached forecast (week_start → Date).
+ * @param {Object} cached
+ * @return {Object|null}
+ */
+function _deserializeForecastFromCache_(cached) {
+  if (!cached) return null;
+  return {
+    weeks: (cached.weeks || []).map(function (w) {
+      return {
+        week_start: w.week_start ? new Date(w.week_start) : null,
+        week_key: String(w.week_key || ''),
+        fiscal_year: Number(w.fiscal_year) || 0,
+        fiscal_quarter: String(w.fiscal_quarter || ''),
+        workdays_in_week: Number(w.workdays_in_week) || 5,
+        holiday_hours: Number(w.holiday_hours) || 0
+      };
+    }),
+    workers: cached.workers || [],
+    icp: cached.icp,
+    rawCapacity: Number(cached.rawCapacity) || 40,
+    holidayHoursByWeek: cached.holidayHoursByWeek || {}
+  };
 }
 
 /**
@@ -614,19 +679,37 @@ function _projectionFilterSignature_(params) {
 }
 
 /**
- * Baseline computeWeeklyForecast_ with per-signature in-memory cache.
+ * Baseline computeWeeklyForecast_ with L1 (per-execution) + L2 (CacheService).
  * @param {Object} forecastParams
- * @return {{forecast:Object, cacheHit:boolean}}
+ * @return {{forecast:Object, cacheHit:boolean, l2Hit:boolean}}
  */
 function _getCachedBaselineForecast_(forecastParams) {
   var sig = _projectionFilterSignature_(forecastParams);
+
   if (_softBookingBaselineCache_.signature === sig && _softBookingBaselineCache_.forecast) {
-    return { forecast: _softBookingBaselineCache_.forecast, cacheHit: true };
+    return {
+      forecast: _softBookingBaselineCache_.forecast,
+      cacheHit: true,
+      l2Hit: false
+    };
   }
+
+  var cacheKey = _projectionBaselineCacheKey_(forecastParams);
+  var cached = _enrichedCacheRead_(cacheKey);
+  if (cached) {
+    var fromL2 = _deserializeForecastFromCache_(cached);
+    if (fromL2) {
+      _softBookingBaselineCache_.signature = sig;
+      _softBookingBaselineCache_.forecast = fromL2;
+      return { forecast: fromL2, cacheHit: true, l2Hit: true };
+    }
+  }
+
   var forecast = computeWeeklyForecast_(forecastParams);
+  _enrichedCacheWrite_(cacheKey, _serializeForecastForCache_(forecast), 21600);
   _softBookingBaselineCache_.signature = sig;
   _softBookingBaselineCache_.forecast = forecast;
-  return { forecast: forecast, cacheHit: false };
+  return { forecast: forecast, cacheHit: false, l2Hit: false };
 }
 
 /**
@@ -892,7 +975,7 @@ function api_projectSoftBookings(params, softBookings) {
 
   var baselineCached = _getCachedBaselineForecast_(forecastParams);
   var baselineForecast = baselineCached.forecast;
-  var baselineCacheHit = baselineCached.cacheHit;
+  var baselineCacheHit = baselineCached.l2Hit;
   var holidays = readHolidays_();
   var quarterKeys = _quarterKeysForSoftBookings_(softBookings);
 

@@ -579,6 +579,236 @@ function api_getQuarterlyScorecard(params) {
 }
 
 // ------------------------------------------------------------
+// WFM.23 — Soft booking projection (Stage 1)
+// ------------------------------------------------------------
+
+/**
+ * Fiscal quarter keys touched by soft-booking date ranges (dynamic, cap 8).
+ * Empty bookings ⇒ rolling four quarters (Explorer default window).
+ * @param {Array<{start_date:*, end_date:*}>} softBookings
+ * @return {string[]}
+ */
+function _quarterKeysForSoftBookings_(softBookings) {
+  if (!softBookings || !softBookings.length) {
+    return rollingQuarterKeys_(4);
+  }
+  var minDate = null;
+  var maxDate = null;
+  softBookings.forEach(function (sb) {
+    var s = sb.start_date ? new Date(sb.start_date) : null;
+    var e = sb.end_date ? new Date(sb.end_date) : null;
+    if (s && !isNaN(s.getTime()) && (!minDate || s < minDate)) minDate = s;
+    if (e && !isNaN(e.getTime()) && (!maxDate || e > maxDate)) maxDate = e;
+  });
+  if (!minDate || !maxDate) return rollingQuarterKeys_(4);
+
+  var keys = [];
+  var qk = fiscalQuarterKey_(minDate);
+  var endQk = fiscalQuarterKey_(maxDate);
+  var safety = 0;
+  while (safety < 12) {
+    keys.push(qk);
+    if (qk === endQk) break;
+    var bounds = fiscalQuarterBounds_(qk);
+    var nextStart = new Date(bounds.end.getFullYear(), bounds.end.getMonth() + 1, 1);
+    qk = fiscalQuarterKey_(nextStart);
+    safety++;
+  }
+  if (keys.indexOf(endQk) < 0) keys.push(endQk);
+  return keys.slice(0, 8);
+}
+
+/**
+ * Quarter capacity for soft-booking projection. Quarters beyond the last
+ * configured holiday year are holiday-free with approximate:true (D4a).
+ * @param {string} quarterKey
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @return {{icpAvailableHours:number, rawCapacityHours:number, approximate:boolean}}
+ */
+function _quarterCapacityForProjection_(quarterKey, holidays) {
+  var maxHolidayYear = 0;
+  (holidays || []).forEach(function (h) {
+    if (h.date) {
+      var y = h.date.getFullYear();
+      if (y > maxHolidayYear) maxHolidayYear = y;
+    }
+  });
+  var bounds = fiscalQuarterBounds_(quarterKey);
+  var approximate = bounds.end.getFullYear() > maxHolidayYear;
+  var effectiveHolidays = approximate ? [] : holidays;
+  var wd = quarterWorkdaySummary_(quarterKey, effectiveHolidays);
+  return {
+    icpAvailableHours: Number(wd.icpAvailableHours) || 0,
+    rawCapacityHours: Number(wd.rawCapacityHours) || 0,
+    approximate: approximate
+  };
+}
+
+/**
+ * Build worker / team / org-team quarterly aggregates from a forecast.
+ * @param {Object} forecast computeWeeklyForecast_ result
+ * @param {string[]} quarterKeys
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @return {{worker:Object[], team:Object, orgTeams:Object[]}}
+ */
+function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays) {
+  var weeks = forecast.weeks || [];
+  var workers = forecast.workers || [];
+
+  function quarterCell_(productiveHours, qk) {
+    var qinfo = _quarterCapacityForProjection_(qk, holidays);
+    var icpAvail = qinfo.icpAvailableHours;
+    var rawCap = qinfo.rawCapacityHours;
+    var prod = Number(productiveHours) || 0;
+    return {
+      quarterKey: String(qk),
+      productiveHours: prod,
+      icpAvailableHours: icpAvail,
+      rawCapacityHours: rawCap,
+      icpUtil: icpAvail > 0 ? prod / icpAvail : 0,
+      financeUtil: rawCap > 0 ? prod / rawCap : 0,
+      approximate: !!qinfo.approximate
+    };
+  }
+
+  var workerOut = workers.map(function (w) {
+    return {
+      employeeId: String(w.employeeId || ''),
+      resourceName: String(w.resource || ''),
+      teamLabel: String(w.teamLabel || ''),
+      managerOrg: String(w.managerOrg || ''),
+      quarters: quarterKeys.map(function (qk) {
+        return quarterCell_(sumForecastProductiveForQuarter_(w, qk, weeks), qk);
+      })
+    };
+  });
+
+  var teamQuarters = quarterKeys.map(function (qk) {
+    var sumProd = 0;
+    var sumIcpAvail = 0;
+    var sumRawCap = 0;
+    var approx = false;
+    workers.forEach(function (w) {
+      sumProd += sumForecastProductiveForQuarter_(w, qk, weeks);
+      var qinfo = _quarterCapacityForProjection_(qk, holidays);
+      sumIcpAvail += qinfo.icpAvailableHours;
+      sumRawCap += qinfo.rawCapacityHours;
+      if (qinfo.approximate) approx = true;
+    });
+    return {
+      quarterKey: String(qk),
+      productiveHours: Number(sumProd) || 0,
+      icpAvailableHours: Number(sumIcpAvail) || 0,
+      rawCapacityHours: Number(sumRawCap) || 0,
+      icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
+      financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+      approximate: approx
+    };
+  });
+
+  var byLabel = {};
+  workers.forEach(function (w) {
+    var label = String(w.teamLabel || 'Unclassified');
+    if (!byLabel[label]) byLabel[label] = [];
+    byLabel[label].push(w);
+  });
+  var orgTeamsOut = Object.keys(byLabel).sort().map(function (label) {
+    var group = byLabel[label];
+    var quarters = quarterKeys.map(function (qk) {
+      var sumProd = 0;
+      var sumIcpAvail = 0;
+      var sumRawCap = 0;
+      var approx = false;
+      group.forEach(function (w) {
+        sumProd += sumForecastProductiveForQuarter_(w, qk, weeks);
+        var qinfo = _quarterCapacityForProjection_(qk, holidays);
+        sumIcpAvail += qinfo.icpAvailableHours;
+        sumRawCap += qinfo.rawCapacityHours;
+        if (qinfo.approximate) approx = true;
+      });
+      return {
+        quarterKey: String(qk),
+        productiveHours: Number(sumProd) || 0,
+        icpAvailableHours: Number(sumIcpAvail) || 0,
+        rawCapacityHours: Number(sumRawCap) || 0,
+        icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
+        financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+        approximate: approx
+      };
+    });
+    return { teamLabel: String(label), quarters: quarters };
+  });
+
+  return {
+    worker: workerOut,
+    team: { quarters: teamQuarters },
+    orgTeams: orgTeamsOut
+  };
+}
+
+/**
+ * WFM.23: project soft-booking overlay utilization at worker / team /
+ * org-team levels. Empty softBookings ⇒ projected deep-equals baseline.
+ * @param {Object} params standard buildServerParams_ shape
+ * @param {Array<{employee_id:string, resource_name:string, start_date:*, end_date:*, total_hours:number}>} softBookings
+ * @return {{baseline:Object, projected:Object}}
+ */
+function api_projectSoftBookings(params, softBookings) {
+  _requireAuthorized_();
+  var t0 = Date.now();
+  params = params || {};
+  softBookings = softBookings || [];
+
+  var forecastParams = {
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  };
+
+  var baselineForecast = computeWeeklyForecast_(forecastParams);
+  var holidays = readHolidays_();
+  var quarterKeys = _quarterKeysForSoftBookings_(softBookings);
+
+  var inMemoryModeledAssignments = softBookings.map(function (sb) {
+    return {
+      resource_name: String(sb.resource_name || ''),
+      employee_id: String(sb.employee_id || ''),
+      start_date: sb.start_date ? new Date(sb.start_date) : null,
+      end_date: sb.end_date ? new Date(sb.end_date) : null,
+      estimated_hours: Number(sb.total_hours) || 0,
+      distribution: 'Even',
+      status: 'Modeled'
+    };
+  }).filter(function (a) {
+    return a.resource_name && a.start_date && a.end_date && !isNaN(a.start_date.getTime()) &&
+      !isNaN(a.end_date.getTime()) && a.estimated_hours > 0;
+  });
+
+  var projectedForecast = baselineForecast;
+  if (inMemoryModeledAssignments.length) {
+    var projectedParams = Object.assign({}, forecastParams, {
+      inMemoryModeledAssignments: inMemoryModeledAssignments
+    });
+    projectedForecast = computeWeeklyForecast_(projectedParams);
+  }
+
+  var result = {
+    baseline: _aggregateSoftBookingProjection_(baselineForecast, quarterKeys, holidays),
+    projected: _aggregateSoftBookingProjection_(projectedForecast, quarterKeys, holidays)
+  };
+
+  Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +
+    ' workers=' + (baselineForecast.workers || []).length +
+    ' quarters=' + quarterKeys.length +
+    ' bookings=' + softBookings.length);
+  return result;
+}
+
+// ------------------------------------------------------------
 // Weekly Forecast Table (weekly-forecast-migration §8)
 //
 // Powers the redesigned Dashboard's weekly table. Built on

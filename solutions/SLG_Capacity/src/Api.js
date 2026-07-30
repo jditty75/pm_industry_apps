@@ -385,6 +385,7 @@ function api_flushCaches() {
   if (typeof invalidateEnrichedCaches_ === 'function') {
     invalidateEnrichedCaches_();
   }
+  invalidateSoftBookingBaselineCache_();
   return { ok: true, flushedAt: new Date().toISOString() };
 }
 
@@ -582,6 +583,52 @@ function api_getQuarterlyScorecard(params) {
 // WFM.23 — Soft booking projection (Stage 1)
 // ------------------------------------------------------------
 
+/** Per-execution baseline forecast cache keyed on filter signature (§9a). */
+var _softBookingBaselineCache_ = { signature: '', forecast: null };
+
+/**
+ * Clear WFM.23 projection baseline cache (called from api_flushCaches).
+ */
+function invalidateSoftBookingBaselineCache_() {
+  _softBookingBaselineCache_.signature = '';
+  _softBookingBaselineCache_.forecast = null;
+}
+
+/**
+ * Stable filter signature for projection baseline caching.
+ * Mirrors computeWeeklyForecast_ param defaults.
+ * @param {Object} params
+ * @return {string}
+ */
+function _projectionFilterSignature_(params) {
+  params = params || {};
+  return JSON.stringify({
+    viewMode: params.viewMode || 'Committed',
+    scenarioId: params.scenarioId || null,
+    teams: params.teams || null,
+    teamLabel: params.teamLabel ? String(params.teamLabel).trim() : '',
+    workerScope: params.workerScope || 'SLG',
+    includeMyManagers: !!params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff !== false
+  });
+}
+
+/**
+ * Baseline computeWeeklyForecast_ with per-signature in-memory cache.
+ * @param {Object} forecastParams
+ * @return {{forecast:Object, cacheHit:boolean}}
+ */
+function _getCachedBaselineForecast_(forecastParams) {
+  var sig = _projectionFilterSignature_(forecastParams);
+  if (_softBookingBaselineCache_.signature === sig && _softBookingBaselineCache_.forecast) {
+    return { forecast: _softBookingBaselineCache_.forecast, cacheHit: true };
+  }
+  var forecast = computeWeeklyForecast_(forecastParams);
+  _softBookingBaselineCache_.signature = sig;
+  _softBookingBaselineCache_.forecast = forecast;
+  return { forecast: forecast, cacheHit: false };
+}
+
 /**
  * Fiscal quarter keys touched by soft-booking date ranges (dynamic, cap 8).
  * Empty bookings ⇒ rolling four quarters (Explorer default window).
@@ -769,7 +816,9 @@ function api_projectSoftBookings(params, softBookings) {
     includeTimeOff: params.includeTimeOff
   };
 
-  var baselineForecast = computeWeeklyForecast_(forecastParams);
+  var baselineCached = _getCachedBaselineForecast_(forecastParams);
+  var baselineForecast = baselineCached.forecast;
+  var baselineCacheHit = baselineCached.cacheHit;
   var holidays = readHolidays_();
   var quarterKeys = _quarterKeysForSoftBookings_(softBookings);
 
@@ -802,6 +851,7 @@ function api_projectSoftBookings(params, softBookings) {
   };
 
   Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +
+    ' baselineCache=' + (baselineCacheHit ? 'hit' : 'miss') +
     ' workers=' + (baselineForecast.workers || []).length +
     ' quarters=' + quarterKeys.length +
     ' bookings=' + softBookings.length);

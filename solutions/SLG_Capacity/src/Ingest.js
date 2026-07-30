@@ -193,6 +193,22 @@ var FORECAST_STAGED_DEFAULT_ACTUAL_ = {
 };
 
 /**
+ * Log elapsed ms for consolidated-upload phase timing (WFM.21.1 instrumentation).
+ * @param {string} label phase name
+ * @param {number} t0 phase start timestamp (Date.getTime())
+ * @param {string} [detail] optional row-count or note
+ * @return {number} current timestamp for chaining
+ * @private
+ */
+function _logConsolidatedPhase_(label, t0, detail) {
+  var now = new Date().getTime();
+  var msg = 'uploadConsolidatedWorkbook [PHASE] ' + label + ': ' + (now - t0) + 'ms';
+  if (detail) msg += ' (' + detail + ')';
+  Logger.log(msg);
+  return now;
+}
+
+/**
  * Ingest a consolidated workbook (base64) with full preflight validation.
  * Writes Forecast → PSA + normalizeStaff, actuals, summary, utilization
  * quarterly, and history tables on success.
@@ -206,6 +222,8 @@ function uploadConsolidatedWorkbook(base64, filename) {
   var safeName = String(filename || 'consolidated_upload.xlsx');
   var warnings = [];
   var gsId = null;
+  var tAll = new Date().getTime();
+  var tPhase = tAll;
 
   try {
     if (!base64) {
@@ -233,22 +251,30 @@ function uploadConsolidatedWorkbook(base64, filename) {
     safeName = String(filename || gsFile.title || safeName);
 
     var tempSs = SpreadsheetApp.openById(gsId);
+    tPhase = _logConsolidatedPhase_('drive_conversion', tPhase, safeName);
+
     var preflight = runConsolidatedPreflight_(tempSs, warnings);
+    tPhase = _logConsolidatedPhase_('preflight', tPhase);
     if (!preflight.passed) {
+      _logConsolidatedPhase_('total_elapsed', tAll, 'preflight_failed');
       return _buildConsolidatedResult_(false, safeName, preflight, null, warnings);
     }
 
     var written = writeConsolidatedWorkbook_(preflight.data, warnings);
+    tPhase = _logConsolidatedPhase_('destination_writes_total', tPhase);
 
     try {
       if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
     } catch (e) {
       Logger.log('uploadConsolidatedWorkbook: invalidateEnrichedCaches_ failed — ' + e);
     }
+    tPhase = _logConsolidatedPhase_('invalidate_enriched_caches_post_write', tPhase);
 
+    _logConsolidatedPhase_('total_elapsed', tAll, 'success');
     return _buildConsolidatedResult_(true, safeName, preflight, written, warnings);
   } catch (e) {
     Logger.log('uploadConsolidatedWorkbook: unexpected error — ' + e);
+    _logConsolidatedPhase_('total_elapsed', tAll, 'error');
     return _buildConsolidatedResult_(false, safeName, {
       passed: false,
       checks: [{ label: 'Unexpected error', passed: false, detail: String(e) }]
@@ -294,7 +320,8 @@ function _buildConsolidatedResult_(success, filename, preflight, written, warnin
       actualsRowsOut: Number(written.actualsRowsOut) || 0,
       summaryRowsOut: Number(written.summaryRowsOut) || 0,
       utilQuarterlyRows: Number(written.utilQuarterlyRows) || 0,
-      historyRows: Number(written.historyRows) || 0
+      historyRows: Number(written.historyRows) || 0,
+      unstaffedDemandRowsOut: Number(written.unstaffedDemandRowsOut) || 0
     } : null,
     warnings: (warnings || []).map(function (w) { return String(w); })
   };
@@ -365,6 +392,13 @@ function runConsolidatedPreflight_(tempSs, warnings) {
 
   if (failed) {
     return { passed: false, checks: checks, data: data };
+  }
+
+  var unstaffedSh = tempSs.getSheetByName(UNSTAFFED_DEMAND_SHEET);
+  if (unstaffedSh) {
+    data[UNSTAFFED_DEMAND_SHEET] = unstaffedSh.getDataRange().getValues();
+    recordCheck('sheet_present:' + UNSTAFFED_DEMAND_SHEET, true,
+      'Optional sheet present (' + Math.max(data[UNSTAFFED_DEMAND_SHEET].length - 1, 0) + ' data rows)');
   }
 
   validateForecastStagedHeaders_(data.Forecast_Staged, recordCheck, warnings);
@@ -928,6 +962,7 @@ function validateUtilizationQuarterCount_(values, recordCheck) {
  * @private
  */
 function writeConsolidatedWorkbook_(data, warnings) {
+  var t0 = new Date().getTime();
   var destSs = SpreadsheetApp.getActiveSpreadsheet();
   var forecastValues = data.Forecast_Staged;
   var destSheet = destSs.getSheetByName(STAFF_SHEET);
@@ -941,21 +976,61 @@ function writeConsolidatedWorkbook_(data, warnings) {
       .getRange(1, 1, forecastValues.length, forecastValues[0].length)
       .setValues(forecastValues);
   }
+  t0 = _logConsolidatedPhase_('write_forecast_psa_copy', t0,
+    Math.max(forecastValues.length - 1, 0) + ' forecast rows, ' +
+    (forecastValues[0] ? forecastValues[0].length : 0) + ' cols');
+
   var normResult = normalizeStaff();
   normResult.warnings.forEach(function (w) { warnings.push('normalizeStaff: ' + w); });
+  t0 = _logConsolidatedPhase_('normalizeStaff', t0,
+    (normResult.rowsIn || 0) + ' PSA rows in, ' + (normResult.rowsOut || 0) +
+    ' alloc rows out (includes reconcileWorkerExclusions_ + invalidateEnrichedCaches_ + enriched-cache warm inside)');
 
   var actualsRowsOut = writeConsolidatedActuals_(data.Actuals_Current_Normalized);
+  t0 = _logConsolidatedPhase_('write_actuals_normalized', t0, actualsRowsOut + ' rows');
+
   var summaryRowsOut = writeConsolidatedActualsSummary_(data.Utilization_Normalized);
+  t0 = _logConsolidatedPhase_('write_actuals_worker_summary', t0, summaryRowsOut + ' rows');
+
   var utilQuarterlyRows = writeConsolidatedUtilQuarterly_(data.Utilization_Normalized);
+  t0 = _logConsolidatedPhase_('write_utilization_quarterly', t0, utilQuarterlyRows + ' rows');
+
   var historyRows = writeConsolidatedHistory_(data.History_Normalized);
+  t0 = _logConsolidatedPhase_('write_actuals_history', t0, historyRows + ' rows');
+
+  var unstaffedRowsOut = writeConsolidatedUnstaffedDemand_(data[UNSTAFFED_DEMAND_SHEET]);
+  _logConsolidatedPhase_('write_unstaffed_demand', t0, unstaffedRowsOut + ' rows');
 
   return {
     forecastRowsOut: normResult.rowsOut || 0,
     actualsRowsOut: actualsRowsOut,
     summaryRowsOut: summaryRowsOut,
     utilQuarterlyRows: utilQuarterlyRows,
-    historyRows: historyRows
+    historyRows: historyRows,
+    unstaffedDemandRowsOut: unstaffedRowsOut
   };
+}
+
+/**
+ * Copy optional Unstaffed_Demand sheet verbatim into the app tab for review.
+ * No normalization or downstream routing.
+ * @param {Array[]|undefined} values sheet values including header
+ * @return {number} data rows written (0 if sheet absent/empty)
+ * @private
+ */
+function writeConsolidatedUnstaffedDemand_(values) {
+  if (!values || !values.length) return 0;
+  var destSs = SpreadsheetApp.getActiveSpreadsheet();
+  var destSheet = destSs.getSheetByName(UNSTAFFED_DEMAND_SHEET);
+  if (!destSheet) {
+    destSheet = destSs.insertSheet(UNSTAFFED_DEMAND_SHEET);
+  } else {
+    destSheet.clear();
+  }
+  destSheet
+    .getRange(1, 1, values.length, values[0].length)
+    .setValues(values);
+  return Math.max(values.length - 1, 0);
 }
 
 /**

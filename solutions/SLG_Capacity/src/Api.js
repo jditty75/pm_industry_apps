@@ -794,6 +794,80 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays) {
 }
 
 /**
+ * WFM.23 Stage 1.5: apply soft-booking hours as a delta on the cached
+ * baseline forecast — clone affected workers only; baseline objects are
+ * never mutated (gate check 2).
+ * @param {Object} baselineForecast computeWeeklyForecast_ result
+ * @param {Array<Object>} assignments in-memory Modeled assignment shapes
+ * @return {{forecast:Object, affectedWorkers:number}}
+ */
+function _buildProjectedForecastDelta_(baselineForecast, assignments) {
+  if (!assignments || !assignments.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+  var calendar = readCalendar_();
+  var workerByName = {};
+  (baselineForecast.workers || []).forEach(function (w) {
+    workerByName[w.resource] = w;
+  });
+
+  var deltasByResource = {};
+  assignments.forEach(function (a) {
+    if (!a.resource_name || !workerByName[a.resource_name]) return;
+    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+      var rn = a.resource_name;
+      if (!deltasByResource[rn]) deltasByResource[rn] = {};
+      var hrs = Number(w.hours) || 0;
+      if (!hrs) return;
+      deltasByResource[rn][w.week_key] = (deltasByResource[rn][w.week_key] || 0) + hrs;
+    });
+  });
+
+  var affectedNames = Object.keys(deltasByResource);
+  if (!affectedNames.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+
+  var projectedWorkers = (baselineForecast.workers || []).map(function (w) {
+    var delta = deltasByResource[w.resource];
+    if (!delta) return w;
+    var clone = {
+      resource: w.resource,
+      jobProfile: w.jobProfile,
+      level: w.level,
+      managerOrg: w.managerOrg,
+      managersManager: w.managersManager,
+      icpRole: w.icpRole,
+      teamLabel: w.teamLabel,
+      workerClass: w.workerClass,
+      icpTarget: w.icpTarget,
+      employeeId: w.employeeId,
+      workerWeekly: Object.assign({}, w.workerWeekly || {}),
+      productiveWeekly: Object.assign({}, w.productiveWeekly || {}),
+      projects: JSON.parse(JSON.stringify(w.projects || {})),
+      blendedWeekly: JSON.parse(JSON.stringify(w.blendedWeekly || {}))
+    };
+    Object.keys(delta).forEach(function (wk) {
+      var hrs = delta[wk];
+      clone.productiveWeekly[wk] = (clone.productiveWeekly[wk] || 0) + hrs;
+      clone.workerWeekly[wk] = (clone.workerWeekly[wk] || 0) + hrs;
+    });
+    return clone;
+  });
+
+  return {
+    forecast: {
+      weeks: baselineForecast.weeks,
+      workers: projectedWorkers,
+      icp: baselineForecast.icp,
+      rawCapacity: baselineForecast.rawCapacity,
+      holidayHoursByWeek: baselineForecast.holidayHoursByWeek
+    },
+    affectedWorkers: affectedNames.length
+  };
+}
+
+/**
  * WFM.23: project soft-booking overlay utilization at worker / team /
  * org-team levels. Empty softBookings ⇒ projected deep-equals baseline.
  * @param {Object} params standard buildServerParams_ shape
@@ -838,11 +912,13 @@ function api_projectSoftBookings(params, softBookings) {
   });
 
   var projectedForecast = baselineForecast;
+  var affectedWorkerCount = 0;
+  var projectedMode = 'baseline';
   if (inMemoryModeledAssignments.length) {
-    var projectedParams = Object.assign({}, forecastParams, {
-      inMemoryModeledAssignments: inMemoryModeledAssignments
-    });
-    projectedForecast = computeWeeklyForecast_(projectedParams);
+    var deltaResult = _buildProjectedForecastDelta_(baselineForecast, inMemoryModeledAssignments);
+    projectedForecast = deltaResult.forecast;
+    affectedWorkerCount = deltaResult.affectedWorkers;
+    projectedMode = 'targeted';
   }
 
   var result = {
@@ -852,6 +928,8 @@ function api_projectSoftBookings(params, softBookings) {
 
   Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +
     ' baselineCache=' + (baselineCacheHit ? 'hit' : 'miss') +
+    ' projectedMode=' + projectedMode +
+    ' affectedWorkers=' + affectedWorkerCount +
     ' workers=' + (baselineForecast.workers || []).length +
     ' quarters=' + quarterKeys.length +
     ' bookings=' + softBookings.length);

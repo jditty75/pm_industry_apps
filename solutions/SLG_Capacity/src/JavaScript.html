@@ -3226,6 +3226,23 @@
     });
   }
 
+  /**
+   * Drop stale Explorer detail selection when the worker is no longer in the
+   * filtered roster (e.g. Team filter changed).
+   * @return {boolean} true if selection was cleared
+   */
+  function revalidateExplorerSelection_() {
+    const selected = State.selectedResource;
+    if (!selected) return false;
+    const inScope = getFilteredExplorerResources_().some(function (r) {
+      return r.name === selected;
+    });
+    if (inScope) return false;
+    State.explorerReqId++;
+    _hidePlanningCard_();
+    return true;
+  }
+
   function updateExplorerLayout_() {
     const grid = $('#explorerGrid');
     const toggle = $('#explorerListToggle');
@@ -3283,6 +3300,7 @@
   }
 
   function renderResourceList() {
+    revalidateExplorerSelection_();
     const list = $('#resourceList');
     if (!list) return;
 
@@ -3656,6 +3674,8 @@
    */
   async function refreshExplorer_({ reason } = {}) {
     if (State.currentView !== 'explorer') return;
+
+    revalidateExplorerSelection_();
 
     const reqId = ++State.explorerReqId;
     const resource = State.selectedResource;

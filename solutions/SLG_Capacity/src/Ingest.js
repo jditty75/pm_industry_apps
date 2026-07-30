@@ -294,7 +294,8 @@ function _buildConsolidatedResult_(success, filename, preflight, written, warnin
       actualsRowsOut: Number(written.actualsRowsOut) || 0,
       summaryRowsOut: Number(written.summaryRowsOut) || 0,
       utilQuarterlyRows: Number(written.utilQuarterlyRows) || 0,
-      historyRows: Number(written.historyRows) || 0
+      historyRows: Number(written.historyRows) || 0,
+      unstaffedDemandRowsOut: Number(written.unstaffedDemandRowsOut) || 0
     } : null,
     warnings: (warnings || []).map(function (w) { return String(w); })
   };
@@ -365,6 +366,13 @@ function runConsolidatedPreflight_(tempSs, warnings) {
 
   if (failed) {
     return { passed: false, checks: checks, data: data };
+  }
+
+  var unstaffedSh = tempSs.getSheetByName(UNSTAFFED_DEMAND_SHEET);
+  if (unstaffedSh) {
+    data[UNSTAFFED_DEMAND_SHEET] = unstaffedSh.getDataRange().getValues();
+    recordCheck('sheet_present:' + UNSTAFFED_DEMAND_SHEET, true,
+      'Optional sheet present (' + Math.max(data[UNSTAFFED_DEMAND_SHEET].length - 1, 0) + ' data rows)');
   }
 
   validateForecastStagedHeaders_(data.Forecast_Staged, recordCheck, warnings);
@@ -948,14 +956,38 @@ function writeConsolidatedWorkbook_(data, warnings) {
   var summaryRowsOut = writeConsolidatedActualsSummary_(data.Utilization_Normalized);
   var utilQuarterlyRows = writeConsolidatedUtilQuarterly_(data.Utilization_Normalized);
   var historyRows = writeConsolidatedHistory_(data.History_Normalized);
+  var unstaffedRowsOut = writeConsolidatedUnstaffedDemand_(data[UNSTAFFED_DEMAND_SHEET]);
 
   return {
     forecastRowsOut: normResult.rowsOut || 0,
     actualsRowsOut: actualsRowsOut,
     summaryRowsOut: summaryRowsOut,
     utilQuarterlyRows: utilQuarterlyRows,
-    historyRows: historyRows
+    historyRows: historyRows,
+    unstaffedDemandRowsOut: unstaffedRowsOut
   };
+}
+
+/**
+ * Copy optional Unstaffed_Demand sheet verbatim into the app tab for review.
+ * No normalization or downstream routing.
+ * @param {Array[]|undefined} values sheet values including header
+ * @return {number} data rows written (0 if sheet absent/empty)
+ * @private
+ */
+function writeConsolidatedUnstaffedDemand_(values) {
+  if (!values || !values.length) return 0;
+  var destSs = SpreadsheetApp.getActiveSpreadsheet();
+  var destSheet = destSs.getSheetByName(UNSTAFFED_DEMAND_SHEET);
+  if (!destSheet) {
+    destSheet = destSs.insertSheet(UNSTAFFED_DEMAND_SHEET);
+  } else {
+    destSheet.clear();
+  }
+  destSheet
+    .getRange(1, 1, values.length, values[0].length)
+    .setValues(values);
+  return Math.max(values.length - 1, 0);
 }
 
 /**

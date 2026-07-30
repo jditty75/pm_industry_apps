@@ -110,6 +110,7 @@ const ACTUALS_HISTORY_HEADERS = ['employee_id','resource_name','worker_class',
     'fiscal_quarter','project','project_role_category','worked_hours'];
 const CONSOLIDATED_REQUIRED_SHEETS = ['Forecast_Staged','Actuals_Current_Normalized',
     'Utilization_Normalized','History_Normalized','_manifest'];
+const UNSTAFFED_DEMAND_SHEET = 'Unstaffed_Demand';
 
 const OPP_HEADERS = [
   'opportunity_id','opportunity_name','account','stage','stage_num',

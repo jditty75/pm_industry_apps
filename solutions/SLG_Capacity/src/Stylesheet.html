@@ -1233,6 +1233,9 @@ textarea.input {
 }
 
 /* WFM.23 — soft-booking popover + pending basket */
+.view[data-view="explorer"] {
+  position: relative;
+}
 .explorer-softbook-popover {
   position: absolute;
   z-index: 1200;
@@ -1320,6 +1323,109 @@ textarea.input {
   gap: 8px;
   margin-top: 10px;
   justify-content: flex-end;
+}
+
+/* WFM.23 — pinned what-if impact band */
+.explorer-impact-band {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--desk);
+  border-radius: 8px;
+  background: #fff;
+  border-left: 4px solid var(--happy-hour);
+}
+.explorer-impact-band.is-computing {
+  opacity: 0.85;
+}
+.explorer-impact-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.explorer-impact-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: var(--happy-hour);
+  text-transform: uppercase;
+}
+.explorer-impact-quarter {
+  font-size: 11px;
+}
+.explorer-impact-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--staple);
+  margin-left: auto;
+}
+.explorer-impact-pending .explorer-loading-spinner {
+  width: 14px;
+  height: 14px;
+}
+.explorer-impact-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.explorer-impact-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--staple);
+  margin-bottom: 6px;
+}
+.explorer-impact-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.explorer-impact-row-label {
+  color: var(--after-hours);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorer-impact-row-values {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.impact-baseline { font-weight: 400; }
+.impact-projected {
+  font-weight: 700;
+  color: var(--happy-hour);
+}
+.impact-arrow {
+  color: var(--staple);
+  font-size: 11px;
+}
+.explorer-approx-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #fff3cc;
+  color: #8a5c00;
+  white-space: nowrap;
+}
+.explorer-impact-org.is-settling .explorer-impact-settling {
+  font-size: 11px;
+  font-style: italic;
+  padding: 4px 0;
 }
 
 /* Scenario list */

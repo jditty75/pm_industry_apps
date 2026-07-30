@@ -235,6 +235,17 @@
 
     <!-- ============ View: Capacity Explorer ============ -->
     <section class="view" data-view="explorer" hidden>
+      <div class="explorer-impact-band" id="explorerImpactBand" hidden>
+        <div class="explorer-impact-header">
+          <span class="explorer-impact-label">WHAT-IF PROJECTION</span>
+          <span class="explorer-impact-quarter muted" id="explorerImpactQuarter"></span>
+          <span class="explorer-impact-pending" id="explorerImpactPending" hidden>
+            <span class="explorer-loading-spinner" aria-hidden="true"></span>
+            Computing…
+          </span>
+        </div>
+        <div class="explorer-impact-body" id="explorerImpactBody"></div>
+      </div>
       <div class="explorer-softbook-popover" id="explorerSoftBookPopover" hidden>
         <div class="explorer-popover-title">Soft book hours</div>
         <label class="explorer-popover-label" for="sbPopoverWorker">Worker</label>

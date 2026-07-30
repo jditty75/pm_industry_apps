@@ -52,6 +52,9 @@
     explorerBaselineProjection: null,
     softBookings: [],
     explorerPopoverWorker: null,
+    explorerProjection: null,
+    explorerProjectionReqId: 0,
+    explorerImpactOrgReady: false,
     workerPlanning: null,      // Drop 7: { rows, summary } for Planning Detail card
     reporting: null,
     rpAccountsAll: [],
@@ -746,6 +749,9 @@
     if (State.currentView === 'admin')        return loadAdmin();
     if (State.currentView === 'explorer') {
       await refreshExplorer_({ reason: 'filters' });
+      if (State.softBookings && State.softBookings.length && typeof scheduleExplorerProjection_ === 'function') {
+        scheduleExplorerProjection_();
+      }
     }
   }
 
@@ -2974,19 +2980,26 @@
   }
 
   function clearExplorerSoftBookings_(reason) {
+    State.explorerProjectionReqId++;
     State.softBookings = [];
     State.explorerPopoverWorker = null;
+    State.explorerProjection = null;
+    State.explorerImpactOrgReady = false;
     closeSoftBookPopover_();
     renderExplorerSoftBookBasket_();
+    hideExplorerProjectionPending_();
     const band = $('#explorerImpactBand');
-    if (band) band.hidden = true;
-    if (typeof hideExplorerProjectionPending_ === 'function') hideExplorerProjectionPending_();
-    State.explorerProjection = null;
+    if (band) {
+      band.hidden = true;
+      band.classList.remove('is-computing');
+    }
+    const body = $('#explorerImpactBody');
+    if (body) body.innerHTML = '';
   }
 
   function onSoftBookingsChanged_() {
     renderExplorerSoftBookBasket_();
-    if (typeof scheduleExplorerProjection_ === 'function') scheduleExplorerProjection_();
+    scheduleExplorerProjection_();
   }
 
   function renderExplorerSoftBookBasket_() {
@@ -3030,6 +3043,149 @@
   function stubExplorerCommit_() {
     toast('Commit lands in Stage 3', '');
   }
+
+  let _explorerProjPendingTimer = null;
+
+  function showExplorerProjectionPending_(show) {
+    const el = $('#explorerImpactPending');
+    const band = $('#explorerImpactBand');
+    if (el) el.hidden = !show;
+    if (band) band.classList.toggle('is-computing', !!show);
+  }
+
+  function hideExplorerProjectionPending_() {
+    showExplorerProjectionPending_(false);
+    if (_explorerProjPendingTimer) {
+      clearTimeout(_explorerProjPendingTimer);
+      _explorerProjPendingTimer = null;
+    }
+  }
+
+  function getImpactQuarterKey_() {
+    const curQ = getExplorerCurQuarter_();
+    const bookings = State.softBookings || [];
+    if (!bookings.length) return curQ;
+    const keys = {};
+    bookings.forEach(function (b) {
+      if (b.start_date) keys[fiscalQuarterKey_(new Date(b.start_date + 'T12:00:00'))] = true;
+      if (b.end_date) keys[fiscalQuarterKey_(new Date(b.end_date + 'T12:00:00'))] = true;
+    });
+    if (keys[curQ]) return curQ;
+    const sorted = Object.keys(keys).sort();
+    return sorted[0] || curQ;
+  }
+
+  function renderImpactCompareHtml_(baseUtil, projUtil, approx) {
+    const b = Number(baseUtil) || 0;
+    const p = Number(projUtil) || 0;
+    const arrow = p > b + 0.0001 ? '\u2191' : (p < b - 0.0001 ? '\u2193' : '\u2192');
+    let html = '<span class="impact-baseline muted">' + fmtPct1(b) + '</span>' +
+      '<span class="impact-arrow" aria-hidden="true">' + arrow + '</span>' +
+      '<span class="impact-projected">' + fmtPct1(p) + '</span>';
+    if (approx) {
+      html += '<span class="explorer-approx-tag">approximate — holidays not yet set</span>';
+    }
+    return html;
+  }
+
+  function renderExplorerImpactBand_(data, opts) {
+    opts = opts || {};
+    if (opts.reqId != null && opts.reqId !== State.explorerProjectionReqId) return;
+    const body = $('#explorerImpactBody');
+    const band = $('#explorerImpactBand');
+    const qLabel = $('#explorerImpactQuarter');
+    if (!body || !band) return;
+    if (!State.softBookings.length) {
+      band.hidden = true;
+      body.innerHTML = '';
+      return;
+    }
+    band.hidden = false;
+    const qk = getImpactQuarterKey_();
+    if (qLabel) qLabel.textContent = qk;
+    const base = data.baseline || {};
+    const proj = data.projected || {};
+    let html = '';
+
+    const workerNames = {};
+    State.softBookings.forEach(function (b) { workerNames[b.resource_name] = true; });
+    html += '<div class="explorer-impact-section"><div class="explorer-impact-section-title">Worker</div>';
+    Object.keys(workerNames).sort().forEach(function (name) {
+      const bw = (base.worker || []).find(function (w) { return w.resourceName === name; });
+      const pw = (proj.worker || []).find(function (w) { return w.resourceName === name; });
+      const bq = bw && (bw.quarters || []).find(function (q) { return q.quarterKey === qk; });
+      const pq = pw && (pw.quarters || []).find(function (q) { return q.quarterKey === qk; });
+      if (!bq || !pq) return;
+      html += '<div class="explorer-impact-row"><span class="explorer-impact-row-label">' +
+        escapeHtml_(name) + '</span><span class="explorer-impact-row-values">' +
+        renderImpactCompareHtml_(bq.icpUtil, pq.icpUtil, pq.approximate) + '</span></div>';
+    });
+    html += '</div>';
+
+    const bt = (base.team && base.team.quarters || []).find(function (q) { return q.quarterKey === qk; });
+    const pt = (proj.team && proj.team.quarters || []).find(function (q) { return q.quarterKey === qk; });
+    if (bt && pt) {
+      html += '<div class="explorer-impact-section"><div class="explorer-impact-section-title">Manager team</div>' +
+        '<div class="explorer-impact-row"><span class="explorer-impact-row-label">All in scope</span>' +
+        '<span class="explorer-impact-row-values">' +
+        renderImpactCompareHtml_(bt.icpUtil, pt.icpUtil, pt.approximate) + '</span></div></div>';
+    }
+
+    if (opts.tier === 'full') {
+      html += '<div class="explorer-impact-section explorer-impact-org"><div class="explorer-impact-section-title">Org team</div>';
+      (base.orgTeams || []).forEach(function (ot) {
+        const po = (proj.orgTeams || []).find(function (o) { return o.teamLabel === ot.teamLabel; });
+        const bq = (ot.quarters || []).find(function (q) { return q.quarterKey === qk; });
+        const pq = po && (po.quarters || []).find(function (q) { return q.quarterKey === qk; });
+        if (!bq || !pq) return;
+        html += '<div class="explorer-impact-row"><span class="explorer-impact-row-label">' +
+          escapeHtml_(ot.teamLabel) + '</span><span class="explorer-impact-row-values">' +
+          renderImpactCompareHtml_(bq.icpUtil, pq.icpUtil, pq.approximate) + '</span></div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<div class="explorer-impact-section explorer-impact-org is-settling">' +
+        '<div class="explorer-impact-section-title">Org team</div>' +
+        '<div class="muted explorer-impact-settling">Settling…</div></div>';
+    }
+
+    body.innerHTML = html;
+  }
+
+  async function fetchExplorerProjection_() {
+    if (!State.softBookings.length) {
+      clearExplorerSoftBookings_('empty');
+      return;
+    }
+    const reqId = ++State.explorerProjectionReqId;
+    State.explorerImpactOrgReady = false;
+    hideExplorerProjectionPending_();
+    _explorerProjPendingTimer = setTimeout(function () {
+      if (reqId === State.explorerProjectionReqId) showExplorerProjectionPending_(true);
+    }, 350);
+
+    const band = $('#explorerImpactBand');
+    if (band) band.hidden = false;
+
+    try {
+      const result = await call('api_projectSoftBookings', buildServerParams_(), State.softBookings);
+      if (reqId !== State.explorerProjectionReqId) return;
+      hideExplorerProjectionPending_();
+      State.explorerProjection = result;
+      renderExplorerImpactBand_(result, { tier: 'fast', reqId: reqId });
+      setTimeout(function () {
+        if (reqId !== State.explorerProjectionReqId) return;
+        State.explorerImpactOrgReady = true;
+        renderExplorerImpactBand_(result, { tier: 'full', reqId: reqId });
+      }, 120);
+    } catch (err) {
+      if (reqId !== State.explorerProjectionReqId) return;
+      hideExplorerProjectionPending_();
+      toast('Projection failed: ' + err.message, 'err');
+    }
+  }
+
+  const scheduleExplorerProjection_ = debounce_(fetchExplorerProjection_, 300);
 
   function getFilteredExplorerResources_() {
     const search = ($('#resourceSearch') && $('#resourceSearch').value || '').toLowerCase();

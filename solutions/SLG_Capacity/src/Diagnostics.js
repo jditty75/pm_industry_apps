@@ -2941,3 +2941,50 @@ function _dbg_reconcileWFM23() {
     : '_dbg_reconcileWFM23: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
+
+/**
+ * WFM.23: verify CacheService L2 baseline cache — two back-to-back
+ * api_projectSoftBookings calls with identical filters should log
+ * baselineCache=hit on the second call.
+ */
+function _dbg_wfm23BaselineCacheCheck() {
+  _dbg_requireAdmin_();
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  var params = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+  var mgrRows = readConfigSlgManagers_();
+  var descendants = buildManagerDescendants_(mgrRows);
+  mgrRows.some(function (r) {
+    if ((descendants[r.manager_name] || []).length >= 1) {
+      params.teams = [r.manager_name];
+      params.includeMyManagers = true;
+      return true;
+    }
+    return false;
+  });
+
+  Logger.log('=== WFM.23 baseline CacheService L2 check ===');
+  var before = Logger.getLog() || '';
+  api_projectSoftBookings(params, []);
+  var mid = Logger.getLog() || '';
+  var firstSlice = mid.slice(before.length);
+  var firstHit = firstSlice.indexOf('baselineCache=hit') >= 0;
+
+  api_projectSoftBookings(params, []);
+  var after = Logger.getLog() || '';
+  var secondSlice = after.slice(mid.length);
+  var secondHit = secondSlice.indexOf('baselineCache=hit') >= 0;
+
+  Logger.log('  call 1 baselineCache=' + (firstHit ? 'hit' : 'miss'));
+  Logger.log('  call 2 baselineCache=' + (secondHit ? 'hit' : 'miss') +
+    (secondHit ? ' OK' : ' FAILED — expected hit on warm L2'));
+  if (!secondHit) {
+    Logger.log('_dbg_wfm23BaselineCacheCheck: FAILED');
+    return;
+  }
+  Logger.log('_dbg_wfm23BaselineCacheCheck: OK');
+}

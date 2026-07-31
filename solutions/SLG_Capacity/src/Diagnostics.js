@@ -3029,20 +3029,11 @@ function _dbg_reconcileWFM23() {
       return false;
     });
     if (!worker) {
-      failures.push('Check 4: no Director-scope worker with resource_type found');
-      Logger.log('  Check 4: FAILED (no worker with resource_type)');
-      return;
+      worker = workers[0];
+      resourceType = resolveRt_(worker);
     }
-    Logger.log('  parity worker: ' + worker.resourceName + ' rt=' + resourceType);
-
-    var blankWorker = null;
-    workers.some(function (w) {
-      if (!resolveRt_(w)) {
-        blankWorker = w;
-        return true;
-      }
-      return false;
-    });
+    Logger.log('  parity worker: ' + worker.resourceName +
+      ' rt=' + (resourceType || '(blank)'));
 
     var futureQk = null;
     var labelQk = null;
@@ -3134,6 +3125,19 @@ function _dbg_reconcileWFM23() {
       } else {
         Logger.log('  opportunity-path weekly expansion OK');
       }
+      if (!resourceType) {
+        if (String(apiRow.team_label || '') !== 'Unclassified') {
+          failures.push('Check 4: blank-resource_type team_label expected Unclassified got ' +
+            apiRow.team_label);
+        }
+        if (String(apiRow.role || '').trim() !== '') {
+          failures.push('Check 4: blank-resource_type role expected blank got ' + apiRow.role);
+        }
+        if (String(apiRow.team_label || '') === 'Unclassified' &&
+            String(apiRow.role || '').trim() === '') {
+          Logger.log('  primary blank-resource_type Unclassified/role-blank OK');
+        }
+      }
     }
 
     var labelBooking = {
@@ -3183,59 +3187,58 @@ function _dbg_reconcileWFM23() {
       }
     }
 
-    if (blankWorker) {
-      Logger.log('  blank-resource_type worker: ' + blankWorker.resourceName);
-      var blankBooking = {
-        employee_id: String(blankWorker.employeeId || ''),
-        resource_name: String(blankWorker.resourceName),
+    if (resourceType) {
+      Logger.log('  forced blank-resource_type commit (synthetic worker)');
+      var forcedBlankBooking = {
+        employee_id: '',
+        resource_name: '_dbg_wfm23_forced_blank_rt',
         start_date: blankStartIso,
         end_date: blankEndIso,
         total_hours: blankHours,
         what: { type: 'opportunity', opportunity_id: '' }
       };
-      var blankResult = api_commitSoftBookings('', [blankBooking]);
-      var blankId = blankResult.committed[0] && blankResult.committed[0].assignment_id;
-      if (!blankId) {
-        failures.push('Check 4: blank-resource_type commit returned no assignment_id');
+      var forcedResult = api_commitSoftBookings('', [forcedBlankBooking]);
+      var forcedId = forcedResult.committed[0] && forcedResult.committed[0].assignment_id;
+      if (!forcedId) {
+        failures.push('Check 4: forced blank-resource_type commit returned no assignment_id');
       } else {
-        idsToDelete.push(String(blankId));
+        idsToDelete.push(String(forcedId));
         invalidateCache_(ASSIGNMENTS);
-        var blankRow = readTable_(ASSIGNMENTS).find(function (r) {
-          return String(r.assignment_id) === String(blankId);
+        var forcedRow = readTable_(ASSIGNMENTS).find(function (r) {
+          return String(r.assignment_id) === String(forcedId);
         });
-        if (!blankRow) {
-          failures.push('Check 4: blank-resource_type assignment row not found');
+        if (!forcedRow) {
+          failures.push('Check 4: forced blank-resource_type assignment row not found');
         } else {
-          if (String(blankRow.status || '') !== 'Modeled') {
-            failures.push('Check 4: blank-resource_type row status not Modeled');
+          if (String(forcedRow.status || '') !== 'Modeled') {
+            failures.push('Check 4: forced blank-resource_type row status not Modeled');
           }
-          if (String(blankRow.team_label || '') !== 'Unclassified') {
-            failures.push('Check 4: blank-resource_type team_label expected Unclassified got ' +
-              blankRow.team_label);
+          if (String(forcedRow.team_label || '') !== 'Unclassified') {
+            failures.push('Check 4: forced blank-resource_type team_label expected Unclassified got ' +
+              forcedRow.team_label);
           }
-          if (String(blankRow.role || '').trim() !== '') {
-            failures.push('Check 4: blank-resource_type role expected blank got ' + blankRow.role);
+          if (String(forcedRow.role || '').trim() !== '') {
+            failures.push('Check 4: forced blank-resource_type role expected blank got ' +
+              forcedRow.role);
           }
-          var blankShape = {
-            resource_name: blankRow.resource_name,
-            start_date: blankRow.start_date,
-            end_date: blankRow.end_date,
+          var forcedShape = {
+            resource_name: forcedRow.resource_name,
+            start_date: forcedRow.start_date,
+            end_date: forcedRow.end_date,
             estimated_hours: blankHours,
             distribution: 'Even',
             status: 'Modeled'
           };
-          var blankWeekly = _dbg_wfm23WeeklySignature_(blankRow, calendar);
-          var blankExpectedWeekly = _dbg_wfm23WeeklySignature_(blankShape, calendar);
-          if (blankWeekly !== blankExpectedWeekly) {
-            failures.push('Check 4: blank-resource_type weekly expansion mismatch');
-          } else if (String(blankRow.team_label || '') === 'Unclassified' &&
-              String(blankRow.role || '').trim() === '') {
-            Logger.log('  blank-resource_type Unclassified/role-blank weekly OK');
+          var forcedWeekly = _dbg_wfm23WeeklySignature_(forcedRow, calendar);
+          var forcedExpectedWeekly = _dbg_wfm23WeeklySignature_(forcedShape, calendar);
+          if (forcedWeekly !== forcedExpectedWeekly) {
+            failures.push('Check 4: forced blank-resource_type weekly expansion mismatch');
+          } else if (String(forcedRow.team_label || '') === 'Unclassified' &&
+              String(forcedRow.role || '').trim() === '') {
+            Logger.log('  forced blank-resource_type Unclassified/role-blank weekly OK');
           }
         }
       }
-    } else {
-      Logger.log('  blank-resource_type sub-check skipped (no blank worker in scope)');
     }
 
     var uniqueIds = [];

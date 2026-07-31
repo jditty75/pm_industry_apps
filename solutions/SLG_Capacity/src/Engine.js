@@ -2063,6 +2063,7 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     let targetHours = appTarget;
     let bonusAttainment = 0;
     let source = 'forecast';
+    let icpUtil = 0;
 
     if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0) {
       productiveHours = summary.qtd_icp_plus_forecast_hours;
@@ -2071,14 +2072,23 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
         bonusAttainment = productiveHours / targetHours;
       }
       source = 'actuals_plus_forecast';
+      // D8: current-quarter ICP-util pairs qtd_icp_plus_forecast with the
+      // same-scale WoW UTIL_Current target (bonus-scale), not icpAvailableHours.
+      const wowCurTarget = quarterTargetFromWoW_(worker.employeeId, qk);
+      const icpUtilDen = (wowCurTarget != null && wowCurTarget > 0)
+        ? wowCurTarget
+        : (summary.bonus_target_billable_hours_eoq > 0
+          ? summary.bonus_target_billable_hours_eoq
+          : wd.icpAvailableHours);
+      icpUtil = icpUtilDen > 0 ? productiveHours / icpUtilDen : 0;
     } else {
       productiveHours = sumForecastProductiveForQuarter_(worker, qk, weeks);
       targetHours = appTarget;
       bonusAttainment = appTarget > 0 ? productiveHours / appTarget : 0;
       source = 'forecast';
+      icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
     }
 
-    const icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
     const financeUtil = wd.rawCapacityHours > 0 ? productiveHours / wd.rawCapacityHours : 0;
     const icpTarget = Number(worker.icpTarget) || 0;
     const ratioToTarget = icpTarget > 0 ? icpUtil / icpTarget : 0;

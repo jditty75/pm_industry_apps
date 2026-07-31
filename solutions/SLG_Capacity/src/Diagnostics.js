@@ -3621,6 +3621,10 @@ function _dbg_traceLaurenExplorer() {
 
   Logger.log('=== _dbg_traceLaurenExplorer: DONE ===');
 }
+
+/**
+ * WFM.24 Stage 1 discovery: surface real WoW Utilization_Quarterly targets vs
+ * formula anchors and probe D8 current-quarter ICP-util scale pairing (read-only).
  */
 function _dbg_traceWoWTargets() {
   _dbg_requireAdmin_();

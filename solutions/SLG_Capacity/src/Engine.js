@@ -2083,8 +2083,9 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       icpUtil = icpUtilDen > 0 ? productiveHours / icpUtilDen : 0;
     } else {
       productiveHours = sumForecastProductiveForQuarter_(worker, qk, weeks);
-      targetHours = appTarget;
-      bonusAttainment = appTarget > 0 ? productiveHours / appTarget : 0;
+      const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
+      targetHours = wowTarget != null ? wowTarget : appTarget;
+      bonusAttainment = targetHours > 0 ? productiveHours / targetHours : 0;
       source = 'forecast';
       icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
     }

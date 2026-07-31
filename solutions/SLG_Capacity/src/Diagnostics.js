@@ -2589,8 +2589,90 @@ function _dbg_reconcileWFM18() {
 
 // ============================================================
 // WFM.23 — Soft booking projection reconciliation (Stage 1).
-// MANDATORY GATE: checks 1, 2, 3, 5 (check 4 is Stage 3).
+// MANDATORY GATE: checks 1, 2, 3, 4, 5.
 // ============================================================
+
+/**
+ * WFM.23 check 4 cleanup — delete test assignments by id.
+ * @param {string[]} ids
+ */
+function _dbg_wfm23DeleteAssignmentsByIds_(ids) {
+  if (!ids || !ids.length) return;
+  var idSet = {};
+  ids.forEach(function (id) {
+    if (id) idSet[String(id)] = true;
+  });
+  if (!Object.keys(idSet).length) return;
+  var kept = readTable_(ASSIGNMENTS).filter(function (r) {
+    return !idSet[String(r.assignment_id || '')];
+  });
+  writeTable_(ASSIGNMENTS, ASSIGN_HEADERS, kept.map(function (r) {
+    return ASSIGN_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  }));
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+}
+
+/**
+ * WFM.23 check 4 cleanup — delete a test scenario by id.
+ * @param {string} scenarioId
+ */
+function _dbg_wfm23DeleteScenarioById_(scenarioId) {
+  if (!scenarioId) return;
+  var kept = readTable_(SCENARIOS).filter(function (r) {
+    return String(r.scenario_id) !== String(scenarioId);
+  });
+  writeTable_(SCENARIOS, SCENARIO_HEADERS, kept.map(function (r) {
+    return SCENARIO_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  }));
+  invalidateCache_(SCENARIOS);
+}
+
+/**
+ * Demand-affecting assignment fields for WFM.23 check 4 parity.
+ * @param {Object} row
+ * @return {Object}
+ */
+function _dbg_wfm23DemandFields_(row) {
+  return {
+    resource_name: String(row.resource_name || ''),
+    start_date: String(row.start_date || '').slice(0, 10),
+    end_date: String(row.end_date || '').slice(0, 10),
+    estimated_hours: Number(row.estimated_hours) || 0,
+    distribution: String(row.distribution || 'Even'),
+    status: String(row.status || 'Modeled')
+  };
+}
+
+/**
+ * Stable weekly-expansion signature for parity checks.
+ * @param {Object} assignRow
+ * @param {Object} calendar
+ * @return {string}
+ */
+function _dbg_wfm23WeeklySignature_(assignRow, calendar) {
+  var weeks = expandAssignmentToWeekly_(assignRow, calendar) || [];
+  return weeks.map(function (w) {
+    return String(w.week_key || '') + ':' + (Number(w.hours) || 0).toFixed(4);
+  }).sort().join('|');
+}
+
+/**
+ * Compare two demand-field snapshots (near-equal on hours).
+ * @param {Object} a
+ * @param {Object} b
+ * @param {number} tol
+ * @return {boolean}
+ */
+function _dbg_wfm23DemandFieldsEqual_(a, b, tol) {
+  tol = tol || 0.01;
+  if (String(a.resource_name) !== String(b.resource_name)) return false;
+  if (String(a.start_date) !== String(b.start_date)) return false;
+  if (String(a.end_date) !== String(b.end_date)) return false;
+  if (String(a.distribution) !== String(b.distribution)) return false;
+  if (String(a.status) !== String(b.status)) return false;
+  return Math.abs(Number(a.estimated_hours) - Number(b.estimated_hours)) <= tol;
+}
 
 /**
  * Runtime-pick a Director-scoped worker via api_projectSoftBookings baseline.
@@ -2904,6 +2986,183 @@ function _dbg_reconcileWFM23() {
         }
       }
     }
+  })();
+
+  // ---- Check 4: commit parity (api_commitSoftBookings vs saveAssignment_) ----
+  (function checkCommitParity() {
+    Logger.log('=== WFM.23 Check 4: commit parity ===');
+    var idsToDelete = [];
+    var scenarioIdsToDelete = [];
+    var assignCountBefore = readTable_(ASSIGNMENTS).length;
+
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 4: no Director-scope worker found');
+      Logger.log('  Check 4: FAILED (no worker)');
+      return;
+    }
+    var worker = picked.worker;
+    var resIndex = _resourceIndex_(cachedRead_(ALLOC_NORM));
+    var resEntry = resIndex[worker.resourceName] || {};
+    var resourceType = String(resEntry.resource_type || '').trim();
+    if (!resourceType) {
+      failures.push('Check 4: no resource_type for worker ' + worker.resourceName);
+      Logger.log('  Check 4: FAILED (no resource_type)');
+      return;
+    }
+
+    var futureQk = null;
+    var labelQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start <= today) return;
+      if (!futureQk) futureQk = qk;
+      else if (!labelQk && qk !== futureQk) labelQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 4: no future fiscal quarter found');
+      return;
+    }
+    if (!labelQk) labelQk = futureQk;
+
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var labelBounds = fiscalQuarterBounds_(labelQk);
+    var startIso = _toIso_(bounds.start);
+    var endIso = _toIso_(bounds.end);
+    var labelStartIso = _toIso_(labelBounds.start);
+    var labelEndIso = _toIso_(labelBounds.end);
+    var totalHours = 33;
+    var labelHours = 17;
+    var calendar = readCalendar_();
+
+    var directPayload = {
+      opportunity_id: '',
+      resource_name: String(worker.resourceName),
+      resource_type: resourceType,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: totalHours,
+      distribution: 'Even',
+      status: 'Modeled',
+      scenario_id: '',
+      notes: ''
+    };
+
+    var booking = {
+      employee_id: String(worker.employeeId || ''),
+      resource_name: String(worker.resourceName),
+      start_date: startIso,
+      end_date: endIso,
+      total_hours: totalHours,
+      resource_type: resourceType,
+      what: { type: 'opportunity', opportunity_id: '' }
+    };
+
+    var apiResult = api_commitSoftBookings('', [booking]);
+    var apiId = apiResult.committed[0] && apiResult.committed[0].assignment_id;
+    if (!apiId) {
+      failures.push('Check 4: api_commitSoftBookings returned no assignment_id');
+    } else {
+      idsToDelete.push(String(apiId));
+    }
+
+    var directSaved = saveAssignment_(directPayload);
+    if (directSaved && directSaved.assignment_id) {
+      idsToDelete.push(String(directSaved.assignment_id));
+    }
+
+    invalidateCache_(ASSIGNMENTS);
+    var apiRow = readTable_(ASSIGNMENTS).find(function (r) {
+      return String(r.assignment_id) === String(apiId);
+    });
+    if (!apiRow) {
+      failures.push('Check 4: api-created assignment row not found');
+    } else {
+      var expectedFields = _dbg_wfm23DemandFields_(directPayload);
+      var apiFields = _dbg_wfm23DemandFields_(apiRow);
+      if (!_dbg_wfm23DemandFieldsEqual_(expectedFields, apiFields, TOL)) {
+        failures.push('Check 4: demand fields mismatch api vs expected — ' +
+          JSON.stringify({ expected: expectedFields, api: apiFields }));
+      } else {
+        Logger.log('  opportunity-path demand fields OK');
+      }
+      var expectedWeekly = _dbg_wfm23WeeklySignature_(directPayload, calendar);
+      var apiWeekly = _dbg_wfm23WeeklySignature_(apiRow, calendar);
+      if (expectedWeekly !== apiWeekly) {
+        failures.push('Check 4: weekly expansion mismatch api vs direct payload');
+      } else {
+        Logger.log('  opportunity-path weekly expansion OK');
+      }
+    }
+
+    var labelBooking = {
+      employee_id: String(worker.employeeId || ''),
+      resource_name: String(worker.resourceName),
+      start_date: labelStartIso,
+      end_date: labelEndIso,
+      total_hours: labelHours,
+      resource_type: resourceType,
+      what: { type: 'label', label: '_dbg_wfm23_label_test' }
+    };
+    var labelResult = api_commitSoftBookings('', [labelBooking]);
+    var labelId = labelResult.committed[0] && labelResult.committed[0].assignment_id;
+    if (!labelId) {
+      failures.push('Check 4: label-only commit returned no assignment_id');
+    } else {
+      idsToDelete.push(String(labelId));
+      invalidateCache_(ASSIGNMENTS);
+      var labelRow = readTable_(ASSIGNMENTS).find(function (r) {
+        return String(r.assignment_id) === String(labelId);
+      });
+      if (!labelRow) {
+        failures.push('Check 4: label-only assignment row not found');
+      } else {
+        if (String(labelRow.opportunity_id || '').trim() !== '') {
+          failures.push('Check 4: label-only row has non-blank opportunity_id');
+        }
+        if (String(labelRow.notes || '').indexOf('Soft-book label: ') !== 0) {
+          failures.push('Check 4: label-only notes missing Soft-book label: prefix');
+        } else {
+          Logger.log('  label-only opportunity_id/notes OK');
+        }
+        var labelShape = {
+          resource_name: labelRow.resource_name,
+          start_date: labelRow.start_date,
+          end_date: labelRow.end_date,
+          estimated_hours: labelHours,
+          distribution: 'Even',
+          status: 'Modeled'
+        };
+        var labelWeekly = _dbg_wfm23WeeklySignature_(labelRow, calendar);
+        var labelExpectedWeekly = _dbg_wfm23WeeklySignature_(labelShape, calendar);
+        if (labelWeekly !== labelExpectedWeekly) {
+          failures.push('Check 4: label-only weekly expansion mismatch');
+        } else {
+          Logger.log('  label-only weekly expansion OK');
+        }
+      }
+    }
+
+    var uniqueIds = [];
+    idsToDelete.forEach(function (id) {
+      if (id && uniqueIds.indexOf(id) < 0) uniqueIds.push(id);
+    });
+    _dbg_wfm23DeleteAssignmentsByIds_(uniqueIds);
+    scenarioIdsToDelete.forEach(function (sid) { _dbg_wfm23DeleteScenarioById_(sid); });
+    invalidateCache_(ASSIGNMENTS);
+
+    var assignCountAfter = readTable_(ASSIGNMENTS).length;
+    if (assignCountBefore !== assignCountAfter) {
+      failures.push('Check 4: Opportunity_Assignments row count ' + assignCountBefore +
+        ' before vs ' + assignCountAfter + ' after cleanup');
+      Logger.log('  CLEANUP FAILED: row count changed');
+    } else {
+      Logger.log('  cleanup OK — row count unchanged (' + assignCountBefore + ')');
+    }
+
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 4') === 0; })
+      ? '  Check 4: FAILED' : '  Check 4: OK');
   })();
 
   // ---- Check 5: no regression (WFM.15 / 17 / 18) ----

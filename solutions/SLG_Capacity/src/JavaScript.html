@@ -3039,9 +3039,91 @@
     if (commitW) commitW.disabled = false;
     if (commitAll) commitAll.disabled = false;
   }
+    toast('Commit lands in Stage 3', '');
+  }
+
+  function softBookCommitKey_(b) {
+    return [b.resource_name, b.start_date, b.end_date, String(b.total_hours)].join('|');
+  }
+
+  function getResourceTypeForWorker_(resourceName) {
+    const resources = (State.ref && State.ref.resources) || [];
+    const r = resources.find(function (x) { return x.name === resourceName; });
+    return r ? (r.resource_type || '') : '';
+  }
+
+  function getSoftBookingForPerWorkerCommit_() {
+    const bookings = State.softBookings || [];
+    if (!bookings.length) return null;
+    if (State.selectedResource) {
+      const match = bookings.find(function (b) { return b.resource_name === State.selectedResource; });
+      if (match) return match;
+    }
+    return bookings[0];
+  }
+
+  function hideSoftBookAssignFields_() {
+    const field = $('#softBookWhatField');
+    if (field) field.hidden = true;
+    State.softBookCommitKey = null;
+  }
+
+  function populateSoftBookWhatSelect_() {
+    const sel = $('#f_softbook_what');
+    if (!sel) return;
+    const opps = State.opportunities || [];
+    const deps = State.deployments || [];
+    let html = '<option value="">— Select opportunity or deployment —</option>';
+    if (opps.length) {
+      html += '<optgroup label="Opportunities">';
+      opps.forEach(function (o) {
+        const label = (o.account || o.account_name || '') + ' — ' + (o.opportunity_name || o.opportunity_id);
+        html += '<option value="' + escapeHtml_(o.opportunity_id) + '" data-account="' +
+          escapeHtml_(o.account || o.account_name || '') + '" data-name="' +
+          escapeHtml_(o.opportunity_name || '') + '">' + escapeHtml_(label) + '</option>';
+      });
+      html += '</optgroup>';
+    }
+    if (deps.length) {
+      html += '<optgroup label="Deployments">';
+      deps.forEach(function (d) {
+        const label = (d.account_name || d.account || '') + ' — ' + (d.deployment_name || d.deployment_id);
+        html += '<option value="' + escapeHtml_(d.deployment_id) + '" data-account="' +
+          escapeHtml_(d.account_name || d.account || '') + '" data-name="' +
+          escapeHtml_(d.deployment_name || '') + '">' + escapeHtml_(label) + '</option>';
+      });
+      html += '</optgroup>';
+    }
+    sel.innerHTML = html;
+  }
+
+  function removeSoftBookCommitIfDone_() {
+    const key = State.softBookCommitKey;
+    if (!key) return false;
+    const before = State.softBookings.length;
+    State.softBookings = State.softBookings.filter(function (b) {
+      return softBookCommitKey_(b) !== key;
+    });
+    State.softBookCommitKey = null;
+    hideSoftBookAssignFields_();
+    if (State.softBookings.length !== before) {
+      onSoftBookingsChanged_();
+      return true;
+    }
+    return false;
+  }
+
+  async function commitExplorerWorkerSoftBooking_() {
+    const booking = getSoftBookingForPerWorkerCommit_();
+    if (!booking) {
+      toast('No pending soft booking to commit.', 'err');
+      return;
+    }
+    await openAssignDrawerFromSoftBooking_(booking);
+  }
 
   function stubExplorerCommit_() {
-    toast('Commit lands in Stage 3', '');
+    toast('Submit all lands in Stage 3', '');
   }
 
   let _explorerProjPendingTimer = null;
@@ -3787,7 +3869,7 @@
       });
     }
     const commitW = $('#explorerCommitWorker');
-    if (commitW) commitW.addEventListener('click', stubExplorerCommit_);
+    if (commitW) commitW.addEventListener('click', commitExplorerWorkerSoftBooking_);
     const commitAll = $('#explorerCommitAll');
     if (commitAll) commitAll.addEventListener('click', stubExplorerCommit_);
 
@@ -5354,6 +5436,7 @@ async function _qaRefreshPsaHours_() {
   // Both have empty-value placeholders to fail browser native required validation.
   // ============================================================
   async function openAssignDrawer_(opportunityId, source) {
+    hideSoftBookAssignFields_();
     if (!State.scenarios.length) await loadScenariosList();
     const drawer = $('#assignDrawer');
     const opp = State.opportunities.find(o => o.opportunity_id === opportunityId) ||
@@ -5406,9 +5489,87 @@ async function _qaRefreshPsaHours_() {
     drawer.hidden = false;
   }
 
+  async function openAssignDrawerFromSoftBooking_(booking) {
+    if (!booking) {
+      toast('No pending soft booking to commit.', 'err');
+      return;
+    }
+    if (!State.scenarios.length) await loadScenariosList();
+    if (!State.opportunities || !State.opportunities.length) {
+      try { State.opportunities = await call('api_listOpportunities', {}); } catch (e) {}
+    }
+    if (!State.deployments || !State.deployments.length) {
+      try { State.deployments = await call('api_listDeployments'); } catch (e) {}
+    }
+    const drawer = $('#assignDrawer');
+    $('#drawerAccount').textContent = 'Soft booking';
+    $('#drawerOppName').textContent = booking.resource_name;
+    $('#drawerStage').textContent = 'Commit';
+    $('#drawerProb').textContent = '—';
+    $('#drawerSegment').textContent = '—';
+
+    $('#f_assignment_id').value = '';
+    $('#f_opportunity_id').value = '';
+
+    const roleSel = $('#f_role');
+    const resourceTypeOptions = (State.ref && State.ref.resourceTypeOptions) || [];
+    roleSel.innerHTML = '<option value="">— Select role —</option>' +
+      resourceTypeOptions
+        .map(rt => `<option value="${escapeHtml_(rt)}">${escapeHtml_(rt)}</option>`)
+        .join('');
+
+    const resSel = $('#f_resource');
+    const allResources = (State.ref && State.ref.resources) || [];
+    const slgResources = allResources.filter(r =>
+      r.worker_class === 'SLG_Real' || r.worker_class === 'SLG_Generic'
+    );
+    resSel.innerHTML = '<option value="">— Select resource —</option>' +
+      slgResources
+        .map(r => `<option value="${escapeHtml_(r.name)}">${escapeHtml_(r.name)}</option>`)
+        .join('');
+
+    const scenSel = $('#f_scenario');
+    scenSel.innerHTML = '<option value="">— No scenario —</option>' +
+      (State.scenarios || [])
+        .filter(s => s.status !== 'Archived')
+        .map(s => `<option value="${s.scenario_id}">${escapeHtml_(s.name)}</option>`).join('');
+
+    const resourceType = getResourceTypeForWorker_(booking.resource_name);
+    if (resourceType) roleSel.value = resourceType;
+    resSel.value = booking.resource_name;
+    $('#f_start').value = booking.start_date;
+    $('#f_end').value = booking.end_date;
+    $('#f_hours').value = booking.total_hours;
+    $('#f_notes').value = '';
+    $$('#f_distribution button').forEach(b => b.classList.toggle('on', b.dataset.val === 'Even'));
+
+    populateSoftBookWhatSelect_();
+    const whatField = $('#softBookWhatField');
+    if (whatField) whatField.hidden = false;
+    const whatSel = $('#f_softbook_what');
+    if (whatSel) whatSel.value = '';
+    State.softBookCommitKey = softBookCommitKey_(booking);
+
+    drawer.hidden = false;
+  }
+
   $('#assignDrawer')?.addEventListener('click', (e) => {
     if (e.target.dataset && e.target.dataset.close !== undefined) {
       $('#assignDrawer').hidden = true;
+      hideSoftBookAssignFields_();
+    }
+  });
+
+  $('#f_softbook_what')?.addEventListener('change', function () {
+    $('#f_opportunity_id').value = this.value || '';
+    const sel = this.options[this.selectedIndex];
+    if (sel && sel.value) {
+      $('#drawerAccount').textContent = sel.dataset.account || '—';
+      $('#drawerOppName').textContent = sel.dataset.name || sel.textContent;
+    } else {
+      $('#drawerAccount').textContent = 'Soft booking';
+      const booking = getSoftBookingForPerWorkerCommit_();
+      $('#drawerOppName').textContent = booking ? booking.resource_name : 'Assign';
     }
   });
 
@@ -5484,7 +5645,11 @@ async function _qaRefreshPsaHours_() {
       await call('api_saveAssignment', payload);
       toast('Assignment saved as ' + status, 'ok');
       $('#assignDrawer').hidden = true;
-      if (State.currentView === 'dashboard') loadDashboard();
+      hideSoftBookAssignFields_();
+      const softBookCommitted = removeSoftBookCommitIfDone_();
+      if (softBookCommitted) {
+        refreshExplorer_({ reason: 'softbook-commit' });
+      } else if (State.currentView === 'dashboard') loadDashboard();
       else if (State.currentView === 'scenarios') loadScenarios();
       // Refresh planning card if the affected worker is selected
       if (State.selectedResource && State.selectedResource === resourceName) {
@@ -5512,6 +5677,7 @@ async function _qaRefreshPsaHours_() {
   // ============================================================
   function closeDrawer_() {
     $('#assignDrawer').hidden = true;
+    hideSoftBookAssignFields_();
     if (State.charts.preview) {
       State.charts.preview.destroy();
       State.charts.preview = null;

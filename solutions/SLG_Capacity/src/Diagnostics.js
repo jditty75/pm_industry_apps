@@ -1,9 +1,9 @@
-// ============================================================
-// Diagnostics.gs — investigative tools for administrators
+﻿// ============================================================
+// Diagnostics.gs â€” investigative tools for administrators
 //
 // All functions here are intended to be run from the Apps Script
-// editor (function dropdown → Run), not from the web app UI.
-// They write to Logger.log so View → Logs shows the output.
+// editor (function dropdown â†’ Run), not from the web app UI.
+// They write to Logger.log so View â†’ Logs shows the output.
 //
 // Organized by concern:
 //   1. Config & data hygiene
@@ -17,7 +17,7 @@
 
 
 // ============================================================
-// Admin guard — all _dbg_ functions call this first.
+// Admin guard â€” all _dbg_ functions call this first.
 // ============================================================
 
 /**
@@ -26,7 +26,7 @@
  * Authorization sources (any match grants access):
  *   1. Spreadsheet owner (works on personal Drive, fails on Shared Drives
  *      because Shared Drive files have no individual owner)
- *   2. Config_Settings.admin_emails (comma-separated list — works
+ *   2. Config_Settings.admin_emails (comma-separated list â€” works
  *      everywhere, recommended for Shared Drive setups)
  *
  * The dual-path check mirrors the production access gate in
@@ -36,7 +36,7 @@ function _dbg_requireAdmin_() {
   try {
     const userEmail = Session.getActiveUser().getEmail();
     if (!userEmail) {
-      throw new Error('Could not resolve active user — re-authorize the script.');
+      throw new Error('Could not resolve active user â€” re-authorize the script.');
     }
     const userLc = String(userEmail).toLowerCase().trim();
 
@@ -80,7 +80,7 @@ function _dbg_requireAdmin_() {
 // ============================================================
 
 /**
- * Dump the full Config_Resource_Type map (resource_type → team_label).
+ * Dump the full Config_Resource_Type map (resource_type â†’ team_label).
  * Run when you want to verify the mapping is being read correctly.
  */
 function _dbg_debugConfigResourceType() {
@@ -127,9 +127,9 @@ function _dbg_debugWhyUnclassified() {
  * These workers fall into "Unclassified" in the Headcount Gap KPI,
  * which is visible in the UI as a warn-tinted row. Use this diagnostic
  * to identify what to fix:
- *   - Worker has no ICP_role → either fix in PSA at ingest, or
+ *   - Worker has no ICP_role â†’ either fix in PSA at ingest, or
  *     exclude via Config_Worker_Exclusions.
- *   - Worker has ICP_role but it's not in Config_Roles → add the role
+ *   - Worker has ICP_role but it's not in Config_Roles â†’ add the role
  *     with appropriate team_label in Config_Roles.
  *
  * Output: per-worker line with name, ICP_role (if any), worker_class,
@@ -151,8 +151,8 @@ function _dbg_debugUnclassifiedSlgWorkers() {
     : new Set();
 
   const rows = readTable_(ALLOC_NORM);
-  const blankRole = {};       // resource_name → { class, mgr, hours, monthsSeen }
-  const unmappedRole = {};    // resource_name → { role, class, mgr, hours, monthsSeen }
+  const blankRole = {};       // resource_name â†’ { class, mgr, hours, monthsSeen }
+  const unmappedRole = {};    // resource_name â†’ { role, class, mgr, hours, monthsSeen }
 
   function _trackInto_(map, key, info, hours, mk) {
     if (!map[key]) {
@@ -217,7 +217,7 @@ function _dbg_debugUnclassifiedSlgWorkers() {
   const blankList = Object.values(blankRole).sort((a, b) => b.totalHours - a.totalHours);
   Logger.log('  Count: ' + blankList.length);
   if (blankList.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     blankList.forEach(w => {
       Logger.log(
@@ -235,7 +235,7 @@ function _dbg_debugUnclassifiedSlgWorkers() {
   const unmappedList = Object.values(unmappedRole).sort((a, b) => b.totalHours - a.totalHours);
   Logger.log('  Count: ' + unmappedList.length);
   if (unmappedList.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     // Roll up by ICP_role for the summary
     const byRole = {};
@@ -274,18 +274,18 @@ function _dbg_debugUnclassifiedSlgWorkers() {
  *
  * Three categories surfaced:
  *
- *   A. MISMATCH — worker has ICP, ICP-team differs from manager-team.
+ *   A. MISMATCH â€” worker has ICP, ICP-team differs from manager-team.
  *      True override candidates (the Phil Dessaigne pattern).
  *
- *   B. UNCLASSIFIED — worker under SLG manager, blank or unmapped ICP.
+ *   B. UNCLASSIFIED â€” worker under SLG manager, blank or unmapped ICP.
  *      Bench/data hygiene; investigate the ingest classifier or
  *      add to Config_Worker_Exclusions. NOT an override case.
  *
- *   C. ALREADY OVERRIDDEN — worker in Config_Worker_Role_Overrides.
+ *   C. ALREADY OVERRIDDEN â€” worker in Config_Worker_Role_Overrides.
  *      Informational; confirms overrides are in effect.
  *
  * Excludes workers who are themselves SLG managers (managers don't
- * get ICP roles by design — their Job Profile is "M4 Sr Manager...").
+ * get ICP roles by design â€” their Job Profile is "M4 Sr Manager...").
  *
  * Manager team is derived from the data: each manager's "team" is the
  * dominant team_label among their reports, using >= 70% threshold on
@@ -361,7 +361,7 @@ function _dbg_debugSlgWorkerTeamMismatches() {
       if (t !== 'Unclassified') classified += counts[t];
     });
     if (classified === 0) {
-      managerTeam[mgr] = 'Mixed';  // all reports unclassified — can't infer
+      managerTeam[mgr] = 'Mixed';  // all reports unclassified â€” can't infer
       return;
     }
     let bestTeam = null, bestCount = 0;
@@ -412,11 +412,11 @@ function _dbg_debugSlgWorkerTeamMismatches() {
 
   Logger.log('');
   Logger.log('============================================================');
-  Logger.log('CATEGORY A — TRUE OVERRIDE CANDIDATES (mismatch, no override yet)');
+  Logger.log('CATEGORY A â€” TRUE OVERRIDE CANDIDATES (mismatch, no override yet)');
   Logger.log('============================================================');
   Logger.log('Count: ' + catA.length);
   if (catA.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     catA.forEach(function (c) {
       Logger.log(
@@ -436,11 +436,11 @@ function _dbg_debugSlgWorkerTeamMismatches() {
 
   Logger.log('');
   Logger.log('============================================================');
-  Logger.log('CATEGORY B — UNCLASSIFIED (bench/data hygiene, not override)');
+  Logger.log('CATEGORY B â€” UNCLASSIFIED (bench/data hygiene, not override)');
   Logger.log('============================================================');
   Logger.log('Count: ' + catB.length);
   if (catB.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     catB.forEach(function (c) {
       Logger.log(
@@ -460,7 +460,7 @@ function _dbg_debugSlgWorkerTeamMismatches() {
 
   Logger.log('');
   Logger.log('============================================================');
-  Logger.log('CATEGORY C — ALREADY OVERRIDDEN (informational)');
+  Logger.log('CATEGORY C â€” ALREADY OVERRIDDEN (informational)');
   Logger.log('============================================================');
   Logger.log('Count: ' + catC.length);
   if (catC.length === 0) {
@@ -513,7 +513,7 @@ function _dbg_debugReportingSummaryReconciliation() {
 }
 
 /**
- * weekly-forecast-migration §6.6 reconciliation diagnostic #1: sum a
+ * weekly-forecast-migration Â§6.6 reconciliation diagnostic #1: sum a
  * sample worker's weekly hours straight from Allocations_Normalized, then
  * separately roll every one of that worker's rows through
  * splitWeekAcrossMonths_ and re-sum across all resulting month buckets.
@@ -560,12 +560,12 @@ function _dbg_reconcileWeekToMonthSplit(resourceName) {
   Logger.log('Weekly total hours:   ' + weeklyTotal.toFixed(4));
   Logger.log('Monthly total hours:  ' + monthlyTotal.toFixed(4) + '  (sum of splitWeekAcrossMonths_ output)');
   Logger.log('Difference:            ' + diff.toFixed(6));
-  Logger.log('RECONCILE: ' + (diff < 0.01 ? 'OK — totals match' : 'MISMATCH — investigate splitWeekAcrossMonths_'));
+  Logger.log('RECONCILE: ' + (diff < 0.01 ? 'OK â€” totals match' : 'MISMATCH â€” investigate splitWeekAcrossMonths_'));
   Logger.log('Per-month breakdown: ' + JSON.stringify(byMonth));
 }
 
 /**
- * weekly-forecast-migration §6.6 reconciliation diagnostic #2: run
+ * weekly-forecast-migration Â§6.6 reconciliation diagnostic #2: run
  * detectWeekColumns_ against the CURRENT PSA/STAFF_SHEET header row and
  * confirm (a) the expected week count is found (27 in the spec's sample
  * export) and (b) "Total Hours" is excluded. Run this against the live
@@ -597,7 +597,7 @@ function _dbg_verifyWeekColumnDetection() {
   Logger.log('Last week:   ' + (detection.weeks.length ? weekKey_(detection.weeks[detection.weeks.length - 1].weekStart) : '(none)'));
   Logger.log('Contiguity warnings: ' + detection.warnings.length);
   detection.warnings.forEach(function (w) { Logger.log('  - ' + w); });
-  Logger.log('RESULT: ' + (detection.weeks.length > 0 && (!hasTotalHoursCol || totalHoursExcluded) ? 'OK' : 'FAILED — see above'));
+  Logger.log('RESULT: ' + (detection.weeks.length > 0 && (!hasTotalHoursCol || totalHoursExcluded) ? 'OK' : 'FAILED â€” see above'));
 }
 
 
@@ -934,7 +934,7 @@ function _dbg_debugTeamResolveForBucket() {
 function _dbg_debugP4AssignmentEnrichment() {
   _dbg_requireAdmin_();
   // Simulate what saveAssignment_ would do for the enrichment portion only.
-  // Does NOT call appendRow_ or updateRow_ — read-only.
+  // Does NOT call appendRow_ or updateRow_ â€” read-only.
   function dryEnrich_(resourceType) {
     var a = { resource_type: resourceType };
     var teamLabel = 'Unclassified';
@@ -1071,7 +1071,7 @@ function _dbg_debugCompareResourceDetailPaths() {
       '  [' + i + '] ' +
       'A: ' + a.monthKey + ' s=' + a.scenario + ' | ' +
       'B: ' + b.monthKey + ' s=' + b.scenario +
-      (a.scenario !== b.scenario ? ' ← MISMATCH' : '')
+      (a.scenario !== b.scenario ? ' â† MISMATCH' : '')
     );
   }
 }
@@ -1234,7 +1234,7 @@ function _dbg_enrichedCacheStats() {
 
 /**
  * Drop 5 performance test. Run after clasp push to validate warm/cold ratio.
- * Goal: warm-call total time ≤ 30% of cold-call total time.
+ * Goal: warm-call total time â‰¤ 30% of cold-call total time.
  * Add output to commit message Perf notes: section.
  */
 function _test_drop5_endpoints() {
@@ -1274,7 +1274,7 @@ function _test_drop5_endpoints() {
   const coldTotal = t3 - t0;
   const warmTotal = t7 - t4;
   const ratio = coldTotal > 0 ? (warmTotal / coldTotal) : 1;
-  Logger.log('Warm/cold ratio:                ' + (ratio * 100).toFixed(1) + '%  (goal ≤ 30%)');
+  Logger.log('Warm/cold ratio:                ' + (ratio * 100).toFixed(1) + '%  (goal â‰¤ 30%)');
   Logger.log('Goal met:                       ' + (ratio <= 0.30 ? 'YES' : 'NO'));
 
   Logger.log('Sanity: cold kpis.headcount = ' + ((coldDash.kpis || {}).headcount || '(none)'));
@@ -1292,7 +1292,7 @@ function _test_drop5_endpoints() {
  * verifying the math after committing a scenario.
  *
  * Run from the Apps Script editor: set scenarioId to your scenario's UUID.
- * Results appear in View → Logs.
+ * Results appear in View â†’ Logs.
  *
  * @param {string} scenarioId
  */
@@ -1395,9 +1395,9 @@ function _test_phase8_ingest_filter_logic() {
     ['Delivery', 'PD', 'Government']    // should pass
   ];
   // Stub the alias map and filter rules so we don't touch real config
-  // ... (full test scaffolding deferred — verify by running existing
+  // ... (full test scaffolding deferred â€” verify by running existing
   // Phase 5 PSA upload diagnostics instead)
-  Logger.log('Phase 8 test stub — exercise by re-running Phase 5 diagnostics');
+  Logger.log('Phase 8 test stub â€” exercise by re-running Phase 5 diagnostics');
 }
 
 function _dbg_findParseError() {
@@ -1667,7 +1667,7 @@ function _dbg_verifyFastDateParity() {
  * once and lets the [PERF] logs fire (computeUtilization's _p.mark calls,
  * plus the getEnrichedAllocations_/getEnrichedAssignments_/getResourceIndex_
  * cache-hit/cold-rebuild logs). Run from the editor; read View -> Logs.
- * Strip this instrumentation once the real fix ships (see WFM-PERF.1 §6).
+ * Strip this instrumentation once the real fix ships (see WFM-PERF.1 Â§6).
  */
 function _dbg_profileDashboardCold() {
   _dbg_requireAdmin_();
@@ -1679,17 +1679,17 @@ function _dbg_profileDashboardCold() {
 }
 
 // ============================================================
-// WFM.15 — Productive Utilization Model reconciliation.
+// WFM.15 â€” Productive Utilization Model reconciliation.
 // MANDATORY GATE: do not ship WFM.15 unless both cases below report OK.
 // ============================================================
 
 /**
- * WFM.15 §7 MANDATORY GATE. Reproduces the spec's two worked examples
+ * WFM.15 Â§7 MANDATORY GATE. Reproduces the spec's two worked examples
  * EXACTLY against the live icpTargetFor_/holidayHoursForWeek_ formulas,
  * then logs the Headcount Gap capacity-FTE shift (legacy monthly roleCap
  * vs. the new weekly raw-capacity model) per team so the move is
  * explainable, not silent. Run from the editor; read View -> Logs.
- * If either case fails, DO NOT SHIP -- see WFM.15 §8 escalation.
+ * If either case fails, DO NOT SHIP -- see WFM.15 Â§8 escalation.
  */
 function _dbg_reconcileWFM15() {
   _dbg_requireAdmin_();
@@ -1727,7 +1727,7 @@ function _dbg_reconcileWFM15() {
       Math.abs(icpUtil - 0.9375) < 1e-9 &&
       Math.abs(icpTarget - 0.61) < 1e-9 &&
       Math.abs(ratioToTarget - 1.537) < 0.001;
-    Logger.log(ok ? '  Case A: OK' : '  Case A: FAILED — DO NOT SHIP');
+    Logger.log(ok ? '  Case A: OK' : '  Case A: FAILED â€” DO NOT SHIP');
     if (!ok) failures++;
   })();
 
@@ -1759,7 +1759,7 @@ function _dbg_reconcileWFM15() {
 
     const icpAvailable = rawCap - targetHrs; // expect 24
     Logger.log('  week_key=' + targetWeek.week_key);
-    Logger.log('  holidayHours=' + targetHrs + ' (expect 16 — proves holidayHoursForWeek_ sums multiple holidays)');
+    Logger.log('  holidayHours=' + targetHrs + ' (expect 16 â€” proves holidayHoursForWeek_ sums multiple holidays)');
     Logger.log('  icpAvailable=' + icpAvailable + ' (expect 24)');
 
     const ok = (targetHrs === 16) && Math.abs(icpAvailable - 24) < 1e-9;
@@ -1784,10 +1784,10 @@ function _dbg_reconcileWFM15() {
       Logger.log('  productiveDemand=' + productiveDemand.toFixed(2) + 'h -> icpUtil = ' +
         productiveDemand.toFixed(2) + ' / ' + icpAvailable + ' = ' + (icpUtil * 100).toFixed(2) + '%');
     } else {
-      Logger.log('  No worker has non-PTO allocation hours in this week — cannot spot-check a real worker.');
+      Logger.log('  No worker has non-PTO allocation hours in this week â€” cannot spot-check a real worker.');
     }
 
-    Logger.log(ok ? '  Case B: OK' : '  Case B: FAILED — DO NOT SHIP');
+    Logger.log(ok ? '  Case B: OK' : '  Case B: FAILED â€” DO NOT SHIP');
     if (!ok) failures++;
   })();
 
@@ -1826,13 +1826,13 @@ function _dbg_reconcileWFM15() {
           (afterFte - beforeFte).toFixed(2) + ' FTE)');
       });
     } catch (e) {
-      Logger.log('  (live per-team pull failed, non-fatal — the flat conversionFactor above still holds: ' + e + ')');
+      Logger.log('  (live per-team pull failed, non-fatal â€” the flat conversionFactor above still holds: ' + e + ')');
     }
   })();
 
   Logger.log(failures === 0
     ? '_dbg_reconcileWFM15: ALL CASES OK'
-    : '_dbg_reconcileWFM15: ' + failures + ' CASE(S) FAILED — DO NOT SHIP');
+    : '_dbg_reconcileWFM15: ' + failures + ' CASE(S) FAILED â€” DO NOT SHIP');
 }
 /**
  * Phase 0 gate: verify every non-excluded SLG worker got an employee_id
@@ -1854,7 +1854,7 @@ function _dbg_verifyEmployeeIds() {
     var w = byWorker[nm];
     var isSlg = (w.wc === 'SLG_Real' || w.wc === 'SLG_Generic');
     if (!isSlg) return;
-    // Skip excluded workers (managers/on-leave) — they need no join.
+    // Skip excluded workers (managers/on-leave) â€” they need no join.
     var key = (typeof _exclusionKey_ === 'function') ? _exclusionKey_(nm) : nm.toLowerCase();
     if (excluded.has(key)) return;
     total++;
@@ -1862,15 +1862,15 @@ function _dbg_verifyEmployeeIds() {
   });
   Logger.log('_dbg_verifyEmployeeIds: ' + withId + ' / ' + total + ' non-excluded SLG workers have an employee_id');
   if (blanks.length) {
-    Logger.log('  BLANKS (' + blanks.length + ') — investigate: ' + JSON.stringify(blanks));
-    Logger.log('  RESULT: FAILED — these will not join to actuals in Phase 1');
+    Logger.log('  BLANKS (' + blanks.length + ') â€” investigate: ' + JSON.stringify(blanks));
+    Logger.log('  RESULT: FAILED â€” these will not join to actuals in Phase 1');
   } else {
-    Logger.log('  RESULT: OK — every non-excluded SLG worker has an employee_id');
+    Logger.log('  RESULT: OK â€” every non-excluded SLG worker has an employee_id');
   }
 }
 
 /**
- * WFM.16 §9 MANDATORY GATE. Proves ingest reconcile, join, blend precedence,
+ * WFM.16 Â§9 MANDATORY GATE. Proves ingest reconcile, join, blend precedence,
  * seam correctness, and forecast data retention. Run from the editor;
  * read View -> Logs. Do not ship if any check fails.
  */
@@ -2029,14 +2029,14 @@ function _dbg_reconcileActualsBlend() {
 
   if (failures.length) {
     failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
-    Logger.log('_dbg_reconcileActualsBlend: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+    Logger.log('_dbg_reconcileActualsBlend: ' + failures.length + ' CHECK(S) FAILED â€” DO NOT SHIP');
   } else {
     Logger.log('_dbg_reconcileActualsBlend: ALL CHECKS OK');
   }
 }
 
 // ============================================================
-// WFM.17 — Quarterly scorecard + dashboard KPI reconciliation.
+// WFM.17 â€” Quarterly scorecard + dashboard KPI reconciliation.
 // MANDATORY GATE: do not ship WFM.17 unless ALL CHECKS OK.
 // ============================================================
 
@@ -2065,7 +2065,7 @@ function _dbg_reconcileWFM17() {
   // ---- WoW forward-target re-anchor (WFM.24 D5) ----
   (function wowForwardTargetReanchor() {
     Logger.log('=== WFM.17 WoW forward-target re-anchor (WFM.24 D5) ===');
-    Logger.log('  audit old→new Consulting: FY27-Q3 388.08→369.60, FY27-Q4 357.28→369.60');
+    Logger.log('  audit oldâ†’new Consulting: FY27-Q3 388.08â†’369.60, FY27-Q4 357.28â†’369.60');
     var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
     var curQ = fiscalQuarterKey_(new Date());
     var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) { return qk !== curQ; });
@@ -2091,7 +2091,7 @@ function _dbg_reconcileWFM17() {
           }
         } else {
           var okFb = Math.abs(q.targetHours - q.appTargetHours) < TARGET_TOL;
-          Logger.log('  ' + workerName + ' ' + qk + ': no WoW row — formula fallback=' +
+          Logger.log('  ' + workerName + ' ' + qk + ': no WoW row â€” formula fallback=' +
             q.targetHours.toFixed(2) + ' appTarget=' + q.appTargetHours.toFixed(2) +
             (okFb ? ' OK' : ' FAILED'));
           if (!okFb) {
@@ -2108,11 +2108,11 @@ function _dbg_reconcileWFM17() {
     if (p6) {
       checkWorkerForward_(p6.worker);
     } else {
-      Logger.log('  P6 sample worker not found — skip');
+      Logger.log('  P6 sample worker not found â€” skip');
     }
   })();
 
-  // ---- Target reconciliation: Consulting P3–P5 (Aidan) ----
+  // ---- Target reconciliation: Consulting P3â€“P5 (Aidan) ----
   (function consultingFormulaFallback() {
     Logger.log('=== WFM.17 Consulting formula fallback (quarterTargetHoursFor_) ===');
     var expected = { 'FY27-Q2': 375.76, 'FY27-Q3': 388.08, 'FY27-Q4': 357.28 };
@@ -2149,7 +2149,7 @@ function _dbg_reconcileWFM17() {
         Number(r.bonus_target_billable_hours_eoq) > 0;
     });
     if (!sample) {
-      Logger.log('  SKIPPED — no worker with qtd_icp_plus_forecast + bonus target in Actuals_Worker_Summary');
+      Logger.log('  SKIPPED â€” no worker with qtd_icp_plus_forecast + bonus target in Actuals_Worker_Summary');
       return;
     }
     var prod = Number(sample.qtd_icp_plus_forecast_hours);
@@ -2186,7 +2186,7 @@ function _dbg_reconcileWFM17() {
     var curQ = fiscalQuarterKey_(new Date());
     var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) { return qk !== curQ; });
     if (!futureKeys.length) {
-      Logger.log('  SKIPPED — no future quarters');
+      Logger.log('  SKIPPED â€” no future quarters');
       return;
     }
     var fk = futureKeys[0];
@@ -2195,7 +2195,7 @@ function _dbg_reconcileWFM17() {
       return q && q.productiveHours > 0 && q.source === 'forecast';
     });
     if (!sample) {
-      Logger.log('  SKIPPED — no worker with forecast productive hours in ' + fk);
+      Logger.log('  SKIPPED â€” no worker with forecast productive hours in ' + fk);
       return;
     }
     var q = sample.quarters.find(function (qq) { return qq.quarterKey === fk; });
@@ -2279,7 +2279,7 @@ function _dbg_reconcileWFM17() {
         JSON.stringify(blankIds.slice(0, 5)));
       failures.push(blankIds.length + ' worker(s) with blank Employee ID');
     } else {
-      Logger.log('  No non-excluded worker has blank Employee ID — OK');
+      Logger.log('  No non-excluded worker has blank Employee ID â€” OK');
     }
     if (blankRoles.length) {
       Logger.log('  Workers with blank ICP role (fallback target warning): ' +
@@ -2289,7 +2289,7 @@ function _dbg_reconcileWFM17() {
 
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM17: ALL CHECKS OK'
-    : '_dbg_reconcileWFM17: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+    : '_dbg_reconcileWFM17: ' + failures.length + ' CHECK(S) FAILED â€” DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
 
@@ -2426,23 +2426,38 @@ function _dbg_reconcileWFM18() {
       Logger.log('  ' + workerName + ' quarter cells checked');
     });
 
-    // Aidan current-quarter attainment anchor (87.63%)
+    // Aidan current-quarter attainment anchor â€” was hard-coded 87.63%; now
+    // self-computed from Actuals_Worker_Summary (qtd_icp_plus_forecast_hours /
+    // bonus_target_billable_hours_eoq) so the gate survives data refresh.
+    var ATTAIN_TOL = 0.001;
+    var aidanSc = (scorecard.workers || []).find(function (w) { return w.worker === 'Aidan Votaw'; });
     var aidanV2 = api_getResourceDetailV2(Object.assign({ resource: 'Aidan Votaw' }, baseParams));
-    if (aidanV2.found) {
-      var aidanCur = (aidanV2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
-      if (!aidanCur) {
-        failures.push('Aidan current quarter missing from V2');
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    if (!aidanSc || !aidanV2.found) {
+      failures.push('Aidan Votaw not found for attainment anchor');
+    } else {
+      var aidanCurSc = (aidanSc.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      var summary = actualsSummary[String(aidanSc.employeeId || '').trim()];
+      if (!aidanCurSc) {
+        failures.push('Aidan current quarter missing from scorecard');
+      } else if (!summary || !Number(summary.qtd_icp_plus_forecast_hours) ||
+          !Number(summary.bonus_target_billable_hours_eoq)) {
+        failures.push('Aidan actuals summary missing for current-quarter anchor');
       } else {
-        var aidanPct = aidanCur.bonusAttainment * 100;
-        var aidanOk = Math.abs(aidanPct - 87.63) <= TOL;
-        Logger.log('  Aidan current-quarter attainment=' + aidanPct.toFixed(2) + '% (expect 87.63%)' +
+        var expectedAttainment = Number(summary.qtd_icp_plus_forecast_hours) /
+          Number(summary.bonus_target_billable_hours_eoq);
+        var aidanPct = aidanCurSc.bonusAttainment * 100;
+        var expectedPct = expectedAttainment * 100;
+        var aidanOk = Math.abs(aidanCurSc.bonusAttainment - expectedAttainment) <= ATTAIN_TOL;
+        Logger.log('  Aidan current-quarter attainment=' + aidanPct.toFixed(2) +
+          '% (self-computed expect=' + expectedPct.toFixed(2) + '%)' +
           (aidanOk ? ' OK' : ' FAILED'));
         if (!aidanOk) {
-          failures.push('Aidan current-quarter attainment: got ' + aidanPct.toFixed(2) + '% expect 87.63%');
+          failures.push('Aidan current-quarter attainment: scorecard=' + aidanPct.toFixed(2) +
+            '% expected=' + expectedPct.toFixed(2) + '%');
         }
       }
-    } else {
-      failures.push('Aidan Votaw not found in V2 for attainment anchor');
     }
 
     // FY27 target anchors: Consulting (Aidan profile) and P6
@@ -2616,13 +2631,996 @@ function _dbg_reconcileWFM18() {
 
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM18: ALL CHECKS OK'
-    : '_dbg_reconcileWFM18: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+    : '_dbg_reconcileWFM18: ' + failures.length + ' CHECK(S) FAILED â€” DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}
+// ============================================================
+// WFM.23 ΓÇö Soft booking projection reconciliation (Stage 1).
+// MANDATORY GATE: checks 1, 2, 3, 4, 5.
+// ============================================================
+
+/**
+ * WFM.23 check 4 cleanup ΓÇö delete test assignments by id.
+ * @param {string[]} ids
+ */
+function _dbg_wfm23DeleteAssignmentsByIds_(ids) {
+  if (!ids || !ids.length) return;
+  var idSet = {};
+  ids.forEach(function (id) {
+    if (id) idSet[String(id)] = true;
+  });
+  if (!Object.keys(idSet).length) return;
+  var kept = readTable_(ASSIGNMENTS).filter(function (r) {
+    return !idSet[String(r.assignment_id || '')];
+  });
+  writeTable_(ASSIGNMENTS, ASSIGN_HEADERS, kept.map(function (r) {
+    return ASSIGN_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  }));
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+}
+
+/**
+ * WFM.23 check 4 cleanup ΓÇö delete a test scenario by id.
+ * @param {string} scenarioId
+ */
+function _dbg_wfm23DeleteScenarioById_(scenarioId) {
+  if (!scenarioId) return;
+  var kept = readTable_(SCENARIOS).filter(function (r) {
+    return String(r.scenario_id) !== String(scenarioId);
+  });
+  writeTable_(SCENARIOS, SCENARIO_HEADERS, kept.map(function (r) {
+    return SCENARIO_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  }));
+  invalidateCache_(SCENARIOS);
+}
+
+/**
+ * Demand-affecting assignment fields for WFM.23 check 4 parity.
+ * @param {Object} row
+ * @return {Object}
+ */
+function _dbg_wfm23DemandFields_(row) {
+  return {
+    resource_name: String(row.resource_name || ''),
+    start_date: String(row.start_date || '').slice(0, 10),
+    end_date: String(row.end_date || '').slice(0, 10),
+    estimated_hours: Number(row.estimated_hours) || 0,
+    distribution: String(row.distribution || 'Even'),
+    status: String(row.status || 'Modeled')
+  };
+}
+
+/**
+ * Stable weekly-expansion signature for parity checks.
+ * @param {Object} assignRow
+ * @param {Object} calendar
+ * @return {string}
+ */
+function _dbg_wfm23WeeklySignature_(assignRow, calendar) {
+  var weeks = expandAssignmentToWeekly_(assignRow, calendar) || [];
+  return weeks.map(function (w) {
+    return String(w.week_key || '') + ':' + (Number(w.hours) || 0).toFixed(4);
+  }).sort().join('|');
+}
+
+/**
+ * Compare two demand-field snapshots (near-equal on hours).
+ * @param {Object} a
+ * @param {Object} b
+ * @param {number} tol
+ * @return {boolean}
+ */
+function _dbg_wfm23DemandFieldsEqual_(a, b, tol) {
+  tol = tol || 0.01;
+  if (String(a.resource_name) !== String(b.resource_name)) return false;
+  if (String(a.start_date) !== String(b.start_date)) return false;
+  if (String(a.end_date) !== String(b.end_date)) return false;
+  if (String(a.distribution) !== String(b.distribution)) return false;
+  if (String(a.status) !== String(b.status)) return false;
+  return Math.abs(Number(a.estimated_hours) - Number(b.estimated_hours)) <= tol;
+}
+
+/**
+ * Runtime-pick a Director-scoped worker via api_projectSoftBookings baseline.
+ * Shared by WFM.23 gate checks 2 and 3.
+ * @param {Object} baseParams
+ * @return {{params:Object, worker:Object, mgrName:string}|null}
+ */
+function _dbg_wfm23PickDirectorScopeWorker_(baseParams) {
+  var mgrRows = readConfigSlgManagers_();
+  var descendants = buildManagerDescendants_(mgrRows);
+  var mgrName = '';
+  mgrRows.some(function (r) {
+    if ((descendants[r.manager_name] || []).length >= 1) {
+      mgrName = r.manager_name;
+      return true;
+    }
+    return false;
+  });
+  if (!mgrName) return null;
+  var params = Object.assign({}, baseParams, {
+    teams: [mgrName],
+    includeMyManagers: true
+  });
+  var baselineOnly = api_projectSoftBookings(params, []);
+  var workers = baselineOnly.baseline.worker || [];
+  if (!workers.length) return null;
+  return { params: params, worker: workers[0], mgrName: mgrName };
+}
+
+/**
+ * WFM.23 Stage 1 gate. Self-computing checks; prints ALL CHECKS OK only
+ * when every check passes. Run api_flushCaches first (check 5 does).
+ */
+function _dbg_reconcileWFM23() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.01;
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function deepEqualProjection_(a, b, path) {
+    path = path || '';
+    if (a === b) return true;
+    if (a == null || b == null) return a === b;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object') return near_(a, b);
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b) || a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (!deepEqualProjection_(a[i], b[i], path + '[' + i + ']')) return false;
+      }
+      return true;
+    }
+    var keysA = Object.keys(a).sort();
+    var keysB = Object.keys(b).sort();
+    if (keysA.length !== keysB.length) return false;
+    for (var k = 0; k < keysA.length; k++) {
+      if (keysA[k] !== keysB[k]) return false;
+      if (!deepEqualProjection_(a[keysA[k]], b[keysB[k]], path + '.' + keysA[k])) return false;
+    }
+    return true;
+  }
+
+  function snapshotAssignments_() {
+    var rows = [];
+    try { rows = cachedRead_(ASSIGNMENTS); } catch (e) { rows = []; }
+    return JSON.stringify(rows.map(function (r) {
+      return {
+        assignment_id: String(r.assignment_id || ''),
+        resource_name: String(r.resource_name || ''),
+        status: String(r.status || ''),
+        estimated_hours: Number(r.estimated_hours) || 0,
+        start_date: r.start_date ? String(r.start_date) : '',
+        end_date: r.end_date ? String(r.end_date) : ''
+      };
+    }).sort(function (a, b) {
+      return String(a.assignment_id).localeCompare(String(b.assignment_id));
+    }));
+  }
+
+  function snapshotAllocations_() {
+    var rows = [];
+    try { rows = cachedRead_(ALLOC_NORM); } catch (e) { rows = []; }
+    return JSON.stringify(rows.map(function (r) {
+      return {
+        resource_name: String(r.resource_name || ''),
+        week_key: String(r.week_key || ''),
+        hours: Number(r.hours) || 0,
+        allocation_type: String(r.allocation_type || '')
+      };
+    }).sort(function (a, b) {
+      return String(a.resource_name + a.week_key).localeCompare(String(b.resource_name + b.week_key));
+    }));
+  }
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+
+  // ---- Check 1: empty-overlay neutrality ----
+  (function checkNeutrality() {
+    Logger.log('=== WFM.23 Check 1: empty-overlay neutrality ===');
+    var ref = api_getReference();
+    var resources = ref.resources || [];
+    var mgrRows = readConfigSlgManagers_();
+    var descendants = buildManagerDescendants_(mgrRows);
+    var mgrName = '';
+    mgrRows.some(function (r) {
+      if ((descendants[r.manager_name] || []).length >= 1) {
+        mgrName = r.manager_name;
+        return true;
+      }
+      return false;
+    });
+    var params = Object.assign({}, baseParams, {
+      teams: mgrName ? [mgrName] : null,
+      includeMyManagers: true
+    });
+    var result = api_projectSoftBookings(params, []);
+    if (!deepEqualProjection_(result.baseline, result.projected, 'root')) {
+      failures.push('Empty overlay: projected !== baseline');
+      Logger.log('  FAILED: projected !== baseline');
+      return;
+    }
+    var sampleWorkers = (result.baseline.worker || []).slice(0, 3);
+    if (!sampleWorkers.length && resources.length) {
+      Logger.log('  SKIPPED sample workers (no workers in scoped projection)');
+    } else {
+      sampleWorkers.forEach(function (w) {
+        var pw = (result.projected.worker || []).find(function (x) {
+          return x.resourceName === w.resourceName;
+        });
+        if (!pw || !deepEqualProjection_(w, pw, w.resourceName)) {
+          failures.push('Neutrality worker mismatch: ' + w.resourceName);
+        }
+      });
+    }
+    if (!deepEqualProjection_(result.baseline.team, result.projected.team, 'team')) {
+      failures.push('Empty overlay: team projected !== baseline');
+    }
+    if (!deepEqualProjection_(result.baseline.orgTeams, result.projected.orgTeams, 'orgTeams')) {
+      failures.push('Empty overlay: orgTeams projected !== baseline');
+    }
+    Logger.log(failures.length ? '  Check 1: FAILED' : '  Check 1: OK');
+  })();
+
+  // ---- Check 2: baseline untouched (nothing persisted) ----
+  (function checkBaselineUntouched() {
+    Logger.log('=== WFM.23 Check 2: baseline untouched ===');
+    var beforeAssign = snapshotAssignments_();
+    var beforeAlloc = snapshotAllocations_();
+
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 2: no Director-scope worker found for projection call');
+      return;
+    }
+    var worker = picked.worker;
+    var params = picked.params;
+
+    var futureQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      if (futureQk) return;
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start > today) futureQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 2: no future fiscal quarter found');
+      return;
+    }
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var booking = {
+      employee_id: String(worker.employeeId),
+      resource_name: String(worker.resourceName),
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: 25
+    };
+    api_projectSoftBookings(params, [booking]);
+
+    var afterAssign = snapshotAssignments_();
+    var afterAlloc = snapshotAllocations_();
+    if (beforeAssign !== afterAssign) {
+      failures.push('Check 2: Opportunity_Assignments changed after projection');
+    }
+    if (beforeAlloc !== afterAlloc) {
+      failures.push('Check 2: Allocations_Normalized changed after projection');
+    }
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 2') === 0; })
+      ? '  Check 2: FAILED' : '  Check 2: OK');
+  })();
+
+  // ---- Check 3: injection correctness (self-computing expected N) ----
+  (function checkInjection() {
+    Logger.log('=== WFM.23 Check 3: injection correctness ===');
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 3: no Director with descendants / in-scope workers found');
+      return;
+    }
+    var params = picked.params;
+    var targetWorker = picked.worker;
+    Logger.log('  Director scope: ' + picked.mgrName + ' worker: ' + targetWorker.resourceName);
+
+    var baselineOnly = api_projectSoftBookings(params, []);
+    var futureQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      if (futureQk) return;
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start > today) futureQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 3: no future fiscal quarter found');
+      return;
+    }
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var N = 40;
+    var booking = {
+      employee_id: targetWorker.employeeId,
+      resource_name: targetWorker.resourceName,
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: N
+    };
+
+    var calendar = readCalendar_();
+    var assignShape = {
+      resource_name: booking.resource_name,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: N,
+      distribution: 'Even',
+      status: 'Modeled'
+    };
+    var expectedN = 0;
+    expandAssignmentToWeekly_(assignShape, calendar).forEach(function (w) {
+      if (fiscalQuarterKey_(w.week_start) === futureQk) {
+        expectedN += Number(w.hours) || 0;
+      }
+    });
+    if (expectedN <= 0) {
+      failures.push('Check 3: expectedN recomputed as 0 for quarter ' + futureQk);
+      return;
+    }
+
+    var projected = api_projectSoftBookings(params, [booking]);
+    var baseW = (baselineOnly.baseline.worker || []).find(function (w) {
+      return w.resourceName === targetWorker.resourceName;
+    });
+    var projW = (projected.projected.worker || []).find(function (w) {
+      return w.resourceName === targetWorker.resourceName;
+    });
+    if (!baseW || !projW) {
+      failures.push('Check 3: worker row missing for ' + targetWorker.resourceName);
+      return;
+    }
+    var baseQ = (baseW.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+    var projQ = (projW.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+    if (!baseQ || !projQ) {
+      failures.push('Check 3: quarter cell missing for ' + futureQk);
+      return;
+    }
+    var delta = Number(projQ.productiveHours) - Number(baseQ.productiveHours);
+    if (!near_(delta, expectedN)) {
+      failures.push('Check 3: worker productiveHours delta=' + delta.toFixed(4) +
+        ' expected=' + expectedN.toFixed(4));
+    } else {
+      Logger.log('  worker ' + targetWorker.resourceName + ' delta=' + delta.toFixed(2) +
+        ' expected=' + expectedN.toFixed(2) + ' OK');
+    }
+
+    var baseTeamQ = (baselineOnly.baseline.team.quarters || []).find(function (q) {
+      return q.quarterKey === futureQk;
+    });
+    var projTeamQ = (projected.projected.team.quarters || []).find(function (q) {
+      return q.quarterKey === futureQk;
+    });
+    if (baseTeamQ && projTeamQ) {
+      var teamDelta = Number(projTeamQ.productiveHours) - Number(baseTeamQ.productiveHours);
+      if (!near_(teamDelta, expectedN)) {
+        failures.push('Check 3: team productiveHours delta=' + teamDelta.toFixed(4) +
+          ' expected=' + expectedN.toFixed(4));
+      } else {
+        Logger.log('  team aggregate delta=' + teamDelta.toFixed(2) + ' OK');
+      }
+    }
+
+    var teamLabel = targetWorker.teamLabel;
+    var baseOrg = (baselineOnly.baseline.orgTeams || []).find(function (o) {
+      return o.teamLabel === teamLabel;
+    });
+    var projOrg = (projected.projected.orgTeams || []).find(function (o) {
+      return o.teamLabel === teamLabel;
+    });
+    if (baseOrg && projOrg) {
+      var baseOrgQ = (baseOrg.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+      var projOrgQ = (projOrg.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+      if (baseOrgQ && projOrgQ) {
+        var orgDelta = Number(projOrgQ.productiveHours) - Number(baseOrgQ.productiveHours);
+        if (!near_(orgDelta, expectedN)) {
+          failures.push('Check 3: org-team ' + teamLabel + ' delta=' + orgDelta.toFixed(4) +
+            ' expected=' + expectedN.toFixed(4));
+        } else {
+          Logger.log('  org-team ' + teamLabel + ' delta=' + orgDelta.toFixed(2) + ' OK');
+        }
+      }
+    }
+  })();
+
+  // ---- Check 4: commit parity (api_commitSoftBookings vs saveAssignment_) ----
+  (function checkCommitParity() {
+    Logger.log('=== WFM.23 Check 4: commit parity ===');
+    var idsToDelete = [];
+    var scenarioIdsToDelete = [];
+    var assignCountBefore = readTable_(ASSIGNMENTS).length;
+
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 4: no Director-scope worker found');
+      Logger.log('  Check 4: FAILED (no worker)');
+      return;
+    }
+
+    var baselineOnly = api_projectSoftBookings(picked.params, []);
+    var workers = baselineOnly.baseline.worker || [];
+    if (!workers.length) {
+      failures.push('Check 4: no Director-scope workers in baseline');
+      Logger.log('  Check 4: FAILED (no workers)');
+      return;
+    }
+
+    function resolveRt_(w) {
+      return _resolveBookingResourceType_({
+        resource_name: String(w.resourceName || ''),
+        employee_id: String(w.employeeId || '')
+      });
+    }
+
+    var worker = null;
+    var resourceType = '';
+    workers.some(function (w) {
+      var rt = resolveRt_(w);
+      if (rt) {
+        worker = w;
+        resourceType = rt;
+        return true;
+      }
+      return false;
+    });
+    if (!worker) {
+      worker = workers[0];
+      resourceType = resolveRt_(worker);
+    }
+    Logger.log('  parity worker: ' + worker.resourceName +
+      ' rt=' + (resourceType || '(blank)'));
+
+    var futureQk = null;
+    var labelQk = null;
+    var blankQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start <= today) return;
+      if (!futureQk) futureQk = qk;
+      else if (!labelQk && qk !== futureQk) labelQk = qk;
+      else if (!blankQk && qk !== futureQk && qk !== labelQk) blankQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 4: no future fiscal quarter found');
+      return;
+    }
+    if (!labelQk) labelQk = futureQk;
+    if (!blankQk) blankQk = labelQk;
+
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var labelBounds = fiscalQuarterBounds_(labelQk);
+    var blankBounds = fiscalQuarterBounds_(blankQk);
+    var startIso = _toIso_(bounds.start);
+    var endIso = _toIso_(bounds.end);
+    var labelStartIso = _toIso_(labelBounds.start);
+    var labelEndIso = _toIso_(labelBounds.end);
+    var blankStartIso = _toIso_(blankBounds.start);
+    var blankEndIso = _toIso_(blankBounds.end);
+    var totalHours = 33;
+    var labelHours = 17;
+    var blankHours = 11;
+    var calendar = readCalendar_();
+
+    var directPayload = {
+      opportunity_id: '',
+      resource_name: String(worker.resourceName),
+      resource_type: resourceType,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: totalHours,
+      distribution: 'Even',
+      status: 'Modeled',
+      scenario_id: '',
+      notes: ''
+    };
+
+    // Omit resource_type ΓÇö server must resolve from resource index (real soft-book path).
+    var booking = {
+      employee_id: String(worker.employeeId || ''),
+      resource_name: String(worker.resourceName),
+      start_date: startIso,
+      end_date: endIso,
+      total_hours: totalHours,
+      what: { type: 'opportunity', opportunity_id: '' }
+    };
+
+    var apiResult = api_commitSoftBookings('', [booking]);
+    var apiId = apiResult.committed[0] && apiResult.committed[0].assignment_id;
+    if (!apiId) {
+      failures.push('Check 4: api_commitSoftBookings returned no assignment_id');
+    } else {
+      idsToDelete.push(String(apiId));
+    }
+
+    var directSaved = saveAssignment_(directPayload);
+    if (directSaved && directSaved.assignment_id) {
+      idsToDelete.push(String(directSaved.assignment_id));
+    }
+
+    invalidateCache_(ASSIGNMENTS);
+    var apiRow = readTable_(ASSIGNMENTS).find(function (r) {
+      return String(r.assignment_id) === String(apiId);
+    });
+    if (!apiRow) {
+      failures.push('Check 4: api-created assignment row not found');
+    } else {
+      var expectedFields = _dbg_wfm23DemandFields_(directPayload);
+      var apiFields = _dbg_wfm23DemandFields_(apiRow);
+      if (!_dbg_wfm23DemandFieldsEqual_(expectedFields, apiFields, TOL)) {
+        failures.push('Check 4: demand fields mismatch api vs expected ΓÇö ' +
+          JSON.stringify({ expected: expectedFields, api: apiFields }));
+      } else {
+        Logger.log('  opportunity-path demand fields OK');
+      }
+      var expectedWeekly = _dbg_wfm23WeeklySignature_(directPayload, calendar);
+      var apiWeekly = _dbg_wfm23WeeklySignature_(apiRow, calendar);
+      if (expectedWeekly !== apiWeekly) {
+        failures.push('Check 4: weekly expansion mismatch api vs direct payload');
+      } else {
+        Logger.log('  opportunity-path weekly expansion OK');
+      }
+      if (!resourceType) {
+        if (String(apiRow.team_label || '') !== 'Unclassified') {
+          failures.push('Check 4: blank-resource_type team_label expected Unclassified got ' +
+            apiRow.team_label);
+        }
+        if (String(apiRow.role || '').trim() !== '') {
+          failures.push('Check 4: blank-resource_type role expected blank got ' + apiRow.role);
+        }
+        if (String(apiRow.team_label || '') === 'Unclassified' &&
+            String(apiRow.role || '').trim() === '') {
+          Logger.log('  primary blank-resource_type Unclassified/role-blank OK');
+        }
+      }
+    }
+
+    var labelBooking = {
+      employee_id: String(worker.employeeId || ''),
+      resource_name: String(worker.resourceName),
+      start_date: labelStartIso,
+      end_date: labelEndIso,
+      total_hours: labelHours,
+      what: { type: 'label', label: '_dbg_wfm23_label_test' }
+    };
+    var labelResult = api_commitSoftBookings('', [labelBooking]);
+    var labelId = labelResult.committed[0] && labelResult.committed[0].assignment_id;
+    if (!labelId) {
+      failures.push('Check 4: label-only commit returned no assignment_id');
+    } else {
+      idsToDelete.push(String(labelId));
+      invalidateCache_(ASSIGNMENTS);
+      var labelRow = readTable_(ASSIGNMENTS).find(function (r) {
+        return String(r.assignment_id) === String(labelId);
+      });
+      if (!labelRow) {
+        failures.push('Check 4: label-only assignment row not found');
+      } else {
+        if (String(labelRow.opportunity_id || '').trim() !== '') {
+          failures.push('Check 4: label-only row has non-blank opportunity_id');
+        }
+        if (String(labelRow.notes || '').indexOf('Soft-book label: ') !== 0) {
+          failures.push('Check 4: label-only notes missing Soft-book label: prefix');
+        } else {
+          Logger.log('  label-only opportunity_id/notes OK');
+        }
+        var labelShape = {
+          resource_name: labelRow.resource_name,
+          start_date: labelRow.start_date,
+          end_date: labelRow.end_date,
+          estimated_hours: labelHours,
+          distribution: 'Even',
+          status: 'Modeled'
+        };
+        var labelWeekly = _dbg_wfm23WeeklySignature_(labelRow, calendar);
+        var labelExpectedWeekly = _dbg_wfm23WeeklySignature_(labelShape, calendar);
+        if (labelWeekly !== labelExpectedWeekly) {
+          failures.push('Check 4: label-only weekly expansion mismatch');
+        } else {
+          Logger.log('  label-only weekly expansion OK');
+        }
+      }
+    }
+
+    if (resourceType) {
+      Logger.log('  forced blank-resource_type commit (synthetic worker)');
+      var forcedBlankBooking = {
+        employee_id: '',
+        resource_name: '_dbg_wfm23_forced_blank_rt',
+        start_date: blankStartIso,
+        end_date: blankEndIso,
+        total_hours: blankHours,
+        what: { type: 'opportunity', opportunity_id: '' }
+      };
+      var forcedResult = api_commitSoftBookings('', [forcedBlankBooking]);
+      var forcedId = forcedResult.committed[0] && forcedResult.committed[0].assignment_id;
+      if (!forcedId) {
+        failures.push('Check 4: forced blank-resource_type commit returned no assignment_id');
+      } else {
+        idsToDelete.push(String(forcedId));
+        invalidateCache_(ASSIGNMENTS);
+        var forcedRow = readTable_(ASSIGNMENTS).find(function (r) {
+          return String(r.assignment_id) === String(forcedId);
+        });
+        if (!forcedRow) {
+          failures.push('Check 4: forced blank-resource_type assignment row not found');
+        } else {
+          if (String(forcedRow.status || '') !== 'Modeled') {
+            failures.push('Check 4: forced blank-resource_type row status not Modeled');
+          }
+          if (String(forcedRow.team_label || '') !== 'Unclassified') {
+            failures.push('Check 4: forced blank-resource_type team_label expected Unclassified got ' +
+              forcedRow.team_label);
+          }
+          if (String(forcedRow.role || '').trim() !== '') {
+            failures.push('Check 4: forced blank-resource_type role expected blank got ' +
+              forcedRow.role);
+          }
+          var forcedShape = {
+            resource_name: forcedRow.resource_name,
+            start_date: forcedRow.start_date,
+            end_date: forcedRow.end_date,
+            estimated_hours: blankHours,
+            distribution: 'Even',
+            status: 'Modeled'
+          };
+          var forcedWeekly = _dbg_wfm23WeeklySignature_(forcedRow, calendar);
+          var forcedExpectedWeekly = _dbg_wfm23WeeklySignature_(forcedShape, calendar);
+          if (forcedWeekly !== forcedExpectedWeekly) {
+            failures.push('Check 4: forced blank-resource_type weekly expansion mismatch');
+          } else if (String(forcedRow.team_label || '') === 'Unclassified' &&
+              String(forcedRow.role || '').trim() === '') {
+            Logger.log('  forced blank-resource_type Unclassified/role-blank weekly OK');
+          }
+        }
+      }
+    }
+
+    var uniqueIds = [];
+    idsToDelete.forEach(function (id) {
+      if (id && uniqueIds.indexOf(id) < 0) uniqueIds.push(id);
+    });
+    _dbg_wfm23DeleteAssignmentsByIds_(uniqueIds);
+    scenarioIdsToDelete.forEach(function (sid) { _dbg_wfm23DeleteScenarioById_(sid); });
+    invalidateCache_(ASSIGNMENTS);
+
+    var assignCountAfter = readTable_(ASSIGNMENTS).length;
+    if (assignCountBefore !== assignCountAfter) {
+      failures.push('Check 4: Opportunity_Assignments row count ' + assignCountBefore +
+        ' before vs ' + assignCountAfter + ' after cleanup');
+      Logger.log('  CLEANUP FAILED: row count changed');
+    } else {
+      Logger.log('  cleanup OK ΓÇö row count unchanged (' + assignCountBefore + ')');
+    }
+
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 4') === 0; })
+      ? '  Check 4: FAILED' : '  Check 4: OK');
+  })();
+
+  // ---- Check 5: no regression (WFM.15 / 17 / 18) ----
+  (function checkNoRegression() {
+    Logger.log('=== WFM.23 Check 5: no regression ===');
+    if (typeof api_flushCaches === 'function') api_flushCaches();
+
+    function runGate_(fn, okToken) {
+      var before = Logger.getLog() || '';
+      try {
+        fn();
+      } catch (e) {
+        failures.push('Check 5: ' + fn.name + ' threw ΓÇö ' + e);
+        return false;
+      }
+      var after = Logger.getLog() || '';
+      var slice = after.slice(before.length);
+      if (slice.indexOf(okToken) < 0) {
+        failures.push('Check 5: ' + fn.name + ' did not print ' + okToken);
+        return false;
+      }
+      return true;
+    }
+
+    var ok15 = runGate_(_dbg_reconcileWFM15, '_dbg_reconcileWFM15: ALL CASES OK');
+    var ok17 = runGate_(_dbg_reconcileWFM17, '_dbg_reconcileWFM17: ALL CHECKS OK');
+    var ok18 = runGate_(_dbg_reconcileWFM18, '_dbg_reconcileWFM18: ALL CHECKS OK');
+    Logger.log('  WFM.15=' + (ok15 ? 'OK' : 'FAIL') +
+      ' WFM.17=' + (ok17 ? 'OK' : 'FAIL') +
+      ' WFM.18=' + (ok18 ? 'OK' : 'FAIL'));
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM23: ALL CHECKS OK'
+    : '_dbg_reconcileWFM23: ' + failures.length + ' CHECK(S) FAILED ΓÇö DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
 
 /**
- * WFM.24 Stage 1 discovery: surface real WoW Utilization_Quarterly targets vs
- * formula anchors and probe D8 current-quarter ICP-util scale pairing (read-only).
+ * WFM.23: verify CacheService L2 baseline cache ΓÇö two back-to-back
+ * api_projectSoftBookings calls with identical filters should log
+ * baselineCache=hit on the second call.
+ */
+function _dbg_wfm23BaselineCacheCheck() {
+  _dbg_requireAdmin_();
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  var params = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+  var mgrRows = readConfigSlgManagers_();
+  var descendants = buildManagerDescendants_(mgrRows);
+  mgrRows.some(function (r) {
+    if ((descendants[r.manager_name] || []).length >= 1) {
+      params.teams = [r.manager_name];
+      params.includeMyManagers = true;
+      return true;
+    }
+    return false;
+  });
+
+  Logger.log('=== WFM.23 baseline CacheService L2 check ===');
+  var before = Logger.getLog() || '';
+  api_projectSoftBookings(params, []);
+  var mid = Logger.getLog() || '';
+  var firstSlice = mid.slice(before.length);
+  var firstHit = firstSlice.indexOf('baselineCache=hit') >= 0;
+
+  api_projectSoftBookings(params, []);
+  var after = Logger.getLog() || '';
+  var secondSlice = after.slice(mid.length);
+  var secondHit = secondSlice.indexOf('baselineCache=hit') >= 0;
+
+  Logger.log('  call 1 baselineCache=' + (firstHit ? 'hit' : 'miss'));
+  Logger.log('  call 2 baselineCache=' + (secondHit ? 'hit' : 'miss') +
+    (secondHit ? ' OK' : ' FAILED ΓÇö expected hit on warm L2'));
+  if (!secondHit) {
+    Logger.log('_dbg_wfm23BaselineCacheCheck: FAILED');
+    return;
+  }
+  Logger.log('_dbg_wfm23BaselineCacheCheck: OK');
+}
+
+/**
+ * WFM.23 investigation: trace Lauren Vannini Explorer FY27-Q2 scorecard cell
+ * and City of PHX Modeled assignment visibility (Logger.log only).
+ */
+function _dbg_traceLaurenExplorer() {
+  _dbg_requireAdmin_();
+  var WORKER = 'Lauren Vannini';
+  var TRACE_Q = 'FY27-Q2';
+  var curQ = fiscalQuarterKey_(new Date());
+
+  Logger.log('=== _dbg_traceLaurenExplorer: ' + WORKER + ' ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' currentFiscalQuarter=' + curQ);
+
+  // ---- 1. Actuals_Worker_Summary row ----
+  Logger.log('--- 1. Actuals_Worker_Summary ---');
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+  var info = resIndex[WORKER] || {};
+  var employeeId = String(info.employee_id || '').trim();
+  var summary = employeeId ? actualsSummary[employeeId] : null;
+  if (!summary) {
+    Object.keys(actualsSummary).some(function (eid) {
+      if (String(actualsSummary[eid].resource_name || '') === WORKER) {
+        summary = actualsSummary[eid];
+        employeeId = eid;
+        return true;
+      }
+      return false;
+    });
+  }
+  if (!summary) {
+    Logger.log('  NOT FOUND ΓÇö employee_id from resource index=' + (employeeId || '(blank)'));
+  } else {
+    Logger.log('  employee_id=' + summary.employee_id);
+    Logger.log('  resource_name=' + summary.resource_name);
+    Logger.log('  qtd_actual_icp_hours=' + summary.qtd_actual_icp_hours);
+    Logger.log('  qtd_icp_plus_forecast_hours=' + summary.qtd_icp_plus_forecast_hours);
+    Logger.log('  bonus_target_billable_hours_eoq=' + summary.bonus_target_billable_hours_eoq);
+  }
+
+  // ---- 2. quarterWorkdaySummary_ for FY27-Q2 ----
+  var holidays = readHolidays_();
+  var wd = quarterWorkdaySummary_(TRACE_Q, holidays);
+  Logger.log('--- 2. quarterWorkdaySummary_(' + TRACE_Q + ') ---');
+  Logger.log('  workdays=' + wd.workdays);
+  Logger.log('  holidayHours=' + wd.holidayHours);
+  Logger.log('  icpAvailableHours=' + wd.icpAvailableHours);
+  Logger.log('  rawCapacityHours=' + wd.rawCapacityHours);
+
+  // ---- 3. Current-quarter scorecard cell (buildWorkerQuarters_ path) ----
+  Logger.log('--- 3. buildWorkerQuarters_ scorecard cell (' + TRACE_Q + ') ---');
+  var settings = readSettings_();
+  var forecastParams = { viewMode: 'Committed', workerScope: 'SLG', includeTimeOff: false };
+  var forecast = computeWeeklyForecast_(forecastParams);
+  var worker = (forecast.workers || []).find(function (w) { return w.resource === WORKER; });
+  if (!worker) {
+    Logger.log('  worker NOT FOUND in computeWeeklyForecast_ (Committed/SLG)');
+  } else {
+    Logger.log('  employeeId=' + worker.employeeId + ' icpRole=' + worker.icpRole +
+      ' jobProfile=' + worker.jobProfile + ' icpTarget=' + worker.icpTarget);
+    var quarters = buildWorkerQuarters_(
+      worker, [TRACE_Q], forecast.weeks, holidays, actualsSummary, settings, curQ);
+    var cell = quarters[0];
+    if (!cell) {
+      Logger.log('  quarter cell missing');
+    } else {
+      Logger.log('  source=' + cell.source);
+      Logger.log('  productiveHours=' + cell.productiveHours);
+      Logger.log('  denominator (icpAvailableHours)=' + cell.icpAvailableHours);
+      Logger.log('  icpUtil=' + (cell.icpUtil * 100).toFixed(4) + '%');
+      Logger.log('  arithmetic: ' + cell.productiveHours + ' / ' + cell.icpAvailableHours +
+        ' = ' + cell.icpUtil.toFixed(6) + ' (' + (cell.icpUtil * 100).toFixed(2) + '%)');
+      Logger.log('  targetHours=' + cell.targetHours + ' appTargetHours=' + cell.appTargetHours);
+      Logger.log('  bonusAttainment=' + (cell.bonusAttainment * 100).toFixed(4) + '%');
+      Logger.log('  financeUtil=' + (cell.financeUtil * 100).toFixed(4) + '%');
+      if (cell.isCurrentQuarter && summary) {
+        Logger.log('  current-quarter inputs: qtd_icp_plus_forecast_hours=' +
+          summary.qtd_icp_plus_forecast_hours + ' (numerator when source=actuals_plus_forecast)');
+      }
+    }
+  }
+
+  // ---- Locate City of PHX assignment ----
+  Logger.log('--- 4. Assignment + forecast visibility (Committed vs Scenario) ---');
+  var assigns = cachedRead_(ASSIGNMENTS);
+  var phxAssign = null;
+  assigns.forEach(function (a) {
+    if (String(a.resource_name || '') !== WORKER) return;
+    var startIso = String(a.start_date || '').slice(0, 10);
+    var notes = String(a.notes || '');
+    var opp = String(a.opportunity_id || '');
+    if (Number(a.estimated_hours) === 32 && startIso === '2026-09-28') {
+      phxAssign = a;
+    } else if (notes.indexOf('PHX') >= 0 || opp.indexOf('PHX') >= 0) {
+      if (!phxAssign) phxAssign = a;
+    }
+  });
+  if (!phxAssign) {
+    Logger.log('  City of PHX assignment NOT FOUND ΓÇö listing all ' + WORKER + ' assignments:');
+    assigns.filter(function (a) { return String(a.resource_name) === WORKER; }).forEach(function (a) {
+      Logger.log('    id=' + a.assignment_id + ' status=' + a.status +
+        ' hours=' + a.estimated_hours +
+        ' ' + String(a.start_date || '').slice(0, 10) + 'ΓåÆ' + String(a.end_date || '').slice(0, 10) +
+        ' opp=' + a.opportunity_id + ' notes=' + a.notes);
+    });
+  } else {
+    Logger.log('  assignment_id=' + phxAssign.assignment_id);
+    Logger.log('  status=' + phxAssign.status);
+    Logger.log('  estimated_hours=' + phxAssign.estimated_hours);
+    Logger.log('  start_date=' + String(phxAssign.start_date || '').slice(0, 10));
+    Logger.log('  end_date=' + String(phxAssign.end_date || '').slice(0, 10));
+    Logger.log('  opportunity_id=' + phxAssign.opportunity_id);
+    Logger.log('  scenario_id=' + phxAssign.scenario_id);
+    Logger.log('  notes=' + phxAssign.notes);
+  }
+
+  var calendar = readCalendar_();
+  var weekQkMap = {};
+  (calendar.weeks || []).forEach(function (wk) {
+    weekQkMap[wk.week_key] = fiscalQuarterKey_(wk.week_start);
+  });
+
+  function assignmentIncludedInView_(assign, viewMode, scenarioId) {
+    if (!assign) return false;
+    var isCommitted = (assign.status === 'Committed');
+    var isModeled = (assign.status === 'Modeled');
+    return isCommitted ||
+      (viewMode === 'Scenario' && isModeled &&
+       (!scenarioId || String(assign.scenario_id || '') === String(scenarioId || '')));
+  }
+
+  function traceForecastMode_(viewMode) {
+    Logger.log('  --- viewMode=' + viewMode + ' ---');
+    var included = assignmentIncludedInView_(phxAssign, viewMode, '');
+    Logger.log('    PHX assignment included by filter logic: ' + included +
+      ' (status=' + (phxAssign ? phxAssign.status : 'n/a') + ')');
+    var fc = computeWeeklyForecast_({
+      viewMode: viewMode,
+      workerScope: 'SLG',
+      includeTimeOff: false
+    });
+    var w = (fc.workers || []).find(function (x) { return x.resource === WORKER; });
+    if (!w) {
+      Logger.log('    worker not in forecast');
+      return;
+    }
+    var assignHoursByWeek = {};
+    var assignHoursByQuarter = {};
+    var totalAssign = 0;
+    Object.keys(w.projects || {}).forEach(function (proj) {
+      if (proj.indexOf('Assignment') !== 0) return;
+      Object.keys(w.projects[proj]).forEach(function (wk) {
+        var h = Number(w.projects[proj][wk]) || 0;
+        if (!h) return;
+        assignHoursByWeek[wk] = (assignHoursByWeek[wk] || 0) + h;
+        totalAssign += h;
+        var qk = weekQkMap[wk] || '(unknown)';
+        assignHoursByQuarter[qk] = (assignHoursByQuarter[qk] || 0) + h;
+      });
+    });
+    Logger.log('    total Assignment project hours across all weeks: ' + totalAssign.toFixed(4));
+    if (phxAssign && included) {
+      var expanded = expandAssignmentToWeekly_(phxAssign, calendar) || [];
+      var phxTotal = 0;
+      var phxByQuarter = {};
+      expanded.forEach(function (ew) {
+        var wk = String(ew.week_key || '');
+        var h = Number(ew.hours) || 0;
+        phxTotal += h;
+        var qk = weekQkMap[wk] || fiscalQuarterKey_(wk);
+        phxByQuarter[qk] = (phxByQuarter[qk] || 0) + h;
+        var inForecast = Number(assignHoursByWeek[wk] || 0);
+        Logger.log('      week ' + wk + ' q=' + qk + ' expanded=' + h.toFixed(4) +
+          ' in-forecast-assign=' + inForecast.toFixed(4));
+      });
+      Logger.log('    PHX expandAssignmentToWeekly_ total=' + phxTotal.toFixed(4));
+      Object.keys(phxByQuarter).sort().forEach(function (qk) {
+        Logger.log('      quarter ' + qk + ': ' + phxByQuarter[qk].toFixed(4) + 'h');
+      });
+    } else if (phxAssign) {
+      Logger.log('    PHX assignment excluded ΓÇö no weekly hours expected in this viewMode');
+    }
+    if (Object.keys(assignHoursByQuarter).length) {
+      Logger.log('    all assignment hours by fiscal quarter:');
+      Object.keys(assignHoursByQuarter).sort().forEach(function (qk) {
+        Logger.log('      ' + qk + ': ' + assignHoursByQuarter[qk].toFixed(4) + 'h');
+      });
+    }
+    var visibleWeeks = (typeof _deriveVisibleWeeksFiscal_ === 'function')
+      ? _deriveVisibleWeeksFiscal_(fc.weeks) : [];
+    var visibleKeys = {};
+    visibleWeeks.forEach(function (vw) { visibleKeys[vw.week_key] = true; });
+    var visibleAssign = 0;
+    Object.keys(assignHoursByWeek).forEach(function (wk) {
+      if (visibleKeys[wk]) visibleAssign += assignHoursByWeek[wk];
+    });
+    Logger.log('    Explorer strip scope: ' + curQ + ' + nextQ (' + visibleWeeks.length + ' weeks)');
+    Logger.log('    assignment hours in visible strip window: ' + visibleAssign.toFixed(4));
+  }
+
+  traceForecastMode_('Committed');
+  traceForecastMode_('Scenario');
+
+  // ---- 5. expandAssignmentToWeekly_ raw output ----
+  Logger.log('--- 5. expandAssignmentToWeekly_ (PHX assignment) ---');
+  if (!phxAssign) {
+    Logger.log('  skipped ΓÇö assignment not found');
+  } else {
+    var weeks = expandAssignmentToWeekly_(phxAssign, calendar) || [];
+    var sum = 0;
+    weeks.forEach(function (w) {
+      var h = Number(w.hours) || 0;
+      sum += h;
+      var qk = weekQkMap[w.week_key] || fiscalQuarterKey_(w.week_start || w.week_key);
+      Logger.log('  ' + w.week_key + ' ΓåÆ ' + h.toFixed(4) + 'h  (' + qk + ')');
+    });
+    Logger.log('  total expanded hours: ' + sum.toFixed(4) +
+      ' (sheet estimated_hours=' + phxAssign.estimated_hours + ')');
+    if (weeks.length) {
+      var firstQk = weekQkMap[weeks[0].week_key] || '?';
+      var lastQk = weekQkMap[weeks[weeks.length - 1].week_key] || '?';
+      Logger.log('  fiscal quarter span: ' + firstQk + ' ΓåÆ ' + lastQk);
+    }
+  }
+
+  Logger.log('=== _dbg_traceLaurenExplorer: DONE ===');
+}
  */
 function _dbg_traceWoWTargets() {
   _dbg_requireAdmin_();
@@ -2723,7 +3721,7 @@ function _dbg_traceWoWTargets() {
       return String(r.resource_name || '') === workerName;
     });
     if (!rows.length) {
-      Logger.log('  ' + workerName + ': no WoW rows — skip');
+      Logger.log('  ' + workerName + ': no WoW rows ΓÇö skip');
       return;
     }
     rows.forEach(function (r) {
@@ -2838,7 +3836,7 @@ function _dbg_reconcileWFM24() {
     try {
       fn();
     } catch (e) {
-      failures.push('Regression: ' + fn.name + ' threw — ' + e);
+      failures.push('Regression: ' + fn.name + ' threw ΓÇö ' + e);
       return false;
     }
     var after = Logger.getLog() || '';
@@ -2927,12 +3925,12 @@ function _dbg_reconcileWFM24() {
     probes.forEach(function (name) {
       var wRow = (scorecard.workers || []).find(function (w) { return w.worker === name; });
       if (!wRow || !wRow.employeeId) {
-        Logger.log('  ' + name + ': not in scorecard — skip');
+        Logger.log('  ' + name + ': not in scorecard ΓÇö skip');
         return;
       }
       var summary = actualsSummary[String(wRow.employeeId).trim()];
       if (!summary || !Number(summary.qtd_icp_plus_forecast_hours)) {
-        Logger.log('  ' + name + ': no qtd_icp_plus_forecast — skip');
+        Logger.log('  ' + name + ': no qtd_icp_plus_forecast ΓÇö skip');
         return;
       }
       var wowTarget = quarterTargetFromWoW_(wRow.employeeId, curQ);
@@ -2977,7 +3975,7 @@ function _dbg_reconcileWFM24() {
     if (typeof _dbg_reconcileWFM23 === 'function') {
       ok23 = runGate_(_dbg_reconcileWFM23, '_dbg_reconcileWFM23: ALL CHECKS OK');
     } else {
-      Logger.log('  WFM.23 gate not present on branch — SKIPPED');
+      Logger.log('  WFM.23 gate not present on branch ΓÇö SKIPPED');
     }
     Logger.log('  WFM.15=' + (ok15 ? 'OK' : 'FAIL') +
       ' WFM.17=' + (ok17 ? 'OK' : 'FAIL') +
@@ -2987,6 +3985,6 @@ function _dbg_reconcileWFM24() {
 
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM24: ALL CHECKS OK'
-    : '_dbg_reconcileWFM24: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+    : '_dbg_reconcileWFM24: ' + failures.length + ' CHECK(S) FAILED ΓÇö DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }

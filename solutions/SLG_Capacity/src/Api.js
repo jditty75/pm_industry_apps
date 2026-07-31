@@ -385,6 +385,7 @@ function api_flushCaches() {
   if (typeof invalidateEnrichedCaches_ === 'function') {
     invalidateEnrichedCaches_();
   }
+  invalidateSoftBookingBaselineCache_();
   return { ok: true, flushedAt: new Date().toISOString() };
 }
 
@@ -576,6 +577,548 @@ function api_getResourceDetailV2(params) {
 function api_getQuarterlyScorecard(params) {
   _requireAuthorized_();
   return computeQuarterlyScorecard_(params || {});
+}
+
+// ------------------------------------------------------------
+// WFM.23 — Soft booking projection (Stage 1)
+// ------------------------------------------------------------
+
+/** Per-execution L1 baseline forecast cache (L2 = CacheService). */
+var _softBookingBaselineCache_ = { signature: '', forecast: null };
+
+/**
+ * Clear WFM.23 projection L1 baseline cache (called from api_flushCaches).
+ * L2 entries are keyed on _getEnrichedCacheVersion_() and invalidate via
+ * invalidateEnrichedCaches_() version bump.
+ */
+function invalidateSoftBookingBaselineCache_() {
+  _softBookingBaselineCache_.signature = '';
+  _softBookingBaselineCache_.forecast = null;
+}
+
+/**
+ * CacheService key for a projection baseline (version + filter signature).
+ * @param {Object} forecastParams
+ * @return {string}
+ */
+function _projectionBaselineCacheKey_(forecastParams) {
+  var sig = _projectionFilterSignature_(forecastParams);
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, sig, Utilities.Charset.UTF_8);
+  var hex = digest.map(function (b) {
+    return ('0' + (b < 0 ? b + 256 : b).toString(16)).slice(-2);
+  }).join('');
+  return 'wfm23:baseline:v' + _getEnrichedCacheVersion_() + ':' + hex;
+}
+
+/**
+ * JSON-safe forecast payload for CacheService (no Date objects).
+ * @param {Object} forecast
+ * @return {Object}
+ */
+function _serializeForecastForCache_(forecast) {
+  return {
+    weeks: (forecast.weeks || []).map(function (w) {
+      return {
+        week_start: _toIso_(w.week_start),
+        week_key: String(w.week_key || ''),
+        fiscal_year: Number(w.fiscal_year) || 0,
+        fiscal_quarter: String(w.fiscal_quarter || ''),
+        workdays_in_week: Number(w.workdays_in_week) || 5,
+        holiday_hours: Number(w.holiday_hours) || 0
+      };
+    }),
+    workers: JSON.parse(JSON.stringify(forecast.workers || [])),
+    icp: forecast.icp,
+    rawCapacity: Number(forecast.rawCapacity) || 40,
+    holidayHoursByWeek: forecast.holidayHoursByWeek || {}
+  };
+}
+
+/**
+ * Rehydrate a cached forecast (week_start → Date).
+ * @param {Object} cached
+ * @return {Object|null}
+ */
+function _deserializeForecastFromCache_(cached) {
+  if (!cached) return null;
+  return {
+    weeks: (cached.weeks || []).map(function (w) {
+      return {
+        week_start: w.week_start ? new Date(w.week_start) : null,
+        week_key: String(w.week_key || ''),
+        fiscal_year: Number(w.fiscal_year) || 0,
+        fiscal_quarter: String(w.fiscal_quarter || ''),
+        workdays_in_week: Number(w.workdays_in_week) || 5,
+        holiday_hours: Number(w.holiday_hours) || 0
+      };
+    }),
+    workers: cached.workers || [],
+    icp: cached.icp,
+    rawCapacity: Number(cached.rawCapacity) || 40,
+    holidayHoursByWeek: cached.holidayHoursByWeek || {}
+  };
+}
+
+/**
+ * Stable filter signature for projection baseline caching.
+ * Mirrors computeWeeklyForecast_ param defaults.
+ * @param {Object} params
+ * @return {string}
+ */
+function _projectionFilterSignature_(params) {
+  params = params || {};
+  return JSON.stringify({
+    viewMode: params.viewMode || 'Committed',
+    scenarioId: params.scenarioId || null,
+    teams: params.teams || null,
+    teamLabel: params.teamLabel ? String(params.teamLabel).trim() : '',
+    workerScope: params.workerScope || 'SLG',
+    includeMyManagers: !!params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff !== false
+  });
+}
+
+/**
+ * Baseline computeWeeklyForecast_ with L1 (per-execution) + L2 (CacheService).
+ * @param {Object} forecastParams
+ * @return {{forecast:Object, cacheHit:boolean, l2Hit:boolean}}
+ */
+function _getCachedBaselineForecast_(forecastParams) {
+  var sig = _projectionFilterSignature_(forecastParams);
+
+  if (_softBookingBaselineCache_.signature === sig && _softBookingBaselineCache_.forecast) {
+    return {
+      forecast: _softBookingBaselineCache_.forecast,
+      cacheHit: true,
+      l2Hit: false
+    };
+  }
+
+  var cacheKey = _projectionBaselineCacheKey_(forecastParams);
+  var cached = _enrichedCacheRead_(cacheKey);
+  if (cached) {
+    var fromL2 = _deserializeForecastFromCache_(cached);
+    if (fromL2) {
+      _softBookingBaselineCache_.signature = sig;
+      _softBookingBaselineCache_.forecast = fromL2;
+      return { forecast: fromL2, cacheHit: true, l2Hit: true };
+    }
+  }
+
+  var forecast = computeWeeklyForecast_(forecastParams);
+  _enrichedCacheWrite_(cacheKey, _serializeForecastForCache_(forecast), 21600);
+  _softBookingBaselineCache_.signature = sig;
+  _softBookingBaselineCache_.forecast = forecast;
+  return { forecast: forecast, cacheHit: false, l2Hit: false };
+}
+
+/**
+ * Fiscal quarter keys touched by soft-booking date ranges (dynamic, cap 8).
+ * Empty bookings ⇒ rolling four quarters (Explorer default window).
+ * @param {Array<{start_date:*, end_date:*}>} softBookings
+ * @return {string[]}
+ */
+function _quarterKeysForSoftBookings_(softBookings) {
+  if (!softBookings || !softBookings.length) {
+    return rollingQuarterKeys_(4);
+  }
+  var minDate = null;
+  var maxDate = null;
+  softBookings.forEach(function (sb) {
+    var s = sb.start_date ? new Date(sb.start_date) : null;
+    var e = sb.end_date ? new Date(sb.end_date) : null;
+    if (s && !isNaN(s.getTime()) && (!minDate || s < minDate)) minDate = s;
+    if (e && !isNaN(e.getTime()) && (!maxDate || e > maxDate)) maxDate = e;
+  });
+  if (!minDate || !maxDate) return rollingQuarterKeys_(4);
+
+  var keys = [];
+  var qk = fiscalQuarterKey_(minDate);
+  var endQk = fiscalQuarterKey_(maxDate);
+  var safety = 0;
+  while (safety < 12) {
+    keys.push(qk);
+    if (qk === endQk) break;
+    var bounds = fiscalQuarterBounds_(qk);
+    var nextStart = new Date(bounds.end.getFullYear(), bounds.end.getMonth() + 1, 1);
+    qk = fiscalQuarterKey_(nextStart);
+    safety++;
+  }
+  if (keys.indexOf(endQk) < 0) keys.push(endQk);
+  return keys.slice(0, 8);
+}
+
+/**
+ * Quarter capacity for soft-booking projection. Quarters beyond the last
+ * configured holiday year are holiday-free with approximate:true (D4a).
+ * @param {string} quarterKey
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @return {{icpAvailableHours:number, rawCapacityHours:number, approximate:boolean}}
+ */
+function _quarterCapacityForProjection_(quarterKey, holidays) {
+  var maxHolidayYear = 0;
+  (holidays || []).forEach(function (h) {
+    if (h.date) {
+      var y = h.date.getFullYear();
+      if (y > maxHolidayYear) maxHolidayYear = y;
+    }
+  });
+  var bounds = fiscalQuarterBounds_(quarterKey);
+  var approximate = bounds.end.getFullYear() > maxHolidayYear;
+  var effectiveHolidays = approximate ? [] : holidays;
+  var wd = quarterWorkdaySummary_(quarterKey, effectiveHolidays);
+  return {
+    icpAvailableHours: Number(wd.icpAvailableHours) || 0,
+    rawCapacityHours: Number(wd.rawCapacityHours) || 0,
+    approximate: approximate
+  };
+}
+
+/**
+ * Build worker / team / org-team quarterly aggregates from a forecast.
+ * @param {Object} forecast computeWeeklyForecast_ result
+ * @param {string[]} quarterKeys
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @return {{worker:Object[], team:Object, orgTeams:Object[]}}
+ */
+function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays) {
+  var weeks = forecast.weeks || [];
+  var workers = forecast.workers || [];
+
+  function quarterCell_(productiveHours, qk) {
+    var qinfo = _quarterCapacityForProjection_(qk, holidays);
+    var icpAvail = qinfo.icpAvailableHours;
+    var rawCap = qinfo.rawCapacityHours;
+    var prod = Number(productiveHours) || 0;
+    return {
+      quarterKey: String(qk),
+      productiveHours: prod,
+      icpAvailableHours: icpAvail,
+      rawCapacityHours: rawCap,
+      icpUtil: icpAvail > 0 ? prod / icpAvail : 0,
+      financeUtil: rawCap > 0 ? prod / rawCap : 0,
+      approximate: !!qinfo.approximate
+    };
+  }
+
+  var workerOut = workers.map(function (w) {
+    return {
+      employeeId: String(w.employeeId || ''),
+      resourceName: String(w.resource || ''),
+      teamLabel: String(w.teamLabel || ''),
+      managerOrg: String(w.managerOrg || ''),
+      quarters: quarterKeys.map(function (qk) {
+        return quarterCell_(sumForecastProductiveForQuarter_(w, qk, weeks), qk);
+      })
+    };
+  });
+
+  var teamQuarters = quarterKeys.map(function (qk) {
+    var sumProd = 0;
+    var sumIcpAvail = 0;
+    var sumRawCap = 0;
+    var approx = false;
+    workers.forEach(function (w) {
+      sumProd += sumForecastProductiveForQuarter_(w, qk, weeks);
+      var qinfo = _quarterCapacityForProjection_(qk, holidays);
+      sumIcpAvail += qinfo.icpAvailableHours;
+      sumRawCap += qinfo.rawCapacityHours;
+      if (qinfo.approximate) approx = true;
+    });
+    return {
+      quarterKey: String(qk),
+      productiveHours: Number(sumProd) || 0,
+      icpAvailableHours: Number(sumIcpAvail) || 0,
+      rawCapacityHours: Number(sumRawCap) || 0,
+      icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
+      financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+      approximate: approx
+    };
+  });
+
+  var byLabel = {};
+  workers.forEach(function (w) {
+    var label = String(w.teamLabel || 'Unclassified');
+    if (!byLabel[label]) byLabel[label] = [];
+    byLabel[label].push(w);
+  });
+  var orgTeamsOut = Object.keys(byLabel).sort().map(function (label) {
+    var group = byLabel[label];
+    var quarters = quarterKeys.map(function (qk) {
+      var sumProd = 0;
+      var sumIcpAvail = 0;
+      var sumRawCap = 0;
+      var approx = false;
+      group.forEach(function (w) {
+        sumProd += sumForecastProductiveForQuarter_(w, qk, weeks);
+        var qinfo = _quarterCapacityForProjection_(qk, holidays);
+        sumIcpAvail += qinfo.icpAvailableHours;
+        sumRawCap += qinfo.rawCapacityHours;
+        if (qinfo.approximate) approx = true;
+      });
+      return {
+        quarterKey: String(qk),
+        productiveHours: Number(sumProd) || 0,
+        icpAvailableHours: Number(sumIcpAvail) || 0,
+        rawCapacityHours: Number(sumRawCap) || 0,
+        icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
+        financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+        approximate: approx
+      };
+    });
+    return { teamLabel: String(label), quarters: quarters };
+  });
+
+  return {
+    worker: workerOut,
+    team: { quarters: teamQuarters },
+    orgTeams: orgTeamsOut
+  };
+}
+
+/**
+ * WFM.23 Stage 1.5: apply soft-booking hours as a delta on the cached
+ * baseline forecast — clone affected workers only; baseline objects are
+ * never mutated (gate check 2).
+ * @param {Object} baselineForecast computeWeeklyForecast_ result
+ * @param {Array<Object>} assignments in-memory Modeled assignment shapes
+ * @return {{forecast:Object, affectedWorkers:number}}
+ */
+function _buildProjectedForecastDelta_(baselineForecast, assignments) {
+  if (!assignments || !assignments.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+  var calendar = readCalendar_();
+  var workerByName = {};
+  (baselineForecast.workers || []).forEach(function (w) {
+    workerByName[w.resource] = w;
+  });
+
+  var deltasByResource = {};
+  assignments.forEach(function (a) {
+    if (!a.resource_name || !workerByName[a.resource_name]) return;
+    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+      var rn = a.resource_name;
+      if (!deltasByResource[rn]) deltasByResource[rn] = {};
+      var hrs = Number(w.hours) || 0;
+      if (!hrs) return;
+      deltasByResource[rn][w.week_key] = (deltasByResource[rn][w.week_key] || 0) + hrs;
+    });
+  });
+
+  var affectedNames = Object.keys(deltasByResource);
+  if (!affectedNames.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+
+  var projectedWorkers = (baselineForecast.workers || []).map(function (w) {
+    var delta = deltasByResource[w.resource];
+    if (!delta) return w;
+    var clone = {
+      resource: w.resource,
+      jobProfile: w.jobProfile,
+      level: w.level,
+      managerOrg: w.managerOrg,
+      managersManager: w.managersManager,
+      icpRole: w.icpRole,
+      teamLabel: w.teamLabel,
+      workerClass: w.workerClass,
+      icpTarget: w.icpTarget,
+      employeeId: w.employeeId,
+      workerWeekly: Object.assign({}, w.workerWeekly || {}),
+      productiveWeekly: Object.assign({}, w.productiveWeekly || {}),
+      projects: JSON.parse(JSON.stringify(w.projects || {})),
+      blendedWeekly: JSON.parse(JSON.stringify(w.blendedWeekly || {}))
+    };
+    Object.keys(delta).forEach(function (wk) {
+      var hrs = delta[wk];
+      clone.productiveWeekly[wk] = (clone.productiveWeekly[wk] || 0) + hrs;
+      clone.workerWeekly[wk] = (clone.workerWeekly[wk] || 0) + hrs;
+    });
+    return clone;
+  });
+
+  return {
+    forecast: {
+      weeks: baselineForecast.weeks,
+      workers: projectedWorkers,
+      icp: baselineForecast.icp,
+      rawCapacity: baselineForecast.rawCapacity,
+      holidayHoursByWeek: baselineForecast.holidayHoursByWeek
+    },
+    affectedWorkers: affectedNames.length
+  };
+}
+
+/**
+ * WFM.23: project soft-booking overlay utilization at worker / team /
+ * org-team levels. Empty softBookings ⇒ projected deep-equals baseline.
+ * @param {Object} params standard buildServerParams_ shape
+ * @param {Array<{employee_id:string, resource_name:string, start_date:*, end_date:*, total_hours:number}>} softBookings
+ * @return {{baseline:Object, projected:Object}}
+ */
+function api_projectSoftBookings(params, softBookings) {
+  _requireAuthorized_();
+  var t0 = Date.now();
+  params = params || {};
+  softBookings = softBookings || [];
+
+  var forecastParams = {
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  };
+
+  var baselineCached = _getCachedBaselineForecast_(forecastParams);
+  var baselineForecast = baselineCached.forecast;
+  var baselineCacheHit = baselineCached.l2Hit;
+  var holidays = readHolidays_();
+  var quarterKeys = _quarterKeysForSoftBookings_(softBookings);
+
+  var inMemoryModeledAssignments = softBookings.map(function (sb) {
+    return {
+      resource_name: String(sb.resource_name || ''),
+      employee_id: String(sb.employee_id || ''),
+      start_date: sb.start_date ? new Date(sb.start_date) : null,
+      end_date: sb.end_date ? new Date(sb.end_date) : null,
+      estimated_hours: Number(sb.total_hours) || 0,
+      distribution: 'Even',
+      status: 'Modeled'
+    };
+  }).filter(function (a) {
+    return a.resource_name && a.start_date && a.end_date && !isNaN(a.start_date.getTime()) &&
+      !isNaN(a.end_date.getTime()) && a.estimated_hours > 0;
+  });
+
+  var projectedForecast = baselineForecast;
+  var affectedWorkerCount = 0;
+  var projectedMode = 'baseline';
+  if (inMemoryModeledAssignments.length) {
+    var deltaResult = _buildProjectedForecastDelta_(baselineForecast, inMemoryModeledAssignments);
+    projectedForecast = deltaResult.forecast;
+    affectedWorkerCount = deltaResult.affectedWorkers;
+    projectedMode = 'targeted';
+  }
+
+  var result = {
+    baseline: _aggregateSoftBookingProjection_(baselineForecast, quarterKeys, holidays),
+    projected: _aggregateSoftBookingProjection_(projectedForecast, quarterKeys, holidays)
+  };
+
+  Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +
+    ' baselineCache=' + (baselineCacheHit ? 'hit' : 'miss') +
+    ' projectedMode=' + projectedMode +
+    ' affectedWorkers=' + affectedWorkerCount +
+    ' workers=' + (baselineForecast.workers || []).length +
+    ' quarters=' + quarterKeys.length +
+    ' bookings=' + softBookings.length);
+  return result;
+}
+
+/**
+ * Resolve resource_type for a soft-booking commit. Uses the booking payload
+ * when present; otherwise looks up the worker in the resource index by name
+ * or employee_id. Blank-safe — returns '' when no type is known.
+ * @param {Object} booking
+ * @return {string}
+ */
+function _resolveBookingResourceType_(booking) {
+  var fromBooking = String((booking && booking.resource_type) || '').trim();
+  if (fromBooking) return fromBooking;
+
+  var resourceName = String((booking && booking.resource_name) || '').trim();
+  var employeeId = String((booking && booking.employee_id) || '').trim();
+  if (!resourceName && !employeeId) return '';
+
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_()
+    : _resourceIndex_(cachedRead_(ALLOC_NORM));
+
+  var info = null;
+  if (resourceName && resIndex[resourceName]) {
+    info = resIndex[resourceName];
+  } else if (employeeId) {
+    Object.keys(resIndex).some(function (k) {
+      if (String(resIndex[k].employee_id || '').trim() === employeeId) {
+        info = resIndex[k];
+        return true;
+      }
+      return false;
+    });
+  }
+
+  return info ? String(info.resource_type || '').trim() : '';
+}
+
+/**
+ * WFM.23 Stage 3: promote soft-booking basket rows to Modeled assignments.
+ * @param {string} scenarioName non-empty → always creates a NEW scenario via saveScenario_
+ * @param {Array<Object>} bookings
+ * @return {{scenario_id:string, committed:Object[], count:number}}
+ */
+function api_commitSoftBookings(scenarioName, bookings) {
+  _requireAuthorized_();
+  scenarioName = String(scenarioName || '').trim();
+  bookings = bookings || [];
+
+  var scenarioId = '';
+  if (scenarioName) {
+    var scen = saveScenario_({
+      name: scenarioName,
+      description: 'WFM.23 soft-booking submit-all',
+      status: 'Active'
+    });
+    scenarioId = scen ? String(scen.scenario_id || '') : '';
+  }
+
+  var committed = [];
+  bookings.forEach(function (b) {
+    var what = b.what || {};
+    var whatType = String(what.type || '');
+    var opportunityId = '';
+    var notes = '';
+    if (whatType === 'opportunity') {
+      opportunityId = String(what.opportunity_id || '');
+    } else if (whatType === 'deployment') {
+      opportunityId = String(what.deployment_id || what.opportunity_id || '');
+      if (opportunityId) {
+        notes = 'Soft-book deployment: ' + opportunityId;
+      }
+    } else if (whatType === 'label') {
+      opportunityId = '';
+      notes = 'Soft-book label: ' + String(what.label || '');
+    }
+
+    var resolvedResourceType = _resolveBookingResourceType_(b);
+
+    var saved = saveAssignment_({
+      opportunity_id: opportunityId,
+      resource_name: String(b.resource_name || ''),
+      resource_type: resolvedResourceType,
+      start_date: b.start_date,
+      end_date: b.end_date,
+      estimated_hours: Number(b.total_hours) || 0,
+      distribution: 'Even',
+      status: 'Modeled',
+      scenario_id: scenarioId,
+      notes: notes
+    });
+    committed.push({
+      resource_name: String(saved.resource_name || b.resource_name || ''),
+      assignment_id: String(saved.assignment_id || '')
+    });
+  });
+
+  Logger.log('api_commitSoftBookings: scenario_id=' + scenarioId + ' count=' + committed.length);
+  return {
+    scenario_id: scenarioId,
+    committed: committed,
+    count: committed.length
+  };
 }
 
 // ------------------------------------------------------------

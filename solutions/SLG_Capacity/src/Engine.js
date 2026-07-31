@@ -1415,6 +1415,14 @@ function computeWeeklyForecast_(params) {
         addHours(a.resource_name, w.week_key, label, w.hours, true);
       });
     });
+
+    // WFM.23: in-memory soft booking overlay (additive; never persisted).
+    (params.inMemoryModeledAssignments || []).forEach(function (a) {
+      if (!a.resource_name) return;
+      expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+        addHours(a.resource_name, w.week_key, 'Soft Booking', w.hours, true);
+      });
+    });
   }
 
   // 2.5) Capacity adjustments (signed: positive = reduce, so we subtract).

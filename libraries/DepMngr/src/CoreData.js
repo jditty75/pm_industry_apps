@@ -2936,7 +2936,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     }
 
     // Tier 2 (_PerfCache) check.
-    var t2Key = 'mdsPglBatchView:' + cfg.appId + ':' + horizonMonths;
+    var t2Key = _perfKey_(cfg, 'mdsPglBatchView') + ':' + horizonMonths;
     var cached2 = _perfCacheRead_(t2Key);
     if (cached2) {
       Logger.log('CoreData.getMdsPglBatchView: tier 2 hit for window=' + horizonMonths);
@@ -3693,7 +3693,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    */
   function getOverviewSnapshot(config) {
     var cfg      = CoreConfig.withDefaults(config);
-    var cacheKey = 'overviewData:v2:' + cfg.appId;
+    var cacheKey = _perfKey_(cfg, 'overviewData:v2');
 
     if (_cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
 

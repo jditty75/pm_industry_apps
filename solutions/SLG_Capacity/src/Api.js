@@ -1019,6 +1019,71 @@ function api_projectSoftBookings(params, softBookings) {
   return result;
 }
 
+/**
+ * WFM.23 Stage 3: promote soft-booking basket rows to Modeled assignments.
+ * @param {string} scenarioName non-empty → always creates a NEW scenario via saveScenario_
+ * @param {Array<Object>} bookings
+ * @return {{scenario_id:string, committed:Object[], count:number}}
+ */
+function api_commitSoftBookings(scenarioName, bookings) {
+  _requireAuthorized_();
+  scenarioName = String(scenarioName || '').trim();
+  bookings = bookings || [];
+
+  var scenarioId = '';
+  if (scenarioName) {
+    var scen = saveScenario_({
+      name: scenarioName,
+      description: 'WFM.23 soft-booking submit-all',
+      status: 'Active'
+    });
+    scenarioId = scen ? String(scen.scenario_id || '') : '';
+  }
+
+  var committed = [];
+  bookings.forEach(function (b) {
+    var what = b.what || {};
+    var whatType = String(what.type || '');
+    var opportunityId = '';
+    var notes = '';
+    if (whatType === 'opportunity') {
+      opportunityId = String(what.opportunity_id || '');
+    } else if (whatType === 'deployment') {
+      opportunityId = String(what.deployment_id || what.opportunity_id || '');
+      if (opportunityId) {
+        notes = 'Soft-book deployment: ' + opportunityId;
+      }
+    } else if (whatType === 'label') {
+      opportunityId = '';
+      notes = 'Soft-book label: ' + String(what.label || '');
+    }
+
+    var saved = saveAssignment_({
+      opportunity_id: opportunityId,
+      resource_name: String(b.resource_name || ''),
+      resource_type: String(b.resource_type || ''),
+      start_date: b.start_date,
+      end_date: b.end_date,
+      estimated_hours: Number(b.total_hours) || 0,
+      distribution: 'Even',
+      status: 'Modeled',
+      scenario_id: scenarioId,
+      notes: notes
+    });
+    committed.push({
+      resource_name: String(saved.resource_name || b.resource_name || ''),
+      assignment_id: String(saved.assignment_id || '')
+    });
+  });
+
+  Logger.log('api_commitSoftBookings: scenario_id=' + scenarioId + ' count=' + committed.length);
+  return {
+    scenario_id: scenarioId,
+    committed: committed,
+    count: committed.length
+  };
+}
+
 // ------------------------------------------------------------
 // Weekly Forecast Table (weekly-forecast-migration §8)
 //

@@ -356,6 +356,20 @@ var CoreConfig = (function () {
       cfg.report.portfolioHealth.historyWindowMonths = 6;
 
     // -------------------------------------------------------------------------
+    // Data freshness (N4)
+    // -------------------------------------------------------------------------
+    cfg.freshness = cfg.freshness || {};
+    if (cfg.freshness.enabled === undefined) cfg.freshness.enabled = true;
+    if (cfg.freshness.refreshCycleHours === undefined) cfg.freshness.refreshCycleHours = 8;
+    if (cfg.freshness.graceHours === undefined) cfg.freshness.graceHours = 1;
+    if (cfg.freshness.amberHours === undefined) cfg.freshness.amberHours = null; // null = derive
+    if (cfg.freshness.redHours === undefined) cfg.freshness.redHours = null;
+    if (cfg.freshness.alertHours === undefined) cfg.freshness.alertHours = null;
+    if (!cfg.freshness.watchSheet) cfg.freshness.watchSheet = 'SFDC_Deployments';
+    if (!cfg.freshness.alertRecipient) cfg.freshness.alertRecipient = 'jeffrey.ditty@workday.com';
+    if (!cfg.freshness.logSheet) cfg.freshness.logSheet = 'Auto Refresh Execution Log';
+
+    // -------------------------------------------------------------------------
     // Notable (Part 1)
     // -------------------------------------------------------------------------
     cfg.notable = cfg.notable || {};

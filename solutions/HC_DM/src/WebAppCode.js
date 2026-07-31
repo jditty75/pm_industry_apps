@@ -169,6 +169,26 @@ function _warmCaches() {
 }
 
 // ============================================================================
+// N4 — DATA FRESHNESS MONITORING
+// ============================================================================
+
+/**
+ * Returns data-freshness signal for the header badge (L1).
+ * @return {Object}
+ */
+function getDataFreshnessForUI() {
+  return CoreLib.CoreData.getDataFreshness(APP_CONFIG);
+}
+
+/**
+ * L2 alert entry point — installed manually as a 4-hourly time-based trigger.
+ * @return {void}
+ */
+function checkDataFreshness() {
+  return CoreLib.CoreData.checkDataFreshnessAndAlert_(APP_CONFIG);
+}
+
+// ============================================================================
 // NOTABLE DEPLOYMENTS (Part 2)
 // ============================================================================
 

@@ -4054,6 +4054,213 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
   }
 
+  /**
+   * N4: Returns data-freshness signal from the Auto Refresh Execution Log.
+   * Reuses the bounded log-tab read pattern from _sfdcDataVersion_ (cols A/B/D).
+   *
+   * @param {AppConfig} config
+   * @return {{ lastRefresh: string, ageHours: number|null, status: string,
+   *           lastRefreshStatus: string, thresholds: Object, watchSheetFound: boolean }}
+   */
+  function getDataFreshness(config) {
+  var cfg = CoreConfig.withDefaults(config);
+  var cycle = cfg.freshness.refreshCycleHours;
+  var grace = cfg.freshness.graceHours;
+  var amber = cfg.freshness.amberHours != null ? cfg.freshness.amberHours : (cycle + grace);
+  var red = cfg.freshness.redHours != null ? cfg.freshness.redHours : (2 * cycle + grace);
+  var alert = cfg.freshness.alertHours != null ? cfg.freshness.alertHours : (3 * cycle);
+  var thresholds = { amber: amber, red: red, alert: alert };
+
+  var unknown = {
+    lastRefresh: '',
+    ageHours: null,
+    status: 'unknown',
+    lastRefreshStatus: '',
+    thresholds: thresholds,
+    watchSheetFound: false
+  };
+
+  try {
+    var ss = getSpreadsheet_();
+    var logSheetName = cfg.freshness.logSheet || 'Auto Refresh Execution Log';
+    var sh = ss.getSheetByName(logSheetName);
+    if (!sh) {
+      Logger.log('CoreData.getDataFreshness: log sheet "' + logSheetName + '" not found.');
+      return unknown;
+    }
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return unknown;
+
+    // Columns: A=Refresh Time, B=Sheet, D=Status (same layout as _sfdcDataVersion_).
+    var vals = sh.getRange(2, 1, lastRow - 1, 4).getValues();
+    var watchSheet = cfg.freshness.watchSheet || 'SFDC_Deployments';
+    var latestOverallKey = 0;
+    var latestWatchSuccessKey = 0;
+    var latestWatchSuccessDate = null;
+    var latestSuccessKey = 0;
+    var latestSuccessDate = null;
+    var runMap = {};
+
+    for (var i = 0; i < vals.length; i++) {
+      var ts = vals[i][0];
+      if (!ts) continue;
+      var sheetName = String(vals[i][1] || '').trim();
+      var status = String(vals[i][3] || '').trim();
+      var date = ts instanceof Date ? ts : new Date(ts);
+      if (isNaN(date.getTime())) continue;
+      var key = date.getTime();
+
+      if (key > latestOverallKey) latestOverallKey = key;
+
+      if (!runMap[key]) {
+        runMap[key] = { date: date, statuses: [] };
+      }
+      runMap[key].statuses.push(status);
+
+      if (sheetName === watchSheet && status === 'Success' && key > latestWatchSuccessKey) {
+        latestWatchSuccessKey = key;
+        latestWatchSuccessDate = date;
+      }
+    }
+
+    if (latestOverallKey === 0) return unknown;
+
+    for (var runKey in runMap) {
+      var run = runMap[runKey];
+      var allSuccess = true;
+      for (var si = 0; si < run.statuses.length; si++) {
+        if (run.statuses[si] !== 'Success') {
+          allSuccess = false;
+          break;
+        }
+      }
+      var runKeyNum = Number(runKey);
+      if (allSuccess && runKeyNum > latestSuccessKey) {
+        latestSuccessKey = runKeyNum;
+        latestSuccessDate = run.date;
+      }
+    }
+
+    var watchSheetFound = latestWatchSuccessDate !== null;
+    var lastRefreshDate = watchSheetFound ? latestWatchSuccessDate : latestSuccessDate;
+    if (!lastRefreshDate) return unknown;
+
+    var lastRefreshStatus = 'Success';
+    var latestRun = runMap[latestOverallKey];
+    if (latestRun) {
+      for (var sj = 0; sj < latestRun.statuses.length; sj++) {
+        if (latestRun.statuses[sj] !== 'Success') {
+          lastRefreshStatus = latestRun.statuses[sj] || 'Failed';
+          break;
+        }
+      }
+    }
+
+    var ageHours = (Date.now() - lastRefreshDate.getTime()) / 3600000;
+    var freshnessStatus;
+    if (lastRefreshStatus !== 'Success' || ageHours > red) {
+      freshnessStatus = 'stale';
+    } else if (ageHours > amber) {
+      freshnessStatus = 'aging';
+    } else {
+      freshnessStatus = 'fresh';
+    }
+
+    return {
+      lastRefresh: lastRefreshDate.toISOString(),
+      ageHours: ageHours,
+      status: freshnessStatus,
+      lastRefreshStatus: lastRefreshStatus,
+      thresholds: thresholds,
+      watchSheetFound: watchSheetFound
+    };
+  } catch (e) {
+    Logger.log('CoreData.getDataFreshness: ' + e);
+    return unknown;
+  }
+  }
+
+  /**
+   * N4 L2: Time-trigger entry point — emails alertRecipient on stale episodes only.
+   * Anti-spam: one email on ok→alerted, one recovery on alerted→ok; never on unknown.
+   *
+   * @param {AppConfig} config
+   */
+  function checkDataFreshnessAndAlert_(config) {
+    try {
+      var cfg = CoreConfig.withDefaults(config);
+      if (!cfg.freshness.enabled) {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: freshness disabled; skipped.');
+        return;
+      }
+
+      var freshness = getDataFreshness(cfg);
+      if (freshness.status === 'unknown') {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: status unknown; no action.');
+        return;
+      }
+
+      var appId = cfg.appId || 'default';
+      var propKey = 'freshnessAlertState:' + appId;
+      var props = PropertiesService.getScriptProperties();
+      var prevState = props.getProperty(propKey) || 'ok';
+      if (prevState !== 'ok' && prevState !== 'alerted') prevState = 'ok';
+
+      var isAlert = freshness.lastRefreshStatus !== 'Success' ||
+        (freshness.ageHours !== null && freshness.ageHours > freshness.thresholds.alert);
+
+      var recipient = cfg.freshness.alertRecipient;
+      if (!recipient) {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: no alertRecipient; skipped.');
+        return;
+      }
+
+      var ss = getSpreadsheet_();
+      var logSheetName = cfg.freshness.logSheet || 'Auto Refresh Execution Log';
+      var logTab = ss.getSheetByName(logSheetName);
+      var logTabUrl = ss.getUrl();
+      if (logTab) logTabUrl += '#gid=' + logTab.getSheetId();
+
+      if (isAlert && prevState === 'ok') {
+        var ageRounded = freshness.ageHours !== null ? Math.round(freshness.ageHours) : '?';
+        var staleSubject = '[' + appId + '] DHM data STALE — ' + ageRounded + 'h old';
+        var staleBody = [
+          'App: ' + appId,
+          'Last refresh: ' + (freshness.lastRefresh || 'n/a'),
+          'Age (hours): ' + (freshness.ageHours !== null ? freshness.ageHours.toFixed(1) : 'n/a'),
+          'Status: ' + freshness.status,
+          'Last refresh status: ' + freshness.lastRefreshStatus,
+          'Alert threshold (hours): ' + freshness.thresholds.alert,
+          '',
+          'Auto Refresh Execution Log: ' + logTabUrl
+        ].join('\n');
+        MailApp.sendEmail({ to: recipient, subject: staleSubject, body: staleBody });
+        props.setProperty(propKey, 'alerted');
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: stale alert sent to ' + recipient);
+      } else if (!isAlert && prevState === 'alerted') {
+        var recoverySubject = '[' + appId + '] DHM data refresh RECOVERED';
+        var recoveryBody = [
+          'App: ' + appId,
+          'Last refresh: ' + (freshness.lastRefresh || 'n/a'),
+          'Age (hours): ' + (freshness.ageHours !== null ? freshness.ageHours.toFixed(1) : 'n/a'),
+          'Status: ' + freshness.status,
+          'Last refresh status: ' + freshness.lastRefreshStatus,
+          'Alert threshold (hours): ' + freshness.thresholds.alert,
+          '',
+          'Auto Refresh Execution Log: ' + logTabUrl
+        ].join('\n');
+        MailApp.sendEmail({ to: recipient, subject: recoverySubject, body: recoveryBody });
+        props.setProperty(propKey, 'ok');
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: recovery alert sent to ' + recipient);
+      } else {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: no state change (' +
+                   prevState + ', isAlert=' + isAlert + '); no email.');
+      }
+    } catch (e) {
+      Logger.log('CoreData.checkDataFreshnessAndAlert_: ' + e);
+    }
+  }
+
   // ===========================================================================
   // EXPORTS
   // ===========================================================================
@@ -4108,6 +4315,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     _warmSfdcRows:               _warmSfdcRows,
     _getCachedSfdcRowCount:      _getCachedSfdcRowCount,
     _dataVersion:                _dataVersion,
+    getDataFreshness:            getDataFreshness,
+    checkDataFreshnessAndAlert_: checkDataFreshnessAndAlert_,
 
     // D1 diagnostic
     _debugDdFromContacts_:       _debugDdFromContacts_,

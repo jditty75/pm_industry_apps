@@ -1410,6 +1410,54 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   // --- HTML SHELLS ----------------------------------------------------------
 
   /**
+   * N4 L3: Outlook-safe freshness warning banner for stale/failed data at report generation.
+   * Table layout + inline styles only (no flex/grid).
+   *
+   * @param {AppConfig} config
+   * @return {string} HTML fragment or ''
+   * @private
+   */
+  function buildFreshnessReportBanner_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (!cfg.freshness || !cfg.freshness.enabled) return '';
+    try {
+      var freshness = CoreData.getDataFreshness(cfg);
+      if (freshness.status !== 'stale' && freshness.lastRefreshStatus === 'Success') return '';
+
+      var lastRefreshLocal = 'n/a';
+      if (freshness.lastRefresh) {
+        var refreshDate = new Date(freshness.lastRefresh);
+        if (!isNaN(refreshDate.getTime())) {
+          lastRefreshLocal = Utilities.formatDate(
+            refreshDate,
+            Session.getScriptTimeZone(),
+            'M/d/yyyy h:mm a'
+          );
+        }
+      }
+      var ageStr = freshness.ageHours !== null ? Math.round(freshness.ageHours) : '?';
+      var bannerText = '\u26A0 Data as of ' + lastRefreshLocal + ' \u2014 ' + ageStr +
+                       'h old. Verify before distributing.';
+
+      return (
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+        'style="border-collapse:collapse; margin-bottom:16px;">' +
+        '<tr>' +
+        '<td style="background-color:#fdecea; border:1px solid #f5c6cb; ' +
+        'padding:10px 14px; font-family:Arial,sans-serif; font-size:12px; ' +
+        'color:#721c24; font-weight:600;">' +
+        CoreUtils.escapeHtml(bannerText) +
+        '</td>' +
+        '</tr>' +
+        '</table>'
+      );
+    } catch (e) {
+      Logger.log('CoreReport.buildFreshnessReportBanner_: ' + e);
+      return '';
+    }
+  }
+
+  /**
    * Inline (pure HTML) shell: used for preview + inline export.
    *
    * @param {AppConfig} config
@@ -1426,6 +1474,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     );
 
     var title = cfg.report.title || 'Deployment Health Report';
+    var freshnessBanner = buildFreshnessReportBanner_(cfg);
 
     var headerHtml =
       '<table width="100%" cellpadding="0" cellspacing="0" border="0" ' +
@@ -1511,6 +1560,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
           CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') +
           '</div>'
         : '') +
+      freshnessBanner +
       bodyContent +
       footerHtml +
       '</body></html>'
@@ -1533,6 +1583,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       'MMMM yyyy'
     );
     var title = cfg.report.title || 'Deployment Health Report';
+    var freshnessBanner = buildFreshnessReportBanner_(cfg);
 
     var headerInner =
       '<table width="100%" cellpadding="0" cellspacing="0" border="0" ' +
@@ -1626,6 +1677,9 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
           'font-size:11px; color:#4a628f; font-style:italic;">' +
           CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') +
           '</div></td></tr>'
+        : '') +
+      (freshnessBanner
+        ? '<tr><td style="padding:8px 18px 0 18px;">' + freshnessBanner + '</td></tr>'
         : '') +
       '<tr>' +
       '<td style="padding:16px 18px 6px 18px; font-size:14px; line-height:1.5;">' +

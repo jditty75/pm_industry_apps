@@ -3344,3 +3344,233 @@ function _dbg_wfm23BaselineCacheCheck() {
   }
   Logger.log('_dbg_wfm23BaselineCacheCheck: OK');
 }
+
+/**
+ * WFM.23 investigation: trace Lauren Vannini Explorer FY27-Q2 scorecard cell
+ * and City of PHX Modeled assignment visibility (Logger.log only).
+ */
+function _dbg_traceLaurenExplorer() {
+  _dbg_requireAdmin_();
+  var WORKER = 'Lauren Vannini';
+  var TRACE_Q = 'FY27-Q2';
+  var curQ = fiscalQuarterKey_(new Date());
+
+  Logger.log('=== _dbg_traceLaurenExplorer: ' + WORKER + ' ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' currentFiscalQuarter=' + curQ);
+
+  // ---- 1. Actuals_Worker_Summary row ----
+  Logger.log('--- 1. Actuals_Worker_Summary ---');
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+  var info = resIndex[WORKER] || {};
+  var employeeId = String(info.employee_id || '').trim();
+  var summary = employeeId ? actualsSummary[employeeId] : null;
+  if (!summary) {
+    Object.keys(actualsSummary).some(function (eid) {
+      if (String(actualsSummary[eid].resource_name || '') === WORKER) {
+        summary = actualsSummary[eid];
+        employeeId = eid;
+        return true;
+      }
+      return false;
+    });
+  }
+  if (!summary) {
+    Logger.log('  NOT FOUND — employee_id from resource index=' + (employeeId || '(blank)'));
+  } else {
+    Logger.log('  employee_id=' + summary.employee_id);
+    Logger.log('  resource_name=' + summary.resource_name);
+    Logger.log('  qtd_actual_icp_hours=' + summary.qtd_actual_icp_hours);
+    Logger.log('  qtd_icp_plus_forecast_hours=' + summary.qtd_icp_plus_forecast_hours);
+    Logger.log('  bonus_target_billable_hours_eoq=' + summary.bonus_target_billable_hours_eoq);
+  }
+
+  // ---- 2. quarterWorkdaySummary_ for FY27-Q2 ----
+  var holidays = readHolidays_();
+  var wd = quarterWorkdaySummary_(TRACE_Q, holidays);
+  Logger.log('--- 2. quarterWorkdaySummary_(' + TRACE_Q + ') ---');
+  Logger.log('  workdays=' + wd.workdays);
+  Logger.log('  holidayHours=' + wd.holidayHours);
+  Logger.log('  icpAvailableHours=' + wd.icpAvailableHours);
+  Logger.log('  rawCapacityHours=' + wd.rawCapacityHours);
+
+  // ---- 3. Current-quarter scorecard cell (buildWorkerQuarters_ path) ----
+  Logger.log('--- 3. buildWorkerQuarters_ scorecard cell (' + TRACE_Q + ') ---');
+  var settings = readSettings_();
+  var forecastParams = { viewMode: 'Committed', workerScope: 'SLG', includeTimeOff: false };
+  var forecast = computeWeeklyForecast_(forecastParams);
+  var worker = (forecast.workers || []).find(function (w) { return w.resource === WORKER; });
+  if (!worker) {
+    Logger.log('  worker NOT FOUND in computeWeeklyForecast_ (Committed/SLG)');
+  } else {
+    Logger.log('  employeeId=' + worker.employeeId + ' icpRole=' + worker.icpRole +
+      ' jobProfile=' + worker.jobProfile + ' icpTarget=' + worker.icpTarget);
+    var quarters = buildWorkerQuarters_(
+      worker, [TRACE_Q], forecast.weeks, holidays, actualsSummary, settings, curQ);
+    var cell = quarters[0];
+    if (!cell) {
+      Logger.log('  quarter cell missing');
+    } else {
+      Logger.log('  source=' + cell.source);
+      Logger.log('  productiveHours=' + cell.productiveHours);
+      Logger.log('  denominator (icpAvailableHours)=' + cell.icpAvailableHours);
+      Logger.log('  icpUtil=' + (cell.icpUtil * 100).toFixed(4) + '%');
+      Logger.log('  arithmetic: ' + cell.productiveHours + ' / ' + cell.icpAvailableHours +
+        ' = ' + cell.icpUtil.toFixed(6) + ' (' + (cell.icpUtil * 100).toFixed(2) + '%)');
+      Logger.log('  targetHours=' + cell.targetHours + ' appTargetHours=' + cell.appTargetHours);
+      Logger.log('  bonusAttainment=' + (cell.bonusAttainment * 100).toFixed(4) + '%');
+      Logger.log('  financeUtil=' + (cell.financeUtil * 100).toFixed(4) + '%');
+      if (cell.isCurrentQuarter && summary) {
+        Logger.log('  current-quarter inputs: qtd_icp_plus_forecast_hours=' +
+          summary.qtd_icp_plus_forecast_hours + ' (numerator when source=actuals_plus_forecast)');
+      }
+    }
+  }
+
+  // ---- Locate City of PHX assignment ----
+  Logger.log('--- 4. Assignment + forecast visibility (Committed vs Scenario) ---');
+  var assigns = cachedRead_(ASSIGNMENTS);
+  var phxAssign = null;
+  assigns.forEach(function (a) {
+    if (String(a.resource_name || '') !== WORKER) return;
+    var startIso = String(a.start_date || '').slice(0, 10);
+    var notes = String(a.notes || '');
+    var opp = String(a.opportunity_id || '');
+    if (Number(a.estimated_hours) === 32 && startIso === '2026-09-28') {
+      phxAssign = a;
+    } else if (notes.indexOf('PHX') >= 0 || opp.indexOf('PHX') >= 0) {
+      if (!phxAssign) phxAssign = a;
+    }
+  });
+  if (!phxAssign) {
+    Logger.log('  City of PHX assignment NOT FOUND — listing all ' + WORKER + ' assignments:');
+    assigns.filter(function (a) { return String(a.resource_name) === WORKER; }).forEach(function (a) {
+      Logger.log('    id=' + a.assignment_id + ' status=' + a.status +
+        ' hours=' + a.estimated_hours +
+        ' ' + String(a.start_date || '').slice(0, 10) + '→' + String(a.end_date || '').slice(0, 10) +
+        ' opp=' + a.opportunity_id + ' notes=' + a.notes);
+    });
+  } else {
+    Logger.log('  assignment_id=' + phxAssign.assignment_id);
+    Logger.log('  status=' + phxAssign.status);
+    Logger.log('  estimated_hours=' + phxAssign.estimated_hours);
+    Logger.log('  start_date=' + String(phxAssign.start_date || '').slice(0, 10));
+    Logger.log('  end_date=' + String(phxAssign.end_date || '').slice(0, 10));
+    Logger.log('  opportunity_id=' + phxAssign.opportunity_id);
+    Logger.log('  scenario_id=' + phxAssign.scenario_id);
+    Logger.log('  notes=' + phxAssign.notes);
+  }
+
+  var calendar = readCalendar_();
+  var weekQkMap = {};
+  (calendar.weeks || []).forEach(function (wk) {
+    weekQkMap[wk.week_key] = fiscalQuarterKey_(wk.week_start);
+  });
+
+  function assignmentIncludedInView_(assign, viewMode, scenarioId) {
+    if (!assign) return false;
+    var isCommitted = (assign.status === 'Committed');
+    var isModeled = (assign.status === 'Modeled');
+    return isCommitted ||
+      (viewMode === 'Scenario' && isModeled &&
+       (!scenarioId || String(assign.scenario_id || '') === String(scenarioId || '')));
+  }
+
+  function traceForecastMode_(viewMode) {
+    Logger.log('  --- viewMode=' + viewMode + ' ---');
+    var included = assignmentIncludedInView_(phxAssign, viewMode, '');
+    Logger.log('    PHX assignment included by filter logic: ' + included +
+      ' (status=' + (phxAssign ? phxAssign.status : 'n/a') + ')');
+    var fc = computeWeeklyForecast_({
+      viewMode: viewMode,
+      workerScope: 'SLG',
+      includeTimeOff: false
+    });
+    var w = (fc.workers || []).find(function (x) { return x.resource === WORKER; });
+    if (!w) {
+      Logger.log('    worker not in forecast');
+      return;
+    }
+    var assignHoursByWeek = {};
+    var assignHoursByQuarter = {};
+    var totalAssign = 0;
+    Object.keys(w.projects || {}).forEach(function (proj) {
+      if (proj.indexOf('Assignment') !== 0) return;
+      Object.keys(w.projects[proj]).forEach(function (wk) {
+        var h = Number(w.projects[proj][wk]) || 0;
+        if (!h) return;
+        assignHoursByWeek[wk] = (assignHoursByWeek[wk] || 0) + h;
+        totalAssign += h;
+        var qk = weekQkMap[wk] || '(unknown)';
+        assignHoursByQuarter[qk] = (assignHoursByQuarter[qk] || 0) + h;
+      });
+    });
+    Logger.log('    total Assignment project hours across all weeks: ' + totalAssign.toFixed(4));
+    if (phxAssign && included) {
+      var expanded = expandAssignmentToWeekly_(phxAssign, calendar) || [];
+      var phxTotal = 0;
+      var phxByQuarter = {};
+      expanded.forEach(function (ew) {
+        var wk = String(ew.week_key || '');
+        var h = Number(ew.hours) || 0;
+        phxTotal += h;
+        var qk = weekQkMap[wk] || fiscalQuarterKey_(wk);
+        phxByQuarter[qk] = (phxByQuarter[qk] || 0) + h;
+        var inForecast = Number(assignHoursByWeek[wk] || 0);
+        Logger.log('      week ' + wk + ' q=' + qk + ' expanded=' + h.toFixed(4) +
+          ' in-forecast-assign=' + inForecast.toFixed(4));
+      });
+      Logger.log('    PHX expandAssignmentToWeekly_ total=' + phxTotal.toFixed(4));
+      Object.keys(phxByQuarter).sort().forEach(function (qk) {
+        Logger.log('      quarter ' + qk + ': ' + phxByQuarter[qk].toFixed(4) + 'h');
+      });
+    } else if (phxAssign) {
+      Logger.log('    PHX assignment excluded — no weekly hours expected in this viewMode');
+    }
+    if (Object.keys(assignHoursByQuarter).length) {
+      Logger.log('    all assignment hours by fiscal quarter:');
+      Object.keys(assignHoursByQuarter).sort().forEach(function (qk) {
+        Logger.log('      ' + qk + ': ' + assignHoursByQuarter[qk].toFixed(4) + 'h');
+      });
+    }
+    var visibleWeeks = (typeof _deriveVisibleWeeksFiscal_ === 'function')
+      ? _deriveVisibleWeeksFiscal_(fc.weeks) : [];
+    var visibleKeys = {};
+    visibleWeeks.forEach(function (vw) { visibleKeys[vw.week_key] = true; });
+    var visibleAssign = 0;
+    Object.keys(assignHoursByWeek).forEach(function (wk) {
+      if (visibleKeys[wk]) visibleAssign += assignHoursByWeek[wk];
+    });
+    Logger.log('    Explorer strip scope: ' + curQ + ' + nextQ (' + visibleWeeks.length + ' weeks)');
+    Logger.log('    assignment hours in visible strip window: ' + visibleAssign.toFixed(4));
+  }
+
+  traceForecastMode_('Committed');
+  traceForecastMode_('Scenario');
+
+  // ---- 5. expandAssignmentToWeekly_ raw output ----
+  Logger.log('--- 5. expandAssignmentToWeekly_ (PHX assignment) ---');
+  if (!phxAssign) {
+    Logger.log('  skipped — assignment not found');
+  } else {
+    var weeks = expandAssignmentToWeekly_(phxAssign, calendar) || [];
+    var sum = 0;
+    weeks.forEach(function (w) {
+      var h = Number(w.hours) || 0;
+      sum += h;
+      var qk = weekQkMap[w.week_key] || fiscalQuarterKey_(w.week_start || w.week_key);
+      Logger.log('  ' + w.week_key + ' → ' + h.toFixed(4) + 'h  (' + qk + ')');
+    });
+    Logger.log('  total expanded hours: ' + sum.toFixed(4) +
+      ' (sheet estimated_hours=' + phxAssign.estimated_hours + ')');
+    if (weeks.length) {
+      var firstQk = weekQkMap[weeks[0].week_key] || '?';
+      var lastQk = weekQkMap[weeks[weeks.length - 1].week_key] || '?';
+      Logger.log('  fiscal quarter span: ' + firstQk + ' → ' + lastQk);
+    }
+  }
+
+  Logger.log('=== _dbg_traceLaurenExplorer: DONE ===');
+}

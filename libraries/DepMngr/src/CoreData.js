@@ -424,6 +424,37 @@ var CoreData = (function () {
         classification:        normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
       };
     });
+
+    // N3: collapse 15/18-char twin keys — newest LastEditedAt wins; result keyed by full id.
+    var rawMap = map;
+    map = {};
+    var byPrefix = {};
+    Object.keys(rawMap).forEach(function (id) {
+      var entry = rawMap[id];
+      var prefix = id.length >= 15 ? id.slice(0, 15) : id;
+      if (!byPrefix[prefix]) {
+        byPrefix[prefix] = { fullId: id, entry: entry };
+      } else {
+        var kept = byPrefix[prefix];
+        var keptTs = kept.entry.lastEditedAt || '';
+        var newTs = entry.lastEditedAt || '';
+        if (newTs > keptTs) {
+          Logger.log('CoreData.getDeploymentOverridesMap_: collapsed override twin for prefix ' +
+                     prefix + ' — kept ' + id + ' (lastEditedAt=' + newTs + ') over ' +
+                     kept.fullId + ' (lastEditedAt=' + keptTs + ')');
+          byPrefix[prefix] = { fullId: id, entry: entry };
+        } else {
+          Logger.log('CoreData.getDeploymentOverridesMap_: collapsed override twin for prefix ' +
+                     prefix + ' — kept ' + kept.fullId + ' (lastEditedAt=' + keptTs + ') over ' +
+                     id + ' (lastEditedAt=' + newTs + ')');
+        }
+      }
+    });
+    Object.keys(byPrefix).forEach(function (prefix) {
+      var kept = byPrefix[prefix];
+      map[kept.fullId] = kept.entry;
+    });
+
     _cache.overridesMap = map;
     return map;
   }
@@ -474,6 +505,44 @@ var CoreData = (function () {
     var s = String(v || '').trim().toLowerCase();
     if (s === 'structural') return 'Structural';
     return 'Monthly';
+  }
+
+  /**
+   * Normalizes a Salesforce deployment id string (trim; use full 18 when present).
+   * @param {any} id
+   * @return {string}
+   * @private
+   */
+  function _canonicalId_(id) {
+    var s = String(id || '').trim();
+    return s.length >= 18 ? s.slice(0, 18) : s;
+  }
+
+  /**
+   * Resolves a deployment id to its canonical 18-char form from SFDC rows when available.
+   * @param {AppConfig} cfg
+   * @param {any} deploymentId
+   * @return {string}
+   * @private
+   */
+  function _resolveCanonicalDeploymentId_(cfg, deploymentId) {
+    var target = _canonicalId_(deploymentId);
+    if (!target) return '';
+    if (target.length >= 18) return target;
+    var prefix = target.slice(0, 15);
+    try {
+      var rows = readSfdcDeploymentsRaw_(cfg) || [];
+      for (var i = 0; i < rows.length; i++) {
+        var id = _canonicalId_(rows[i].deploymentId);
+        if (!id) continue;
+        if (id === target || (id.length >= 15 && id.slice(0, 15) === prefix)) {
+          return id;
+        }
+      }
+    } catch (err) {
+      Logger.log('CoreData._resolveCanonicalDeploymentId_: readSfdcDeploymentsRaw_ failed: ' + err);
+    }
+    return target;
   }
 
   function buildEffectiveDeploymentRow_(rawRow, overridesMap) {
@@ -1710,25 +1779,37 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     CoreUsers.requirePowerUser_(cfg);
     if (!deploymentId) throw new Error('deploymentId required');
 
+    var canonicalId = _resolveCanonicalDeploymentId_(cfg, deploymentId);
+
     var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(cfg.sheets.deploymentOverrides);
     if (!sheet) throw new Error('DeploymentOverrides sheet not found: ' + cfg.sheets.deploymentOverrides);
 
     // Capture before-snapshot for audit
-    var before = snapshotDeploymentOverride_(cfg, deploymentId);
-    var accountName = lookupAccountForDeployment_(cfg, deploymentId);
+    var before = snapshotDeploymentOverride_(cfg, canonicalId);
+    var accountName = lookupAccountForDeployment_(cfg, canonicalId);
 
     var values = sheet.getDataRange().getValues();
     var rowIndex = -1;
+    var targetPrefix = String(deploymentId).trim();
+    targetPrefix = targetPrefix.length >= 15 ? targetPrefix.slice(0, 15) : targetPrefix;
     if (values.length > 1) {
-      var ids = values.slice(1).map(function (r) { return String(r[0] || '').trim(); });
-      var idx = ids.indexOf(String(deploymentId).trim());
-      if (idx >= 0) rowIndex = idx + 2;
+      for (var ri = 1; ri < values.length; ri++) {
+        var rowId = String(values[ri][0] || '').trim();
+        if (!rowId) continue;
+        var rowPrefix = rowId.length >= 15 ? rowId.slice(0, 15) : rowId;
+        if (rowId === String(deploymentId).trim() || rowPrefix === targetPrefix) {
+          rowIndex = ri + 1;
+          break;
+        }
+      }
     }
     if (rowIndex === -1) {
       var lastRow = sheet.getLastRow();
       rowIndex = (lastRow >= 1) ? lastRow + 1 : 2;
-      sheet.getRange(rowIndex, 1).setValue(deploymentId);
+      sheet.getRange(rowIndex, 1).setValue(canonicalId);
+    } else {
+      sheet.getRange(rowIndex, 1).setValue(canonicalId);
     }
 
     var headers = values[0] || sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -1756,12 +1837,12 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     setCell('LastEditedAt', new Date());
 
     // Capture after-snapshot and write audit row
-    var after = snapshotDeploymentOverride_(cfg, deploymentId);
+    var after = snapshotDeploymentOverride_(cfg, canonicalId);
     var changed = diffSnapshotFields_(before, after);
     writeAuditRow_(cfg, {
       action:           before.isEmpty ? 'CREATE' : 'UPDATE',
       overrideType:     'deployment',
-      deploymentId:     deploymentId,
+      deploymentId:     canonicalId,
       accountName:      accountName,
       fieldsAffected:   changed,
       oldValueSnapshot: JSON.stringify(before),

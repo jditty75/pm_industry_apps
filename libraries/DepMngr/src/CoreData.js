@@ -156,6 +156,19 @@ var CoreData = (function () {
   var _perfCacheKnownKeys = {};
 
   /**
+   * Builds a refresh-aware tier-2 cache key: baseName + appId + optional data-version token.
+   * @param {AppConfig} cfg
+   * @param {string} baseName
+   * @return {string}
+   * @private
+   */
+  function _perfKey_(cfg, baseName) {
+    var appId = (cfg && cfg.appId) ? cfg.appId : 'default';
+    var v = _sfdcDataVersion_(cfg);
+    return baseName + ':' + appId + (v ? ':' + v : '');
+  }
+
+  /**
    * Serializes and compresses a value for CacheService storage.
    * Returns a base64-encoded gzipped string.
    * @private
@@ -871,10 +884,7 @@ function _sfdcDataVersion_(cfg) {
     // Performance Layer 1: tier 1 (in-memory).
     if (_cache.sfdcRows !== null) return _cache.sfdcRows;
     // Performance Layer 2: tier 2 (sheet-tab cache).
-    var _ver = _sfdcDataVersion_(cfg);
-    var _ver = _sfdcDataVersion_(cfg);
-    var cacheKey = 'sfdcRows:' + (cfg && cfg.appId ? cfg.appId : 'default') +
-                 (_ver ? ':' + _ver : '');
+    var cacheKey = _perfKey_(cfg, 'sfdcRows');
     var cached = _perfCacheRead_(cacheKey);
     if (cached !== null) {
       _cache.sfdcRows = cached; // hoist to tier 1 for the rest of this execution

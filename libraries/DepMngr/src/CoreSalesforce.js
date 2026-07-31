@@ -646,7 +646,9 @@ var CoreSalesforce = {
     // Performance Layer 1: tier 1 (in-memory).
     if (_enrichmentCache !== null) return _enrichmentCache;
     // Performance Layer 2: tier 2 (sheet-tab cache).
-    var enrichmentCacheKey = 'enrichmentMap:' + (cfg && cfg.appId ? cfg.appId : 'default');
+    var appId = (cfg && cfg.appId) ? cfg.appId : 'default';
+    var dataVer = CoreData._dataVersion(cfg);
+    var enrichmentCacheKey = 'enrichmentMap:' + appId + (dataVer ? ':' + dataVer : '');
     var cachedEnrichment = _perfCacheReadS_(enrichmentCacheKey);
     if (cachedEnrichment !== null) {
       _enrichmentCache = cachedEnrichment;

@@ -3977,6 +3977,15 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   // EXPORTS
   // ===========================================================================
 
+  /**
+   * Exported accessor for the SFDC data-version token (used by CoreSalesforce).
+   * @param {AppConfig} cfg
+   * @return {string}
+   */
+  function _dataVersion(cfg) {
+    return _sfdcDataVersion_(cfg);
+  }
+
   return {
     // Phase 1 surface — preserved unchanged for backward compatibility
     getActiveDeployments:                getActiveDeployments,
@@ -4017,6 +4026,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Performance Layer 2 additions
     _warmSfdcRows:               _warmSfdcRows,
     _getCachedSfdcRowCount:      _getCachedSfdcRowCount,
+    _dataVersion:                _dataVersion,
 
     // D1 diagnostic
     _debugDdFromContacts_:       _debugDdFromContacts_,

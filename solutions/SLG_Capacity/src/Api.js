@@ -1020,6 +1020,41 @@ function api_projectSoftBookings(params, softBookings) {
 }
 
 /**
+ * Resolve resource_type for a soft-booking commit. Uses the booking payload
+ * when present; otherwise looks up the worker in the resource index by name
+ * or employee_id. Blank-safe — returns '' when no type is known.
+ * @param {Object} booking
+ * @return {string}
+ */
+function _resolveBookingResourceType_(booking) {
+  var fromBooking = String((booking && booking.resource_type) || '').trim();
+  if (fromBooking) return fromBooking;
+
+  var resourceName = String((booking && booking.resource_name) || '').trim();
+  var employeeId = String((booking && booking.employee_id) || '').trim();
+  if (!resourceName && !employeeId) return '';
+
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_()
+    : _resourceIndex_(cachedRead_(ALLOC_NORM));
+
+  var info = null;
+  if (resourceName && resIndex[resourceName]) {
+    info = resIndex[resourceName];
+  } else if (employeeId) {
+    Object.keys(resIndex).some(function (k) {
+      if (String(resIndex[k].employee_id || '').trim() === employeeId) {
+        info = resIndex[k];
+        return true;
+      }
+      return false;
+    });
+  }
+
+  return info ? String(info.resource_type || '').trim() : '';
+}
+
+/**
  * WFM.23 Stage 3: promote soft-booking basket rows to Modeled assignments.
  * @param {string} scenarioName non-empty → always creates a NEW scenario via saveScenario_
  * @param {Array<Object>} bookings
@@ -1058,10 +1093,12 @@ function api_commitSoftBookings(scenarioName, bookings) {
       notes = 'Soft-book label: ' + String(what.label || '');
     }
 
+    var resolvedResourceType = _resolveBookingResourceType_(b);
+
     var saved = saveAssignment_({
       opportunity_id: opportunityId,
       resource_name: String(b.resource_name || ''),
-      resource_type: String(b.resource_type || ''),
+      resource_type: resolvedResourceType,
       start_date: b.start_date,
       end_date: b.end_date,
       estimated_hours: Number(b.total_hours) || 0,

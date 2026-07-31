@@ -3001,39 +3001,79 @@ function _dbg_reconcileWFM23() {
       Logger.log('  Check 4: FAILED (no worker)');
       return;
     }
-    var worker = picked.worker;
-    var resIndex = _resourceIndex_(cachedRead_(ALLOC_NORM));
-    var resEntry = resIndex[worker.resourceName] || {};
-    var resourceType = String(resEntry.resource_type || '').trim();
-    if (!resourceType) {
-      failures.push('Check 4: no resource_type for worker ' + worker.resourceName);
-      Logger.log('  Check 4: FAILED (no resource_type)');
+
+    var baselineOnly = api_projectSoftBookings(picked.params, []);
+    var workers = baselineOnly.baseline.worker || [];
+    if (!workers.length) {
+      failures.push('Check 4: no Director-scope workers in baseline');
+      Logger.log('  Check 4: FAILED (no workers)');
       return;
     }
 
+    function resolveRt_(w) {
+      return _resolveBookingResourceType_({
+        resource_name: String(w.resourceName || ''),
+        employee_id: String(w.employeeId || '')
+      });
+    }
+
+    var worker = null;
+    var resourceType = '';
+    workers.some(function (w) {
+      var rt = resolveRt_(w);
+      if (rt) {
+        worker = w;
+        resourceType = rt;
+        return true;
+      }
+      return false;
+    });
+    if (!worker) {
+      failures.push('Check 4: no Director-scope worker with resource_type found');
+      Logger.log('  Check 4: FAILED (no worker with resource_type)');
+      return;
+    }
+    Logger.log('  parity worker: ' + worker.resourceName + ' rt=' + resourceType);
+
+    var blankWorker = null;
+    workers.some(function (w) {
+      if (!resolveRt_(w)) {
+        blankWorker = w;
+        return true;
+      }
+      return false;
+    });
+
     var futureQk = null;
     var labelQk = null;
+    var blankQk = null;
     var today = new Date();
     rollingQuarterKeys_(8).forEach(function (qk) {
       var bounds = fiscalQuarterBounds_(qk);
       if (bounds.start <= today) return;
       if (!futureQk) futureQk = qk;
       else if (!labelQk && qk !== futureQk) labelQk = qk;
+      else if (!blankQk && qk !== futureQk && qk !== labelQk) blankQk = qk;
     });
     if (!futureQk) {
       failures.push('Check 4: no future fiscal quarter found');
       return;
     }
     if (!labelQk) labelQk = futureQk;
+    if (!blankQk) blankQk = labelQk;
 
     var bounds = fiscalQuarterBounds_(futureQk);
     var labelBounds = fiscalQuarterBounds_(labelQk);
+    var blankBounds = fiscalQuarterBounds_(blankQk);
     var startIso = _toIso_(bounds.start);
     var endIso = _toIso_(bounds.end);
     var labelStartIso = _toIso_(labelBounds.start);
     var labelEndIso = _toIso_(labelBounds.end);
+    var blankStartIso = _toIso_(blankBounds.start);
+    var blankEndIso = _toIso_(blankBounds.end);
     var totalHours = 33;
     var labelHours = 17;
+    var blankHours = 11;
     var calendar = readCalendar_();
 
     var directPayload = {
@@ -3049,13 +3089,13 @@ function _dbg_reconcileWFM23() {
       notes: ''
     };
 
+    // Omit resource_type — server must resolve from resource index (real soft-book path).
     var booking = {
       employee_id: String(worker.employeeId || ''),
       resource_name: String(worker.resourceName),
       start_date: startIso,
       end_date: endIso,
       total_hours: totalHours,
-      resource_type: resourceType,
       what: { type: 'opportunity', opportunity_id: '' }
     };
 
@@ -3102,7 +3142,6 @@ function _dbg_reconcileWFM23() {
       start_date: labelStartIso,
       end_date: labelEndIso,
       total_hours: labelHours,
-      resource_type: resourceType,
       what: { type: 'label', label: '_dbg_wfm23_label_test' }
     };
     var labelResult = api_commitSoftBookings('', [labelBooking]);
@@ -3142,6 +3181,61 @@ function _dbg_reconcileWFM23() {
           Logger.log('  label-only weekly expansion OK');
         }
       }
+    }
+
+    if (blankWorker) {
+      Logger.log('  blank-resource_type worker: ' + blankWorker.resourceName);
+      var blankBooking = {
+        employee_id: String(blankWorker.employeeId || ''),
+        resource_name: String(blankWorker.resourceName),
+        start_date: blankStartIso,
+        end_date: blankEndIso,
+        total_hours: blankHours,
+        what: { type: 'opportunity', opportunity_id: '' }
+      };
+      var blankResult = api_commitSoftBookings('', [blankBooking]);
+      var blankId = blankResult.committed[0] && blankResult.committed[0].assignment_id;
+      if (!blankId) {
+        failures.push('Check 4: blank-resource_type commit returned no assignment_id');
+      } else {
+        idsToDelete.push(String(blankId));
+        invalidateCache_(ASSIGNMENTS);
+        var blankRow = readTable_(ASSIGNMENTS).find(function (r) {
+          return String(r.assignment_id) === String(blankId);
+        });
+        if (!blankRow) {
+          failures.push('Check 4: blank-resource_type assignment row not found');
+        } else {
+          if (String(blankRow.status || '') !== 'Modeled') {
+            failures.push('Check 4: blank-resource_type row status not Modeled');
+          }
+          if (String(blankRow.team_label || '') !== 'Unclassified') {
+            failures.push('Check 4: blank-resource_type team_label expected Unclassified got ' +
+              blankRow.team_label);
+          }
+          if (String(blankRow.role || '').trim() !== '') {
+            failures.push('Check 4: blank-resource_type role expected blank got ' + blankRow.role);
+          }
+          var blankShape = {
+            resource_name: blankRow.resource_name,
+            start_date: blankRow.start_date,
+            end_date: blankRow.end_date,
+            estimated_hours: blankHours,
+            distribution: 'Even',
+            status: 'Modeled'
+          };
+          var blankWeekly = _dbg_wfm23WeeklySignature_(blankRow, calendar);
+          var blankExpectedWeekly = _dbg_wfm23WeeklySignature_(blankShape, calendar);
+          if (blankWeekly !== blankExpectedWeekly) {
+            failures.push('Check 4: blank-resource_type weekly expansion mismatch');
+          } else if (String(blankRow.team_label || '') === 'Unclassified' &&
+              String(blankRow.role || '').trim() === '') {
+            Logger.log('  blank-resource_type Unclassified/role-blank weekly OK');
+          }
+        }
+      }
+    } else {
+      Logger.log('  blank-resource_type sub-check skipped (no blank worker in scope)');
     }
 
     var uniqueIds = [];

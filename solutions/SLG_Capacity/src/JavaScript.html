@@ -3122,8 +3122,310 @@
     await openAssignDrawerFromSoftBooking_(booking);
   }
 
-  function stubExplorerCommit_() {
-    toast('Submit all lands in Stage 3', '');
+  function getSoftBookLinkRecords_(whatType) {
+    if (whatType === 'deployment') return State.deployments || [];
+    return State.opportunities || [];
+  }
+
+  function formatSoftBookLinkLabel_(whatType, item) {
+    if (!item) return '';
+    if (whatType === 'deployment') {
+      return (item.account_name || item.account || '') + ' — ' + (item.deployment_name || item.deployment_id || '');
+    }
+    return (item.account || item.account_name || '') + ' — ' + (item.opportunity_name || item.opportunity_id || '');
+  }
+
+  function getSoftBookLinkId_(whatType, item) {
+    if (!item) return '';
+    return whatType === 'deployment'
+      ? String(item.deployment_id || '')
+      : String(item.opportunity_id || '');
+  }
+
+  function filterSoftBookLinkRecords_(whatType, filterText) {
+    const f = String(filterText || '').toLowerCase().trim();
+    return getSoftBookLinkRecords_(whatType).filter(function (item) {
+      const label = formatSoftBookLinkLabel_(whatType, item).toLowerCase();
+      return !f || label.indexOf(f) >= 0;
+    });
+  }
+
+  function populateSoftBookLinkSelect_(sel, whatType, filterText, selectedId) {
+    if (!sel) return;
+    const items = filterSoftBookLinkRecords_(whatType, filterText);
+    let html = '<option value="">— Select —</option>';
+    items.forEach(function (item) {
+      const id = getSoftBookLinkId_(whatType, item);
+      const label = formatSoftBookLinkLabel_(whatType, item);
+      html += '<option value="' + escapeHtml_(id) + '">' + escapeHtml_(label) + '</option>';
+    });
+    sel.innerHTML = html;
+    if (selectedId) sel.value = selectedId;
+  }
+
+  function syncSoftBookCommitRowWhatUi_(rowEl, row) {
+    if (!rowEl || !row) return;
+    const linkWrap = rowEl.querySelector('.sb-commit-link-wrap');
+    const search = rowEl.querySelector('.sb-commit-search');
+    const linkSel = rowEl.querySelector('.sb-commit-link');
+    const labelInput = rowEl.querySelector('.sb-commit-label');
+    const isLabel = row.whatType === 'label';
+    if (linkWrap) linkWrap.hidden = isLabel;
+    if (labelInput) {
+      labelInput.hidden = !isLabel;
+      labelInput.value = row.label || '';
+    }
+    if (!isLabel) {
+      populateSoftBookLinkSelect_(linkSel, row.whatType, search ? search.value : '', row.linkId);
+    }
+    rowEl.querySelectorAll('.sb-commit-what-seg button').forEach(function (btn) {
+      btn.classList.toggle('on', btn.dataset.val === row.whatType);
+    });
+  }
+
+  function renderSoftBookCommitGrid_() {
+    const body = $('#sbCommitGridBody');
+    if (!body) return;
+    const rows = State.softBookCommitDraft || [];
+    body.innerHTML = rows.map(function (row, idx) {
+      return '<tr class="sb-commit-row" data-idx="' + idx + '">' +
+        '<td><button type="button" class="sb-commit-worker-link" data-worker="' +
+          escapeHtml_(row.resource_name) + '">' + escapeHtml_(row.resource_name) + '</button></td>' +
+        '<td class="muted">' + escapeHtml_(formatSoftBookSpan_(row)) + '</td>' +
+        '<td class="num">' + escapeHtml_(fmtHours(row.total_hours)) + 'h</td>' +
+        '<td class="sb-commit-what-cell">' +
+          '<div class="seg seg-sm sb-commit-what-seg">' +
+            '<button type="button" data-val="deployment">Deployment</button>' +
+            '<button type="button" data-val="opportunity" class="on">Opportunity</button>' +
+            '<button type="button" data-val="label">Manual label</button>' +
+          '</div>' +
+          '<div class="sb-commit-link-wrap">' +
+            '<input type="text" class="input sb-commit-search" placeholder="Filter…">' +
+            '<select class="select sb-commit-link"></select>' +
+          '</div>' +
+          '<input type="text" class="input sb-commit-label" placeholder="Manual label text">' +
+        '</td>' +
+        '<td><button type="button" class="btn-ghost sb-commit-remove" aria-label="Remove row">\u2715</button></td>' +
+      '</tr>';
+    }).join('');
+
+    $$('#sbCommitGridBody .sb-commit-row').forEach(function (rowEl) {
+      const idx = Number(rowEl.dataset.idx);
+      const row = State.softBookCommitDraft[idx];
+      syncSoftBookCommitRowWhatUi_(rowEl, row);
+
+      rowEl.querySelector('.sb-commit-worker-link')?.addEventListener('click', function () {
+        selectExplorerResource_(row.resource_name);
+      });
+      rowEl.querySelectorAll('.sb-commit-what-seg button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          row.whatType = btn.dataset.val;
+          row.linkId = '';
+          row.label = '';
+          syncSoftBookCommitRowWhatUi_(rowEl, row);
+        });
+      });
+      const search = rowEl.querySelector('.sb-commit-search');
+      const linkSel = rowEl.querySelector('.sb-commit-link');
+      const labelInput = rowEl.querySelector('.sb-commit-label');
+      if (search) {
+        search.addEventListener('input', debounce_(function () {
+          populateSoftBookLinkSelect_(linkSel, row.whatType, search.value, row.linkId);
+        }, 150));
+      }
+      if (linkSel) {
+        linkSel.addEventListener('change', function () {
+          row.linkId = linkSel.value || '';
+        });
+      }
+      if (labelInput) {
+        labelInput.addEventListener('input', function () {
+          row.label = labelInput.value;
+        });
+      }
+      rowEl.querySelector('.sb-commit-remove')?.addEventListener('click', function () {
+        State.softBookCommitDraft.splice(idx, 1);
+        if (!State.softBookCommitDraft.length) {
+          closeSoftBookCommitModal_();
+        } else {
+          renderSoftBookCommitGrid_();
+        }
+      });
+    });
+  }
+
+  function syncSoftBookCommitApplyBar_() {
+    const whatType = $$('#sbCommitApplyWhatSeg button').find(function (b) {
+      return b.classList.contains('on');
+    });
+    const type = whatType ? whatType.dataset.val : 'opportunity';
+    const isLabel = type === 'label';
+    const search = $('#sbCommitApplySearch');
+    const linkSel = $('#sbCommitApplyLink');
+    const labelInput = $('#sbCommitApplyLabel');
+    if (search) search.hidden = isLabel;
+    if (linkSel) linkSel.hidden = isLabel;
+    if (labelInput) labelInput.hidden = !isLabel;
+    if (!isLabel) {
+      populateSoftBookLinkSelect_(linkSel, type, search ? search.value : '', linkSel ? linkSel.value : '');
+    }
+  }
+
+  function closeSoftBookCommitModal_() {
+    const modal = $('#softBookCommitModal');
+    if (modal) modal.hidden = true;
+    State.softBookCommitDraft = null;
+    const err = $('#sbCommitError');
+    if (err) err.hidden = true;
+  }
+
+  async function openSoftBookCommitModal_() {
+    const bookings = State.softBookings || [];
+    if (!bookings.length) {
+      toast('No pending soft bookings.', 'err');
+      return;
+    }
+    if (!State.opportunities || !State.opportunities.length) {
+      try { State.opportunities = await call('api_listOpportunities', {}); } catch (e) {}
+    }
+    if (!State.deployments || !State.deployments.length) {
+      try { State.deployments = await call('api_listDeployments'); } catch (e) {}
+    }
+    State.softBookCommitDraft = bookings.map(function (b) {
+      return {
+        employee_id: b.employee_id || '',
+        resource_name: b.resource_name,
+        start_date: b.start_date,
+        end_date: b.end_date,
+        total_hours: b.total_hours,
+        whatType: 'opportunity',
+        linkId: '',
+        label: ''
+      };
+    });
+    const nameEl = $('#sbCommitScenarioName');
+    if (nameEl) nameEl.value = '';
+    $$('#sbCommitApplyWhatSeg button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.val === 'opportunity');
+    });
+    const applySearch = $('#sbCommitApplySearch');
+    if (applySearch) applySearch.value = '';
+    const applyLabel = $('#sbCommitApplyLabel');
+    if (applyLabel) applyLabel.value = '';
+    syncSoftBookCommitApplyBar_();
+    renderSoftBookCommitGrid_();
+    const modal = $('#softBookCommitModal');
+    if (modal) modal.hidden = false;
+  }
+
+  function applySoftBookCommitWhatToAll_() {
+    const whatBtn = $$('#sbCommitApplyWhatSeg button').find(function (b) {
+      return b.classList.contains('on');
+    });
+    const whatType = whatBtn ? whatBtn.dataset.val : 'opportunity';
+    const linkId = $('#sbCommitApplyLink') ? $('#sbCommitApplyLink').value : '';
+    const label = $('#sbCommitApplyLabel') ? $('#sbCommitApplyLabel').value : '';
+    (State.softBookCommitDraft || []).forEach(function (row) {
+      row.whatType = whatType;
+      row.linkId = whatType === 'label' ? '' : linkId;
+      row.label = whatType === 'label' ? label : '';
+    });
+    renderSoftBookCommitGrid_();
+  }
+
+  async function submitSoftBookCommitAll_() {
+    const errEl = $('#sbCommitError');
+    if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+    const scenarioName = ($('#sbCommitScenarioName') && $('#sbCommitScenarioName').value || '').trim();
+    if (!scenarioName) {
+      if (errEl) { errEl.textContent = 'Scenario name is required.'; errEl.hidden = false; }
+      return;
+    }
+    const draft = State.softBookCommitDraft || [];
+    if (!draft.length) {
+      if (errEl) { errEl.textContent = 'No bookings to commit.'; errEl.hidden = false; }
+      return;
+    }
+    for (let i = 0; i < draft.length; i++) {
+      const row = draft[i];
+      if (row.whatType === 'label') {
+        if (!String(row.label || '').trim()) {
+          if (errEl) {
+            errEl.textContent = 'Row ' + (i + 1) + ' (' + row.resource_name + '): enter a manual label.';
+            errEl.hidden = false;
+          }
+          return;
+        }
+      } else if (!row.linkId) {
+        if (errEl) {
+          errEl.textContent = 'Row ' + (i + 1) + ' (' + row.resource_name + '): select a ' + row.whatType + '.';
+          errEl.hidden = false;
+        }
+        return;
+      }
+    }
+    const committedKeys = draft.map(function (r) {
+      return softBookCommitKey_(r);
+    });
+    const bookings = draft.map(function (row) {
+      const what = { type: row.whatType };
+      if (row.whatType === 'opportunity') what.opportunity_id = row.linkId;
+      else if (row.whatType === 'deployment') what.deployment_id = row.linkId;
+      else if (row.whatType === 'label') what.label = String(row.label || '').trim();
+      return {
+        employee_id: row.employee_id,
+        resource_name: row.resource_name,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        total_hours: row.total_hours,
+        resource_type: getResourceTypeForWorker_(row.resource_name),
+        what: what
+      };
+    });
+    const btn = $('#sbCommitSubmitBtn');
+    try {
+      await withLoading_(btn, async function () {
+        await call('api_commitSoftBookings', scenarioName, bookings);
+      }, { label: 'Submitting...' });
+      State.softBookings = (State.softBookings || []).filter(function (b) {
+        return committedKeys.indexOf(softBookCommitKey_(b)) < 0;
+      });
+      closeSoftBookCommitModal_();
+      onSoftBookingsChanged_();
+      refreshExplorer_({ reason: 'softbook-commit-all' });
+      toast('Committed ' + bookings.length + ' Modeled assignment(s) to scenario "' + scenarioName + '".', 'ok');
+    } catch (e) {
+      if (errEl) {
+        errEl.textContent = 'Submit failed: ' + (e.message || e);
+        errEl.hidden = false;
+      }
+    }
+  }
+
+  function initSoftBookCommitModal_() {
+    $$('[data-sb-commit-close]').forEach(function (el) {
+      el.addEventListener('click', closeSoftBookCommitModal_);
+    });
+    $$('#sbCommitApplyWhatSeg button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('#sbCommitApplyWhatSeg button').forEach(function (b) {
+          b.classList.toggle('on', b === btn);
+        });
+        syncSoftBookCommitApplyBar_();
+      });
+    });
+    const applySearch = $('#sbCommitApplySearch');
+    if (applySearch) {
+      applySearch.addEventListener('input', debounce_(function () {
+        const whatBtn = $$('#sbCommitApplyWhatSeg button').find(function (b) {
+          return b.classList.contains('on');
+        });
+        const type = whatBtn ? whatBtn.dataset.val : 'opportunity';
+        populateSoftBookLinkSelect_($('#sbCommitApplyLink'), type, applySearch.value, '');
+      }, 150));
+    }
+    $('#sbCommitApplyBtn')?.addEventListener('click', applySoftBookCommitWhatToAll_);
+    $('#sbCommitSubmitBtn')?.addEventListener('click', submitSoftBookCommitAll_);
   }
 
   let _explorerProjPendingTimer = null;
@@ -3871,7 +4173,7 @@
     const commitW = $('#explorerCommitWorker');
     if (commitW) commitW.addEventListener('click', commitExplorerWorkerSoftBooking_);
     const commitAll = $('#explorerCommitAll');
-    if (commitAll) commitAll.addEventListener('click', stubExplorerCommit_);
+    if (commitAll) commitAll.addEventListener('click', openSoftBookCommitModal_);
 
     document.addEventListener('click', function (e) {
       const pop = $('#explorerSoftBookPopover');
@@ -3882,6 +4184,7 @@
     });
 
     updateExplorerLayout_();
+    initSoftBookCommitModal_();
   })();
 
   async function loadProjectAllocationCard_(resourceName, monthKey) {

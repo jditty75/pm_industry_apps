@@ -1323,6 +1323,57 @@ textarea.input {
   justify-content: flex-end;
 }
 
+/* WFM.23 Stage 3 — submit-all commit grid */
+.sb-commit-apply-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--desk);
+  margin-bottom: 12px;
+}
+.sb-commit-apply-all .seg { flex-shrink: 0; }
+.sb-commit-apply-all .input,
+.sb-commit-apply-all .select { min-width: 140px; flex: 1; max-width: 220px; }
+.sb-commit-table-wrap {
+  max-height: 50vh;
+  overflow: auto;
+  border: 1px solid var(--desk);
+  border-radius: 6px;
+}
+.sb-commit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sb-commit-table th,
+.sb-commit-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--desk);
+  vertical-align: top;
+}
+.sb-commit-table th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  background: var(--business-card);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.sb-commit-what-cell .seg { margin-bottom: 6px; }
+.sb-commit-what-cell .input,
+.sb-commit-what-cell .select { width: 100%; margin-top: 4px; }
+.sb-commit-worker-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--happy-hour);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.sb-commit-worker-link:hover { text-decoration: underline; }
+.sb-commit-footer-note { font-size: 12px; margin-right: auto; }
+
 /* WFM.23 — pinned what-if impact band */
 .explorer-impact-band {
   margin-bottom: 12px;

@@ -73,7 +73,8 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     // Read-only flag for builders that need to hide in-tab controls.
     _accessRole: role,
     _isReadOnly: isReadOnly,
-    overviewTab: cfg.overviewTab || {}
+    overviewTab: cfg.overviewTab || {},
+    freshness: cfg.freshness || {}
   });
 
   // S1: splice the Student tab into filteredUi.tabs dynamically based on
@@ -155,7 +156,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 // ---------------------------------------------------------------------------
 
 function _CoreUI_Markup_buildHeader_(ui) {
-  return [
+  var lines = [
     '<div class="header">',
     '  <div class="header-strip">',
     '    ' + _CoreUI_Markup_workdayWMarkSvg_(),
@@ -163,14 +164,18 @@ function _CoreUI_Markup_buildHeader_(ui) {
     '  <div class="header-body">',
     '    <h1>' + _CoreUI_Markup_esc_(ui.headerTitle || 'Deployment Health Manager') + '</h1>',
     '    <p>' + _CoreUI_Markup_esc_(ui.headerSubtitle || 'Review and manage deployment data across all stages') + '</p>',
-    '  </div>',
-    // Phase 2: right-side region. JS populates with toggle or dropdown depending
-    // on user role. Hidden entirely for anonymous/unknown users.
+    '  </div>'
+  ];
+  if (!ui.freshness || ui.freshness.enabled !== false) {
+    lines.push('  <span id="data-freshness-badge" class="freshness-badge"></span>');
+  }
+  lines.push(
     '  <div class="header-right hidden" id="header-right">',
     '    <div id="header-mode-control"></div>',
     '  </div>',
     '</div>'
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 function _CoreUI_Markup_workdayWMarkSvg_() {

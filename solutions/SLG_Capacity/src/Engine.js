@@ -1808,6 +1808,57 @@ function quarterWorkdaySummary_(quarterKey, holidays) {
 }
 
 /**
+ * Build a cached index of Utilization_Quarterly rows keyed by
+ * employee_id|fiscal_quarter → target_hours.
+ * @return {Object<string, number>}
+ */
+function _wowQuarterTargetIndex_() {
+  var version = (typeof _getEnrichedCacheVersion_ === 'function')
+    ? _getEnrichedCacheVersion_() : '';
+  if (_wowQuarterTargetIndex_.cache && _wowQuarterTargetIndex_.cacheVersion === version) {
+    return _wowQuarterTargetIndex_.cache;
+  }
+  var map = {};
+  cachedRead_(CFG_UTIL_QUARTERLY).forEach(function (r) {
+    var eid = String(r.employee_id || '').trim();
+    var qk = String(r.fiscal_quarter || '').trim();
+    if (!eid || !qk) return;
+    map[eid + '|' + qk] = Number(r.target_hours) || 0;
+  });
+  _wowQuarterTargetIndex_.cache = map;
+  _wowQuarterTargetIndex_.cacheVersion = version;
+  return map;
+}
+
+/**
+ * WoW-first quarter target from Utilization_Quarterly (WFM.24 D5).
+ *
+ * Returns target_hours for the worker+quarter when a WoW row exists, else null
+ * so the caller can fall back to quarterTargetHoursFor_.
+ *
+ * Same column, two roles by quarter position in the WoW snapshot:
+ *   UTIL_Current target_hours — bonus-scale current-quarter target (D8 ICP-util
+ *     denominator; pairs with qtd_icp_plus_forecast on the same scale).
+ *   UTIL_Previous / UTIL_Next / UTIL_Next+1 target_hours — ICP-scale forward
+ *     (and prior) quarter targets for scorecard targetHours / tracking.
+ *
+ * WoW coverage is FY27-Q1..Q4 in the current workbook; outside that window
+ * this returns null and the formula path applies.
+ *
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter e.g. 'FY27-Q2'
+ * @return {number|null}
+ */
+function quarterTargetFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return null;
+  var map = _wowQuarterTargetIndex_();
+  var key = employeeId + '|' + fiscalQuarter;
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+}
+
+/**
  * Quarterly target hours per WFM.15/WFM.17:
  * daily target = (raw_weekly_capacity × icp target %) ÷ 5
  * quarter target = daily target × net workdays (Mon–Fri minus holidays).

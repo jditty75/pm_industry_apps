@@ -2571,3 +2571,195 @@ function _dbg_reconcileWFM18() {
     : '_dbg_reconcileWFM18: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
+
+/**
+ * WFM.24 Stage 1 discovery: surface real WoW Utilization_Quarterly targets vs
+ * formula anchors and probe D8 current-quarter ICP-util scale pairing (read-only).
+ */
+function _dbg_traceWoWTargets() {
+  _dbg_requireAdmin_();
+  var AIDAN = 'Aidan Votaw';
+  var TRACE_Q = 'FY27-Q2';
+  var curQ = fiscalQuarterKey_(new Date());
+
+  Logger.log('=== _dbg_traceWoWTargets ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' currentFiscalQuarter=' + curQ);
+
+  var wowRows = cachedRead_(CFG_UTIL_QUARTERLY);
+  var holidays = readHolidays_();
+  var settings = readSettings_();
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+
+  function printWowRow_(r) {
+    Logger.log('    employee_id=' + r.employee_id +
+      ' resource_name=' + r.resource_name +
+      ' fiscal_quarter=' + r.fiscal_quarter +
+      ' target_hours=' + r.target_hours +
+      ' util_rate_wkly=' + r.util_rate_wkly +
+      ' qtd_actual_icp=' + r.qtd_actual_icp +
+      ' qtd_icp_plus_forecast=' + r.qtd_icp_plus_forecast +
+      ' source_sheet=' + r.source_sheet);
+  }
+
+  function profileForWorker_(name, fallbackIcp, fallbackProfile) {
+    var info = resIndex[name] || {};
+    return {
+      icpRole: String(info.icp || fallbackIcp || ''),
+      jobProfile: String(info.job_profile || fallbackProfile || '')
+    };
+  }
+
+  function findP6Worker_() {
+    var hit = '';
+    wowRows.some(function (r) {
+      var nm = String(r.resource_name || '');
+      if (/P6/i.test(nm) || /P6 Delivery/i.test(String(r.source_sheet || ''))) {
+        hit = nm;
+        return true;
+      }
+      return false;
+    });
+    if (hit) return hit;
+    Object.keys(resIndex).some(function (name) {
+      var jp = String(resIndex[name].job_profile || '');
+      if (/P6 Delivery Consultant/i.test(jp)) {
+        hit = name;
+        return true;
+      }
+      return false;
+    });
+    if (hit) return hit;
+    Object.keys(resIndex).some(function (name) {
+      if (/^P6$/i.test(String(resIndex[name].icp || '')) ||
+          /P6/i.test(String(resIndex[name].job_profile || ''))) {
+        hit = name;
+        return true;
+      }
+      return false;
+    });
+    return hit;
+  }
+
+  var p6Worker = findP6Worker_();
+  var anchorWorkers = [AIDAN];
+  if (p6Worker && anchorWorkers.indexOf(p6Worker) < 0) anchorWorkers.push(p6Worker);
+
+  // ---- 1. Raw Utilization_Quarterly rows for anchor profiles ----
+  Logger.log('--- 1. Utilization_Quarterly rows (anchor profiles) ---');
+  anchorWorkers.forEach(function (workerName) {
+    var prof = workerName === AIDAN
+      ? profileForWorker_(workerName, 'CS_FUNC', 'P4 Consulting')
+      : profileForWorker_(workerName, 'EM', 'P6 Delivery Consultant');
+    Logger.log('  ' + workerName + ' (formula profile: icp=' + prof.icpRole +
+      ' jobProfile=' + prof.jobProfile + ')');
+    var rows = wowRows.filter(function (r) {
+      return String(r.resource_name || '') === workerName;
+    }).sort(function (a, b) {
+      return String(a.fiscal_quarter).localeCompare(String(b.fiscal_quarter));
+    });
+    if (!rows.length) {
+      Logger.log('    (no Utilization_Quarterly rows)');
+      return;
+    }
+    rows.forEach(printWowRow_);
+  });
+
+  // ---- 2. Formula vs WoW side-by-side (re-anchor pairs) ----
+  Logger.log('--- 2. Formula vs WoW target_hours (re-anchor pairs) ---');
+  anchorWorkers.forEach(function (workerName) {
+    var prof = workerName === AIDAN
+      ? profileForWorker_(workerName, 'CS_FUNC', 'P4 Consulting')
+      : profileForWorker_(workerName, 'EM', 'P6 Delivery Consultant');
+    var rows = wowRows.filter(function (r) {
+      return String(r.resource_name || '') === workerName;
+    });
+    if (!rows.length) {
+      Logger.log('  ' + workerName + ': no WoW rows — skip');
+      return;
+    }
+    rows.forEach(function (r) {
+      var qk = String(r.fiscal_quarter || '').trim();
+      var wowTarget = Number(r.target_hours) || 0;
+      var formulaTarget = quarterTargetHoursFor_(
+        prof.icpRole, prof.jobProfile, qk, holidays, settings);
+      var delta = wowTarget - formulaTarget;
+      Logger.log('  ' + workerName + ' ' + qk +
+        ': formula=' + formulaTarget.toFixed(2) +
+        ' WoW=' + wowTarget.toFixed(2) +
+        ' delta(WoW-formula)=' + delta.toFixed(2));
+    });
+  });
+
+  // ---- 3. Aidan FY27-Q2 D8 units probe ----
+  Logger.log('--- 3. Aidan ' + TRACE_Q + ' D8 ICP-util scale probe ---');
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var aidanInfo = resIndex[AIDAN] || {};
+  var aidanEid = String(aidanInfo.employee_id || '').trim();
+  var aidanSummary = aidanEid ? actualsSummary[aidanEid] : null;
+  if (!aidanSummary) {
+    Object.keys(actualsSummary).some(function (eid) {
+      if (String(actualsSummary[eid].resource_name || '') === AIDAN) {
+        aidanSummary = actualsSummary[eid];
+        aidanEid = eid;
+        return true;
+      }
+      return false;
+    });
+  }
+  var aidanWowQ2 = wowRows.find(function (r) {
+    return String(r.resource_name || '') === AIDAN &&
+      String(r.fiscal_quarter || '').trim() === TRACE_Q;
+  });
+  var wd = quarterWorkdaySummary_(TRACE_Q, holidays);
+  var qtdPlus = aidanSummary ? Number(aidanSummary.qtd_icp_plus_forecast_hours) || 0 : 0;
+  var bonusTarget = aidanSummary ? Number(aidanSummary.bonus_target_billable_hours_eoq) || 0 : 0;
+  var wowTarget = aidanWowQ2 ? Number(aidanWowQ2.target_hours) || 0 : 0;
+  var wowQtd = aidanWowQ2 ? Number(aidanWowQ2.qtd_icp_plus_forecast) || 0 : 0;
+  var icpAvail = Number(wd.icpAvailableHours) || 0;
+
+  Logger.log('  Actuals_Worker_Summary qtd_icp_plus_forecast_hours=' + qtdPlus);
+  Logger.log('  Utilization_Quarterly qtd_icp_plus_forecast=' + wowQtd);
+  Logger.log('  Utilization_Quarterly target_hours (WoW)=' + wowTarget);
+  Logger.log('  Actuals_Worker_Summary bonus_target_billable_hours_eoq=' + bonusTarget);
+  Logger.log('  quarterWorkdaySummary_(' + TRACE_Q + ').icpAvailableHours=' + icpAvail);
+
+  function printRatio_(label, num, den) {
+    var pct = den > 0 ? (num / den) * 100 : 0;
+    Logger.log('  ' + label + ': ' + num.toFixed(2) + ' / ' + den.toFixed(2) +
+      ' = ' + (den > 0 ? (num / den).toFixed(6) : 'n/a') +
+      ' (' + pct.toFixed(2) + '%)');
+  }
+
+  printRatio_('qtd_icp_plus_forecast / icpAvailableHours (current D8 path)',
+    qtdPlus, icpAvail);
+  printRatio_('qtd_icp_plus_forecast / WoW target_hours',
+    qtdPlus, wowTarget);
+  printRatio_('qtd_icp_plus_forecast / bonus_target_billable_hours_eoq',
+    qtdPlus, bonusTarget);
+  if (wowQtd > 0 && wowQtd !== qtdPlus) {
+    printRatio_('Utilization_Quarterly qtd_icp_plus_forecast / icpAvailableHours',
+      wowQtd, icpAvail);
+    printRatio_('Utilization_Quarterly qtd_icp_plus_forecast / WoW target_hours',
+      wowQtd, wowTarget);
+  }
+
+  // ---- 4. WoW coverage window ----
+  Logger.log('--- 4. Utilization_Quarterly coverage window ---');
+  Logger.log('  total rows=' + wowRows.length);
+  var quarterSet = {};
+  wowRows.forEach(function (r) {
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq) return;
+    quarterSet[fq] = (quarterSet[fq] || 0) + 1;
+  });
+  var quartersSorted = Object.keys(quarterSet).sort();
+  Logger.log('  distinct fiscal_quarter values (' + quartersSorted.length + '): ' +
+    quartersSorted.join(', '));
+  quartersSorted.forEach(function (qk) {
+    Logger.log('    ' + qk + ': ' + quarterSet[qk] + ' rows');
+  });
+
+  Logger.log('=== _dbg_traceWoWTargets: DONE ===');
+}

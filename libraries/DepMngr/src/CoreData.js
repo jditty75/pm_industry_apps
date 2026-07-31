@@ -4094,10 +4094,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Columns: A=Refresh Time, B=Sheet, D=Status (same layout as _sfdcDataVersion_).
     var vals = sh.getRange(2, 1, lastRow - 1, 4).getValues();
     var watchSheet = cfg.freshness.watchSheet || 'SFDC_Deployments';
-    var latestOverallKey = '';
-    var latestWatchSuccessKey = '';
+    var latestOverallKey = 0;
+    var latestWatchSuccessKey = 0;
     var latestWatchSuccessDate = null;
-    var latestSuccessKey = '';
+    var latestSuccessKey = 0;
     var latestSuccessDate = null;
     var runMap = {};
 
@@ -4106,9 +4106,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       if (!ts) continue;
       var sheetName = String(vals[i][1] || '').trim();
       var status = String(vals[i][3] || '').trim();
-      var key = (ts instanceof Date) ? String(ts.getTime()) : String(ts);
       var date = ts instanceof Date ? ts : new Date(ts);
       if (isNaN(date.getTime())) continue;
+      var key = date.getTime();
 
       if (key > latestOverallKey) latestOverallKey = key;
 
@@ -4123,7 +4123,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       }
     }
 
-    if (!latestOverallKey) return unknown;
+    if (latestOverallKey === 0) return unknown;
 
     for (var runKey in runMap) {
       var run = runMap[runKey];
@@ -4134,8 +4134,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           break;
         }
       }
-      if (allSuccess && runKey > latestSuccessKey) {
-        latestSuccessKey = runKey;
+      var runKeyNum = Number(runKey);
+      if (allSuccess && runKeyNum > latestSuccessKey) {
+        latestSuccessKey = runKeyNum;
         latestSuccessDate = run.date;
       }
     }

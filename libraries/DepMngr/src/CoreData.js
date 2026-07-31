@@ -4180,6 +4180,87 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
   }
 
+  /**
+   * N4 L2: Time-trigger entry point — emails alertRecipient on stale episodes only.
+   * Anti-spam: one email on ok→alerted, one recovery on alerted→ok; never on unknown.
+   *
+   * @param {AppConfig} config
+   */
+  function checkDataFreshnessAndAlert_(config) {
+    try {
+      var cfg = CoreConfig.withDefaults(config);
+      if (!cfg.freshness.enabled) {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: freshness disabled; skipped.');
+        return;
+      }
+
+      var freshness = getDataFreshness(cfg);
+      if (freshness.status === 'unknown') {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: status unknown; no action.');
+        return;
+      }
+
+      var appId = cfg.appId || 'default';
+      var propKey = 'freshnessAlertState:' + appId;
+      var props = PropertiesService.getScriptProperties();
+      var prevState = props.getProperty(propKey) || 'ok';
+      if (prevState !== 'ok' && prevState !== 'alerted') prevState = 'ok';
+
+      var isAlert = freshness.lastRefreshStatus !== 'Success' ||
+        (freshness.ageHours !== null && freshness.ageHours > freshness.thresholds.alert);
+
+      var recipient = cfg.freshness.alertRecipient;
+      if (!recipient) {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: no alertRecipient; skipped.');
+        return;
+      }
+
+      var ss = getSpreadsheet_();
+      var logSheetName = cfg.freshness.logSheet || 'Auto Refresh Execution Log';
+      var logTab = ss.getSheetByName(logSheetName);
+      var logTabUrl = ss.getUrl();
+      if (logTab) logTabUrl += '#gid=' + logTab.getSheetId();
+
+      if (isAlert && prevState === 'ok') {
+        var ageRounded = freshness.ageHours !== null ? Math.round(freshness.ageHours) : '?';
+        var staleSubject = '[' + appId + '] DHM data STALE — ' + ageRounded + 'h old';
+        var staleBody = [
+          'App: ' + appId,
+          'Last refresh: ' + (freshness.lastRefresh || 'n/a'),
+          'Age (hours): ' + (freshness.ageHours !== null ? freshness.ageHours.toFixed(1) : 'n/a'),
+          'Status: ' + freshness.status,
+          'Last refresh status: ' + freshness.lastRefreshStatus,
+          'Alert threshold (hours): ' + freshness.thresholds.alert,
+          '',
+          'Auto Refresh Execution Log: ' + logTabUrl
+        ].join('\n');
+        MailApp.sendEmail({ to: recipient, subject: staleSubject, body: staleBody });
+        props.setProperty(propKey, 'alerted');
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: stale alert sent to ' + recipient);
+      } else if (!isAlert && prevState === 'alerted') {
+        var recoverySubject = '[' + appId + '] DHM data refresh RECOVERED';
+        var recoveryBody = [
+          'App: ' + appId,
+          'Last refresh: ' + (freshness.lastRefresh || 'n/a'),
+          'Age (hours): ' + (freshness.ageHours !== null ? freshness.ageHours.toFixed(1) : 'n/a'),
+          'Status: ' + freshness.status,
+          'Last refresh status: ' + freshness.lastRefreshStatus,
+          'Alert threshold (hours): ' + freshness.thresholds.alert,
+          '',
+          'Auto Refresh Execution Log: ' + logTabUrl
+        ].join('\n');
+        MailApp.sendEmail({ to: recipient, subject: recoverySubject, body: recoveryBody });
+        props.setProperty(propKey, 'ok');
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: recovery alert sent to ' + recipient);
+      } else {
+        Logger.log('CoreData.checkDataFreshnessAndAlert_: no state change (' +
+                   prevState + ', isAlert=' + isAlert + '); no email.');
+      }
+    } catch (e) {
+      Logger.log('CoreData.checkDataFreshnessAndAlert_: ' + e);
+    }
+  }
+
   // ===========================================================================
   // EXPORTS
   // ===========================================================================
@@ -4235,6 +4316,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     _getCachedSfdcRowCount:      _getCachedSfdcRowCount,
     _dataVersion:                _dataVersion,
     getDataFreshness:            getDataFreshness,
+    checkDataFreshnessAndAlert_: checkDataFreshnessAndAlert_,
 
     // D1 diagnostic
     _debugDdFromContacts_:       _debugDdFromContacts_,

@@ -4054,6 +4054,131 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
   }
 
+  /**
+   * N4: Returns data-freshness signal from the Auto Refresh Execution Log.
+   * Reuses the bounded log-tab read pattern from _sfdcDataVersion_ (cols A/B/D).
+   *
+   * @param {AppConfig} config
+   * @return {{ lastRefresh: string, ageHours: number|null, status: string,
+   *           lastRefreshStatus: string, thresholds: Object, watchSheetFound: boolean }}
+   */
+  function getDataFreshness(config) {
+  var cfg = CoreConfig.withDefaults(config);
+  var cycle = cfg.freshness.refreshCycleHours;
+  var grace = cfg.freshness.graceHours;
+  var amber = cfg.freshness.amberHours != null ? cfg.freshness.amberHours : (cycle + grace);
+  var red = cfg.freshness.redHours != null ? cfg.freshness.redHours : (2 * cycle + grace);
+  var alert = cfg.freshness.alertHours != null ? cfg.freshness.alertHours : (3 * cycle);
+  var thresholds = { amber: amber, red: red, alert: alert };
+
+  var unknown = {
+    lastRefresh: '',
+    ageHours: null,
+    status: 'unknown',
+    lastRefreshStatus: '',
+    thresholds: thresholds,
+    watchSheetFound: false
+  };
+
+  try {
+    var ss = getSpreadsheet_();
+    var logSheetName = cfg.freshness.logSheet || 'Auto Refresh Execution Log';
+    var sh = ss.getSheetByName(logSheetName);
+    if (!sh) {
+      Logger.log('CoreData.getDataFreshness: log sheet "' + logSheetName + '" not found.');
+      return unknown;
+    }
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return unknown;
+
+    // Columns: A=Refresh Time, B=Sheet, D=Status (same layout as _sfdcDataVersion_).
+    var vals = sh.getRange(2, 1, lastRow - 1, 4).getValues();
+    var watchSheet = cfg.freshness.watchSheet || 'SFDC_Deployments';
+    var latestOverallKey = '';
+    var latestWatchSuccessKey = '';
+    var latestWatchSuccessDate = null;
+    var latestSuccessKey = '';
+    var latestSuccessDate = null;
+    var runMap = {};
+
+    for (var i = 0; i < vals.length; i++) {
+      var ts = vals[i][0];
+      if (!ts) continue;
+      var sheetName = String(vals[i][1] || '').trim();
+      var status = String(vals[i][3] || '').trim();
+      var key = (ts instanceof Date) ? String(ts.getTime()) : String(ts);
+      var date = ts instanceof Date ? ts : new Date(ts);
+      if (isNaN(date.getTime())) continue;
+
+      if (key > latestOverallKey) latestOverallKey = key;
+
+      if (!runMap[key]) {
+        runMap[key] = { date: date, statuses: [] };
+      }
+      runMap[key].statuses.push(status);
+
+      if (sheetName === watchSheet && status === 'Success' && key > latestWatchSuccessKey) {
+        latestWatchSuccessKey = key;
+        latestWatchSuccessDate = date;
+      }
+    }
+
+    if (!latestOverallKey) return unknown;
+
+    for (var runKey in runMap) {
+      var run = runMap[runKey];
+      var allSuccess = true;
+      for (var si = 0; si < run.statuses.length; si++) {
+        if (run.statuses[si] !== 'Success') {
+          allSuccess = false;
+          break;
+        }
+      }
+      if (allSuccess && runKey > latestSuccessKey) {
+        latestSuccessKey = runKey;
+        latestSuccessDate = run.date;
+      }
+    }
+
+    var watchSheetFound = latestWatchSuccessDate !== null;
+    var lastRefreshDate = watchSheetFound ? latestWatchSuccessDate : latestSuccessDate;
+    if (!lastRefreshDate) return unknown;
+
+    var lastRefreshStatus = 'Success';
+    var latestRun = runMap[latestOverallKey];
+    if (latestRun) {
+      for (var sj = 0; sj < latestRun.statuses.length; sj++) {
+        if (latestRun.statuses[sj] !== 'Success') {
+          lastRefreshStatus = latestRun.statuses[sj] || 'Failed';
+          break;
+        }
+      }
+    }
+
+    var ageHours = (Date.now() - lastRefreshDate.getTime()) / 3600000;
+    var freshnessStatus;
+    if (lastRefreshStatus !== 'Success' || ageHours > red) {
+      freshnessStatus = 'stale';
+    } else if (ageHours > amber) {
+      freshnessStatus = 'aging';
+    } else {
+      freshnessStatus = 'fresh';
+    }
+
+    return {
+      lastRefresh: lastRefreshDate.toISOString(),
+      ageHours: ageHours,
+      status: freshnessStatus,
+      lastRefreshStatus: lastRefreshStatus,
+      thresholds: thresholds,
+      watchSheetFound: watchSheetFound
+    };
+  } catch (e) {
+    Logger.log('CoreData.getDataFreshness: ' + e);
+    return unknown;
+  }
+  }
+
   // ===========================================================================
   // EXPORTS
   // ===========================================================================
@@ -4108,6 +4233,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     _warmSfdcRows:               _warmSfdcRows,
     _getCachedSfdcRowCount:      _getCachedSfdcRowCount,
     _dataVersion:                _dataVersion,
+    getDataFreshness:            getDataFreshness,
 
     // D1 diagnostic
     _debugDdFromContacts_:       _debugDdFromContacts_,

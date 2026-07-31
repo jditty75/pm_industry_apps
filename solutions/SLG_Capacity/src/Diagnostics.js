@@ -2062,33 +2062,81 @@ function _dbg_reconcileWFM17() {
     failures.push('January 2027 holidays missing from Config_Holidays');
   }
 
+  // ---- WoW forward-target re-anchor (WFM.24 D5) ----
+  (function wowForwardTargetReanchor() {
+    Logger.log('=== WFM.17 WoW forward-target re-anchor (WFM.24 D5) ===');
+    Logger.log('  audit old→new Consulting: FY27-Q3 388.08→369.60, FY27-Q4 357.28→369.60');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var curQ = fiscalQuarterKey_(new Date());
+    var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) { return qk !== curQ; });
+    var TARGET_TOL = 0.02;
+
+    function checkWorkerForward_(workerName) {
+      var wRow = (scorecard.workers || []).find(function (w) { return w.worker === workerName; });
+      if (!wRow || !wRow.employeeId) {
+        failures.push('WoW re-anchor: ' + workerName + ' not found in scorecard');
+        return;
+      }
+      futureKeys.forEach(function (qk) {
+        var q = (wRow.quarters || []).find(function (qq) { return qq.quarterKey === qk; });
+        if (!q) return;
+        var wow = quarterTargetFromWoW_(wRow.employeeId, qk);
+        if (wow != null) {
+          var ok = Math.abs(q.targetHours - wow) < TARGET_TOL;
+          Logger.log('  ' + workerName + ' ' + qk + ': scorecard target=' +
+            q.targetHours.toFixed(2) + ' WoW=' + wow.toFixed(2) + (ok ? ' OK' : ' FAILED'));
+          if (!ok) {
+            failures.push(workerName + ' ' + qk + ' targetHours=' + q.targetHours +
+              ' expect WoW=' + wow);
+          }
+        } else {
+          var okFb = Math.abs(q.targetHours - q.appTargetHours) < TARGET_TOL;
+          Logger.log('  ' + workerName + ' ' + qk + ': no WoW row — formula fallback=' +
+            q.targetHours.toFixed(2) + ' appTarget=' + q.appTargetHours.toFixed(2) +
+            (okFb ? ' OK' : ' FAILED'));
+          if (!okFb) {
+            failures.push(workerName + ' ' + qk + ' formula fallback mismatch');
+          }
+        }
+      });
+    }
+
+    checkWorkerForward_('Aidan Votaw');
+    var p6 = (scorecard.workers || []).find(function (w) {
+      return String(w.level || '') === 'P6' || /P6/i.test(String(w.icpRole || ''));
+    });
+    if (p6) {
+      checkWorkerForward_(p6.worker);
+    } else {
+      Logger.log('  P6 sample worker not found — skip');
+    }
+  })();
+
   // ---- Target reconciliation: Consulting P3–P5 (Aidan) ----
-  (function consultingTargets() {
-    Logger.log('=== WFM.17 Consulting P3–P5 target reconciliation (Aidan profile) ===');
+  (function consultingFormulaFallback() {
+    Logger.log('=== WFM.17 Consulting formula fallback (quarterTargetHoursFor_) ===');
     var expected = { 'FY27-Q2': 375.76, 'FY27-Q3': 388.08, 'FY27-Q4': 357.28 };
-    var staleQ4 = 369.6;
     Object.keys(expected).forEach(function (qk) {
       var got = quarterTargetHoursFor_('CS_FUNC', 'P4 Consulting', qk, holidays, settings);
       var exp = expected[qk];
       var ok = Math.abs(got - exp) < 0.02;
-      Logger.log('  ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
-      if (!ok) failures.push('Consulting target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
-      if (qk === 'FY27-Q4') {
-        Logger.log('  FY27-Q4 stale workbook target=' + staleQ4 + ' (expected difference — Jan 2027 holidays applied)');
-      }
+      Logger.log('  ' + qk + ': formula=' + got.toFixed(2) + ' (fallback reference=' + exp.toFixed(2) + ')' +
+        (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('Consulting formula fallback ' + qk + ': got ' + got.toFixed(2));
     });
   })();
 
-  // ---- Target reconciliation: P6 (Larry / Phil profile) ----
-  (function p6Targets() {
-    Logger.log('=== WFM.17 P6 target reconciliation ===');
+  // ---- Target reconciliation: P6 (Larry / Phil profile) formula fallback ----
+  (function p6FormulaFallback() {
+    Logger.log('=== WFM.17 P6 formula fallback (quarterTargetHoursFor_) ===');
     var expected = { 'FY27-Q2': 297.68, 'FY27-Q3': 307.44, 'FY27-Q4': 283.04 };
     Object.keys(expected).forEach(function (qk) {
       var got = quarterTargetHoursFor_('EM', 'P6 Delivery Consultant', qk, holidays, settings);
       var exp = expected[qk];
       var ok = Math.abs(got - exp) < 0.02;
-      Logger.log('  ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
-      if (!ok) failures.push('P6 target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
+      Logger.log('  ' + qk + ': formula=' + got.toFixed(2) + ' (fallback reference=' + exp.toFixed(2) + ')' +
+        (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('P6 formula fallback ' + qk + ': got ' + got.toFixed(2));
     });
   })();
 
@@ -2762,4 +2810,183 @@ function _dbg_traceWoWTargets() {
   });
 
   Logger.log('=== _dbg_traceWoWTargets: DONE ===');
+}
+
+// ============================================================
+// WFM.24 mandatory gate: WoW target sourcing + D8 scale unification.
+// MANDATORY GATE: do not ship WFM.24 unless ALL CHECKS OK.
+// ============================================================
+
+/**
+ * WFM.24 Stage 1 mandatory gate. Self-computing checks for WoW-first targets,
+ * D8 current-quarter ICP-util scale, and no regression on WFM.15/17/18/23.
+ */
+function _dbg_reconcileWFM24() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.01;
+  var curQ = fiscalQuarterKey_(new Date());
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function runGate_(fn, okToken) {
+    var before = Logger.getLog() || '';
+    try {
+      fn();
+    } catch (e) {
+      failures.push('Regression: ' + fn.name + ' threw — ' + e);
+      return false;
+    }
+    var after = Logger.getLog() || '';
+    var slice = after.slice(before.length);
+    if (slice.indexOf(okToken) < 0) {
+      failures.push('Regression: ' + fn.name + ' did not print ' + okToken);
+      return false;
+    }
+    return true;
+  }
+
+  // ---- Check A: WoW target sourcing (D5) ----
+  (function wowTargetSourcing() {
+    Logger.log('=== WFM.24 Check A: WoW target sourcing ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) {
+      return qk !== curQ;
+    });
+
+    var withWow = null;
+    (scorecard.workers || []).some(function (w) {
+      if (!w.employeeId) return false;
+      for (var i = 0; i < futureKeys.length; i++) {
+        var qk = futureKeys[i];
+        var wow = quarterTargetFromWoW_(w.employeeId, qk);
+        if (wow != null && wow > 0) {
+          withWow = { worker: w, qk: qk, wow: wow };
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!withWow) {
+      failures.push('WoW sourcing: no worker with forward WoW target found');
+      return;
+    }
+    var qWow = (withWow.worker.quarters || []).find(function (qq) {
+      return qq.quarterKey === withWow.qk;
+    });
+    if (!qWow) {
+      failures.push('WoW sourcing: quarter cell missing for ' + withWow.worker.worker);
+      return;
+    }
+    if (!near_(qWow.targetHours, withWow.wow)) {
+      failures.push('WoW sourcing: ' + withWow.worker.worker + ' ' + withWow.qk +
+        ' targetHours=' + qWow.targetHours + ' expect WoW=' + withWow.wow);
+    } else {
+      Logger.log('  worker with WoW row: ' + withWow.worker.worker + ' ' + withWow.qk +
+        ' targetHours=' + qWow.targetHours.toFixed(2) + ' == WoW OK');
+    }
+
+    var withoutWow = null;
+    (scorecard.workers || []).some(function (w) {
+      if (!w.employeeId) return false;
+      for (var i = 0; i < futureKeys.length; i++) {
+        var qk2 = futureKeys[i];
+        if (quarterTargetFromWoW_(w.employeeId, qk2) != null) continue;
+        var qCell = (w.quarters || []).find(function (qq) { return qq.quarterKey === qk2; });
+        if (!qCell || qCell.source !== 'forecast') continue;
+        withoutWow = { worker: w, qk: qk2, q: qCell };
+        return true;
+      }
+      return false;
+    });
+    if (!withoutWow) {
+      Logger.log('  formula-fallback sample: SKIPPED (all forward quarters have WoW rows)');
+      return;
+    }
+    if (!near_(withoutWow.q.targetHours, withoutWow.q.appTargetHours)) {
+      failures.push('WoW sourcing fallback: ' + withoutWow.worker.worker + ' ' + withoutWow.qk +
+        ' targetHours=' + withoutWow.q.targetHours + ' expect formula=' + withoutWow.q.appTargetHours);
+    } else {
+      Logger.log('  worker without WoW row: ' + withoutWow.worker.worker + ' ' + withoutWow.qk +
+        ' targetHours=' + withoutWow.q.targetHours.toFixed(2) + ' == formula OK');
+    }
+  })();
+
+  // ---- Check B: D8 current-quarter ICP-util scale unification ----
+  (function d8CurrentQuarterScale() {
+    Logger.log('=== WFM.24 Check B: D8 current-quarter ICP-util scale ===');
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var probes = ['Lauren Vannini', 'Aidan Votaw'];
+
+    probes.forEach(function (name) {
+      var wRow = (scorecard.workers || []).find(function (w) { return w.worker === name; });
+      if (!wRow || !wRow.employeeId) {
+        Logger.log('  ' + name + ': not in scorecard — skip');
+        return;
+      }
+      var summary = actualsSummary[String(wRow.employeeId).trim()];
+      if (!summary || !Number(summary.qtd_icp_plus_forecast_hours)) {
+        Logger.log('  ' + name + ': no qtd_icp_plus_forecast — skip');
+        return;
+      }
+      var wowTarget = quarterTargetFromWoW_(wRow.employeeId, curQ);
+      var qtd = Number(summary.qtd_icp_plus_forecast_hours);
+      var curCell = (wRow.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      if (!curCell) {
+        failures.push('D8: ' + name + ' current quarter missing');
+        return;
+      }
+      var den = (wowTarget != null && wowTarget > 0)
+        ? wowTarget
+        : Number(summary.bonus_target_billable_hours_eoq) || 0;
+      if (!den) {
+        failures.push('D8: ' + name + ' no WoW/bonus denominator');
+        return;
+      }
+      var expectedIcp = qtd / den;
+      var icpOk = near_(curCell.icpUtil, expectedIcp);
+      var bonusOk = near_(curCell.icpUtil, curCell.bonusAttainment);
+      Logger.log('  ' + name + ': qtd=' + qtd.toFixed(2) + ' WoW_den=' + den.toFixed(2) +
+        ' icpUtil=' + (curCell.icpUtil * 100).toFixed(2) + '%' +
+        ' bonusAtt=' + (curCell.bonusAttainment * 100).toFixed(2) + '%' +
+        ' expected=' + (expectedIcp * 100).toFixed(2) + '%' +
+        (icpOk && bonusOk ? ' OK' : ' FAILED'));
+      if (!icpOk) {
+        failures.push('D8: ' + name + ' icpUtil=' + curCell.icpUtil +
+          ' expect qtd/WoW=' + expectedIcp);
+      }
+      if (!bonusOk) {
+        failures.push('D8: ' + name + ' icpUtil != bonusAttainment');
+      }
+    });
+  })();
+
+  // ---- Check C: no regression ----
+  (function noRegression() {
+    Logger.log('=== WFM.24 Check C: no regression ===');
+    var ok15 = runGate_(_dbg_reconcileWFM15, '_dbg_reconcileWFM15: ALL CASES OK');
+    var ok17 = runGate_(_dbg_reconcileWFM17, '_dbg_reconcileWFM17: ALL CHECKS OK');
+    var ok18 = runGate_(_dbg_reconcileWFM18, '_dbg_reconcileWFM18: ALL CHECKS OK');
+    var ok23 = true;
+    if (typeof _dbg_reconcileWFM23 === 'function') {
+      ok23 = runGate_(_dbg_reconcileWFM23, '_dbg_reconcileWFM23: ALL CHECKS OK');
+    } else {
+      Logger.log('  WFM.23 gate not present on branch — SKIPPED');
+    }
+    Logger.log('  WFM.15=' + (ok15 ? 'OK' : 'FAIL') +
+      ' WFM.17=' + (ok17 ? 'OK' : 'FAIL') +
+      ' WFM.18=' + (ok18 ? 'OK' : 'FAIL') +
+      ' WFM.23=' + (ok23 ? 'OK' : 'SKIP'));
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM24: ALL CHECKS OK'
+    : '_dbg_reconcileWFM24: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }

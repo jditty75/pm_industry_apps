@@ -813,7 +813,43 @@ var CoreData = (function () {
       return {};
     }
   }
-
+  
+/**
+ * N2: Returns a "data version" token = the latest 'Refresh Time' in the
+ * 'Auto Refresh Execution Log' tab for the SFDC_Deployments sheet. Folded into
+ * the sfdcRows cache key so a connector refresh of SFDC_Deployments automatically
+ * invalidates stale tier-2 cache. Falls back to the overall latest refresh time,
+ * then ''. Returns '' if the tab is missing/empty (key degrades to non-versioned).
+ * @private
+ */
+function _sfdcDataVersion_(cfg) {
+  try {
+    var ss = getSpreadsheet_();
+    var sh = ss.getSheetByName('Auto Refresh Execution Log');
+    if (!sh) return '';
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return '';
+    // Columns: A=Refresh Time, B=Sheet. Read both.
+    var vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
+    var deploymentsSheet = cfg && cfg.sheets && cfg.sheets.deployments
+      ? cfg.sheets.deployments : 'SFDC_Deployments';
+    var latestForDep = '';
+    var latestOverall = '';
+    for (var i = 0; i < vals.length; i++) {
+      var ts = vals[i][0];
+      var sheetName = String(vals[i][1] || '').trim();
+      if (!ts) continue;
+      var key = (ts instanceof Date) ? String(ts.getTime()) : String(ts);
+      if (key > latestOverall) latestOverall = key;
+      if (sheetName === deploymentsSheet && key > latestForDep) latestForDep = key;
+    }
+    var chosen = latestForDep || latestOverall;
+    return chosen ? chosen.replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
+  } catch (e) {
+    Logger.log('CoreData._sfdcDataVersion_: ' + e);
+    return '';
+  }
+}
   // ===========================================================================
   // PHASE 3i: SFDC_DEPLOYMENTS READER (Active + Complete unified source)
   // ===========================================================================
@@ -835,7 +871,10 @@ var CoreData = (function () {
     // Performance Layer 1: tier 1 (in-memory).
     if (_cache.sfdcRows !== null) return _cache.sfdcRows;
     // Performance Layer 2: tier 2 (sheet-tab cache).
-    var cacheKey = 'sfdcRows:' + (cfg && cfg.appId ? cfg.appId : 'default');
+    var _ver = _sfdcDataVersion_(cfg);
+    var _ver = _sfdcDataVersion_(cfg);
+    var cacheKey = 'sfdcRows:' + (cfg && cfg.appId ? cfg.appId : 'default') +
+                 (_ver ? ':' + _ver : '');
     var cached = _perfCacheRead_(cacheKey);
     if (cached !== null) {
       _cache.sfdcRows = cached; // hoist to tier 1 for the rest of this execution

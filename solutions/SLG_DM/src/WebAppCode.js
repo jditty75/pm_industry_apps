@@ -858,3 +858,64 @@ function _debug_c1_verify_working_v2() {
   Logger.log('  Both calls similar (~1500ms+): NO caching happening at all');
   Logger.log('  Cannot yet distinguish tier-2 vs tier-1 in same execution.');
 }
+
+/**
+ * N2 manual cache flush — run from the Apps Script editor (or wire to a menu/trigger).
+ * Clears this app's CacheService entries used by CoreData/CoreSalesforce tier-2,
+ * so the next data read rebuilds from the live SFDC_Deployments sheet.
+ *
+ * Safe to run anytime. Returns a summary of what it cleared.
+ */
+function flushCache() {
+  var appId = (APP_CONFIG && APP_CONFIG.appId) ? APP_CONFIG.appId : 'default';
+
+  // Known tier-2 cache-key prefixes used across CoreData + CoreSalesforce.
+  var prefixes = [
+    'sfdcRows:',
+    'enrichmentMap:',
+    'ddContacts:',
+    'studentDeploymentIds:',
+    'studentProductFunctions:',
+    'overviewData:',
+    'mdsPglBatchView:'
+  ];
+
+  var keys = [];
+  prefixes.forEach(function (p) {
+    var base = p + appId;
+    keys.push(base);
+    keys.push(base + ':manifest');
+    // Clear chunked payloads (chunked writes use :chunk:N up to ~50 pieces).
+    for (var i = 0; i < 50; i++) keys.push(base + ':chunk:' + i);
+  });
+
+  var cleared = 0;
+  try {
+    var cache = CacheService.getScriptCache();
+    // removeAll tolerates keys that don't exist.
+    for (var start = 0; start < keys.length; start += 100) {
+      var batch = keys.slice(start, start + 100);
+      cache.removeAll(batch);
+      cleared += batch.length;
+    }
+  } catch (e) {
+    Logger.log('flushCache: CacheService clear error: ' + e);
+  }
+
+  // Also clear the document cache in case any writer used it.
+  try {
+    var dcache = CacheService.getDocumentCache();
+    if (dcache) {
+      for (var s2 = 0; s2 < keys.length; s2 += 100) {
+        dcache.removeAll(keys.slice(s2, s2 + 100));
+      }
+    }
+  } catch (e2) {
+    Logger.log('flushCache: DocumentCache clear error: ' + e2);
+  }
+
+  var msg = 'flushCache(' + appId + '): attempted clear of ' + keys.length +
+            ' cache keys across ' + prefixes.length + ' prefixes.';
+  Logger.log(msg);
+  return msg;
+}

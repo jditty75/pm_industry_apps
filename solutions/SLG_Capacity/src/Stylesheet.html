@@ -3207,38 +3207,40 @@ td.cell-with-bar {
   height: 100%;
 }
 
-/* Two-column split: aggregate left, worker panel right */
+/* Two-column split: primary left, worker panel right */
 .wfm25-capacity-body {
   display: flex;
+  flex-direction: row;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 .wfm25-capacity-primary {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  padding: var(--space-5);
 }
 .wfm25-capacity-body.wfm25-panel-open .wfm25-capacity-primary {
   flex: 1 1 55%;
-  max-width: 58%;
-  border-right: 1px solid var(--wfm25-chrome-bdr);
+  max-width: 55%;
+  border-right: 1px solid var(--business-card);
 }
 
 /* ── Worker right-side panel ─────────────────────────────── */
 .wfm25-worker-panel {
-  flex: 0 0 42%;
-  min-width: 320px;
-  max-width: 520px;
-  display: flex;
-  flex-direction: column;
-  background: var(--paper);
-  overflow: hidden;
+  flex: 1 1 45%;
+  min-width: 0;
+  overflow-y: auto;
+  background: #fff;
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
 }
 .wfm25-worker-panel[hidden] {
   display: none !important;
+}
+.wfm25-capacity-body:not(.wfm25-panel-open) .wfm25-worker-panel {
+  display: none;
 }
 .wfm25-worker-panel-header {
   display: flex;
@@ -3308,7 +3310,6 @@ td.cell-with-bar {
 }
 .wfm25-worker-panel-body {
   flex: 1;
-  overflow-y: auto;
   padding: 12px 16px 20px;
 }
 .wfm25-worker-panel-footer {
@@ -3919,47 +3920,6 @@ td.cell-with-bar {
 .wfm25-wc-bar-slg-generic { background: var(--wc-slg-generic); }
 .wfm25-wc-bar-nonslg      { background: var(--wc-nonslg); }
 .wfm25-wc-bar-partner     { background: var(--wc-partner); }
-
-/* ── 4. LAYOUT (single scroll context, no dead middle) ───── */
-
-.wfm25-capacity-body {
-  display: flex;
-  gap: 0;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  flex: 1;
-}
-
-.wfm25-aggregate-pane {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-y: auto;
-  padding: var(--space-5);
-}
-
-.wfm25-capacity-body.wfm25-panel-open .wfm25-aggregate-pane {
-  flex: 1 1 55%;
-  max-width: 55%;
-  border-right: 1px solid var(--business-card);
-}
-
-.wfm25-worker-pane {
-  flex: 1 1 45%;
-  min-width: 0;
-  background: #fff;
-  padding: var(--space-5);
-  overflow-y: auto;
-  box-shadow: var(--shadow-sm);
-}
-
-.wfm25-worker-pane[hidden] {
-  display: none !important;
-}
-
-.wfm25-capacity-body:not(.wfm25-panel-open) .wfm25-worker-pane {
-  display: none;
-}
 
 /* ── 5. TYPOGRAPHY & SPACING ─────────────────────────────── */
 

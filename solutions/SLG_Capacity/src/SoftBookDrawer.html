@@ -1,0 +1,26 @@
+<!-- SoftBookDrawer.html — WFM.25 Stage 2 soft-booking overlay drawer.
+     Included from CapacityCanvas.html. Wired in JavaScript.html. -->
+
+<div class="wfm25-softbook-overlay" id="wfm25SoftBookOverlay" hidden>
+  <div class="wfm25-softbook-backdrop" id="wfm25SoftBookBackdrop"></div>
+  <div class="wfm25-softbook-drawer" role="dialog" aria-labelledby="wfm25SoftBookTitle">
+    <header class="wfm25-softbook-header">
+      <h3 class="wfm25-softbook-title" id="wfm25SoftBookTitle">Add hours</h3>
+      <button type="button" class="icon-btn" id="wfm25SoftBookClose" aria-label="Close">✕</button>
+    </header>
+    <div class="wfm25-softbook-body">
+      <label class="field-label">Worker</label>
+      <input type="text" class="input" id="wfm25SbWorker" readonly>
+      <label class="field-label">Start date</label>
+      <input type="date" class="input" id="wfm25SbStart">
+      <label class="field-label">End date</label>
+      <input type="date" class="input" id="wfm25SbEnd">
+      <label class="field-label">Total hours</label>
+      <input type="number" class="input" id="wfm25SbHours" min="1" step="1" placeholder="e.g. 40">
+    </div>
+    <footer class="wfm25-softbook-actions">
+      <button type="button" class="btn-ghost" id="wfm25SbCancel">Cancel</button>
+      <button type="button" class="btn-primary" id="wfm25SbAdd">Add to draft</button>
+    </footer>
+  </div>
+</div>

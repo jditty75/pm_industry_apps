@@ -2147,8 +2147,11 @@ function computeQuarterlyScorecard_(params) {
   const forecast = computeWeeklyForecast_(params);
   const actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
     ? getActualsSummaryByEmployee_() : {};
-  const quarterKeys = rollingQuarterKeys_(4);
   const curQ = fiscalQuarterKey_(new Date());
+  const curBounds = fiscalQuarterBounds_(curQ);
+  const prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
+  const prevQ = fiscalQuarterKey_(prevDay);
+  const quarterKeys = [prevQ].concat(rollingQuarterKeys_(3));
   const weeks = forecast.weeks || [];
 
   const workersOut = forecast.workers.map(function (w) {

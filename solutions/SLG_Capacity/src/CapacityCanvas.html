@@ -23,7 +23,11 @@
     </div>
   </div>
 
+  <!-- ── Two-column body: aggregate (left) + worker panel (right) ── -->
+  <div class="wfm25-capacity-body" id="wfm25CapacityBody">
+
   <!-- ── Aggregate content region ── -->
+  <div class="wfm25-capacity-primary" id="wfm25CapacityPrimary">
   <div id="aggregateContent" class="wfm25-aggregate-content">
 
     <!-- ─ Utilization panel (active by default) ─ -->
@@ -67,4 +71,9 @@
     </div>
 
   </div><!-- /#aggregateContent -->
+  </div><!-- /.wfm25-capacity-primary -->
+
+  <?!= include('WorkerPanel'); ?>
+
+  </div><!-- /.wfm25-capacity-body -->
 </div><!-- /#capacityCanvas -->

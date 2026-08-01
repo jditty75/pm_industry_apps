@@ -7301,7 +7301,11 @@ async function _qaRefreshPsaHours_() {
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend'
     groupBy:          'team',        // 'team' | 'role'
     landingBreadcrumb: 'SLG Org',
-    activeView:       'capacity'     // 'capacity' | 'admin'
+    activeView:       'capacity',     // 'capacity' | 'admin'
+    selectedWorker:   null,          // worker name when panel is open
+    selectedWorkerTeam: null,       // team label for breadcrumb + live aggregate shift
+    selectedWorkerDetail: null,     // last api_getResourceDetailV2 result
+    workerReqId:      0              // race-guard for worker detail fetch
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -7357,7 +7361,385 @@ async function _qaRefreshPsaHours_() {
     });
   }
 
-  // ── Client-side team aggregation ─────────────────────────────
+  // ── Draft util cell helpers (committed + projected overlay) ──
+
+  /**
+   * Build draft delta arrow for util change.
+   * @param {number} baseUtil
+   * @param {number} projUtil
+   * @returns {string}
+   */
+  function wfm25DraftArrow_(baseUtil, projUtil) {
+    const b = Number(baseUtil) || 0;
+    const p = Number(projUtil) || 0;
+    if (p > b + 0.0001) return '\u2191';
+    if (p < b - 0.0001) return '\u2193';
+    return '\u2192';
+  }
+
+  /**
+   * Render a utilization cell with optional draft overlay.
+   * Committed stays neutral; draft is bright orange when softBookings exist.
+   * @param {number|null} baseUtil committed icpUtil
+   * @param {number|null} projUtil projected icpUtil (null = committed only)
+   * @param {number} icpTarget
+   * @param {string} [extraCls]
+   * @returns {string}
+   */
+  function wfm25RenderUtilCell_(baseUtil, projUtil, icpTarget, extraCls) {
+    const hasDraft = State.softBookings && State.softBookings.length &&
+      projUtil != null && baseUtil != null;
+    if (!hasDraft) {
+      const color = (baseUtil != null)
+        ? cellColor(baseUtil, icpTarget)
+        : { bg: 'var(--business-card)', fg: 'var(--staple)' };
+      return '<td class="wfm25-util-cell' + (extraCls ? ' ' + extraCls : '') +
+        '" style="background:' + color.bg + ';color:' + color.fg + '">' +
+        (baseUtil != null ? fmtPct(baseUtil) : '\u2014') + '</td>';
+    }
+    const arrow = wfm25DraftArrow_(baseUtil, projUtil);
+    return '<td class="wfm25-util-cell has-draft' + (extraCls ? ' ' + extraCls : '') + '">' +
+      '<span class="wfm25-util-committed">' + fmtPct(baseUtil) + '</span>' +
+      '<span class="wfm25-util-draft">' +
+        '<span class="wfm25-draft-label">Your draft</span>' +
+        '<span class="wfm25-draft-value">' + fmtPct(baseUtil) + ' \u2192 ' +
+          fmtPct(projUtil) + ' ' + arrow + '</span>' +
+      '</span></td>';
+  }
+
+  /**
+   * Look up projected/baseline icpUtil from api_projectSoftBookings payload.
+   * @param {Object|null} projection
+   * @param {'worker'|'team'|'orgTeam'} level
+   * @param {string} key resourceName or teamLabel
+   * @param {string} quarterKey
+   * @param {boolean} projected
+   * @returns {number|null}
+   */
+  function wfm25ProjectionUtil_(projection, level, key, quarterKey, projected) {
+    if (!projection) return null;
+    const bucket = projected ? projection.projected : projection.baseline;
+    if (!bucket) return null;
+    let row = null;
+    if (level === 'worker') {
+      row = (bucket.worker || []).find(function (w) { return w.resourceName === key; });
+    } else if (level === 'team') {
+      row = bucket.team;
+    } else if (level === 'orgTeam') {
+      row = (bucket.orgTeams || []).find(function (o) { return o.teamLabel === key; });
+    }
+    if (!row) return null;
+    const q = (row.quarters || []).find(function (qq) { return qq.quarterKey === quarterKey; });
+    return q && q.icpUtil != null ? q.icpUtil : null;
+  }
+
+  /**
+   * Render quarter strip cells for the worker panel header.
+   * @param {Array} quarters from api_getResourceDetailV2
+   * @param {number} icpTarget
+   * @param {Object|null} projection
+   * @param {string} workerName
+   */
+  function renderWFM25WorkerQuarterStrip_(quarters, icpTarget, projection, workerName) {
+    const strip = document.getElementById('wfm25WorkerQuarterStrip');
+    if (!strip) return;
+    if (!quarters || !quarters.length) {
+      strip.hidden = true;
+      return;
+    }
+    strip.hidden = false;
+    const hasDraft = State.softBookings && State.softBookings.length;
+    const headerCells = quarters.map(function (q) {
+      const curTag = q.isCurrentQuarter ? ' \u25c6' : '';
+      return '<th>' + escapeHtml_(q.quarterLabel || q.quarterKey) + curTag + '</th>';
+    }).join('');
+    const bodyCells = quarters.map(function (q) {
+      const qk = q.quarterKey;
+      const baseUtil = q.icpUtil;
+      const projUtil = hasDraft
+        ? wfm25ProjectionUtil_(projection, 'worker', workerName, qk, true)
+        : null;
+      if (!hasDraft || projUtil == null) {
+        const color = cellColor(baseUtil, icpTarget);
+        return '<td class="wfm25-worker-qstrip-cell" style="background:' + color.bg +
+          ';color:' + color.fg + '">' + fmtPct(baseUtil) + '</td>';
+      }
+      const arrow = wfm25DraftArrow_(baseUtil, projUtil);
+      return '<td class="wfm25-worker-qstrip-cell has-draft">' +
+        '<div class="wfm25-worker-qstrip-committed">' + fmtPct(baseUtil) + '</div>' +
+        '<div class="wfm25-draft-label">Your draft</div>' +
+        '<div class="wfm25-worker-qstrip-draft">' + fmtPct(baseUtil) +
+          ' \u2192 ' + fmtPct(projUtil) + ' ' + arrow + '</div></td>';
+    }).join('');
+    strip.innerHTML = '<table class="wfm25-worker-qstrip-table"><thead><tr>' +
+      headerCells + '</tr></thead><tbody><tr>' + bodyCells + '</tr></tbody></table>';
+  }
+
+  /**
+   * Render worker panel body from api_getResourceDetailV2 (reuses Explorer renderers).
+   * @param {Object} detail
+   */
+  function renderWFM25WorkerPanelBody_(detail) {
+    const body = document.getElementById('wfm25WorkerPanelBody');
+    if (!body) return;
+    if (!detail || !detail.found) {
+      body.innerHTML = '<div class="muted" style="padding:12px">This worker is not in the current filter scope.</div>';
+      return;
+    }
+    const meta = (State.ref && State.ref.resources || []).find(function (r) {
+      return r.name === detail.resource;
+    }) || {};
+    const icpTarget = (detail.weeks && detail.weeks[0]) ? detail.weeks[0].icpTarget : 0.72;
+    body.innerHTML =
+      renderExplorerSummaryStrip_(detail, meta) +
+      renderExplorerWeeklyStrip_(detail.weeks || []) +
+      renderExplorerQuarterSection_(detail.quarters || [], icpTarget) +
+      renderExplorerProjectsSection_(detail.projects || [], detail.weeks || []);
+
+    const toggle = body.querySelector('#explorerQsMetricToggle');
+    if (toggle) {
+      toggle.querySelectorAll('.btn-toggle').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          ExplorerQuarterState.metric = btn.dataset.metric || 'icp';
+          renderWFM25WorkerPanelBody_(WFM25State.selectedWorkerDetail);
+        });
+      });
+    }
+    const projToggle = body.querySelector('.explorer-projects-toggle');
+    if (projToggle) {
+      projToggle.addEventListener('click', function () {
+        const w = WFM25State.selectedWorker || '';
+        if (ExplorerProjectState.expanded.has(w)) ExplorerProjectState.expanded.delete(w);
+        else ExplorerProjectState.expanded.add(w);
+        renderWFM25WorkerPanelBody_(WFM25State.selectedWorkerDetail);
+      });
+    }
+  }
+
+  /**
+   * Paint the full worker panel from cached detail + optional projection.
+   * @param {Object|null} projection api_projectSoftBookings result
+   */
+  function paintWFM25WorkerPanel_(projection) {
+    const detail = WFM25State.selectedWorkerDetail;
+    if (!detail || !WFM25State.selectedWorker) return;
+    const meta = (State.ref && State.ref.resources || []).find(function (r) {
+      return r.name === detail.resource;
+    }) || {};
+    const nameEl = document.getElementById('wfm25WorkerPanelName');
+    const metaEl = document.getElementById('wfm25WorkerPanelMeta');
+    if (nameEl) nameEl.textContent = detail.resource || '\u2014';
+    if (metaEl) {
+      const parts = [
+        meta.job_profile || '',
+        meta.manager_org || '',
+        meta.resolvedTeam || ''
+      ].filter(Boolean);
+      metaEl.textContent = parts.join(' \u00b7 ');
+    }
+    const icpTarget = (detail.weeks && detail.weeks[0]) ? detail.weeks[0].icpTarget : 0.72;
+    renderWFM25WorkerQuarterStrip_(detail.quarters || [], icpTarget, projection, detail.resource);
+    renderWFM25WorkerPanelBody_(detail);
+    wfm25UpdatePendingIndicator_();
+  }
+
+  /**
+   * Update the minimal pending-draft count in panel footer + draft handle.
+   */
+  function wfm25UpdatePendingIndicator_() {
+    const count = (State.softBookings || []).length;
+    const footer = document.getElementById('wfm25WorkerPanelFooter');
+    const ind = document.getElementById('wfm25PendingIndicator');
+    const handle = document.getElementById('draftTrayHandle');
+    const handleLabel = handle ? handle.querySelector('.wfm25-draft-handle-label') : null;
+    if (footer) footer.hidden = count === 0;
+    if (ind) ind.textContent = count + ' pending';
+    if (handleLabel) handleLabel.textContent = 'Pending changes (' + count + ')';
+  }
+
+  /**
+   * Open the right-side worker panel and load detail from api_getResourceDetailV2.
+   * @param {string} workerName
+   * @param {string} teamLabel
+   */
+  async function wfm25OpenWorkerPanel_(workerName, teamLabel) {
+    WFM25State.selectedWorker = workerName;
+    WFM25State.selectedWorkerTeam = teamLabel || null;
+    WFM25State.selectedWorkerDetail = null;
+    State.selectedResource = workerName;
+
+    const panel = document.getElementById('wfm25WorkerPanel');
+    const body = document.getElementById('wfm25CapacityBody');
+    const addBtn = document.getElementById('wfm25AddHoursBtn');
+    if (panel) panel.hidden = false;
+    if (body) body.classList.add('wfm25-panel-open');
+    if (addBtn) addBtn.hidden = false;
+
+    const crumbs = [WFM25State.landingBreadcrumb];
+    if (teamLabel) crumbs.push(teamLabel);
+    crumbs.push(workerName);
+    wfm25SetBreadcrumb_(crumbs);
+
+    const panelBody = document.getElementById('wfm25WorkerPanelBody');
+    if (panelBody) {
+      panelBody.innerHTML = '<div class="muted" style="padding:16px">Loading\u2026</div>';
+    }
+    const strip = document.getElementById('wfm25WorkerQuarterStrip');
+    if (strip) strip.hidden = true;
+
+    const reqId = ++WFM25State.workerReqId;
+    try {
+      const detail = await call(
+        'api_getResourceDetailV2',
+        buildServerParams_({ resource: workerName, workerScope: 'SLG' })
+      );
+      if (reqId !== WFM25State.workerReqId) return;
+      WFM25State.selectedWorkerDetail = detail;
+      paintWFM25WorkerPanel_(State.explorerProjection);
+      if (State.softBookings && State.softBookings.length) {
+        scheduleWFM25Projection_();
+      }
+    } catch (err) {
+      if (reqId !== WFM25State.workerReqId) return;
+      if (panelBody) {
+        panelBody.innerHTML = '<div class="muted" style="padding:12px;color:var(--thumbtack)">Failed to load: ' +
+          escapeHtml_(err.message || String(err)) + '</div>';
+      }
+    }
+  }
+
+  /**
+   * Close the worker panel and return to full-width aggregate.
+   */
+  function wfm25CloseWorkerPanel_() {
+    WFM25State.workerReqId++;
+    WFM25State.selectedWorker = null;
+    WFM25State.selectedWorkerTeam = null;
+    WFM25State.selectedWorkerDetail = null;
+    State.selectedResource = null;
+
+    const panel = document.getElementById('wfm25WorkerPanel');
+    const body = document.getElementById('wfm25CapacityBody');
+    const addBtn = document.getElementById('wfm25AddHoursBtn');
+    if (panel) panel.hidden = true;
+    if (body) body.classList.remove('wfm25-panel-open');
+    if (addBtn) addBtn.hidden = true;
+    closeWFM25SoftBookOverlay_();
+
+    if (WFM25State.expandedTeam) {
+      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, WFM25State.expandedTeam]);
+    } else {
+      wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+    }
+  }
+
+  // ── WFM.25 soft-booking overlay + live projection ─────────────
+
+  function closeWFM25SoftBookOverlay_() {
+    const overlay = document.getElementById('wfm25SoftBookOverlay');
+    if (overlay) overlay.hidden = true;
+  }
+
+  function openWFM25SoftBookOverlay_(resourceName) {
+    const overlay = document.getElementById('wfm25SoftBookOverlay');
+    if (!overlay) return;
+    const workerInput = document.getElementById('wfm25SbWorker');
+    const startInput = document.getElementById('wfm25SbStart');
+    const endInput = document.getElementById('wfm25SbEnd');
+    const hoursInput = document.getElementById('wfm25SbHours');
+    if (workerInput) workerInput.value = resourceName || '';
+    const today = new Date().toISOString().slice(0, 10);
+    if (startInput) startInput.value = today;
+    if (endInput) endInput.value = today;
+    if (hoursInput) hoursInput.value = '';
+    overlay.hidden = false;
+    if (hoursInput) hoursInput.focus();
+  }
+
+  function wfm25GetEmployeeId_(resourceName) {
+    const proj = State.explorerProjection || State.explorerBaselineProjection;
+    if (proj && proj.baseline) {
+      const w = (proj.baseline.worker || []).find(function (x) {
+        return x.resourceName === resourceName;
+      });
+      if (w && w.employeeId) return w.employeeId;
+    }
+    const r = (State.ref && State.ref.resources || []).find(function (x) {
+      return x.name === resourceName;
+    });
+    return r ? (r.employee_id || '') : '';
+  }
+
+  function addWFM25SoftBooking_() {
+    const resourceName = WFM25State.selectedWorker ||
+      (document.getElementById('wfm25SbWorker') && document.getElementById('wfm25SbWorker').value);
+    if (!resourceName) return;
+    const start = (document.getElementById('wfm25SbStart') && document.getElementById('wfm25SbStart').value) || '';
+    const end = (document.getElementById('wfm25SbEnd') && document.getElementById('wfm25SbEnd').value) || '';
+    const hours = Number(document.getElementById('wfm25SbHours') && document.getElementById('wfm25SbHours').value);
+    if (!start || !end || !hours || hours <= 0) {
+      toast('Enter start date, end date, and total hours.', 'err');
+      return;
+    }
+    if (new Date(start) > new Date(end)) {
+      toast('Start date must be on or before end date.', 'err');
+      return;
+    }
+    State.softBookings.push({
+      employee_id: wfm25GetEmployeeId_(resourceName),
+      resource_name: resourceName,
+      start_date: start,
+      end_date: end,
+      total_hours: hours
+    });
+    closeWFM25SoftBookOverlay_();
+    onWFM25SoftBookingsChanged_();
+    toast('Draft added — watch the numbers shift.', '');
+  }
+
+  function clearWFM25SoftBookings_(reason) {
+    State.explorerProjectionReqId++;
+    State.softBookings = [];
+    State.explorerProjection = null;
+    closeWFM25SoftBookOverlay_();
+    wfm25UpdatePendingIndicator_();
+    if (WFM25State.scorecardData) {
+      renderWFM25UtilTable_(WFM25State.scorecardData);
+    }
+    if (WFM25State.selectedWorkerDetail) {
+      paintWFM25WorkerPanel_(null);
+    }
+  }
+
+  function onWFM25SoftBookingsChanged_() {
+    wfm25UpdatePendingIndicator_();
+    scheduleWFM25Projection_();
+  }
+
+  async function fetchWFM25Projection_() {
+    if (!State.softBookings.length) {
+      clearWFM25SoftBookings_('empty');
+      return;
+    }
+    const reqId = ++State.explorerProjectionReqId;
+    try {
+      const result = await call('api_projectSoftBookings', buildServerParams_(), State.softBookings);
+      if (reqId !== State.explorerProjectionReqId) return;
+      State.explorerProjection = result;
+      if (WFM25State.scorecardData) {
+        renderWFM25UtilTable_(WFM25State.scorecardData);
+      }
+      if (WFM25State.selectedWorkerDetail) {
+        paintWFM25WorkerPanel_(result);
+      }
+    } catch (err) {
+      if (reqId !== State.explorerProjectionReqId) return;
+      toast('Projection failed: ' + err.message, 'err');
+    }
+  }
+
+  const scheduleWFM25Projection_ = debounce_(fetchWFM25Projection_, 300);
+
 
   /**
    * Aggregate api_getQuarterlyScorecard data by teamLabel.
@@ -7465,18 +7847,23 @@ async function _qaRefreshPsaHours_() {
 
     const colCount = 1 + qKeys.length;
     const rows = [];
+    const projection = State.explorerProjection;
+    const hasDraft = State.softBookings && State.softBookings.length;
+    const selectedWorker = WFM25State.selectedWorker;
+    const selectedTeam = WFM25State.selectedWorkerTeam;
 
     agg.teams.forEach(function (team) {
       const isExpanded = WFM25State.expandedTeam === team.label;
+      const teamGetsDraft = hasDraft && selectedTeam === team.label;
 
       // Team aggregate cells
-      const teamQCells = team.quarters.map(function (q) {
-        const color = (q.util != null)
-          ? cellColor(q.util, team.icpTarget)
-          : { bg: 'var(--business-card)', fg: 'var(--staple)' };
-        return '<td class="wfm25-util-cell" style="background:' + color.bg +
-               ';color:' + color.fg + '">' +
-               (q.util != null ? fmtPct(q.util) : '\u2014') + '</td>';
+      const teamQCells = team.quarters.map(function (q, qi) {
+        const qk = qKeys[qi];
+        const baseUtil = q.util;
+        const projUtil = teamGetsDraft
+          ? wfm25ProjectionUtil_(projection, 'orgTeam', team.label, qk, true)
+          : null;
+        return wfm25RenderUtilCell_(baseUtil, projUtil, team.icpTarget);
       }).join('');
 
       rows.push(
@@ -7493,17 +7880,18 @@ async function _qaRefreshPsaHours_() {
       // Worker rows — only injected when this team is expanded
       if (isExpanded) {
         team.workers.forEach(function (w) {
-          const wQCells = w.quarters.map(function (q) {
-            const color = (q.util != null)
-              ? cellColor(q.util, w.icpTarget)
-              : { bg: '', fg: 'var(--staple)' };
-            return '<td class="wfm25-util-cell" style="' +
-                   (color.bg ? 'background:' + color.bg + ';' : '') +
-                   'color:' + color.fg + '">' +
-                   (q.util != null ? fmtPct(q.util) : '\u2014') + '</td>';
+          const workerGetsDraft = hasDraft && w.name === selectedWorker;
+          const wQCells = w.quarters.map(function (q, qi) {
+            const qk = qKeys[qi];
+            const baseUtil = q.util;
+            const projUtil = workerGetsDraft
+              ? wfm25ProjectionUtil_(projection, 'worker', w.name, qk, true)
+              : null;
+            return wfm25RenderUtilCell_(baseUtil, projUtil, w.icpTarget);
           }).join('');
           rows.push(
-            '<tr class="wfm25-worker-row"' +
+            '<tr class="wfm25-worker-row' +
+            (w.name === selectedWorker ? ' wfm25-worker-row-selected' : '') + '"' +
             ' data-wfm25-worker="' + escapeHtml_(w.name) + '"' +
             ' data-wfm25-team="' + escapeHtml_(team.label) + '">' +
             '<td>' + escapeHtml_(w.name) + '</td>' +
@@ -7530,14 +7918,13 @@ async function _qaRefreshPsaHours_() {
       });
     });
 
-    // ── Wire worker-row clicks (stub — detail panel is Stage 2) ──
+    // ── Wire worker-row clicks → open right-side panel ──
     $$('.wfm25-worker-row', body).forEach(function (tr) {
       tr.addEventListener('click', function (e) {
         e.stopPropagation();
         const wName = tr.dataset.wfm25Worker;
-        Logger && Logger.log
-          ? Logger.log('[WFM.25 stub] worker clicked: ' + wName)
-          : console.log('[WFM.25 stub] worker clicked:', wName);
+        const tName = tr.dataset.wfm25Team;
+        wfm25OpenWorkerPanel_(wName, tName);
       });
     });
   }
@@ -7598,6 +7985,8 @@ async function _qaRefreshPsaHours_() {
     WFM25State.activeView = view;
 
     if (view === 'admin') {
+      clearWFM25SoftBookings_('admin');
+      wfm25CloseWorkerPanel_();
       wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Admin']);
       return;
     }
@@ -7673,6 +8062,34 @@ async function _qaRefreshPsaHours_() {
         toast('Global search is coming in a later stage', '');
       });
     }
+
+    // ── Worker panel close + soft-booking overlay ──
+    const panelClose = document.getElementById('wfm25WorkerPanelClose');
+    if (panelClose) panelClose.addEventListener('click', wfm25CloseWorkerPanel_);
+
+    const addHoursBtn = document.getElementById('wfm25AddHoursBtn');
+    if (addHoursBtn) {
+      addHoursBtn.addEventListener('click', function () {
+        if (WFM25State.selectedWorker) openWFM25SoftBookOverlay_(WFM25State.selectedWorker);
+      });
+    }
+    const sbClose = document.getElementById('wfm25SoftBookClose');
+    const sbCancel = document.getElementById('wfm25SbCancel');
+    const sbBackdrop = document.getElementById('wfm25SoftBookBackdrop');
+    if (sbClose) sbClose.addEventListener('click', closeWFM25SoftBookOverlay_);
+    if (sbCancel) sbCancel.addEventListener('click', closeWFM25SoftBookOverlay_);
+    if (sbBackdrop) sbBackdrop.addEventListener('click', closeWFM25SoftBookOverlay_);
+    const sbAdd = document.getElementById('wfm25SbAdd');
+    if (sbAdd) sbAdd.addEventListener('click', addWFM25SoftBooking_);
+    const sbHours = document.getElementById('wfm25SbHours');
+    if (sbHours) {
+      sbHours.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') addWFM25SoftBooking_();
+      });
+    }
+
+    // ── Load baseline projection for employee_id lookup ──
+    loadExplorerBaselineProjection_();
 
     // ── Load Utilization tab (active on boot) ──
     await loadWFM25Utilization_();

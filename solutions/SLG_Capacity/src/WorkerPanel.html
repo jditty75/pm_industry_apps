@@ -1,0 +1,25 @@
+<!-- WorkerPanel.html — WFM.25 Stage 2 right-side worker detail panel.
+     Included from CapacityCanvas.html. Behavior wired in JavaScript.html. -->
+
+<aside class="wfm25-worker-panel" id="wfm25WorkerPanel" hidden aria-label="Worker detail">
+  <header class="wfm25-worker-panel-header">
+    <button type="button" class="btn-ghost wfm25-worker-panel-close" id="wfm25WorkerPanelClose"
+            aria-label="Close worker panel">← Back</button>
+    <div class="wfm25-worker-panel-identity">
+      <h2 class="wfm25-worker-panel-name" id="wfm25WorkerPanelName">—</h2>
+      <div class="wfm25-worker-panel-meta muted" id="wfm25WorkerPanelMeta"></div>
+    </div>
+    <button type="button" class="btn-primary wfm25-add-hours-btn" id="wfm25AddHoursBtn"
+            hidden>+ Add hours</button>
+  </header>
+
+  <div class="wfm25-worker-quarter-strip" id="wfm25WorkerQuarterStrip" hidden></div>
+
+  <div class="wfm25-worker-panel-body" id="wfm25WorkerPanelBody">
+    <div class="muted" style="padding:16px">Select a worker to view detail.</div>
+  </div>
+
+  <footer class="wfm25-worker-panel-footer" id="wfm25WorkerPanelFooter" hidden>
+    <span class="wfm25-pending-indicator muted" id="wfm25PendingIndicator">0 pending</span>
+  </footer>
+</aside>

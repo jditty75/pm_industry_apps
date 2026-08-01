@@ -3828,6 +3828,11 @@ function _dbg_reconcileWFM24() {
   var failures = [];
   var TOL = 0.01;
   var curQ = fiscalQuarterKey_(new Date());
+  var curBounds = fiscalQuarterBounds_(curQ);
+  var prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
+  var prevQ = fiscalQuarterKey_(prevDay);
+  var expectedWindowKeys = [prevQ].concat(rollingQuarterKeys_(3));
+  var forwardKeys = expectedWindowKeys.slice(2);
 
   if (typeof api_flushCaches === 'function') api_flushCaches();
 
@@ -3852,13 +3857,57 @@ function _dbg_reconcileWFM24() {
     return true;
   }
 
+  // ---- Check 0: scorecard window = previous / current / +1 / +2 ----
+  (function scorecardWindow() {
+    Logger.log('=== WFM.24 Check 0: scorecard window ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var keys = scorecard.quarterKeys || [];
+    if (keys.length !== expectedWindowKeys.length) {
+      failures.push('Window: expected ' + expectedWindowKeys.length + ' keys, got ' + keys.length);
+      return;
+    }
+    for (var wi = 0; wi < expectedWindowKeys.length; wi++) {
+      if (keys[wi] !== expectedWindowKeys[wi]) {
+        failures.push('Window: keys[' + wi + ']=' + keys[wi] + ' expect ' + expectedWindowKeys[wi]);
+      }
+    }
+    var prevTeam = scorecard.teamSummary && scorecard.teamSummary[0];
+    if (!prevTeam || prevTeam.quarterKey !== prevQ) {
+      failures.push('Window: first column=' + (prevTeam && prevTeam.quarterKey) + ' expect previous=' + prevQ);
+    } else if (prevTeam.isCurrentQuarter) {
+      failures.push('Window: previous quarter flagged isCurrentQuarter');
+    }
+    var curTeam = (scorecard.teamSummary || []).find(function (t) { return t.quarterKey === curQ; });
+    if (!curTeam) {
+      failures.push('Window: current quarter missing from teamSummary');
+    } else if (!curTeam.isCurrentQuarter) {
+      failures.push('Window: current quarter not flagged isCurrentQuarter');
+    }
+    var sampleWorker = (scorecard.workers || [])[0];
+    if (sampleWorker && sampleWorker.quarters && sampleWorker.quarters.length) {
+      var prevCell = sampleWorker.quarters[0];
+      if (prevCell.quarterKey !== prevQ) {
+        failures.push('Window: worker first quarter=' + prevCell.quarterKey + ' expect ' + prevQ);
+      } else if (prevCell.isCurrentQuarter) {
+        failures.push('Window: worker previous quarter flagged isCurrentQuarter');
+      }
+      var curCell = (sampleWorker.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      if (!curCell) {
+        failures.push('Window: worker current quarter missing');
+      } else if (!curCell.isCurrentQuarter) {
+        failures.push('Window: worker current quarter not flagged isCurrentQuarter');
+      }
+    }
+    Logger.log('  window=' + keys.join(', ') +
+      ' prevNotCurrent=' + (prevTeam && !prevTeam.isCurrentQuarter ? 'OK' : 'FAIL') +
+      ' curIsCurrent=' + (curTeam && curTeam.isCurrentQuarter ? 'OK' : 'FAIL'));
+  })();
+
   // ---- Check A: WoW target sourcing (D5) ----
   (function wowTargetSourcing() {
     Logger.log('=== WFM.24 Check A: WoW target sourcing ===');
     var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
-    var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) {
-      return qk !== curQ;
-    });
+    var futureKeys = forwardKeys;
 
     var withWow = null;
     (scorecard.workers || []).some(function (w) {

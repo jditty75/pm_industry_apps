@@ -6105,24 +6105,6 @@ async function _qaRefreshPsaHours_() {
 
   async function loadAdmin() {
     try {
-      const ref = State.ref;
-      const icpBody = $('#icpBody');
-      icpBody.innerHTML = (ref.icp || []).map(r => `
-        <tr>
-          <td><input type="text" class="input" data-icp-role value="${escapeHtml_(r.role)}"></td>
-          <td><input type="number" step="0.01" class="input num" data-icp-target value="${r.target_utilization}"></td>
-          <td><input type="number" step="0.01" class="input num" data-icp-red value="${r.red_threshold}"></td>
-        </tr>
-      `).join('');
-
-      const rolesBody = $('#rolesBody');
-      rolesBody.innerHTML = (ref.roles || []).map(r => `
-        <tr>
-          <td><input type="text" class="input" data-role-name value="${escapeHtml_(r.role)}"></td>
-          <td><input type="number" step="1" class="input num" data-role-hours value="${r.monthly_capacity_hours}"></td>
-        </tr>
-      `).join('');
-
       const freshness = await call('api_getDataFreshness');
       renderDataFreshness_(freshness);
 
@@ -6143,29 +6125,6 @@ async function _qaRefreshPsaHours_() {
       toast('Admin load failed: ' + err.message, 'err');
     }
   }
-
-  $('#saveIcpBtn')?.addEventListener('click', async function() {
-    const rows = $$('#icpBody tr').map(tr => ({
-      role: tr.querySelector('[data-icp-role]').value,
-      target_utilization: Number(tr.querySelector('[data-icp-target]').value),
-      red_threshold: Number(tr.querySelector('[data-icp-red]').value)
-    }));
-    await withLoading_(this, async () => {
-      await call('api_saveIcp', rows);
-      toast('ICP saved', 'ok');
-    }, { label: 'Saving...' });
-  });
-
-  $('#saveRolesBtn')?.addEventListener('click', async function() {
-    const rows = $$('#rolesBody tr').map(tr => ({
-      role: tr.querySelector('[data-role-name]').value,
-      monthly_capacity_hours: Number(tr.querySelector('[data-role-hours]').value)
-    }));
-    await withLoading_(this, async () => {
-      await call('api_saveRoles', rows);
-      toast('Roles saved', 'ok');
-    }, { label: 'Saving...' });
-  });
 
   $('#saveExclusionsBtn')?.addEventListener('click', async function() {
     const rows = $$('#exclusionsBody tr').map(tr => ({

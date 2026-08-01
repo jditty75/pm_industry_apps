@@ -838,7 +838,6 @@
       <!-- Admin tab strip -->
       <nav class="admin-tabs" role="tablist" aria-label="Admin sections">
         <button class="admin-tab on" data-admin-tab="operations" role="tab" aria-selected="true">Operations</button>
-        <button class="admin-tab" data-admin-tab="planning" role="tab" aria-selected="false">Planning Config</button>
         <button class="admin-tab" data-admin-tab="workforce" role="tab" aria-selected="false">Workforce</button>
         <button class="admin-tab" data-admin-tab="overrides" role="tab" aria-selected="false">
           Source Overrides
@@ -928,24 +927,6 @@
             <button class="btn-ghost" id="flushCachesBtn" title="Reload all cached config and data sheets">↻ Flush caches</button>
             <button class="btn-ghost" id="refreshOppsBtn">Normalize Opportunities</button>
           </div>
-        </div>
-      </div>
-
-      <!-- Planning Config panel -->
-      <div class="admin-panel" data-admin-panel="planning" hidden>
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Settings</div>
-            <button class="btn-ghost" id="saveSettingsBtn">Save</button>
-          </div>
-          <table class="data-table">
-            <thead>
-              <tr><th>Setting</th><th>Value</th><th>Notes</th></tr>
-            </thead>
-            <tbody id="settingsBody">
-              <tr><td colspan="3" class="muted" style="padding:12px">Loading…</td></tr>
-            </tbody>
-          </table>
         </div>
       </div>
 

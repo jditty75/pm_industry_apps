@@ -528,6 +528,14 @@
   // BEFORE the view-specific load function fires, so the load
   // happens with the correct scope on the first request.
   // ============================================================
+  const ADMIN_TAB_KEY = 'capacityPlanner.adminTab';
+
+  function resolveAdminTab_(tabName) {
+    const valid = ['operations', 'workforce', 'overrides'];
+    const t = String(tabName || '');
+    return valid.indexOf(t) >= 0 ? t : 'operations';
+  }
+
   function showView(name) {
     const previousView = State.currentView;
     State.currentView = name;
@@ -561,7 +569,7 @@
     if (name === 'scenarios') loadScenarios();
     if (name === 'reporting') loadReporting();
     if (name === 'admin') {
-      const savedTab = localStorage.getItem(ADMIN_TAB_KEY) || 'operations';
+      const savedTab = resolveAdminTab_(localStorage.getItem(ADMIN_TAB_KEY) || 'operations');
       activateAdminTab_(savedTab);
       loadAdmin();
     }
@@ -6363,8 +6371,6 @@ async function _qaRefreshPsaHours_() {
   // ============================================================
   // Admin tab navigation (Drop 2)
   // ============================================================
-  const ADMIN_TAB_KEY = 'capacityPlanner.adminTab';
-
   function initAdminTabs_() {
     document.addEventListener('click', (e) => {
       const tab = e.target.closest('[data-admin-tab]');
@@ -6374,6 +6380,7 @@ async function _qaRefreshPsaHours_() {
   }
 
   function activateAdminTab_(tabName) {
+    tabName = resolveAdminTab_(tabName);
     $$('[data-admin-tab]').forEach(btn => {
       const isActive = btn.dataset.adminTab === tabName;
       btn.classList.toggle('on', isActive);
@@ -6383,48 +6390,8 @@ async function _qaRefreshPsaHours_() {
       panel.hidden = panel.dataset.adminPanel !== tabName;
     });
     try { localStorage.setItem(ADMIN_TAB_KEY, tabName); } catch (e) {}
-    if (tabName === 'planning') loadAdminSettings_();
     if (tabName === 'overrides') loadOverridesAdmin_();
   }
-
-  async function loadAdminSettings_() {
-    const body = $('#settingsBody');
-    if (!body) return;
-    try {
-      const settings = await call('api_listSettings');
-      body.innerHTML = settings.map(s => `
-        <tr>
-          <td>
-            <div style="font-weight:500">${escapeHtml_(s.label)}</div>
-            <div class="muted" style="font-size:12px">${escapeHtml_(s.description)}</div>
-          </td>
-          <td>
-            <input type="text" class="input settings-input" data-key="${escapeHtml_(s.key)}" value="${escapeHtml_(s.value)}" style="width:100%;">
-            ${s.isDefault ? '<span class="badge ghost" style="margin-left:6px;font-size:11px;">(default)</span>' : ''}
-          </td>
-          <td class="muted" style="font-size:12px">${escapeHtml_(s.key)}</td>
-        </tr>
-      `).join('');
-    } catch (err) {
-      body.innerHTML = '<tr><td colspan="3" class="muted" style="padding:12px">Failed to load settings: ' + escapeHtml_(err.message) + '</td></tr>';
-    }
-  }
-
-  $('#saveSettingsBtn')?.addEventListener('click', async () => {
-    const inputs = $$('.settings-input');
-    if (!inputs.length) { toast('No settings loaded', 'info'); return; }
-    const rows = Array.from(inputs).map(input => ({
-      key:   input.dataset.key,
-      value: input.value
-    }));
-    try {
-      await call('api_saveSettings', rows);
-      await call('api_flushCaches');
-      toast('Settings saved', 'ok');
-    } catch (err) {
-      toast('Save failed: ' + err.message, 'err');
-    }
-  });
 
   // Consolidated workbook upload (WFM.21)
   const consolidatedUploadZone = $('#consolidatedUploadZone');

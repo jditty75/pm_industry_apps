@@ -2072,23 +2072,34 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     let bonusAttainment = 0;
     let source = 'forecast';
     let icpUtil = 0;
+    let stale = false;
 
-    if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0) {
+    // D8.1: the current-quarter actuals path only applies when a same-scale
+    // bonus target exists. The qtd_icp_plus_forecast numerator is bonus-scale
+    // (tied to the WoW UTIL_Current row / bonus_target_billable_hours_eoq), so
+    // its icpUtil denominator MUST be that same row/scale. Without a valid bonus
+    // target there is no same-scale pairing, so fall through to the pure
+    // forecast path (ICP-scale consistent) rather than a mismatched ratio.
+    if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
+        summary.bonus_target_billable_hours_eoq > 0) {
       productiveHours = summary.qtd_icp_plus_forecast_hours;
-      if (summary.bonus_target_billable_hours_eoq > 0) {
-        targetHours = summary.bonus_target_billable_hours_eoq;
-        bonusAttainment = productiveHours / targetHours;
-      }
+      targetHours = summary.bonus_target_billable_hours_eoq;
+      bonusAttainment = productiveHours / targetHours;
       source = 'actuals_plus_forecast';
-      // D8: current-quarter ICP-util pairs qtd_icp_plus_forecast with the
-      // same-scale WoW UTIL_Current target (bonus-scale), not icpAvailableHours.
+      // D8.1: numerator and denominator share the SAME WoW row / scale. The
+      // numerator is bonus-scale, so the denominator is the same-row bonus
+      // target — making icpUtil == bonusAttainment by construction. Do NOT key
+      // the denominator on quarterTargetFromWoW_(qk): after a fiscal-quarter
+      // rollover qk is a FORWARD (ICP-scale) WoW row while the numerator still
+      // reflects the WoW snapshot's own (earlier, bonus-scale) current quarter,
+      // and bonus-scale / ICP-scale forward = garbage (the 357%/283% drift).
+      icpUtil = targetHours > 0 ? productiveHours / targetHours : 0;
+      // Staleness: the WoW snapshot's current quarter has fallen behind the
+      // calendar current quarter when quarterTargetFromWoW_ has no target for
+      // the calendar-current qk yet we still hold qtd actuals (which therefore
+      // describe a different/earlier quarter than qk).
       const wowCurTarget = quarterTargetFromWoW_(worker.employeeId, qk);
-      const icpUtilDen = (wowCurTarget != null && wowCurTarget > 0)
-        ? wowCurTarget
-        : (summary.bonus_target_billable_hours_eoq > 0
-          ? summary.bonus_target_billable_hours_eoq
-          : wd.icpAvailableHours);
-      icpUtil = icpUtilDen > 0 ? productiveHours / icpUtilDen : 0;
+      stale = !(wowCurTarget != null && wowCurTarget > 0);
     } else {
       productiveHours = sumForecastProductiveForQuarter_(worker, qk, weeks);
       const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
@@ -2117,7 +2128,8 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       financeUtil: Number(financeUtil) || 0,
       ratioToTarget: Number(ratioToTarget) || 0,
       bonusAttainment: Number(bonusAttainment) || 0,
-      source: source
+      source: source,
+      stale: !!stale
     };
   });
 }

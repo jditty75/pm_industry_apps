@@ -3017,4 +3017,407 @@ td.cell-with-bar {
 .access-denied a:hover {
   text-decoration: underline;
 }
+
+/* ============================================================
+   WFM.25 — Calm-chrome unified UX shell
+   §6: color lives in data/actions; chrome stays neutral.
+   ============================================================ */
+:root {
+  --wfm25-topbar-h:   48px;
+  --wfm25-strip-w:    64px;
+  --wfm25-chrome:     var(--keyboard);       /* neutral chrome bg */
+  --wfm25-chrome-bdr: var(--desk);           /* neutral chrome border */
+  /* §6 team identity */
+  --team-functional:  var(--ballpoint);      /* Functional Consulting #0875C1 */
+  --team-technical:   var(--tack);           /* Technical Consulting  #5BB5C4 */
+  --team-delivery:    var(--smoothie);       /* Delivery              #A659C4 */
+}
+
+/* Shell grid: column layout stacks topbar above body row */
+.wfm25-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--paper);
+}
+
+/* ── Top Bar ─────────────────────────────────────────────── */
+.wfm25-topbar {
+  height: var(--wfm25-topbar-h);
+  background: var(--wfm25-chrome);
+  border-bottom: 1px solid var(--wfm25-chrome-bdr);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.wfm25-topbar-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--after-hours);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.wfm25-topbar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+.wfm25-breadcrumb {
+  font-size: 13px;
+  color: var(--laptop);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 480px;
+}
+.wfm25-breadcrumb-sep {
+  color: var(--staple);
+  margin: 0 6px;
+}
+.wfm25-topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+/* userChip override for light topbar (existing style assumes dark sidebar) */
+.wfm25-user-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 100px;
+  background: var(--business-card);
+  color: var(--laptop);
+  border: 1px solid var(--desk);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.wfm25-search-btn {
+  background: none;
+  border: 1px solid var(--desk);
+  border-radius: 6px;
+  color: var(--staple);
+  padding: 4px 9px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  line-height: 1;
+}
+.wfm25-search-btn:hover {
+  background: var(--business-card);
+  color: var(--laptop);
+}
+
+/* ── Body row: icon strip + main + draft handle ──────────── */
+.wfm25-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Slim icon strip (left nav — two items) ──────────────── */
+.wfm25-icon-strip {
+  width: var(--wfm25-strip-w);
+  background: var(--wfm25-chrome);
+  border-right: 1px solid var(--wfm25-chrome-bdr);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.wfm25-strip-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 4px;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 52px;
+  color: var(--staple);
+  transition: background .15s, color .15s;
+}
+.wfm25-strip-btn:hover {
+  background: var(--business-card);
+  color: var(--laptop);
+}
+.wfm25-strip-btn.active {
+  background: rgba(8,117,193,.10);
+  color: var(--ballpoint);
+}
+.wfm25-strip-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.wfm25-strip-label {
+  font-size: 10px;
+  letter-spacing: .3px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ── Main content area ───────────────────────────────────── */
+.wfm25-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  background: var(--paper);
+}
+
+/* ── Draft tray handle (right edge, collapsed, visual only) ─ */
+.wfm25-draft-handle {
+  width: 28px;
+  background: var(--wfm25-chrome);
+  border-left: 1px solid var(--wfm25-chrome-bdr);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: default;
+  user-select: none;
+}
+.wfm25-draft-handle-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  font-size: 11px;
+  color: var(--staple);
+  white-space: nowrap;
+  padding: 8px 0;
+  letter-spacing: .3px;
+}
+
+/* ── Capacity canvas: fills the main area ────────────────── */
+.wfm25-capacity-canvas {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ── Tab bar ─────────────────────────────────────────────── */
+.wfm25-tab-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--wfm25-chrome-bdr);
+  background: var(--paper);
+  padding: 0 20px;
+  flex-shrink: 0;
+  gap: 16px;
+}
+.wfm25-tabs {
+  display: flex;
+  gap: 0;
+}
+.wfm25-tab {
+  padding: 11px 18px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--staple);
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+  margin-bottom: -1px;
+}
+.wfm25-tab:hover {
+  color: var(--laptop);
+}
+.wfm25-tab.active {
+  color: var(--ballpoint);
+  border-bottom-color: var(--ballpoint);
+}
+
+/* Group-by toggle */
+.wfm25-groupby {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+.wfm25-groupby-label {
+  font-size: 12px;
+  color: var(--staple);
+  white-space: nowrap;
+}
+.wfm25-groupby-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--desk);
+  border-radius: 4px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--laptop);
+  cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.wfm25-groupby-btn.active {
+  background: var(--ballpoint);
+  border-color: var(--ballpoint);
+  color: #fff;
+}
+.wfm25-groupby-btn:hover:not(.active) {
+  background: var(--business-card);
+}
+
+/* ── Aggregate content region ────────────────────────────── */
+.wfm25-aggregate-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+.wfm25-tab-panel[hidden] {
+  display: none !important;
+}
+
+/* ── Utilization table ───────────────────────────────────── */
+.wfm25-util-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.wfm25-team-col {
+  min-width: 220px;
+  text-align: left;
+}
+.wfm25-qth {
+  text-align: center;
+  min-width: 110px;
+  font-size: 12px;
+  color: var(--laptop);
+  font-weight: 600;
+  padding: 8px 12px !important;
+}
+.wfm25-qth.wfm25-cur-qth {
+  color: var(--ballpoint);
+}
+
+/* Team rows */
+.wfm25-team-row {
+  cursor: pointer;
+  transition: background .1s;
+}
+.wfm25-team-row:hover td {
+  background: rgba(244,239,223,.7) !important;
+}
+.wfm25-team-row td {
+  font-weight: 600;
+  padding: 10px 12px !important;
+}
+.wfm25-team-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wfm25-team-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.wfm25-expand-chev {
+  font-size: 9px;
+  color: var(--staple);
+  margin-left: auto;
+  transition: transform .15s;
+  display: inline-block;
+}
+.wfm25-team-row.expanded .wfm25-expand-chev {
+  transform: rotate(90deg);
+}
+
+/* Worker rows (zoom-in-place) */
+.wfm25-worker-row {
+  cursor: pointer;
+  background: var(--paper);
+  transition: background .1s;
+}
+.wfm25-worker-row:hover td {
+  background: var(--business-card) !important;
+}
+.wfm25-worker-row td:first-child {
+  padding-left: 36px !important;
+  font-size: 13px;
+  color: var(--laptop);
+}
+.wfm25-worker-row td {
+  padding: 7px 12px !important;
+  font-size: 13px;
+}
+
+/* Util cells */
+.wfm25-util-cell {
+  text-align: center !important;
+  font-size: 13px;
+  font-weight: 500;
+}
+/* Team util cells slightly larger font */
+.wfm25-team-row .wfm25-util-cell {
+  font-size: 14px;
+}
+
+/* ── Placeholder panels (Hours & Budget, Mix & Trend) ─────── */
+.wfm25-placeholder-panel {
+  display: flex !important;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 40px;
+}
+.wfm25-placeholder-panel[hidden] {
+  display: none !important;
+}
+.wfm25-coming-soon {
+  text-align: center;
+  color: var(--staple);
+  padding: 40px 20px;
+}
+.wfm25-coming-soon-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+.wfm25-coming-soon-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--laptop);
+  margin-bottom: 6px;
+}
+.wfm25-coming-soon-body {
+  font-size: 13px;
+}
+
+/* ── Role group-by stub notice ───────────────────────────── */
+.wfm25-role-stub {
+  margin: 32px auto;
+  max-width: 440px;
+  background: var(--keyboard);
+  border: 1px solid var(--desk);
+  border-radius: 8px;
+  padding: 20px 24px;
+  text-align: center;
+  color: var(--laptop);
+  font-size: 13px;
+}
+.wfm25-role-stub strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--after-hours);
+}
 </style>

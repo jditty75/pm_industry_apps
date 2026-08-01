@@ -1,0 +1,70 @@
+<!-- CapacityCanvas.html — WFM.25 Stage 1 Capacity surface canvas.
+     Included via <?!= include('CapacityCanvas'); ?> in Index.html.
+     Contains: tab bar (Utilization / Hours & Budget / Mix & Trend),
+     Group-by toggle, and the aggregate content region (#aggregateContent).
+     All behavior is wired in JavaScript.html (initWFM25_). -->
+
+<div id="capacityCanvas" class="wfm25-capacity-canvas">
+
+  <!-- ── Tab bar + Group-by toggle (right-aligned) ── -->
+  <div class="wfm25-tab-bar">
+    <div class="wfm25-tabs" role="tablist" aria-label="Capacity views">
+      <button class="wfm25-tab active" data-wfm25-tab="utilization"
+              role="tab" aria-selected="true">Utilization</button>
+      <button class="wfm25-tab" data-wfm25-tab="hours-budget"
+              role="tab" aria-selected="false">Hours &amp; Budget</button>
+      <button class="wfm25-tab" data-wfm25-tab="mix-trend"
+              role="tab" aria-selected="false">Mix &amp; Trend</button>
+    </div>
+    <div class="wfm25-groupby" aria-label="Group by">
+      <span class="wfm25-groupby-label">Group by:</span>
+      <button class="wfm25-groupby-btn active" data-wfm25-groupby="team">Team</button>
+      <button class="wfm25-groupby-btn" data-wfm25-groupby="role">Role</button>
+    </div>
+  </div>
+
+  <!-- ── Aggregate content region ── -->
+  <div id="aggregateContent" class="wfm25-aggregate-content">
+
+    <!-- ─ Utilization panel (active by default) ─ -->
+    <div class="wfm25-tab-panel" id="wfm25PanelUtilization"
+         data-wfm25-panel="utilization">
+      <div class="table-wrap" id="wfm25UtilWrap">
+        <table class="data-table wfm25-util-table" id="wfm25UtilTable">
+          <thead>
+            <tr id="wfm25UtilHeaderRow">
+              <th class="wfm25-team-col">Team</th>
+              <!-- quarter header <th> cells injected by renderWFM25UtilTable_() -->
+            </tr>
+          </thead>
+          <tbody id="wfm25UtilBody">
+            <tr>
+              <td colspan="5" class="muted" style="padding:14px">Loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ─ Hours & Budget panel (placeholder) ─ -->
+    <div class="wfm25-tab-panel wfm25-placeholder-panel" id="wfm25PanelHoursBudget"
+         data-wfm25-panel="hours-budget" hidden>
+      <div class="wfm25-coming-soon">
+        <div class="wfm25-coming-soon-icon">⏳</div>
+        <div class="wfm25-coming-soon-title">Hours &amp; Budget</div>
+        <div class="wfm25-coming-soon-body muted">Coming in a later stage</div>
+      </div>
+    </div>
+
+    <!-- ─ Mix & Trend panel (placeholder) ─ -->
+    <div class="wfm25-tab-panel wfm25-placeholder-panel" id="wfm25PanelMixTrend"
+         data-wfm25-panel="mix-trend" hidden>
+      <div class="wfm25-coming-soon">
+        <div class="wfm25-coming-soon-icon">⏳</div>
+        <div class="wfm25-coming-soon-title">Mix &amp; Trend</div>
+        <div class="wfm25-coming-soon-body muted">Coming in a later stage</div>
+      </div>
+    </div>
+
+  </div><!-- /#aggregateContent -->
+</div><!-- /#capacityCanvas -->

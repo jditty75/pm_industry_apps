@@ -7521,8 +7521,9 @@ async function _qaRefreshPsaHours_() {
    * @returns {string}
    */
   function wfm25LoadingSpinnerHtml_() {
-    return '<div class="wfm25-panel-loading" role="status" aria-label="Loading">' +
-      '<div class="explorer-loading-spinner" aria-hidden="true"></div></div>';
+    return '<div class="wfm25-panel-loading" role="status" aria-live="polite">' +
+      '<div class="explorer-loading-spinner" aria-hidden="true"></div>' +
+      '<div class="explorer-loading-label">Loading\u2026</div></div>';
   }
 
   /**

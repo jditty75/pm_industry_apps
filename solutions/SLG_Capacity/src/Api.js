@@ -3242,6 +3242,166 @@ function api_refreshOpportunities() {
   return normalizeOpportunities();
 }
 
+/**
+ * Build a wire-safe freshness event (ISO timestamp + detail string).
+ * @param {Date|string|number} when
+ * @param {string} detail
+ * @return {{when:string, detail:string}}
+ */
+function _dataFreshnessEvent_(when, detail) {
+  var whenStr = '';
+  try {
+    if (when instanceof Date) whenStr = _toIso_(when);
+    else if (when) whenStr = _toIso_(new Date(when));
+  } catch (e) {
+    whenStr = String(when || '');
+  }
+  return {
+    when: whenStr,
+    detail: String(detail || '')
+  };
+}
+
+/**
+ * @return {{lastSuccess:Object|null, lastFailure:Object|null}}
+ */
+function _dataFreshnessNullFeed_() {
+  return { lastSuccess: null, lastFailure: null };
+}
+
+/**
+ * @param {Date|string|number} when
+ * @return {boolean}
+ */
+function _isWithin7Days_(when) {
+  if (!when) return false;
+  try {
+    var d = when instanceof Date ? when : new Date(when);
+    if (isNaN(d.getTime())) return false;
+    return (Date.now() - d.getTime()) <= 7 * 24 * 60 * 60 * 1000;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * WoW ingest freshness from Normalization_Log source='staff'.
+ * @return {{lastSuccess:Object|null, lastFailure:Object|null}}
+ */
+function _dataFreshnessWowIngest_() {
+  var out = _dataFreshnessNullFeed_();
+  try {
+    var rows = (readTable_(REFRESH_LOG) || []).filter(function (r) {
+      return String(r.source || '').trim() === 'staff';
+    }).sort(function (a, b) {
+      return new Date(b.timestamp) - new Date(a.timestamp);
+    });
+    rows.some(function (r) {
+      if (Number(r.rows_out) > 0) {
+        out.lastSuccess = _dataFreshnessEvent_(r.timestamp,
+          String(Number(r.rows_out) || 0) + ' rows');
+        return true;
+      }
+      return false;
+    });
+    rows.some(function (r) {
+      var rowsOut = Number(r.rows_out) || 0;
+      var warnings = String(r.warnings || '').trim();
+      if (rowsOut === 0 || warnings) {
+        if (_isWithin7Days_(r.timestamp)) {
+          out.lastFailure = _dataFreshnessEvent_(r.timestamp,
+            warnings || 'ingest produced 0 rows');
+          return true;
+        }
+      }
+      return false;
+    });
+  } catch (e) {
+    Logger.log('_dataFreshnessWowIngest_ failed — ' + e);
+  }
+  return out;
+}
+
+/**
+ * Read SF pipeline refresh log rows as wire-safe primitives.
+ * @return {Object[]}
+ */
+function _readSfPipelineRefreshRows_() {
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(SF_PIPELINE_REFRESH_LOG);
+    if (!sh) return [];
+    var values = sh.getDataRange().getValues();
+    if (!values || values.length < 2) return [];
+    var header = values[0].map(function (h) { return String(h || '').trim(); });
+    var out = [];
+    for (var i = 1; i < values.length; i++) {
+      var row = {};
+      header.forEach(function (h, j) {
+        var v = values[i][j];
+        if (v === null || v === undefined) row[h] = '';
+        else if (v instanceof Date) row[h] = _toIso_(v);
+        else if (typeof v === 'number' || typeof v === 'boolean') row[h] = v;
+        else row[h] = String(v);
+      });
+      out.push(row);
+    }
+    return out.sort(function (a, b) {
+      return new Date(b['Refresh Time']) - new Date(a['Refresh Time']);
+    });
+  } catch (e) {
+    Logger.log('_readSfPipelineRefreshRows_ failed — ' + e);
+    return [];
+  }
+}
+
+/**
+ * Pipeline or Deployments freshness from Auto Refresh Execution Log 1.
+ * @param {string} sheetName 'Pipeline' | 'Deployments'
+ * @return {{lastSuccess:Object|null, lastFailure:Object|null}}
+ */
+function _dataFreshnessSfFeed_(sheetName) {
+  var out = _dataFreshnessNullFeed_();
+  var rows = _readSfPipelineRefreshRows_().filter(function (r) {
+    return String(r['Sheet'] || '').trim() === sheetName;
+  });
+  rows.some(function (r) {
+    if (String(r['Status'] || '').trim() === 'Success') {
+      var detail = String(r['Operation'] || '').trim() || 'Success';
+      out.lastSuccess = _dataFreshnessEvent_(r['Refresh Time'], detail);
+      return true;
+    }
+    return false;
+  });
+  rows.some(function (r) {
+    if (String(r['Status'] || '').trim() !== 'Success') {
+      if (_isWithin7Days_(r['Refresh Time'])) {
+        var status = String(r['Status'] || '').trim() || 'failed';
+        var op = String(r['Operation'] || '').trim();
+        var detail = op ? (op + ' — ' + status) : status;
+        out.lastFailure = _dataFreshnessEvent_(r['Refresh Time'], detail);
+        return true;
+      }
+    }
+    return false;
+  });
+  return out;
+}
+
+/**
+ * WFM.23 D9: compact data-freshness summary for Admin Operations tab.
+ * Self-computing from Normalization_Log + SF pipeline refresh log.
+ * Wire-safe: no Date objects in the response.
+ * @return {{wowIngest:Object, pipeline:Object, deployments:Object}}
+ */
+function api_getDataFreshness() {
+  _requireAuthorized_();
+  return {
+    wowIngest: _dataFreshnessWowIngest_(),
+    pipeline: _dataFreshnessSfFeed_('Pipeline'),
+    deployments: _dataFreshnessSfFeed_('Deployments')
+  };
+}
+
 function api_getRefreshLog() {
   _requireAuthorized_();
   try {

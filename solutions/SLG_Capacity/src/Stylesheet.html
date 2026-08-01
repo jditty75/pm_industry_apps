@@ -3689,4 +3689,323 @@ td.cell-with-bar {
   margin-bottom: 6px;
   color: var(--after-hours);
 }
+
+/* ============================================================
+   WFM.25 DESIGN SYSTEM
+   Component layer — calm chrome, colorful meaning.
+   Appended rules only; palette tokens live in :root above.
+   ============================================================ */
+
+/* ── 1. CHROME (white-on-paper, no tan/navy) ─────────────── */
+
+.wfm25-app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.wfm25-topbar {
+  height: var(--wfm25-topbar-h, 48px);
+  background: #fff;
+  border-bottom: 1px solid var(--business-card);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-4);
+  gap: var(--space-4);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 100;
+}
+
+.wfm25-rail {
+  width: var(--wfm25-strip-w, 64px);
+  background: #fff;
+  border-right: 1px solid var(--business-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-3) 0;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.wfm25-rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 4px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  width: 52px;
+  color: var(--staple);
+  transition: background .15s, color .15s, box-shadow .15s;
+}
+
+.wfm25-rail-item:hover {
+  background: var(--paper);
+  color: var(--laptop);
+}
+
+.wfm25-rail-item.active {
+  background: rgba(8, 117, 193, .08);
+  color: var(--ballpoint);
+  box-shadow: inset 3px 0 0 var(--ballpoint);
+}
+
+.wfm25-card {
+  background: #fff;
+  border: 1px solid var(--business-card);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.wfm25-card-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ── 2. TABLE (aggregate — white, no tan header) ─────────── */
+
+.wfm25-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.wfm25-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--staple);
+  background: #fff;
+  border-bottom: 1px solid var(--business-card);
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wfm25-table tbody td {
+  font-size: 13px;
+  color: var(--laptop);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--business-card);
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
+.wfm25-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.wfm25-table tbody tr:hover td {
+  background: var(--paper);
+}
+
+/* Team identity: left color-bar + dot */
+.wfm25-team-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.wfm25-team-functional {
+  box-shadow: inset 4px 0 0 var(--ballpoint);
+}
+
+.wfm25-team-functional .wfm25-team-dot {
+  background: var(--ballpoint);
+}
+
+.wfm25-team-technical {
+  box-shadow: inset 4px 0 0 var(--tack);
+}
+
+.wfm25-team-technical .wfm25-team-dot {
+  background: var(--tack);
+}
+
+.wfm25-team-delivery {
+  box-shadow: inset 4px 0 0 var(--smoothie);
+}
+
+.wfm25-team-delivery .wfm25-team-dot {
+  background: var(--smoothie);
+}
+
+/* Worker-row affordance */
+.wfm25-worker-row {
+  cursor: pointer;
+  position: relative;
+  transition: background .12s;
+}
+
+.wfm25-worker-row:hover td {
+  background: var(--paper) !important;
+}
+
+.wfm25-row-chevron {
+  float: right;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--staple);
+  opacity: .45;
+  transition: opacity .15s, color .15s;
+  margin-left: var(--space-2);
+}
+
+.wfm25-worker-row:hover .wfm25-row-chevron {
+  opacity: 1;
+  color: var(--ballpoint);
+}
+
+.wfm25-worker-row .wfm25-row-detail-cue {
+  position: absolute;
+  right: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--staple);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s;
+  white-space: nowrap;
+}
+
+.wfm25-worker-row:hover .wfm25-row-detail-cue {
+  opacity: .75;
+}
+
+/* ── 3. COLOR MEANING ────────────────────────────────────── */
+/* Utilization heat: cellColor() inline styles — do not restyle */
+
+.wfm25-draft {
+  color: var(--happy-hour);
+  background: rgba(231, 111, 28, .14);
+  font-weight: 700;
+}
+
+.wfm25-draft-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 100px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--happy-hour);
+  background: rgba(231, 111, 28, .16);
+  border: 1px solid rgba(231, 111, 28, .40);
+  white-space: nowrap;
+}
+
+/* Worker-class mix — reuse --wc-* tokens */
+.wfm25-wc-slg         { color: var(--wc-slg); }
+.wfm25-wc-slg-generic { color: var(--wc-slg-generic); }
+.wfm25-wc-nonslg      { color: var(--wc-nonslg); }
+.wfm25-wc-partner     { color: var(--wc-partner); }
+
+.wfm25-wc-bar-slg         { background: var(--wc-slg); }
+.wfm25-wc-bar-slg-generic { background: var(--wc-slg-generic); }
+.wfm25-wc-bar-nonslg      { background: var(--wc-nonslg); }
+.wfm25-wc-bar-partner     { background: var(--wc-partner); }
+
+/* ── 4. LAYOUT (single scroll context, no dead middle) ───── */
+
+.wfm25-capacity-body {
+  display: flex;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  flex: 1;
+}
+
+.wfm25-aggregate-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.wfm25-capacity-body.wfm25-panel-open .wfm25-aggregate-pane {
+  flex: 1 1 55%;
+  max-width: 55%;
+  border-right: 1px solid var(--business-card);
+}
+
+.wfm25-worker-pane {
+  flex: 1 1 45%;
+  min-width: 0;
+  background: #fff;
+  padding: var(--space-5);
+  overflow-y: auto;
+  box-shadow: var(--shadow-sm);
+}
+
+.wfm25-worker-pane[hidden] {
+  display: none !important;
+}
+
+.wfm25-capacity-body:not(.wfm25-panel-open) .wfm25-worker-pane {
+  display: none;
+}
+
+/* ── 5. TYPOGRAPHY & SPACING ─────────────────────────────── */
+
+.wfm25-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--after-hours);
+  margin: 0 0 var(--space-4);
+  line-height: 1.3;
+}
+
+.wfm25-section-title-lg {
+  font-size: 16px;
+}
+
+.wfm25-util-number {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--after-hours);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.wfm25-util-number-sm {
+  font-size: 20px;
+}
+
+.wfm25-util-number-lg {
+  font-size: 28px;
+}
+
+.wfm25-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.wfm25-stack-loose {
+  gap: var(--space-6);
+}
+
+.wfm25-pad {
+  padding: var(--space-5);
+}
+
+.wfm25-pad-loose {
+  padding: var(--space-6);
+}
 </style>

@@ -48,10 +48,29 @@
       <?!= include('AdminCanvas'); ?>
     </main>
 
-    <!-- Draft tray handle — docked to right edge, visual only this stage -->
-    <div class="wfm25-draft-handle" id="draftTrayHandle" title="Pending changes — coming in a later stage">
-      <span class="wfm25-draft-handle-label">Pending changes (0)</span>
-    </div>
+    <!-- Draft tray — right-edge slide-out (Stage 3) -->
+    <aside class="wfm25-draft-tray" id="wfm25DraftTray" aria-hidden="true">
+      <div class="wfm25-draft-panel" id="wfm25DraftTrayPanel">
+        <header class="wfm25-draft-panel-header">
+          <h2 class="wfm25-draft-panel-title" id="wfm25DraftTrayTitle">Pending changes (0)</h2>
+          <button type="button" class="icon-btn" id="wfm25DraftTrayClose" aria-label="Close draft tray">✕</button>
+        </header>
+        <div class="wfm25-draft-panel-body" id="wfm25DraftTrayBody">
+          <div class="wfm25-draft-empty muted">No pending drafts</div>
+        </div>
+        <footer class="wfm25-draft-panel-footer">
+          <p class="muted wfm25-draft-panel-note">Drafts are private until committed</p>
+          <div class="wfm25-draft-panel-actions">
+            <button type="button" class="btn-ghost" id="wfm25DraftDiscardAll">Discard all</button>
+            <button type="button" class="btn-primary" id="wfm25DraftCommit">Commit</button>
+          </div>
+        </footer>
+      </div>
+      <button type="button" class="wfm25-draft-handle" id="draftTrayHandle"
+              aria-expanded="false" title="Pending changes">
+        <span class="wfm25-draft-handle-label">Pending changes (0)</span>
+      </button>
+    </aside>
 
   </div><!-- /.wfm25-body -->
 
@@ -73,6 +92,52 @@
       <div class="modal-actions">
         <button type="button" class="btn-ghost" id="confirmModalCancel">Cancel</button>
         <button type="button" class="btn-primary" id="confirmModalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Soft-book commit modal (WFM.23 engine — restored for WFM.25) ============ -->
+  <div class="modal" id="softBookCommitModal" hidden>
+    <div class="modal-backdrop" data-sb-commit-close></div>
+    <div class="modal-panel" style="width:920px;max-width:96vw;">
+      <header class="modal-header">
+        <div>
+          <div class="drawer-title">Submit all soft bookings</div>
+          <div class="muted" style="margin-top:4px;font-size:12px;">Creates Modeled assignments in a new named scenario</div>
+        </div>
+        <button class="icon-btn" data-sb-commit-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body" style="padding:16px 20px;">
+        <label class="field"><span>Scenario name</span>
+          <input type="text" class="input" id="sbCommitScenarioName" placeholder="e.g. Q3 capacity plan" required>
+        </label>
+        <div class="sb-commit-apply-all">
+          <span class="muted">Apply to all:</span>
+          <div class="seg seg-sm" id="sbCommitApplyWhatSeg">
+            <button type="button" data-val="deployment">Deployment</button>
+            <button type="button" data-val="opportunity" class="on">Opportunity</button>
+            <button type="button" data-val="label">Manual label</button>
+          </div>
+          <input type="text" class="input" id="sbCommitApplySearch" placeholder="Filter…">
+          <select class="select" id="sbCommitApplyLink"></select>
+          <input type="text" class="input" id="sbCommitApplyLabel" hidden placeholder="Manual label text">
+          <button type="button" class="btn-ghost" id="sbCommitApplyBtn">Apply</button>
+        </div>
+        <div class="sb-commit-table-wrap">
+          <table class="sb-commit-table">
+            <thead><tr>
+              <th>Worker</th><th>Dates</th><th class="num">Hours</th>
+              <th style="min-width:280px">What</th><th style="width:72px"></th>
+            </tr></thead>
+            <tbody id="sbCommitGridBody"></tbody>
+          </table>
+        </div>
+        <p id="sbCommitError" class="muted" style="color:var(--thumbtack);font-size:13px;margin:10px 0 0;" hidden></p>
+      </div>
+      <div class="modal-actions" style="padding:12px 20px;border-top:1px solid var(--business-card);">
+        <span class="muted sb-commit-footer-note">Creates Modeled assignments only</span>
+        <button type="button" class="btn-ghost" data-sb-commit-close>Cancel</button>
+        <button type="button" class="btn-primary" id="sbCommitSubmitBtn">Submit all as Modeled</button>
       </div>
     </div>
   </div>

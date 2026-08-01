@@ -3022,6 +3022,9 @@
   function onSoftBookingsChanged_() {
     renderExplorerSoftBookBasket_();
     scheduleExplorerProjection_();
+    if (WFM25_SHELL) {
+      wfm25AfterSoftBookCommitRefresh_();
+    }
   }
 
   function renderExplorerSoftBookBasket_() {
@@ -3061,7 +3064,6 @@
     if (commitW) commitW.disabled = false;
     if (commitAll) commitAll.disabled = false;
   }
-    toast('Commit lands in Stage 3', '');
 
   function softBookCommitKey_(b) {
     return [b.resource_name, b.start_date, b.end_date, String(b.total_hours)].join('|');
@@ -7563,7 +7565,7 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Update the minimal pending-draft count in panel footer + draft handle.
+   * Update the minimal pending-draft count in panel footer + draft handle + tray title.
    */
   function wfm25UpdatePendingIndicator_() {
     const count = (State.softBookings || []).length;
@@ -7571,9 +7573,128 @@ async function _qaRefreshPsaHours_() {
     const ind = document.getElementById('wfm25PendingIndicator');
     const handle = document.getElementById('draftTrayHandle');
     const handleLabel = handle ? handle.querySelector('.wfm25-draft-handle-label') : null;
+    const tray = document.getElementById('wfm25DraftTray');
+    const trayTitle = document.getElementById('wfm25DraftTrayTitle');
     if (footer) footer.hidden = count === 0;
     if (ind) ind.textContent = count + ' pending';
     if (handleLabel) handleLabel.textContent = 'Pending changes (' + count + ')';
+    if (trayTitle) trayTitle.textContent = 'Pending changes (' + count + ')';
+    if (tray) tray.classList.toggle('has-drafts', count > 0);
+    renderWFM25DraftTray_();
+  }
+
+  /**
+   * Paint draft-tray rows from State.softBookings.
+   */
+  function renderWFM25DraftTray_() {
+    const body = document.getElementById('wfm25DraftTrayBody');
+    if (!body) return;
+    const bookings = State.softBookings || [];
+    if (!bookings.length) {
+      body.innerHTML = '<div class="wfm25-draft-empty muted">No pending drafts</div>';
+      return;
+    }
+    body.innerHTML = bookings.map(function (b, idx) {
+      return '<div class="wfm25-draft-tray-row">' +
+        '<div class="wfm25-draft-tray-row-main">' +
+          '<div class="wfm25-draft-tray-worker">' + escapeHtml_(b.resource_name) + '</div>' +
+          '<div class="wfm25-draft-tray-meta">' +
+            '<span class="wfm25-draft-tray-hours wfm25-draft">+' + escapeHtml_(fmtHours(b.total_hours)) + 'h</span>' +
+            '<span class="wfm25-draft-tray-span muted">' + escapeHtml_(formatSoftBookSpan_(b)) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<button type="button" class="btn-ghost wfm25-draft-tray-remove" data-idx="' + idx +
+          '" aria-label="Remove draft">\u2715</button>' +
+      '</div>';
+    }).join('');
+    $$('.wfm25-draft-tray-remove', body).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const i = Number(btn.dataset.idx);
+        State.softBookings.splice(i, 1);
+        onWFM25SoftBookingsChanged_();
+      });
+    });
+  }
+
+  /**
+   * Open or close the WFM.25 draft tray slide-out.
+   * @param {boolean} [open] force open/close; omit to toggle
+   */
+  function setWFM25DraftTrayOpen_(open) {
+    const tray = document.getElementById('wfm25DraftTray');
+    const handle = document.getElementById('draftTrayHandle');
+    if (!tray) return;
+    const isOpen = open !== undefined ? !!open : !tray.classList.contains('is-open');
+    tray.classList.toggle('is-open', isOpen);
+    tray.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    if (handle) handle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+
+  /**
+   * Wire draft-tray handle, footer actions, and initial render.
+   */
+  function initWFM25DraftTray_() {
+    const handle = document.getElementById('draftTrayHandle');
+    const closeBtn = document.getElementById('wfm25DraftTrayClose');
+    const discardBtn = document.getElementById('wfm25DraftDiscardAll');
+    const commitBtn = document.getElementById('wfm25DraftCommit');
+    if (handle) {
+      handle.addEventListener('click', function () {
+        setWFM25DraftTrayOpen_();
+      });
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function () {
+        setWFM25DraftTrayOpen_(false);
+      });
+    }
+    if (discardBtn) {
+      discardBtn.addEventListener('click', function () {
+        if (!(State.softBookings || []).length) return;
+        clearWFM25SoftBookings_('discard');
+        setWFM25DraftTrayOpen_(false);
+      });
+    }
+    if (commitBtn) {
+      commitBtn.addEventListener('click', openSoftBookCommitModal_);
+    }
+    renderWFM25DraftTray_();
+  }
+
+  /**
+   * After soft-book commit in WFM.25, refresh aggregate + worker panel from server
+   * so committed Modeled assignments are visible (reuses existing fetch paths).
+   */
+  async function wfm25AfterSoftBookCommitRefresh_() {
+    wfm25UpdatePendingIndicator_();
+    if (!State.softBookings.length) {
+      State.explorerProjection = null;
+    }
+    try {
+      await loadWFM25Utilization_();
+    } catch (e) { /* loadWFM25Utilization_ handles UI errors */ }
+    if (WFM25State.selectedWorker) {
+      const workerName = WFM25State.selectedWorker;
+      const reqId = ++WFM25State.workerReqId;
+      try {
+        const detail = await call(
+          'api_getResourceDetailV2',
+          buildServerParams_({ resource: workerName, workerScope: 'SLG' })
+        );
+        if (reqId !== WFM25State.workerReqId) return;
+        WFM25State.selectedWorkerDetail = detail;
+        if (State.softBookings.length) {
+          scheduleWFM25Projection_();
+        } else {
+          paintWFM25WorkerPanel_(null);
+        }
+      } catch (err) {
+        if (reqId !== WFM25State.workerReqId) return;
+        toast('Failed to refresh worker detail: ' + err.message, 'err');
+      }
+    } else if (State.softBookings.length) {
+      scheduleWFM25Projection_();
+    }
   }
 
   /**
@@ -8110,6 +8231,8 @@ async function _qaRefreshPsaHours_() {
         if (e.key === 'Enter') addWFM25SoftBooking_();
       });
     }
+
+    initWFM25DraftTray_();
 
     // ── Load baseline projection for employee_id lookup ──
     loadExplorerBaselineProjection_();

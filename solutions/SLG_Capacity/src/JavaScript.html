@@ -7517,26 +7517,44 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Paint the full worker panel from cached detail + optional projection.
+   * Spinner markup for WFM.25 loading states (reuses .explorer-loading-spinner).
+   * @returns {string}
+   */
+  function wfm25LoadingSpinnerHtml_() {
+    return '<div class="wfm25-panel-loading" role="status" aria-label="Loading">' +
+      '<div class="explorer-loading-spinner" aria-hidden="true"></div></div>';
+  }
+
+  /**
+   * Set worker panel header synchronously from click-time row data (never waits on API).
+   * @param {string} workerName
+   * @param {string|null} teamLabel
+   */
+  function setWFM25WorkerPanelHeader_(workerName, teamLabel) {
+    const nameEl = document.getElementById('wfm25WorkerPanelName');
+    const metaEl = document.getElementById('wfm25WorkerPanelMeta');
+    if (nameEl) nameEl.textContent = workerName || '\u2014';
+    if (metaEl) {
+      const meta = (State.ref && State.ref.resources || []).find(function (r) {
+        return r.name === workerName;
+      }) || {};
+      const parts = [
+        meta.job_profile || '',
+        meta.manager_org || '',
+        teamLabel || meta.resolvedTeam || ''
+      ].filter(Boolean);
+      metaEl.textContent = parts.join(' \u00b7 ');
+    }
+  }
+
+  /**
+   * Paint worker panel body + quarter strip from cached detail + optional projection.
+   * Header is set synchronously on row click via setWFM25WorkerPanelHeader_.
    * @param {Object|null} projection api_projectSoftBookings result
    */
   function paintWFM25WorkerPanel_(projection) {
     const detail = WFM25State.selectedWorkerDetail;
     if (!detail || !WFM25State.selectedWorker) return;
-    const meta = (State.ref && State.ref.resources || []).find(function (r) {
-      return r.name === detail.resource;
-    }) || {};
-    const nameEl = document.getElementById('wfm25WorkerPanelName');
-    const metaEl = document.getElementById('wfm25WorkerPanelMeta');
-    if (nameEl) nameEl.textContent = detail.resource || '\u2014';
-    if (metaEl) {
-      const parts = [
-        meta.job_profile || '',
-        meta.manager_org || '',
-        meta.resolvedTeam || ''
-      ].filter(Boolean);
-      metaEl.textContent = parts.join(' \u00b7 ');
-    }
     const icpTarget = (detail.weeks && detail.weeks[0]) ? detail.weeks[0].icpTarget : 0.72;
     renderWFM25WorkerQuarterStrip_(detail.quarters || [], icpTarget, projection, detail.resource);
     renderWFM25WorkerPanelBody_(detail);
@@ -7575,17 +7593,20 @@ async function _qaRefreshPsaHours_() {
     if (body) body.classList.add('wfm25-panel-open');
     if (addBtn) addBtn.hidden = false;
 
+    setWFM25WorkerPanelHeader_(workerName, teamLabel);
+
     const crumbs = [WFM25State.landingBreadcrumb];
     if (teamLabel) crumbs.push(teamLabel);
     crumbs.push(workerName);
     wfm25SetBreadcrumb_(crumbs);
 
     const panelBody = document.getElementById('wfm25WorkerPanelBody');
-    if (panelBody) {
-      panelBody.innerHTML = '<div class="muted" style="padding:16px">Loading\u2026</div>';
-    }
+    if (panelBody) panelBody.innerHTML = wfm25LoadingSpinnerHtml_();
     const strip = document.getElementById('wfm25WorkerQuarterStrip');
-    if (strip) strip.hidden = true;
+    if (strip) {
+      strip.hidden = true;
+      strip.innerHTML = '';
+    }
 
     const reqId = ++WFM25State.workerReqId;
     try {
@@ -7937,7 +7958,8 @@ async function _qaRefreshPsaHours_() {
     const body = document.getElementById('wfm25UtilBody');
     const headerRow = document.getElementById('wfm25UtilHeaderRow');
     if (body) {
-      body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px">Loading\u2026</td></tr>';
+      body.innerHTML = '<tr><td colspan="5" class="wfm25-util-loading-cell">' +
+        wfm25LoadingSpinnerHtml_() + '</td></tr>';
     }
     try {
       // Use SLG worker scope (same default as Dashboard; directors scoped via State.filters)

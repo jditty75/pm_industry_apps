@@ -44,7 +44,6 @@
       <div class="wfm25-capacity-body" id="wfm25CapacityBody">
         <?!= include('CapacityCanvas'); ?>
         <?!= include('WorkerPanel'); ?>
-        <?!= include('SoftBookDrawer'); ?>
       </div>
       <?!= include('AdminCanvas'); ?>
     </main>
@@ -55,6 +54,9 @@
     </div>
 
   </div><!-- /.wfm25-body -->
+
+  <!-- ============ Soft-book overlay (fixed; outside flex split) ============ -->
+  <?!= include('SoftBookDrawer'); ?>
 
   <!-- ============ Confirm Modal (kept for JS compatibility) ============ -->
   <div class="modal" id="confirmModal" hidden>

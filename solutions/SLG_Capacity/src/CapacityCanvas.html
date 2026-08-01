@@ -1,10 +1,9 @@
-<!-- CapacityCanvas.html — WFM.25 Stage 1 Capacity surface canvas.
+<!-- CapacityCanvas.html — WFM.25 aggregate column (direct flex child of .wfm25-capacity-body).
      Included via <?!= include('CapacityCanvas'); ?> in Index.html.
-     Contains: tab bar (Utilization / Hours & Budget / Mix & Trend),
-     Group-by toggle, and the aggregate content region (#aggregateContent).
+     Contains: tab bar, #wfm25CapacityPrimary / #aggregateContent, utilization panels.
      All behavior is wired in JavaScript.html (initWFM25_). -->
 
-<div id="capacityCanvas" class="wfm25-capacity-canvas">
+<div id="capacityCanvas" class="wfm25-capacity-canvas wfm25-capacity-primary">
 
   <!-- ── Tab bar + Group-by toggle (right-aligned) ── -->
   <div class="wfm25-tab-bar">
@@ -23,51 +22,51 @@
     </div>
   </div>
 
-  <!-- ── Aggregate content region (siblings: WorkerPanel, SoftBookDrawer in Index.html) ── -->
-  <div class="wfm25-capacity-primary" id="wfm25CapacityPrimary">
-  <div id="aggregateContent" class="wfm25-aggregate-content">
+  <!-- ── Aggregate scroll region ── -->
+  <div id="wfm25CapacityPrimary" class="wfm25-capacity-inner">
+    <div id="aggregateContent" class="wfm25-aggregate-content">
 
-    <!-- ─ Utilization panel (active by default) ─ -->
-    <div class="wfm25-tab-panel" id="wfm25PanelUtilization"
-         data-wfm25-panel="utilization">
-      <div class="table-wrap" id="wfm25UtilWrap">
-        <table class="data-table wfm25-util-table" id="wfm25UtilTable">
-          <thead>
-            <tr id="wfm25UtilHeaderRow">
-              <th class="wfm25-team-col">Team</th>
-              <!-- quarter header <th> cells injected by renderWFM25UtilTable_() -->
-            </tr>
-          </thead>
-          <tbody id="wfm25UtilBody">
-            <tr>
-              <td colspan="5" class="muted" style="padding:14px">Loading…</td>
-            </tr>
-          </tbody>
-        </table>
+      <!-- ─ Utilization panel (active by default) ─ -->
+      <div class="wfm25-tab-panel" id="wfm25PanelUtilization"
+           data-wfm25-panel="utilization">
+        <div class="table-wrap" id="wfm25UtilWrap">
+          <table class="wfm25-util-table wfm25-table" id="wfm25UtilTable">
+            <thead>
+              <tr id="wfm25UtilHeaderRow">
+                <th class="wfm25-team-col">Team</th>
+                <!-- quarter header <th> cells injected by renderWFM25UtilTable_() -->
+              </tr>
+            </thead>
+            <tbody id="wfm25UtilBody">
+              <tr>
+                <td colspan="5" class="muted" style="padding:14px">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
 
-    <!-- ─ Hours & Budget panel (placeholder) ─ -->
-    <div class="wfm25-tab-panel wfm25-placeholder-panel" id="wfm25PanelHoursBudget"
-         data-wfm25-panel="hours-budget" hidden>
-      <div class="wfm25-coming-soon">
-        <div class="wfm25-coming-soon-icon">⏳</div>
-        <div class="wfm25-coming-soon-title">Hours &amp; Budget</div>
-        <div class="wfm25-coming-soon-body muted">Coming in a later stage</div>
+      <!-- ─ Hours & Budget panel (placeholder) ─ -->
+      <div class="wfm25-tab-panel wfm25-placeholder-panel" id="wfm25PanelHoursBudget"
+           data-wfm25-panel="hours-budget" hidden>
+        <div class="wfm25-coming-soon">
+          <div class="wfm25-coming-soon-icon">⏳</div>
+          <div class="wfm25-coming-soon-title">Hours &amp; Budget</div>
+          <div class="wfm25-coming-soon-body muted">Coming in a later stage</div>
+        </div>
       </div>
-    </div>
 
-    <!-- ─ Mix & Trend panel (placeholder) ─ -->
-    <div class="wfm25-tab-panel wfm25-placeholder-panel" id="wfm25PanelMixTrend"
-         data-wfm25-panel="mix-trend" hidden>
-      <div class="wfm25-coming-soon">
-        <div class="wfm25-coming-soon-icon">⏳</div>
-        <div class="wfm25-coming-soon-title">Mix &amp; Trend</div>
-        <div class="wfm25-coming-soon-body muted">Coming in a later stage</div>
+      <!-- ─ Mix & Trend panel (placeholder) ─ -->
+      <div class="wfm25-tab-panel wfm25-placeholder-panel" id="wfm25PanelMixTrend"
+           data-wfm25-panel="mix-trend" hidden>
+        <div class="wfm25-coming-soon">
+          <div class="wfm25-coming-soon-icon">⏳</div>
+          <div class="wfm25-coming-soon-title">Mix &amp; Trend</div>
+          <div class="wfm25-coming-soon-body muted">Coming in a later stage</div>
+        </div>
       </div>
-    </div>
 
-  </div><!-- /#aggregateContent -->
-  </div><!-- /.wfm25-capacity-primary -->
+    </div><!-- /#aggregateContent -->
+  </div><!-- /#wfm25CapacityPrimary -->
 
 </div><!-- /#capacityCanvas -->

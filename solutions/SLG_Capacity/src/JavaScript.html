@@ -6555,7 +6555,12 @@ async function _qaRefreshPsaHours_() {
           status.textContent = 'Consolidated workbook ingested successfully' +
             (warnCount ? ' · ' + warnCount + ' warning' + (warnCount === 1 ? '' : 's') : '');
           State.ref = await call('api_getReference');
-          if (State.currentView === 'dashboard') loadDashboard();
+          if (WFM25_SHELL) {
+            WFM25State.scorecardData = null;
+            await loadWFM25Utilization_();
+          } else if (State.currentView === 'dashboard') {
+            loadDashboard();
+          }
           toast('Consolidated workbook ingested', 'ok');
         } else {
           status.className = 'status err';
@@ -7295,7 +7300,8 @@ async function _qaRefreshPsaHours_() {
     expandedTeam:     null,          // teamLabel string currently expanded, or null
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend'
     groupBy:          'team',        // 'team' | 'role'
-    landingBreadcrumb: 'SLG Org'
+    landingBreadcrumb: 'SLG Org',
+    activeView:       'capacity'     // 'capacity' | 'admin'
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -7580,6 +7586,29 @@ async function _qaRefreshPsaHours_() {
     }
   }
 
+  /**
+   * Switch between Capacity and Admin surfaces in the WFM.25 shell.
+   * @param {'capacity'|'admin'} view
+   */
+  function wfm25ShowView_(view) {
+    const capacity = document.getElementById('capacityCanvas');
+    const admin = document.getElementById('adminCanvas');
+    if (capacity) capacity.hidden = (view !== 'capacity');
+    if (admin) admin.hidden = (view !== 'admin');
+    WFM25State.activeView = view;
+
+    if (view === 'admin') {
+      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Admin']);
+      return;
+    }
+
+    if (WFM25State.expandedTeam) {
+      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, WFM25State.expandedTeam]);
+    } else {
+      wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+    }
+  }
+
   // ── WFM.25 main init ──────────────────────────────────────────
 
   /**
@@ -7594,16 +7623,22 @@ async function _qaRefreshPsaHours_() {
     WFM25State.landingBreadcrumb = wfm25LandingBreadcrumb_(ref);
     wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
 
-    // ── Left icon strip (nav stub — full admin routing is Stage 3+) ──
+    // ── Left icon strip: Capacity ↔ Admin ──
     $$('.wfm25-strip-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         $$('.wfm25-strip-btn').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
-        if (btn.dataset.wfm25Nav === 'admin') {
-          toast('Admin coming in a later stage', '');
-        }
+        wfm25ShowView_(btn.dataset.wfm25Nav === 'admin' ? 'admin' : 'capacity');
       });
     });
+
+    const backBtn = document.getElementById('wfm25BackToCapacityBtn');
+    if (backBtn) {
+      backBtn.addEventListener('click', function () {
+        const capBtn = document.querySelector('.wfm25-strip-btn[data-wfm25-nav="capacity"]');
+        if (capBtn) capBtn.click();
+      });
+    }
 
     // ── Tab switching ──
     $$('.wfm25-tab').forEach(function (btn) {

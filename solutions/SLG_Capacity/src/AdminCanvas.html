@@ -1,0 +1,38 @@
+<!-- AdminCanvas.html — WFM.25 minimal Admin surface (Operations upload only).
+     Included via <?!= include('AdminCanvas'); ?> in Index.html.
+     Consolidated upload behavior is wired in JavaScript.html (existing WFM.21 handlers). -->
+
+<div id="adminCanvas" class="wfm25-admin-canvas" hidden>
+
+  <div class="wfm25-admin-header">
+    <button type="button" class="btn-ghost wfm25-back-btn" id="wfm25BackToCapacityBtn">
+      ← Back to Capacity
+    </button>
+    <h1 class="wfm25-admin-title">Admin</h1>
+  </div>
+
+  <div class="card wfm25-admin-card">
+    <div class="card-header">
+      <div class="card-title">Upload Consolidated WoW Workbook</div>
+    </div>
+    <div class="upload-zone" id="consolidatedUploadZone">
+      <input type="file" id="consolidatedFile" accept=".xlsx" hidden>
+      <div class="upload-hint">
+        <div class="upload-title">Drop .xlsx here or click to browse</div>
+        <div class="muted">Single workbook ingest for forecast, actuals, utilization, and history.</div>
+        <div class="consolidated-sheet-list muted">
+          Required tabs:
+          <code>Forecast_Staged</code>,
+          <code>Actuals_Current_Normalized</code>,
+          <code>Utilization_Normalized</code>,
+          <code>History_Normalized</code>,
+          <code>_manifest</code>
+        </div>
+      </div>
+      <button type="button" class="btn-primary" id="consolidatedBrowseBtn">Choose file</button>
+    </div>
+    <div id="consolidatedUploadStatus" class="status" hidden></div>
+    <div id="consolidatedUploadResult" class="consolidated-upload-result" hidden></div>
+  </div>
+
+</div><!-- /#adminCanvas -->

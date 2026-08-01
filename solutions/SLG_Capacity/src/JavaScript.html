@@ -6073,6 +6073,36 @@ async function _qaRefreshPsaHours_() {
   // ============================================================
   // Admin
   // ============================================================
+  function renderDataFreshness_(data) {
+    const body = $('#dataFreshnessBody');
+    if (!body) return;
+    const feeds = [
+      { key: 'wowIngest', label: 'Consolidated WoW ingest' },
+      { key: 'pipeline', label: 'Pipeline (Salesforce)' },
+      { key: 'deployments', label: 'Deployments' }
+    ];
+    body.innerHTML = feeds.map(function (f) {
+      const feed = (data && data[f.key]) || {};
+      const ok = feed.lastSuccess;
+      const fail = feed.lastFailure;
+      const successHtml = ok
+        ? escapeHtml_(fmtDateTime(ok.when)) + ' — ' + escapeHtml_(ok.detail || '')
+        : '<span class="muted">No successful run found</span>';
+      const failHtml = fail
+        ? '<span class="data-freshness-fail">' +
+          escapeHtml_(fmtDateTime(fail.when)) + ' — ' + escapeHtml_(fail.detail || '') +
+          '</span>'
+        : '<span class="muted">no recent failures</span>';
+      return '<div class="data-freshness-feed">' +
+        '<div class="data-freshness-feed-label">' + escapeHtml_(f.label) + '</div>' +
+        '<div class="data-freshness-line"><span class="data-freshness-line-label">Last successful update:</span> ' +
+          successHtml + '</div>' +
+        '<div class="data-freshness-line"><span class="data-freshness-line-label">Last failed run:</span> ' +
+          failHtml + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
   async function loadAdmin() {
     try {
       const ref = State.ref;
@@ -6093,29 +6123,8 @@ async function _qaRefreshPsaHours_() {
         </tr>
       `).join('');
 
-      const log = await call('api_getRefreshLog');
-      $('#refreshLogBody').innerHTML = log.map(l => `
-        <tr>
-          <td>${fmtDateTime(l.timestamp)}</td>
-          <td>${escapeHtml_(l.source)}</td>
-          <td class="num">${l.rows_in}</td>
-          <td class="num">${l.rows_out}</td>
-          <td class="num">${l.weeks_detected}</td>
-          <td>${escapeHtml_(l.user)}</td>
-          <td class="muted" style="font-size:12px;">${escapeHtml_(l.warnings || '')}</td>
-        </tr>
-      `).join('');
-
-      const pipeLog = await call('api_getPipelineRefreshLog');
-      $('#pipelineLogBody').innerHTML = (pipeLog || []).map(l => `
-        <tr>
-          <td>${fmtDateTime(l['Refresh Time'])}</td>
-          <td>${escapeHtml_(l['Sheet'])}</td>
-          <td>${escapeHtml_(l['Operation'])}</td>
-          <td>${escapeHtml_(l['Status'])}</td>
-          <td>${escapeHtml_(l['User'])}</td>
-        </tr>
-      `).join('');
+      const freshness = await call('api_getDataFreshness');
+      renderDataFreshness_(freshness);
 
       const generics = await call('api_listAllGenericResources');
       const rtOpts = await loadResourceTypeOptions_();

@@ -909,36 +909,11 @@
 
         <div class="card">
           <div class="card-header">
-            <div class="card-title">Normalization Log</div>
+            <div class="card-title">Data Freshness</div>
+            <span class="muted">Last successful update and recent failures (7 days)</span>
           </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>When</th><th>Source</th><th class="num">In</th><th class="num">Out</th><th class="num">Weeks</th><th>User</th><th>Warnings</th></tr>
-              </thead>
-              <tbody id="refreshLogBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Pipeline Auto-Refresh (Salesforce)</div>
-            <span class="muted">Last 10 refreshes · every ~8 hours</span>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Refresh Time</th>
-                  <th>Sheet</th>
-                  <th>Operation</th>
-                  <th>Status</th>
-                  <th>User</th>
-                </tr>
-              </thead>
-              <tbody id="pipelineLogBody"></tbody>
-            </table>
+          <div class="card-body data-freshness-body" id="dataFreshnessBody">
+            <div class="muted" style="padding:8px 0;">Loading freshness...</div>
           </div>
         </div>
 

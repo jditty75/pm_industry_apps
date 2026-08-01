@@ -41,7 +41,11 @@
 
     <!-- Main content: Capacity canvas + minimal Admin surface -->
     <main class="wfm25-main" id="wfm25Main">
-      <?!= include('CapacityCanvas'); ?>
+      <div class="wfm25-capacity-body" id="wfm25CapacityBody">
+        <?!= include('CapacityCanvas'); ?>
+        <?!= include('WorkerPanel'); ?>
+        <?!= include('SoftBookDrawer'); ?>
+      </div>
       <?!= include('AdminCanvas'); ?>
     </main>
 

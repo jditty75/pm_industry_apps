@@ -1906,6 +1906,18 @@ function rollingQuarterKeys_(count) {
 }
 
 /**
+ * Shared four-quarter window for Scorecard and Explorer detail: previous, current, +1, +2.
+ * @return {string[]}
+ */
+function scorecardWindowKeys_() {
+  const curQ = fiscalQuarterKey_(new Date());
+  const curBounds = fiscalQuarterBounds_(curQ);
+  const prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
+  const prevQ = fiscalQuarterKey_(prevDay);
+  return [prevQ].concat(rollingQuarterKeys_(3));
+}
+
+/**
  * Productive hours for one worker-week (actuals win; forecast excludes PTO).
  * @param {Object} worker computeWeeklyForecast_ worker object
  * @param {string} weekKey
@@ -2148,10 +2160,7 @@ function computeQuarterlyScorecard_(params) {
   const actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
     ? getActualsSummaryByEmployee_() : {};
   const curQ = fiscalQuarterKey_(new Date());
-  const curBounds = fiscalQuarterBounds_(curQ);
-  const prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
-  const prevQ = fiscalQuarterKey_(prevDay);
-  const quarterKeys = [prevQ].concat(rollingQuarterKeys_(3));
+  const quarterKeys = scorecardWindowKeys_();
   const weeks = forecast.weeks || [];
 
   const workersOut = forecast.workers.map(function (w) {

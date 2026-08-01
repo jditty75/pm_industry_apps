@@ -502,7 +502,7 @@ function api_getResourceDetailV2(params) {
   const curQ = fiscalQuarterKey_(new Date());
   const quartersOut = buildWorkerQuarters_(
     w,
-    rollingQuarterKeys_(4),
+    scorecardWindowKeys_(),
     forecast.weeks,
     holidays,
     actualsSummary,

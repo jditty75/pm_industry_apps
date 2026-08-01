@@ -3513,7 +3513,7 @@ td.cell-with-bar {
 .wfm25-aggregate-content {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: visible;
   padding: 20px 24px;
 }
 .wfm25-tab-panel[hidden] {
@@ -3539,6 +3539,32 @@ td.cell-with-bar {
 }
 .wfm25-qth.wfm25-cur-qth {
   color: var(--ballpoint);
+}
+
+/* Util table: fit 55% pane — scoped to #wfm25UtilTable / #wfm25UtilWrap only */
+#wfm25UtilWrap {
+  overflow: visible;
+  max-height: none;
+  border: 0;
+}
+#wfm25UtilTable {
+  table-layout: fixed;
+  width: 100%;
+}
+#wfm25UtilTable .wfm25-team-col {
+  min-width: 0;
+  width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#wfm25UtilTable .wfm25-qth,
+#wfm25UtilTable tbody td:not(.wfm25-team-col) {
+  min-width: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 8px;
+  white-space: nowrap;
 }
 
 /* Team rows */

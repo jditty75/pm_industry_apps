@@ -3918,9 +3918,9 @@ function _dbg_reconcileWFM24() {
     }
   })();
 
-  // ---- Check B: D8 current-quarter ICP-util scale unification ----
+  // ---- Check B1: D8 current-quarter ICP-util scale unification (aligned) ----
   (function d8CurrentQuarterScale() {
-    Logger.log('=== WFM.24 Check B: D8 current-quarter ICP-util scale ===');
+    Logger.log('=== WFM.24 Check B1: D8 current-quarter ICP-util scale (aligned) ===');
     var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
       ? getActualsSummaryByEmployee_() : {};
     var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
@@ -3937,36 +3937,160 @@ function _dbg_reconcileWFM24() {
         Logger.log('  ' + name + ': no qtd_icp_plus_forecast ΓÇö skip');
         return;
       }
-      var wowTarget = quarterTargetFromWoW_(wRow.employeeId, curQ);
       var qtd = Number(summary.qtd_icp_plus_forecast_hours);
       var curCell = (wRow.quarters || []).find(function (q) { return q.quarterKey === curQ; });
       if (!curCell) {
         failures.push('D8: ' + name + ' current quarter missing');
         return;
       }
-      var den = (wowTarget != null && wowTarget > 0)
-        ? wowTarget
-        : Number(summary.bonus_target_billable_hours_eoq) || 0;
+      // D8.1: same-scale invariant. The numerator (qtd_icp_plus_forecast) is
+      // bonus-scale, so the denominator MUST be the same-row bonus target ΓÇö
+      // making icpUtil == bonusAttainment. Self-computed, not hard-coded.
+      var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
       if (!den) {
-        failures.push('D8: ' + name + ' no WoW/bonus denominator');
+        failures.push('D8: ' + name + ' no bonus-scale denominator');
         return;
       }
       var expectedIcp = qtd / den;
       var icpOk = near_(curCell.icpUtil, expectedIcp);
       var bonusOk = near_(curCell.icpUtil, curCell.bonusAttainment);
-      Logger.log('  ' + name + ': qtd=' + qtd.toFixed(2) + ' WoW_den=' + den.toFixed(2) +
+      Logger.log('  ' + name + ': qtd=' + qtd.toFixed(2) + ' bonus_den=' + den.toFixed(2) +
         ' icpUtil=' + (curCell.icpUtil * 100).toFixed(2) + '%' +
         ' bonusAtt=' + (curCell.bonusAttainment * 100).toFixed(2) + '%' +
         ' expected=' + (expectedIcp * 100).toFixed(2) + '%' +
         (icpOk && bonusOk ? ' OK' : ' FAILED'));
       if (!icpOk) {
         failures.push('D8: ' + name + ' icpUtil=' + curCell.icpUtil +
-          ' expect qtd/WoW=' + expectedIcp);
+          ' expect qtd/bonus=' + expectedIcp);
       }
       if (!bonusOk) {
         failures.push('D8: ' + name + ' icpUtil != bonusAttainment');
       }
     });
+  })();
+
+  // ---- Check B2: D8 staleness / rollover guard (calendar ahead of WoW) ----
+  (function d8RolloverGuard() {
+    Logger.log('=== WFM.24 Check B2: D8 staleness / rollover guard ===');
+    var SANE_CAP = 1.5; // >150% from a bonus-÷-ICP scale mismatch is garbage.
+    var settings = readSettings_();
+    var holidays = readHolidays_();
+    var forecast = computeWeeklyForecast_({ workerScope: 'All' });
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    var weeks = forecast.weeks || [];
+
+    // Pick a worker that has current-quarter actuals (qtd + bonus target) so the
+    // actuals path is exercised on both the aligned and rolled-over calendars.
+    var probe = null;
+    (forecast.workers || []).some(function (w) {
+      if (!w.employeeId) return false;
+      var s = actualsSummary[String(w.employeeId).trim()];
+      if (s && Number(s.qtd_icp_plus_forecast_hours) > 0 &&
+          Number(s.bonus_target_billable_hours_eoq) > 0) {
+        probe = w;
+        return true;
+      }
+      return false;
+    });
+    if (!probe) {
+      Logger.log('  no worker with current-quarter actuals ΓÇö SKIP');
+      return;
+    }
+    var pSummary = actualsSummary[String(probe.employeeId).trim()];
+
+    // Derive one fiscal quarter AHEAD of the WoW snapshot's current quarter
+    // (== calendar curQ on aligned data). No mutation, no hard-coded keys.
+    var bounds = fiscalQuarterBounds_(curQ);
+    var aheadStart = new Date(bounds.end.getFullYear(), bounds.end.getMonth() + 1, 1);
+    var aheadQ = fiscalQuarterKey_(aheadStart);
+
+    // --- B2a: same-scale pairing survives a rollover (no garbage) ---
+    // Force buildWorkerQuarters_ to treat aheadQ as the current quarter while
+    // the summary still describes the WoW snapshot's (earlier) current quarter.
+    var rolled = buildWorkerQuarters_(probe, [curQ, aheadQ], weeks, holidays,
+      actualsSummary, settings, aheadQ);
+    var aheadCell = rolled.find(function (q) { return q.quarterKey === aheadQ; });
+    if (!aheadCell) {
+      failures.push('D8 rollover: ahead-quarter cell missing for ' + probe.resource);
+      return;
+    }
+    var wowAheadTarget = quarterTargetFromWoW_(probe.employeeId, aheadQ);
+    var hasBonusScaleTarget = (wowAheadTarget != null && wowAheadTarget > 0);
+    // Stale by design: no bonus-scale WoW target for the calendar-current qk,
+    // yet qtd actuals exist (they describe an earlier quarter than qk).
+    var expectStaleA = (!hasBonusScaleTarget) &&
+      (aheadCell.source === 'actuals_plus_forecast');
+
+    if (!(aheadCell.icpUtil <= SANE_CAP)) {
+      failures.push('D8 rollover: ' + probe.resource + ' ' + aheadQ +
+        ' icpUtil=' + (aheadCell.icpUtil * 100).toFixed(2) +
+        '% exceeds sane cap ' + (SANE_CAP * 100).toFixed(0) +
+        '% (bonus-over-ICP scale-mismatch garbage)');
+    }
+    if (aheadCell.source === 'actuals_plus_forecast') {
+      // Same-scale invariant must still hold on rolled-over data.
+      if (!near_(aheadCell.icpUtil, aheadCell.bonusAttainment)) {
+        failures.push('D8 rollover: ' + probe.resource + ' ' + aheadQ +
+          ' icpUtil != bonusAttainment on rolled-over data');
+      }
+      if (aheadCell.stale !== expectStaleA) {
+        failures.push('D8 rollover: ' + probe.resource + ' ' + aheadQ +
+          ' stale=' + aheadCell.stale + ' expect ' + expectStaleA);
+      }
+    }
+    Logger.log('  B2a ' + probe.resource + ' rolled curQ=' + aheadQ +
+      ' source=' + aheadCell.source +
+      ' icpUtil=' + (aheadCell.icpUtil * 100).toFixed(2) + '%' +
+      ' bonusAtt=' + (aheadCell.bonusAttainment * 100).toFixed(2) + '%' +
+      ' stale=' + aheadCell.stale +
+      ' <=cap ' + (aheadCell.icpUtil <= SANE_CAP ? 'OK' : 'FAIL'));
+
+    // --- B2b: forecast fallback when no same-scale bonus target exists ---
+    // Simulate a worker whose current-quarter actuals lack a usable bonus
+    // target (bonus_target_billable_hours_eoq == 0). Clone the summary map so
+    // no persistent data is mutated. FIX 1 must fall through to the pure
+    // forecast path rather than pair the bonus-scale qtd with icpAvailableHours.
+    var clonedSummary = {};
+    Object.keys(actualsSummary).forEach(function (k) {
+      clonedSummary[k] = actualsSummary[k];
+    });
+    var noBonus = {};
+    Object.keys(pSummary).forEach(function (k) { noBonus[k] = pSummary[k]; });
+    noBonus.bonus_target_billable_hours_eoq = 0;
+    clonedSummary[String(probe.employeeId).trim()] = noBonus;
+
+    var fb = buildWorkerQuarters_(probe, [curQ], weeks, holidays,
+      clonedSummary, settings, curQ);
+    var fbCell = fb.find(function (q) { return q.quarterKey === curQ; });
+    if (!fbCell) {
+      failures.push('D8 rollover: forecast-fallback cell missing for ' + probe.resource);
+      return;
+    }
+    var fcHours = sumForecastProductiveForQuarter_(probe, curQ, weeks);
+    var expFbIcp = fbCell.icpAvailableHours > 0 ? fcHours / fbCell.icpAvailableHours : 0;
+    if (fbCell.source !== 'forecast') {
+      failures.push('D8 rollover: ' + probe.resource + ' no-bonus-target source=' +
+        fbCell.source + ' expect forecast');
+    }
+    if (!near_(fbCell.icpUtil, expFbIcp)) {
+      failures.push('D8 rollover: ' + probe.resource + ' forecast icpUtil=' +
+        fbCell.icpUtil + ' expect forecast/icpAvail=' + expFbIcp);
+    }
+    if (!(fbCell.icpUtil <= SANE_CAP)) {
+      failures.push('D8 rollover: ' + probe.resource + ' forecast icpUtil=' +
+        (fbCell.icpUtil * 100).toFixed(2) + '% exceeds sane cap');
+    }
+    if (fbCell.stale !== false) {
+      failures.push('D8 rollover: ' + probe.resource +
+        ' forecast-path stale=' + fbCell.stale + ' expect false');
+    }
+    Logger.log('  B2b ' + probe.resource + ' no-bonus-target source=' + fbCell.source +
+      ' icpUtil=' + (fbCell.icpUtil * 100).toFixed(2) + '%' +
+      ' expect=' + (expFbIcp * 100).toFixed(2) + '%' +
+      ' stale=' + fbCell.stale +
+      ((fbCell.source === 'forecast' && near_(fbCell.icpUtil, expFbIcp) &&
+        fbCell.icpUtil <= SANE_CAP && fbCell.stale === false) ? ' OK' : ' FAILED'));
   })();
 
   // ---- Check C: no regression ----

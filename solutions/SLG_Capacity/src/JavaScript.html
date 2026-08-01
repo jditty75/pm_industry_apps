@@ -1,4 +1,9 @@
 <script>
+  // WFM.25: detect new shell. True when CapacityCanvas is present.
+  // Evaluated at script-run time (before DOMContentLoaded). Accessible to
+  // all script blocks and the init() function via shared page global scope.
+  const WFM25_SHELL = !!document.getElementById('wfm25Breadcrumb');
+
   // ============================================================
   // Client state — applied filters (what the server currently sees)
   // + draft filters (what the user is staging inside the drawer)
@@ -600,66 +605,74 @@
       }
 
       State.ref = await call('api_getReference');
-      $('#userChip').textContent = State.ref.user || 'unknown';
+      const userChipEl = $('#userChip');
+      if (userChipEl) userChipEl.textContent = State.ref.user || 'unknown';
 
-      const qSel = $('#quarterFilter');
-      qSel.innerHTML = '<option value="">All quarters</option>' +
-        State.ref.quarters.map(q => `<option value="${q}">${q}</option>`).join('');
-      qSel.value = '';
-      qSel.addEventListener('change', () => {
-        State.filters.quarter = qSel.value || null;
-        onAppliedFiltersChanged_();
-      });
+      if (WFM25_SHELL) {
+        // ── WFM.25 shell: skip legacy UI setup, run new init ──
+        applyAutoManagerDefaults_();   // sets State.filters from identity (reused)
+        await initWFM25_();
+      } else {
+        // ── Legacy shell: original setup unchanged ──
+        const qSel = $('#quarterFilter');
+        qSel.innerHTML = '<option value="">All quarters</option>' +
+          State.ref.quarters.map(q => `<option value="${q}">${q}</option>`).join('');
+        qSel.value = '';
+        qSel.addEventListener('change', () => {
+          State.filters.quarter = qSel.value || null;
+          onAppliedFiltersChanged_();
+        });
 
-      renderTeamLabelSelect();   // Priority 2 — Team dropdown
-      renderTeamsSelect();        // Manager dropdown
+        renderTeamLabelSelect();   // Priority 2 — Team dropdown
+        renderTeamsSelect();        // Manager dropdown
 
-      $('#openFiltersBtn').addEventListener('click', openFiltersDrawer_);
-      $('#refreshBtn').addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        State.dashboardCache = null;
-        if (State.currentView === 'explorer') clearExplorerSoftBookings_('refresh');
-        await withLoading_(btn, async () => {
-          await refreshReferenceData_();
-          await reloadCurrentView_();
-        }, { label: 'Refreshing...' });
-      });
+        $('#openFiltersBtn').addEventListener('click', openFiltersDrawer_);
+        $('#refreshBtn').addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          State.dashboardCache = null;
+          if (State.currentView === 'explorer') clearExplorerSoftBookings_('refresh');
+          await withLoading_(btn, async () => {
+            await refreshReferenceData_();
+            await reloadCurrentView_();
+          }, { label: 'Refreshing...' });
+        });
 
-      initFiltersDrawer_();
-      initAdminTabs_();
+        initFiltersDrawer_();
+        initAdminTabs_();
 
-      $('#chipStrip').addEventListener('click', onChipStripClick_);
-      $('#chipClearAll').addEventListener('click', clearAllFilters_);
+        $('#chipStrip').addEventListener('click', onChipStripClick_);
+        $('#chipClearAll').addEventListener('click', clearAllFilters_);
 
-      initReportingHandlers_();
+        initReportingHandlers_();
 
-      // Priority 1: apply auto-manager defaults based on logged-in user.
-      applyAutoManagerDefaults_();
+        // Priority 1: apply auto-manager defaults based on logged-in user.
+        applyAutoManagerDefaults_();
 
-      // Priority 3: apply initial view's Worker Scope default
-      // (Dashboard → SLG). Must run AFTER applyAutoManagerDefaults_
-      // so we don't overwrite an intentional state.
-      applyViewWorkerScope_('dashboard');
+        // Priority 3: apply initial view's Worker Scope default
+        // (Dashboard → SLG). Must run AFTER applyAutoManagerDefaults_
+        // so we don't overwrite an intentional state.
+        applyViewWorkerScope_('dashboard');
 
-      renderChipStrip_();
-      updateFilterCountBadge_();
+        renderChipStrip_();
+        updateFilterCountBadge_();
 
-      showView('dashboard');
+        showView('dashboard');
 
-      // Background fetch: populate Admin tab override badge without blocking init.
-      setTimeout(function () {
-        call('api_getOverrideHygieneSummary').then(function (h) {
-          const count = (h.expiringSoon || 0) + (h.stale || 0);
-          const badge = $('#adminTabBadgeOverrides');
-          if (!badge) return;
-          if (count > 0) {
-            badge.textContent = String(count);
-            badge.hidden = false;
-          } else {
-            badge.hidden = true;
-          }
-        }).catch(function () {});
-      }, 1500);
+        // Background fetch: populate Admin tab override badge without blocking init.
+        setTimeout(function () {
+          call('api_getOverrideHygieneSummary').then(function (h) {
+            const count = (h.expiringSoon || 0) + (h.stale || 0);
+            const badge = $('#adminTabBadgeOverrides');
+            if (!badge) return;
+            if (count > 0) {
+              badge.textContent = String(count);
+              badge.hidden = false;
+            } else {
+              badge.hidden = true;
+            }
+          }).catch(function () {});
+        }, 1500);
+      }
 
     } catch (err) {
       toast('Init failed: ' + err.message, 'err');
@@ -792,6 +805,7 @@
   // ============================================================
   function renderTeamsSelect() {
     const sel = $('#teamsSelect');
+    if (!sel) return;  // WFM.25 shell does not have this element
     const source = (State.ref && Array.isArray(State.ref.managerOrgs))
       ? State.ref.managerOrgs : [];
 
@@ -7251,5 +7265,381 @@ async function _qaRefreshPsaHours_() {
     } catch (err) {
       body.innerHTML = '<tr><td colspan="6" class="muted" style="padding:12px;">Load failed: ' + escapeHtml_(err.message) + '</td></tr>';
     }
+  }
+</script>
+
+<script>
+  // ============================================================
+  // WFM.25 — Unified UX Stage 1
+  // Role-aware landing · Utilization aggregate · Zoom-in-place
+  //
+  // Reuses: call(), State, cellColor, fmtPct, escapeHtml_,
+  //         buildServerParams_, fiscalQuarterKey_, applyAutoManagerDefaults_,
+  //         toast, $, $$  — all defined earlier in this file.
+  // No server math or api_* endpoints are added or changed.
+  // ============================================================
+
+  // ── Team identity color map (spec §6) ────────────────────────
+  function wfm25TeamColor_(teamLabel) {
+    if (!teamLabel) return 'var(--staple)';
+    const lc = teamLabel.toLowerCase();
+    if (lc.indexOf('functional') >= 0) return 'var(--team-functional)';
+    if (lc.indexOf('technical')  >= 0) return 'var(--team-technical)';
+    if (lc.indexOf('delivery')   >= 0) return 'var(--team-delivery)';
+    return 'var(--staple)';
+  }
+
+  // ── WFM.25 client state ───────────────────────────────────────
+  const WFM25State = {
+    scorecardData:    null,          // last api_getQuarterlyScorecard result
+    expandedTeam:     null,          // teamLabel string currently expanded, or null
+    activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend'
+    groupBy:          'team',        // 'team' | 'role'
+    landingBreadcrumb: 'SLG Org'
+  };
+
+  // ── Breadcrumb helpers ────────────────────────────────────────
+
+  /**
+   * Derive the landing breadcrumb text from State.ref.
+   * Admin or unrecognized user → 'SLG Org'.
+   * Matched manager → resolvedTeam of first direct report, else 'SLG Org'.
+   * @param {Object} ref  State.ref
+   * @returns {string}
+   */
+  function wfm25LandingBreadcrumb_(ref) {
+    if (!ref || ref.userIsAdmin || !ref.matchedManager) return 'SLG Org';
+    const resources = Array.isArray(ref.resources) ? ref.resources : [];
+    const report = resources.find(function (r) {
+      return r.manager === ref.matchedManager && r.resolvedTeam;
+    });
+    return (report && report.resolvedTeam) ? report.resolvedTeam : 'SLG Org';
+  }
+
+  /**
+   * Set #wfm25Breadcrumb content.
+   * @param {string|string[]} segments  Single string or array joined with ' › '.
+   */
+  function wfm25SetBreadcrumb_(segments) {
+    const el = document.getElementById('wfm25Breadcrumb');
+    if (!el) return;
+    if (Array.isArray(segments)) {
+      el.innerHTML = segments.map(function (s, i) {
+        return (i > 0 ? '<span class="wfm25-breadcrumb-sep"> \u203a </span>' : '') +
+               escapeHtml_(s);
+      }).join('');
+    } else {
+      el.textContent = segments || 'SLG Org';
+    }
+  }
+
+  // ── Tab switching ─────────────────────────────────────────────
+
+  /**
+   * Activate a capacity tab by key.
+   * @param {string} tabKey  'utilization' | 'hours-budget' | 'mix-trend'
+   */
+  function wfm25ActivateTab_(tabKey) {
+    WFM25State.activeTab = tabKey;
+    $$('.wfm25-tab').forEach(function (btn) {
+      const on = btn.dataset.wfm25Tab === tabKey;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $$('.wfm25-tab-panel').forEach(function (panel) {
+      panel.hidden = (panel.dataset.wfm25Panel !== tabKey);
+    });
+  }
+
+  // ── Client-side team aggregation ─────────────────────────────
+
+  /**
+   * Aggregate api_getQuarterlyScorecard data by teamLabel.
+   * Returns quarter keys + team list with per-quarter weighted-avg icpUtil
+   * and individual worker rows for zoom-in-place.
+   *
+   * @param {Object} data  api_getQuarterlyScorecard result
+   * @returns {{quarterKeys: string[], teams: Array}}
+   */
+  function wfm25AggregateByTeam_(data) {
+    const quarterKeys = (data && data.quarterKeys) || [];
+    const workers = (data && data.workers) || [];
+
+    // Group workers by teamLabel
+    var teamMap = {};
+    workers.forEach(function (w) {
+      const tl = w.teamLabel || 'Unknown';
+      if (!teamMap[tl]) {
+        teamMap[tl] = {
+          label:      tl,
+          color:      wfm25TeamColor_(tl),
+          icpTarget:  w.icpTarget || 0.75,
+          workerRows: []
+        };
+      }
+      teamMap[tl].workerRows.push(w);
+    });
+
+    // Sort teams: Functional → Technical → Delivery → others
+    const ORDER = ['functional', 'technical', 'delivery'];
+    const teamList = Object.values(teamMap);
+    teamList.sort(function (a, b) {
+      const ai = ORDER.findIndex(function (k) { return a.label.toLowerCase().indexOf(k) >= 0; });
+      const bi = ORDER.findIndex(function (k) { return b.label.toLowerCase().indexOf(k) >= 0; });
+      return ((ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi)) || a.label.localeCompare(b.label);
+    });
+
+    // Compute per-quarter weighted-avg utilization for each team
+    teamList.forEach(function (team) {
+      team.quarters = quarterKeys.map(function (qk, qi) {
+        var sumProd = 0, sumAvail = 0, count = 0;
+        team.workerRows.forEach(function (w) {
+          const q = (w.quarters || [])[qi];
+          if (!q) return;
+          sumProd  += Number(q.productiveHours) || 0;
+          sumAvail += Number(q.icpAvailableHours) || 0;
+          count++;
+        });
+        const util = (count > 0 && sumAvail > 0) ? (sumProd / sumAvail) : null;
+        return { qk: qk, util: util };
+      });
+
+      // Build worker list for zoom-in-place
+      team.workers = team.workerRows.map(function (w) {
+        return {
+          name:      w.worker || '\u2014',
+          manager:   w.manager || '',
+          icpTarget: w.icpTarget || team.icpTarget,
+          quarters:  (w.quarters || []).map(function (q) {
+            return { util: (q && q.icpUtil != null) ? q.icpUtil : null };
+          })
+        };
+      });
+      team.workers.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    });
+
+    return { quarterKeys: quarterKeys, teams: teamList };
+  }
+
+  // ── Render Utilization table ──────────────────────────────────
+
+  /**
+   * Render the org-team utilization aggregate table.
+   * Rows = teams; columns = fiscal quarter keys from the API.
+   * Clicking a team row expands worker rows inline (only one team at a time).
+   * Clicking again collapses and resets breadcrumb.
+   *
+   * @param {Object} data  api_getQuarterlyScorecard result
+   */
+  function renderWFM25UtilTable_(data) {
+    WFM25State.scorecardData = data;
+    const headerRow = document.getElementById('wfm25UtilHeaderRow');
+    const body      = document.getElementById('wfm25UtilBody');
+    if (!headerRow || !body) return;
+
+    const agg   = wfm25AggregateByTeam_(data);
+    const qKeys = agg.quarterKeys;
+    const curQk = fiscalQuarterKey_(new Date());
+
+    // ── Header ──
+    $$('.wfm25-qth', headerRow).forEach(function (el) { el.remove(); });
+    qKeys.forEach(function (qk) {
+      const th = document.createElement('th');
+      th.className = 'wfm25-qth' + (qk === curQk ? ' wfm25-cur-qth' : '');
+      th.textContent = qk + (qk === curQk ? ' \u25c6' : '');
+      headerRow.appendChild(th);
+    });
+
+    // ── Body ──
+    if (!agg.teams.length) {
+      body.innerHTML = '<tr><td colspan="' + (1 + qKeys.length) +
+        '" class="muted" style="padding:14px">No team data in scope.</td></tr>';
+      return;
+    }
+
+    const colCount = 1 + qKeys.length;
+    const rows = [];
+
+    agg.teams.forEach(function (team) {
+      const isExpanded = WFM25State.expandedTeam === team.label;
+
+      // Team aggregate cells
+      const teamQCells = team.quarters.map(function (q) {
+        const color = (q.util != null)
+          ? cellColor(q.util, team.icpTarget)
+          : { bg: 'var(--business-card)', fg: 'var(--staple)' };
+        return '<td class="wfm25-util-cell" style="background:' + color.bg +
+               ';color:' + color.fg + '">' +
+               (q.util != null ? fmtPct(q.util) : '\u2014') + '</td>';
+      }).join('');
+
+      rows.push(
+        '<tr class="wfm25-team-row' + (isExpanded ? ' expanded' : '') +
+        '" data-wfm25-team="' + escapeHtml_(team.label) + '">' +
+        '<td><div class="wfm25-team-name-cell">' +
+          '<span class="wfm25-team-swatch" style="background:' + team.color + '"></span>' +
+          escapeHtml_(team.label) +
+          '<span class="wfm25-expand-chev">\u25ba</span>' +
+        '</div></td>' +
+        teamQCells + '</tr>'
+      );
+
+      // Worker rows — only injected when this team is expanded
+      if (isExpanded) {
+        team.workers.forEach(function (w) {
+          const wQCells = w.quarters.map(function (q) {
+            const color = (q.util != null)
+              ? cellColor(q.util, w.icpTarget)
+              : { bg: '', fg: 'var(--staple)' };
+            return '<td class="wfm25-util-cell" style="' +
+                   (color.bg ? 'background:' + color.bg + ';' : '') +
+                   'color:' + color.fg + '">' +
+                   (q.util != null ? fmtPct(q.util) : '\u2014') + '</td>';
+          }).join('');
+          rows.push(
+            '<tr class="wfm25-worker-row"' +
+            ' data-wfm25-worker="' + escapeHtml_(w.name) + '"' +
+            ' data-wfm25-team="' + escapeHtml_(team.label) + '">' +
+            '<td>' + escapeHtml_(w.name) + '</td>' +
+            wQCells + '</tr>'
+          );
+        });
+      }
+    });
+
+    body.innerHTML = rows.join('');
+
+    // ── Wire team-row clicks (expand / collapse + breadcrumb) ──
+    $$('.wfm25-team-row', body).forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        const tl = tr.dataset.wfm25Team;
+        if (WFM25State.expandedTeam === tl) {
+          WFM25State.expandedTeam = null;
+          wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+        } else {
+          WFM25State.expandedTeam = tl;
+          wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, tl]);
+        }
+        renderWFM25UtilTable_(WFM25State.scorecardData);
+      });
+    });
+
+    // ── Wire worker-row clicks (stub — detail panel is Stage 2) ──
+    $$('.wfm25-worker-row', body).forEach(function (tr) {
+      tr.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const wName = tr.dataset.wfm25Worker;
+        Logger && Logger.log
+          ? Logger.log('[WFM.25 stub] worker clicked: ' + wName)
+          : console.log('[WFM.25 stub] worker clicked:', wName);
+      });
+    });
+  }
+
+  /**
+   * Fetch and render the Utilization tab via existing api_getQuarterlyScorecard.
+   * Aggregates by team client-side. No new server endpoint.
+   */
+  async function loadWFM25Utilization_() {
+    const body = document.getElementById('wfm25UtilBody');
+    const headerRow = document.getElementById('wfm25UtilHeaderRow');
+    if (body) {
+      body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px">Loading\u2026</td></tr>';
+    }
+    try {
+      // Use SLG worker scope (same default as Dashboard; directors scoped via State.filters)
+      const params = buildServerParams_({ workerScope: 'SLG' });
+      const data = await call('api_getQuarterlyScorecard', params);
+      renderWFM25UtilTable_(data);
+    } catch (err) {
+      if (body) {
+        body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px;color:var(--thumbtack)">' +
+          'Failed to load utilization data: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
+      }
+      console.error('[WFM.25] loadWFM25Utilization_ failed:', err);
+    }
+  }
+
+  // ── Role group-by stub ────────────────────────────────────────
+
+  /**
+   * Show a clear "coming later" stub when Role group-by is selected.
+   * Does NOT fake data. Makes the stub obvious as required by the spec.
+   */
+  function renderWFM25RoleStub_() {
+    const headerRow = document.getElementById('wfm25UtilHeaderRow');
+    const body      = document.getElementById('wfm25UtilBody');
+    if (headerRow) $$('.wfm25-qth', headerRow).forEach(function (el) { el.remove(); });
+    if (body) {
+      body.innerHTML = '<tr><td class="muted" style="padding:0">' +
+        '<div class="wfm25-role-stub">' +
+        '<strong>Role grouping</strong>' +
+        'Role-based population grouping requires an additional data pass ' +
+        'and will be available in a later stage.' +
+        '</div></td></tr>';
+    }
+  }
+
+  // ── WFM.25 main init ──────────────────────────────────────────
+
+  /**
+   * WFM.25 entry point called from init() when WFM25_SHELL is true.
+   * Sets landing breadcrumb, wires navigation, tab switching, group-by,
+   * and loads the Utilization tab.
+   */
+  async function initWFM25_() {
+    const ref = State.ref || {};
+
+    // ── Landing breadcrumb (role-aware) ──
+    WFM25State.landingBreadcrumb = wfm25LandingBreadcrumb_(ref);
+    wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+
+    // ── Left icon strip (nav stub — full admin routing is Stage 3+) ──
+    $$('.wfm25-strip-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('.wfm25-strip-btn').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        if (btn.dataset.wfm25Nav === 'admin') {
+          toast('Admin coming in a later stage', '');
+        }
+      });
+    });
+
+    // ── Tab switching ──
+    $$('.wfm25-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25ActivateTab_(btn.dataset.wfm25Tab);
+      });
+    });
+
+    // ── Group-by toggle ──
+    $$('.wfm25-groupby-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('.wfm25-groupby-btn').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        WFM25State.groupBy = btn.dataset.wfm25Groupby;
+        if (WFM25State.groupBy === 'role') {
+          renderWFM25RoleStub_();
+        } else {
+          // Re-render with cached data, or fetch if not yet loaded
+          if (WFM25State.scorecardData) {
+            renderWFM25UtilTable_(WFM25State.scorecardData);
+          } else {
+            loadWFM25Utilization_();
+          }
+        }
+      });
+    });
+
+    // ── Search icon (stub) ──
+    const searchBtn = document.getElementById('wfm25SearchBtn');
+    if (searchBtn) {
+      searchBtn.addEventListener('click', function () {
+        toast('Global search is coming in a later stage', '');
+      });
+    }
+
+    // ── Load Utilization tab (active on boot) ──
+    await loadWFM25Utilization_();
   }
 </script>

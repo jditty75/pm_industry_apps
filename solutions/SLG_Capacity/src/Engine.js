@@ -2088,6 +2088,8 @@ function committedAssignmentQuarterIndex_(calendar) {
       committedAssignmentQuarterIndex_.cacheVersion === version) {
     return committedAssignmentQuarterIndex_.cache;
   }
+  committedAssignmentQuarterIndex_._dbgIndexBuildCount =
+    (committedAssignmentQuarterIndex_._dbgIndexBuildCount || 0) + 1;
   calendar = calendar || readCalendar_();
   var assignsRaw = [];
   try {

@@ -5031,3 +5031,143 @@ function _dbg_traceCommittedUtilDivergence() {
 
   Logger.log('=== _dbg_traceCommittedUtilDivergence: DONE ===');
 }
+
+/**
+ * WFM.23 perf: decompose one cold baseline projection path (workerScope All,
+ * empty bookings) into timed phases, then two back-to-back
+ * api_projectSoftBookings calls to prove baseline cache reuse. Logger only.
+ */
+function _dbg_traceProjectionTiming() {
+  _dbg_requireAdmin_();
+
+  var params = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+  var forecastParams = {
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  };
+
+  Logger.log('=== _dbg_traceProjectionTiming (workerScope=All, bookings=0) ===');
+
+  // 1. Force cold caches.
+  var tFlush = Date.now();
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  Logger.log('1. api_flushCaches: ' + (Date.now() - tFlush) + 'ms');
+
+  // 2. computeWeeklyForecast_ alone (cold).
+  var tForecast = Date.now();
+  var forecast = computeWeeklyForecast_(forecastParams);
+  var forecastMs = Date.now() - tForecast;
+  var workerCount = (forecast.workers || []).length;
+  Logger.log('2. computeWeeklyForecast_: ' + forecastMs + 'ms workers=' + workerCount);
+
+  var holidays = readHolidays_();
+  var quarterKeys = _quarterKeysForSoftBookings_([]);
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var curQ = fiscalQuarterKey_(new Date());
+  var visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
+  var weeklyWorkerNames = {};
+
+  // 4. committedAssignmentQuarterIndex_ alone (cold index build).
+  committedAssignmentQuarterIndex_.cache = null;
+  committedAssignmentQuarterIndex_.cacheVersion = null;
+  committedAssignmentQuarterIndex_._dbgIndexBuildCount = 0;
+  var calendar = readCalendar_();
+  var tIndex = Date.now();
+  committedAssignmentQuarterIndex_(calendar);
+  var indexMs = Date.now() - tIndex;
+  Logger.log('4. committedAssignmentQuarterIndex_ (first build): ' + indexMs + 'ms' +
+    ' indexBuilds=' + (committedAssignmentQuarterIndex_._dbgIndexBuildCount || 0));
+
+  // 3. _aggregateSoftBookingProjection_ baseline alone.
+  committedAssignmentQuarterIndex_.cache = null;
+  committedAssignmentQuarterIndex_.cacheVersion = null;
+  committedAssignmentQuarterIndex_._dbgIndexBuildCount = 0;
+  var tAgg = Date.now();
+  _aggregateSoftBookingProjection_(
+    forecast, quarterKeys, holidays, actualsSummary, curQ, null, weeklyWorkerNames, visibleWeeks);
+  var aggMs = Date.now() - tAgg;
+  Logger.log('3. _aggregateSoftBookingProjection_ (baseline): ' + aggMs + 'ms' +
+    ' indexBuildsDuringAgg=' + (committedAssignmentQuarterIndex_._dbgIndexBuildCount || 0));
+
+  // 5–6. _getCachedBaselineForecast_ L2 read + write (no recompute — use step-2 forecast).
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+    invalidateSoftBookingBaselineCache_();
+  }
+  var cacheKey = _projectionBaselineCacheKey_(forecastParams);
+  var tCacheRead = Date.now();
+  var l2Cached = _enrichedCacheRead_(cacheKey);
+  var cacheReadMs = Date.now() - tCacheRead;
+
+  var serialized = _serializeForecastForCache_(forecast);
+  var serializedBytes = JSON.stringify(serialized).length;
+  var rawForecastBytes = JSON.stringify(forecast).length;
+
+  var tCacheWrite = Date.now();
+  var cacheWriteMs = 0;
+  try {
+    var cache = CacheService.getScriptCache();
+    var payload = JSON.stringify(serialized);
+    var chunkCount = Math.ceil(payload.length / _CACHE_CHUNK_BYTES);
+    if (chunkCount <= 0 || chunkCount > 50) {
+      Logger.log('6. baseline L2 put FAILED: chunkCount=' + chunkCount + ' (limit 50)');
+    } else {
+      var writes = {};
+      for (var i = 0; i < chunkCount; i++) {
+        var start = i * _CACHE_CHUNK_BYTES;
+        writes[cacheKey + ':' + i] = payload.slice(start, start + _CACHE_CHUNK_BYTES);
+      }
+      writes[cacheKey + ':meta'] = String(chunkCount);
+      cache.putAll(writes, 21600);
+      Logger.log('6. baseline L2 put OK size=' + serializedBytes);
+    }
+    cacheWriteMs = Date.now() - tCacheWrite;
+  } catch (e) {
+    cacheWriteMs = Date.now() - tCacheWrite;
+    Logger.log('6. baseline L2 put FAILED: ' + e.message);
+  }
+
+  Logger.log('5. baseline cache L2 read=' + cacheReadMs + 'ms write=' + cacheWriteMs + 'ms' +
+    ' l2PreWriteHit=' + (l2Cached ? 'yes' : 'no') +
+    ' serializedBytes=' + serializedBytes +
+    ' rawForecastBytes=' + rawForecastBytes +
+    ' cacheLimit~100000');
+
+  // Populate L1 so the warm repeat exercises the same path as production.
+  var sig = _projectionFilterSignature_(forecastParams);
+  _softBookingBaselineCache_.signature = sig;
+  _softBookingBaselineCache_.forecast = forecast;
+
+  // 7. Two back-to-back api_projectSoftBookings (no flush) — second proves cache reuse.
+  Logger.log('7. api_projectSoftBookings warm repeat (no flush):');
+  var logBefore = Logger.getLog() || '';
+  var tCall1 = Date.now();
+  api_projectSoftBookings(params, []);
+  var call1Ms = Date.now() - tCall1;
+  var logMid = Logger.getLog() || '';
+  var call1Slice = logMid.slice(logBefore.length);
+  var call1CacheHit = call1Slice.indexOf('baselineCache=hit') >= 0;
+
+  var tCall2 = Date.now();
+  api_projectSoftBookings(params, []);
+  var call2Ms = Date.now() - tCall2;
+  var logAfter = Logger.getLog() || '';
+  var call2Slice = logAfter.slice(logMid.length);
+  var call2CacheHit = call2Slice.indexOf('baselineCache=hit') >= 0;
+
+  Logger.log('  call 1 elapsed=' + call1Ms + 'ms baselineCache=' + (call1CacheHit ? 'hit' : 'miss'));
+  Logger.log('  call 2 elapsed=' + call2Ms + 'ms baselineCache=' + (call2CacheHit ? 'hit' : 'miss') +
+  (call2Ms < call1Ms ? ' (faster)' : '') +
+  (call2CacheHit || call2Ms < call1Ms ? '' : ' — cache may not be reused'));
+
+  Logger.log('=== _dbg_traceProjectionTiming: DONE ===');
+}

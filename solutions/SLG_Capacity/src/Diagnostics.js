@@ -3356,6 +3356,78 @@ function _dbg_reconcileWFM23() {
       ? '  Check 4: FAILED' : '  Check 4: OK');
   })();
 
+  // ---- Check 6: current-quarter icpUtil cross-path (detailV2 / projection / scorecard) ----
+  (function checkCurQUtilCrossPath() {
+    Logger.log('=== WFM.23 Check 6: current-quarter icpUtil A/B/C cross-verify ===');
+    var params = {
+      viewMode: 'Committed',
+      workerScope: 'All',
+      includeTimeOff: false
+    };
+    var curQ = fiscalQuarterKey_(new Date());
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+
+    var forecast = computeWeeklyForecast_(params);
+    var workerPick = null;
+    (forecast.workers || []).some(function (w) {
+      var eid = String(w.employeeId || '');
+      var summary = eid ? actualsSummary[eid] : null;
+      if (summary && summary.qtd_icp_plus_forecast_hours > 0 &&
+          summary.bonus_target_billable_hours_eoq > 0) {
+        workerPick = w;
+        return true;
+      }
+      return false;
+    });
+    if (!workerPick) {
+      Logger.log('  SKIPPED: no worker with D8 bonus summary found');
+      return;
+    }
+    var workerName = String(workerPick.resource || '');
+    var employeeId = String(workerPick.employeeId || '');
+    Logger.log('  sample worker: ' + workerName + ' (' + employeeId + ') curQ=' + curQ);
+
+    var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
+    var qA = (v2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+    var utilA = qA ? Number(qA.icpUtil) : NaN;
+
+    var projection = api_projectSoftBookings(params, []);
+    var baseWorker = (projection.baseline.worker || []).find(function (w) {
+      return w.resourceName === workerName || String(w.employeeId || '') === employeeId;
+    });
+    var qB = baseWorker ? (baseWorker.quarters || []).find(function (q) {
+      return q.quarterKey === curQ;
+    }) : null;
+    var utilB = qB ? Number(qB.icpUtil) : NaN;
+
+    var scorecard = computeQuarterlyScorecard_(params);
+    var scWorker = (scorecard.workers || []).find(function (w) {
+      return w.worker === workerName || String(w.employeeId || '') === employeeId;
+    });
+    var qC = scWorker ? (scWorker.quarters || []).find(function (q) {
+      return q.quarterKey === curQ;
+    }) : null;
+    var utilC = qC ? Number(qC.icpUtil) : NaN;
+
+    Logger.log('  Path A (detailV2) icpUtil=' + (isNaN(utilA) ? 'n/a' : utilA.toFixed(6)));
+    Logger.log('  Path B (projection baseline) icpUtil=' + (isNaN(utilB) ? 'n/a' : utilB.toFixed(6)));
+    Logger.log('  Path C (scorecard) icpUtil=' + (isNaN(utilC) ? 'n/a' : utilC.toFixed(6)));
+
+    if (isNaN(utilA) || isNaN(utilB) || isNaN(utilC)) {
+      failures.push('Check 6: missing current-quarter icpUtil (A=' + utilA + ' B=' + utilB + ' C=' + utilC + ')');
+      Logger.log('  Check 6: FAILED (missing value)');
+      return;
+    }
+    if (!near_(utilA, utilB) || !near_(utilA, utilC) || !near_(utilB, utilC)) {
+      failures.push('Check 6: current-quarter icpUtil diverges A=' + utilA.toFixed(6) +
+        ' B=' + utilB.toFixed(6) + ' C=' + utilC.toFixed(6));
+      Logger.log('  Check 6: FAILED');
+    } else {
+      Logger.log('  Check 6: OK (A==B==C within ' + TOL + ')');
+    }
+  })();
+
   // ---- Check 5: no regression (WFM.15 / 17 / 18) ----
   (function checkNoRegression() {
     Logger.log('=== WFM.23 Check 5: no regression ===');

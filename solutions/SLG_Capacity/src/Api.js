@@ -822,6 +822,7 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
   actualsSummary = actualsSummary || {};
   curQ = curQ || fiscalQuarterKey_(new Date());
   var calendar = readCalendar_();
+  committedAssignmentQuarterIndex_(calendar);
 
   var baselineByEmployeeId = {};
   if (baselineForecast) {

@@ -2074,8 +2074,48 @@ function computeBlendedWindowKpis_(params) {
 }
 
 /**
+ * Per-request index of Committed Opportunity_Assignment hours by resource and
+ * fiscal quarter. Reads getEnrichedAssignments_() once and expands each
+ * committed assignment once. Memoized on _getEnrichedCacheVersion_() (same
+ * invalidation chain as getEnrichedAssignments_).
+ * @param {Object} [calendar] from readCalendar_()
+ * @return {Object<string, Object<string, number>>} resource_name → { quarterKey → hours }
+ */
+function committedAssignmentQuarterIndex_(calendar) {
+  var version = (typeof _getEnrichedCacheVersion_ === 'function')
+    ? _getEnrichedCacheVersion_() : '';
+  if (committedAssignmentQuarterIndex_.cache &&
+      committedAssignmentQuarterIndex_.cacheVersion === version) {
+    return committedAssignmentQuarterIndex_.cache;
+  }
+  calendar = calendar || readCalendar_();
+  var assignsRaw = [];
+  try {
+    assignsRaw = (typeof getEnrichedAssignments_ === 'function')
+      ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  } catch (e) {
+    assignsRaw = [];
+  }
+  var idx = {};
+  assignsRaw.forEach(function (a) {
+    if (String(a.status || '') !== 'Committed') return;
+    var res = a.resource_name;
+    if (!res) return;
+    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+      var qk = fiscalQuarterKey_(w.week_start);
+      if (!qk) return;
+      if (!idx[res]) idx[res] = {};
+      idx[res][qk] = (idx[res][qk] || 0) + (Number(w.hours) || 0);
+    });
+  });
+  committedAssignmentQuarterIndex_.cache = idx;
+  committedAssignmentQuarterIndex_.cacheVersion = version;
+  return idx;
+}
+
+/**
  * Sum Committed Opportunity_Assignment hours for one worker in a fiscal quarter.
- * Uses enriched/canonical assignment read path; does not mutate data.
+ * O(1) lookup into committedAssignmentQuarterIndex_; does not mutate data.
  * @param {string} resourceName
  * @param {string} quarterKey
  * @param {Object} [calendar] from readCalendar_()
@@ -2083,29 +2123,14 @@ function computeBlendedWindowKpis_(params) {
  */
 function committedAssignmentHoursForQuarter_(resourceName, quarterKey, calendar) {
   if (!resourceName || !quarterKey) return 0;
-  calendar = calendar || readCalendar_();
-  let assignsRaw = [];
-  try {
-    assignsRaw = (typeof getEnrichedAssignments_ === 'function')
-      ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
-  } catch (e) {
-    assignsRaw = [];
-  }
-  let sum = 0;
-  assignsRaw.forEach(function (a) {
-    if (!a.resource_name || a.resource_name !== resourceName) return;
-    if (String(a.status || '') !== 'Committed') return;
-    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
-      if (fiscalQuarterKey_(w.week_start) === quarterKey) {
-        sum += Number(w.hours) || 0;
-      }
-    });
-  });
-  return sum;
+  var idx = committedAssignmentQuarterIndex_(calendar);
+  var byQ = idx[resourceName];
+  return (byQ && byQ[quarterKey]) || 0;
 }
 
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
   const calendar = readCalendar_();
+  committedAssignmentQuarterIndex_(calendar);
   return quarterKeys.map(function (qk) {
     const wd = quarterWorkdaySummary_(qk, holidays);
     const isCurrent = (qk === curQ);

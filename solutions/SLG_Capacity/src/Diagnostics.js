@@ -2867,6 +2867,47 @@ function _dbg_reconcileWFM23() {
     if (!deepEqualProjection_(result.baseline.orgTeams, result.projected.orgTeams, 'orgTeams')) {
       failures.push('Empty overlay: orgTeams projected !== baseline');
     }
+    // Weekly cell neutrality (empty overlay): self-compute for a sample worker
+    var weeklySample = (result.baseline.worker || [])[0];
+    if (weeklySample && weeklySample.resourceName &&
+        typeof _aggregateSoftBookingProjection_ === 'function' &&
+        typeof _deriveVisibleWeeksFiscal_ === 'function') {
+      var weeklyNames = {};
+      weeklyNames[weeklySample.resourceName] = true;
+      var fc = computeWeeklyForecast_({
+        viewMode: params.viewMode,
+        scenarioId: params.scenarioId,
+        teams: params.teams,
+        teamLabel: params.teamLabel,
+        workerScope: params.workerScope,
+        includeMyManagers: params.includeMyManagers,
+        includeTimeOff: params.includeTimeOff
+      });
+      var vw = _deriveVisibleWeeksFiscal_(fc.weeks);
+      var qKeys = _quarterKeysForSoftBookings_([]);
+      var hol = readHolidays_();
+      var act = (typeof getActualsSummaryByEmployee_ === 'function')
+        ? getActualsSummaryByEmployee_() : {};
+      var curQ = fiscalQuarterKey_(new Date());
+      var baseAgg = _aggregateSoftBookingProjection_(
+        fc, qKeys, hol, act, curQ, null, weeklyNames, vw);
+      var projAgg = _aggregateSoftBookingProjection_(
+        fc, qKeys, hol, act, curQ, null, weeklyNames, vw);
+      var bw = (baseAgg.worker || []).find(function (x) {
+        return x.resourceName === weeklySample.resourceName;
+      });
+      var pw = (projAgg.worker || []).find(function (x) {
+        return x.resourceName === weeklySample.resourceName;
+      });
+      if (!bw || !pw || !bw.weeks || !pw.weeks ||
+          !deepEqualProjection_(bw.weeks, pw.weeks, weeklySample.resourceName + '.weeks')) {
+        failures.push('Empty overlay weekly neutrality: ' + weeklySample.resourceName);
+        Logger.log('  FAILED: weekly neutrality for ' + weeklySample.resourceName);
+      } else {
+        Logger.log('  Weekly neutrality OK for ' + weeklySample.resourceName +
+          ' (' + bw.weeks.length + ' weeks)');
+      }
+    }
     Logger.log(failures.length ? '  Check 1: FAILED' : '  Check 1: OK');
   })();
 

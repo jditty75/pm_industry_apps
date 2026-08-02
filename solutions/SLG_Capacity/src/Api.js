@@ -775,6 +775,34 @@ function _quarterCapacityForProjection_(quarterKey, holidays) {
 }
 
 /**
+ * Weekly capacity cells for soft-booking projection (mirrors api_getResourceDetailV2 /
+ * api_getForecastTable weekly grain). Reuses forecast rawCapacity and holidayHoursByWeek.
+ * @param {Object} worker forecast worker row
+ * @param {Array<{week_key:string}>} visibleWeeks from _deriveVisibleWeeksFiscal_
+ * @param {Object} forecast computeWeeklyForecast_ result
+ * @return {Array<{weekKey:string, hours:number, icpUtil:number, icpAvailable:number, isActual:boolean}>}
+ */
+function _workerWeeklyCellsForProjection_(worker, visibleWeeks, forecast) {
+  var rawCapacity = Number(forecast.rawCapacity) || 40;
+  var holidayHoursByWeek = forecast.holidayHoursByWeek || {};
+  return (visibleWeeks || []).map(function (vw) {
+    var cell = (worker.blendedWeekly && worker.blendedWeekly[vw.week_key]) ||
+      { hours: 0, isActual: false };
+    var hours = Number(cell.hours) || 0;
+    var holidayHours = Number(holidayHoursByWeek[vw.week_key] || 0);
+    var icpAvailable = rawCapacity - holidayHours;
+    var icpUtil = icpAvailable > 0 ? (hours / icpAvailable) : 0;
+    return {
+      weekKey: String(vw.week_key),
+      hours: Number(hours) || 0,
+      icpUtil: Number(icpUtil) || 0,
+      icpAvailable: Number(icpAvailable) || 0,
+      isActual: !!cell.isActual
+    };
+  });
+}
+
+/**
  * Build worker / team / org-team quarterly aggregates from a forecast.
  * Current-quarter icpUtil uses D8 bonus-scale pairing (matching buildWorkerQuarters_)
  * when actuals summary provides qtd_icp_plus_forecast_hours and bonus_target.
@@ -784,9 +812,11 @@ function _quarterCapacityForProjection_(quarterKey, holidays) {
  * @param {Object} actualsSummary from getActualsSummaryByEmployee_()
  * @param {string} curQ fiscal quarter key for calendar today
  * @param {Object} [baselineForecast] baseline forecast (projected path only; for curQ draft delta)
+ * @param {Object} [weeklyWorkerNames] map resourceName→true for workers needing weeks[]
+ * @param {Array<{week_key:string}>} [visibleWeeks] visible week window (_deriveVisibleWeeksFiscal_)
  * @return {{worker:Object[], team:Object, orgTeams:Object[]}}
  */
-function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast) {
+function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast, weeklyWorkerNames, visibleWeeks) {
   var weeks = forecast.weeks || [];
   var workers = forecast.workers || [];
   actualsSummary = actualsSummary || {};
@@ -889,7 +919,7 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
   }
 
   var workerOut = workers.map(function (w) {
-    return {
+    var row = {
       employeeId: String(w.employeeId || ''),
       resourceName: String(w.resource || ''),
       teamLabel: String(w.teamLabel || ''),
@@ -898,6 +928,10 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
         return quarterCell_(w, sumForecastProductiveForQuarter_(w, qk, weeks), qk);
       })
     };
+    if (weeklyWorkerNames && weeklyWorkerNames[w.resource] && visibleWeeks && visibleWeeks.length) {
+      row.weeks = _workerWeeklyCellsForProjection_(w, visibleWeeks, forecast);
+    }
+    return row;
   });
 
   return {
@@ -1048,10 +1082,29 @@ function api_projectSoftBookings(params, softBookings) {
   var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
     ? getActualsSummaryByEmployee_() : {};
   var curQ = fiscalQuarterKey_(new Date());
+  var visibleWeeks = _deriveVisibleWeeksFiscal_(baselineForecast.weeks);
+  var weeklyWorkerNames = {};
+  softBookings.forEach(function (sb) {
+    var rn = String(sb.resource_name || '');
+    if (rn) weeklyWorkerNames[rn] = true;
+  });
+  if (inMemoryModeledAssignments.length) {
+    var baselineByName = {};
+    (baselineForecast.workers || []).forEach(function (w) {
+      baselineByName[w.resource] = w;
+    });
+    inMemoryModeledAssignments.forEach(function (a) {
+      if (a.resource_name && baselineByName[a.resource_name]) {
+        weeklyWorkerNames[a.resource_name] = true;
+      }
+    });
+  }
 
   var result = {
-    baseline: _aggregateSoftBookingProjection_(baselineForecast, quarterKeys, holidays, actualsSummary, curQ),
-    projected: _aggregateSoftBookingProjection_(projectedForecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast)
+    baseline: _aggregateSoftBookingProjection_(
+      baselineForecast, quarterKeys, holidays, actualsSummary, curQ, null, weeklyWorkerNames, visibleWeeks),
+    projected: _aggregateSoftBookingProjection_(
+      projectedForecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast, weeklyWorkerNames, visibleWeeks)
   };
 
   Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +

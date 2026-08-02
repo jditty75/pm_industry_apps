@@ -4165,3 +4165,264 @@ function _dbg_reconcileWFM24() {
     : '_dbg_reconcileWFM24: ' + failures.length + ' CHECK(S) FAILED ΓÇö DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
+
+/**
+ * WFM.25 investigation: trace inverted worker icpUtil delta on first soft-book
+ * add vs second add. Logger.log only; does not persist or mutate production data.
+ */
+function _dbg_traceWFM25ProjectionDelta() {
+  _dbg_requireAdmin_();
+
+  var PREFERRED_WORKER = 'Al Romulo';
+  var BOOKING_HOURS = 100;
+  var curQ = fiscalQuarterKey_(new Date());
+  var curBounds = fiscalQuarterBounds_(curQ);
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+
+  function pct_(v) {
+    return (Number(v) * 100).toFixed(2) + '%';
+  }
+
+  function findQuarterCell_(bucket, level, key, qk) {
+    if (!bucket) return null;
+    if (level === 'worker') {
+      var w = (bucket.worker || []).find(function (x) {
+        return x.resourceName === key;
+      });
+      if (!w) return null;
+      return (w.quarters || []).find(function (q) { return q.quarterKey === qk; }) || null;
+    }
+    if (level === 'team') {
+      return ((bucket.team && bucket.team.quarters) || []).find(function (q) {
+        return q.quarterKey === qk;
+      }) || null;
+    }
+    return null;
+  }
+
+  function logUtilBlock_(label, result, workerName, qk) {
+    Logger.log('  --- ' + label + ' (quarter ' + qk + ') ---');
+    ['WORKER', 'TEAM'].forEach(function (lvl) {
+      var level = lvl === 'WORKER' ? 'worker' : 'team';
+      var key = lvl === 'WORKER' ? workerName : null;
+      var baseCell = findQuarterCell_(result.baseline, level, key, qk);
+      var projCell = findQuarterCell_(result.projected, level, key, qk);
+      if (!baseCell || !projCell) {
+        Logger.log('  ' + lvl + ': (missing baseline or projected cell)');
+        return;
+      }
+      var utilDelta = Number(projCell.icpUtil) - Number(baseCell.icpUtil);
+      var prodDelta = Number(projCell.productiveHours) - Number(baseCell.productiveHours);
+      var arrow = utilDelta > 0.0001 ? '\u2191' : (utilDelta < -0.0001 ? '\u2193' : '\u2192');
+      Logger.log('  ' + lvl + ':');
+      Logger.log('    baseline  icpUtil=' + pct_(baseCell.icpUtil) +
+        '  num(productiveHours)=' + Number(baseCell.productiveHours).toFixed(4) +
+        '  den(icpAvailableHours)=' + Number(baseCell.icpAvailableHours).toFixed(4));
+      Logger.log('    projected icpUtil=' + pct_(projCell.icpUtil) +
+        '  num(productiveHours)=' + Number(projCell.productiveHours).toFixed(4) +
+        '  den(icpAvailableHours)=' + Number(projCell.icpAvailableHours).toFixed(4));
+      Logger.log('    delta     icpUtil=' + pct_(utilDelta) + ' (' + arrow + ')' +
+        '  productiveHours=' + (prodDelta >= 0 ? '+' : '') + prodDelta.toFixed(4));
+    });
+  }
+
+  function logFullWorkerQuarter_(result, workerName, qk) {
+    var baseW = (result.baseline.worker || []).find(function (w) {
+      return w.resourceName === workerName;
+    });
+    var projW = (result.projected.worker || []).find(function (w) {
+      return w.resourceName === workerName;
+    });
+    if (!baseW || !projW) {
+      Logger.log('  FULL worker object: row missing for ' + workerName);
+      return;
+    }
+    var baseQ = (baseW.quarters || []).find(function (q) { return q.quarterKey === qk; });
+    var projQ = (projW.quarters || []).find(function (q) { return q.quarterKey === qk; });
+    if (!baseQ || !projQ) {
+      Logger.log('  FULL worker object: quarter cell missing for ' + qk);
+      return;
+    }
+    Logger.log('  baseline.worker quarter (all numeric fields):');
+    Object.keys(baseQ).sort().forEach(function (k) {
+      if (typeof baseQ[k] === 'number') {
+        Logger.log('    ' + k + '=' + baseQ[k]);
+      }
+    });
+    Logger.log('  projected.worker quarter (all numeric fields):');
+    Object.keys(projQ).sort().forEach(function (k) {
+      if (typeof projQ[k] === 'number') {
+        Logger.log('    ' + k + '=' + projQ[k]);
+      }
+    });
+    var prodDelta = Number(projQ.productiveHours) - Number(baseQ.productiveHours);
+    Logger.log('  productiveHours delta=' + (prodDelta >= 0 ? '+' : '') + prodDelta.toFixed(4) +
+      ' (booking total_hours=' + BOOKING_HOURS + ')');
+    var utilDelta = Number(projQ.icpUtil) - Number(baseQ.icpUtil);
+    Logger.log('  icpUtil delta=' + pct_(utilDelta) +
+      (prodDelta > 0 && utilDelta < 0 ? ' *** INVERTED: hours up, util down ***' : ''));
+  }
+
+  function buildDirectorParams_() {
+    var mgrRows = readConfigSlgManagers_();
+    var descendants = buildManagerDescendants_(mgrRows);
+    var scopes = [];
+    mgrRows.forEach(function (r) {
+      if ((descendants[r.manager_name] || []).length >= 1) {
+        scopes.push({
+          mgrName: r.manager_name,
+          params: Object.assign({}, baseParams, {
+            teams: [r.manager_name],
+            includeMyManagers: true
+          })
+        });
+      }
+    });
+    return scopes;
+  }
+
+  function pickTargetWorker_(scopes) {
+    var preferred = null;
+    var bestOver = null;
+    scopes.forEach(function (scope) {
+      var result = api_projectSoftBookings(scope.params, []);
+      var workers = result.baseline.worker || [];
+      workers.forEach(function (w) {
+        var q = (w.quarters || []).find(function (qq) { return qq.quarterKey === curQ; });
+        if (!q) return;
+        if (w.resourceName === PREFERRED_WORKER) {
+          preferred = { worker: w, params: scope.params, mgrName: scope.mgrName, baseline: result };
+        }
+        if (q.icpUtil > 1.0) {
+          if (!bestOver || q.icpUtil > bestOver.icpUtil) {
+            bestOver = {
+              worker: w,
+              params: scope.params,
+              mgrName: scope.mgrName,
+              baseline: result,
+              icpUtil: q.icpUtil
+            };
+          }
+        }
+      });
+    });
+    if (preferred) {
+      var pq = (preferred.worker.quarters || []).find(function (qq) { return qq.quarterKey === curQ; });
+      if (pq && pq.icpUtil <= 1.0) {
+        Logger.log('  NOTE: ' + PREFERRED_WORKER + ' baseline icpUtil=' + pct_(pq.icpUtil) +
+          ' (not >100%); using preferred worker anyway');
+      }
+      return preferred;
+    }
+    return bestOver;
+  }
+
+  Logger.log('=== _dbg_traceWFM25ProjectionDelta ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' currentFiscalQuarter=' + curQ);
+  Logger.log('  booking window: ' + _toIso_(curBounds.start) + ' .. ' + _toIso_(curBounds.end) +
+    ' total_hours=' + BOOKING_HOURS + ' per booking');
+
+  var scopes = buildDirectorParams_();
+  if (!scopes.length) {
+    Logger.log('  ABORT: no Director scope with descendants found');
+    Logger.log('=== _dbg_traceWFM25ProjectionDelta: DONE ===');
+    return;
+  }
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  var picked = pickTargetWorker_(scopes);
+  if (!picked) {
+    Logger.log('  ABORT: no over-utilized worker (icpUtil>100%) in any Director scope; ' +
+      PREFERRED_WORKER + ' not found');
+    Logger.log('=== _dbg_traceWFM25ProjectionDelta: DONE ===');
+    return;
+  }
+
+  var targetWorker = picked.worker;
+  var params = picked.params;
+  var workerName = targetWorker.resourceName;
+  var baseQ = (targetWorker.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+
+  Logger.log('--- STEP 1: target worker ---');
+  Logger.log('  employee_id=' + targetWorker.employeeId);
+  Logger.log('  resource_name=' + workerName);
+  Logger.log('  team=' + targetWorker.teamLabel);
+  Logger.log('  director_scope=' + picked.mgrName);
+  Logger.log('  current_quarter=' + curQ);
+  Logger.log('  baseline_icpUtil=' + (baseQ ? pct_(baseQ.icpUtil) : '(missing)'));
+
+  var booking1 = {
+    employee_id: String(targetWorker.employeeId),
+    resource_name: workerName,
+    start_date: _toIso_(curBounds.start),
+    end_date: _toIso_(curBounds.end),
+    total_hours: BOOKING_HOURS
+  };
+  var booking2 = {
+    employee_id: String(targetWorker.employeeId),
+    resource_name: workerName,
+    start_date: _toIso_(curBounds.start),
+    end_date: _toIso_(curBounds.end),
+    total_hours: BOOKING_HOURS
+  };
+
+  Logger.log('--- STEP 2/3: FIRST add (cold cache, 1 booking) ---');
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  var resultFirst = api_projectSoftBookings(params, [booking1]);
+  logUtilBlock_('FIRST add', resultFirst, workerName, curQ);
+
+  Logger.log('--- STEP 5: FULL baseline vs projected worker quarter (FIRST add) ---');
+  logFullWorkerQuarter_(resultFirst, workerName, curQ);
+
+  Logger.log('--- STEP 4: SECOND add [flush-between] ---');
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  api_projectSoftBookings(params, [booking1]);
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  var resultSecondFlush = api_projectSoftBookings(params, [booking1, booking2]);
+  logUtilBlock_('SECOND add (2 bookings)', resultSecondFlush, workerName, curQ);
+
+  Logger.log('--- STEP 4: SECOND add [no-flush-between] ---');
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  api_projectSoftBookings(params, [booking1]);
+  var resultSecondWarm = api_projectSoftBookings(params, [booking1, booking2]);
+  logUtilBlock_('SECOND add warm-cache (2 bookings)', resultSecondWarm, workerName, curQ);
+
+  var firstWorkerDelta = (function () {
+    var b = findQuarterCell_(resultFirst.baseline, 'worker', workerName, curQ);
+    var p = findQuarterCell_(resultFirst.projected, 'worker', workerName, curQ);
+    return b && p ? Number(p.icpUtil) - Number(b.icpUtil) : null;
+  })();
+  var secondFlushWorkerDelta = (function () {
+    var b = findQuarterCell_(resultSecondFlush.baseline, 'worker', workerName, curQ);
+    var p = findQuarterCell_(resultSecondFlush.projected, 'worker', workerName, curQ);
+    return b && p ? Number(p.icpUtil) - Number(b.icpUtil) : null;
+  })();
+  var secondWarmWorkerDelta = (function () {
+    var b = findQuarterCell_(resultSecondWarm.baseline, 'worker', workerName, curQ);
+    var p = findQuarterCell_(resultSecondWarm.projected, 'worker', workerName, curQ);
+    return b && p ? Number(p.icpUtil) - Number(b.icpUtil) : null;
+  })();
+
+  Logger.log('--- SUMMARY: worker icpUtil delta sign ---');
+  Logger.log('  FIRST add:        ' + (firstWorkerDelta == null ? 'n/a' :
+    pct_(firstWorkerDelta) + (firstWorkerDelta < 0 ? ' (NEGATIVE)' : ' (non-negative)')));
+  Logger.log('  SECOND flush:     ' + (secondFlushWorkerDelta == null ? 'n/a' :
+    pct_(secondFlushWorkerDelta) + (secondFlushWorkerDelta < 0 ? ' (NEGATIVE)' : ' (non-negative)')));
+  Logger.log('  SECOND no-flush:  ' + (secondWarmWorkerDelta == null ? 'n/a' :
+    pct_(secondWarmWorkerDelta) + (secondWarmWorkerDelta < 0 ? ' (NEGATIVE)' : ' (non-negative)')));
+  if (firstWorkerDelta != null && secondFlushWorkerDelta != null &&
+      firstWorkerDelta < 0 && secondFlushWorkerDelta > 0) {
+    Logger.log('  PATTERN MATCH: first-add worker delta negative, second-add positive (flush-between)');
+  }
+  if (firstWorkerDelta != null && secondWarmWorkerDelta != null &&
+      firstWorkerDelta < 0 && secondWarmWorkerDelta > 0) {
+    Logger.log('  PATTERN MATCH: first-add worker delta negative, second-add positive (no-flush-between)');
+  }
+
+  Logger.log('=== _dbg_traceWFM25ProjectionDelta: DONE ===');
+}

@@ -3835,11 +3835,15 @@
     '</div>';
   }
 
-  function renderExplorerWeeklyStrip_(weeks) {
+  function renderExplorerWeeklyStrip_(weeks, projection, workerName) {
     if (!weeks || !weeks.length) {
       return '<div class="explorer-section"><div class="explorer-section-title">Weekly capacity</div>' +
         '<div class="muted">No weeks in scope.</div></div>';
     }
+    const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
+    const projWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, true) : null;
+    const baseWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, false) : null;
+    const showDraft = hasDraft && projWeeks && projWeeks.length;
     let seamWeekKey = '';
     weeks.forEach(function (w) { if (w.isActual) seamWeekKey = w.weekKey; });
     let seamIdx = -1;
@@ -3868,6 +3872,35 @@
     });
     html += '</tr></thead><tbody><tr>';
     weeks.forEach(function (cell, idx) {
+      const seamCls = idx === seamIdx ? ' wf-seam-divider' : '';
+      const forecastCls = cell.isActual ? '' : ' wf-cell-forecast';
+      if (showDraft && !cell.isActual) {
+        const pw = projWeeks.find(function (w) { return w.weekKey === cell.weekKey; });
+        if (pw) {
+          const bw = baseWeeks
+            ? (baseWeeks.find(function (w) { return w.weekKey === cell.weekKey; }) || cell)
+            : cell;
+          const baseHours = Number(bw.hours) || 0;
+          const projHours = Number(pw.hours) || 0;
+          const baseUtil = Number(bw.icpUtil != null ? bw.icpUtil : cell.icpUtil) || 0;
+          const projUtil = Number(pw.icpUtil) || 0;
+          const arrow = wfm25DraftArrow_(baseUtil, projUtil);
+          const tip = [
+            (State.selectedResource || workerName || '') + ' · ' + cell.label,
+            'Forecast',
+            'Committed: ' + Math.round(baseHours) + 'h (' + fmtPct(baseUtil) + ')',
+            'Your draft: ' + Math.round(projHours) + 'h (' + fmtPct(projUtil) + ')',
+            'ICP available: ' + Math.round(pw.icpAvailable || cell.icpAvailable) + 'h'
+          ].join('\n');
+          html += '<td class="wf-col-week wf-cell has-draft' + seamCls + forecastCls + '" title="' +
+            escapeHtml_(tip) + '">' +
+            '<div class="wfm25-worker-qstrip-committed">' + Math.round(baseHours) + 'h</div>' +
+            '<div class="wfm25-draft-label">Your draft</div>' +
+            '<div class="wfm25-worker-qstrip-draft">' + Math.round(baseHours) + ' \u2192 ' +
+              Math.round(projHours) + 'h ' + arrow + '</div></td>';
+          return;
+        }
+      }
       const color = cellColor(cell.icpUtil, cell.icpTarget);
       const rawCap = Number(cell.icpAvailable || 0) + Number(cell.holidayHours || 0);
       const holidayNote = cell.holidayHours
@@ -3875,7 +3908,7 @@
         : '';
       const actualLabel = cell.isActual ? 'Actual' : 'Forecast';
       const title = [
-        (State.selectedResource || '') + ' · ' + cell.label,
+        (State.selectedResource || workerName || '') + ' · ' + cell.label,
         actualLabel,
         'Hours: ' + Math.round(cell.hours) + 'h',
         'ICP available: ' + Math.round(cell.icpAvailable) + 'h' + holidayNote,
@@ -3883,8 +3916,6 @@
         'ICP target: ' + fmtPct(cell.icpTarget),
         'Finance utilization: ' + fmtPct(cell.financeUtil)
       ].join('\n');
-      const seamCls = idx === seamIdx ? ' wf-seam-divider' : '';
-      const forecastCls = cell.isActual ? '' : ' wf-cell-forecast';
       html += '<td class="wf-col-week wf-cell' + seamCls + forecastCls + '" style="background:' +
         color.bg + ';color:' + color.fg + '" title="' + escapeHtml_(title) + '">' +
         Math.round(cell.hours) + '</td>';
@@ -7469,6 +7500,21 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Look up projected/baseline weekly cells from api_projectSoftBookings payload.
+   * @param {Object|null} projection
+   * @param {string} workerName
+   * @param {boolean} projected
+   * @returns {Array|null}
+   */
+  function wfm25ProjectionWeeks_(projection, workerName, projected) {
+    if (!projection) return null;
+    const bucket = projected ? projection.projected : projection.baseline;
+    if (!bucket) return null;
+    const row = (bucket.worker || []).find(function (w) { return w.resourceName === workerName; });
+    return row && row.weeks ? row.weeks : null;
+  }
+
+  /**
    * Look up projected/baseline icpUtil from api_projectSoftBookings payload.
    * @param {Object|null} projection
    * @param {'worker'|'team'|'orgTeam'} level
@@ -7559,7 +7605,7 @@ async function _qaRefreshPsaHours_() {
     const icpTarget = (detail.weeks && detail.weeks[0]) ? detail.weeks[0].icpTarget : 0.72;
     body.innerHTML =
       renderExplorerSummaryStrip_(detail, meta) +
-      renderExplorerWeeklyStrip_(detail.weeks || []) +
+      renderExplorerWeeklyStrip_(detail.weeks || [], projection, workerName) +
       renderExplorerQuarterSection_(detail.quarters || [], icpTarget, projection, workerName) +
       renderExplorerProjectsSection_(detail.projects || [], detail.weeks || []);
 

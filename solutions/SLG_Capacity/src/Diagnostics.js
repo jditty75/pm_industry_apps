@@ -3203,6 +3203,18 @@ function _dbg_reconcileWFM23() {
         return q.quarterKey === futureQk;
       });
       var postProductive = postQ ? Number(postQ.productiveHours) || 0 : 0;
+      var preCommitQuarterKeys = (preCommitW && preCommitW.quarters || []).map(function (q) {
+        return q.quarterKey;
+      });
+      var postQuarterKeys = (postW && postW.quarters || []).map(function (q) {
+        return q.quarterKey;
+      });
+      Logger.log('  Check 4 diag futureQk=' + futureQk);
+      Logger.log('  Check 4 diag preCommit quarterKeys=' + JSON.stringify(preCommitQuarterKeys));
+      Logger.log('  Check 4 diag postCommit quarterKeys=' + JSON.stringify(postQuarterKeys));
+      Logger.log('  Check 4 diag preCommitProductive=' + preCommitProductive +
+        ' postProductive=' + postProductive +
+        ' postQ=' + (postQ ? 'found' : 'MISSING'));
       var committedHoursDelta = postProductive - preCommitProductive;
       var expectedCommittedHours = 0;
       expandAssignmentToWeekly_(directPayload, calendar).forEach(function (w) {

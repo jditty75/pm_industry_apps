@@ -106,9 +106,16 @@ const CFG_UTIL_QUARTERLY = 'Utilization_Quarterly';
 const UTIL_QUARTERLY_HEADERS = ['employee_id','resource_name','fiscal_quarter',
     'target_hours','util_rate_wkly','qtd_actual_icp','qtd_icp_plus_forecast','source_sheet'];
 const ACTUALS_HISTORY = 'Actuals_History';
-const ACTUALS_HISTORY_HEADERS = ['employee_id','resource_name','worker_class',
-    'fiscal_quarter','project','project_role_category','worked_hours',
-    'workday_region_as_of_date_worked'];
+const ACTUALS_HISTORY_HEADERS = [
+  'employee_id',
+  'resource_name',
+  'worker_class',
+  'workday_region_as_of_date_worked',
+  'fiscal_quarter',
+  'project',
+  'project_role_category',
+  'worked_hours'
+];
 const CONSOLIDATED_REQUIRED_SHEETS = ['Forecast_Staged','Actuals_Current_Normalized',
     'Utilization_Normalized','History_Normalized','_manifest'];
 const UNSTAFFED_DEMAND_SHEET = 'Unstaffed_Demand';

@@ -580,6 +580,93 @@ function api_getQuarterlyScorecard(params) {
   return computeQuarterlyScorecard_(params || {});
 }
 
+/**
+ * WFM.25 Stage 4: Historical worker-type hours for Mix & Trend.
+ * Reads Actuals_History; aggregates by fiscal quarter and display class.
+ * @param {Object} [params] reserved for future filter params
+ * @return {Object}
+ */
+function api_getWorkerTypeHistory(params) {
+  _requireAuthorized_();
+  return getWorkerTypeHistory_(params || {});
+}
+
+/**
+ * Aggregate Actuals_History into Mix & Trend wire payload.
+ * Storage worker_class → display class: SLG, Workday Regions, Contractor.
+ * @param {Object} [params]
+ * @return {Object}
+ */
+function getWorkerTypeHistory_(params) {
+  var rows = readTable_(ACTUALS_HISTORY) || [];
+  var quarterTotals = {};
+  var quarterClasses = {};
+  var quarterRegions = {};
+  var grandTotal = 0;
+
+  rows.forEach(function (r) {
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq) return;
+    var hrs = Number(r.worked_hours) || 0;
+    if (!hrs) return;
+
+    var displayClass = historyDisplayClass_(r.worker_class);
+    if (!displayClass) return;
+
+    grandTotal += hrs;
+    quarterTotals[fq] = (quarterTotals[fq] || 0) + hrs;
+
+    if (!quarterClasses[fq]) quarterClasses[fq] = {};
+    quarterClasses[fq][displayClass] = (quarterClasses[fq][displayClass] || 0) + hrs;
+
+    if (displayClass === 'Workday Regions') {
+      var region = String(r.workday_region_as_of_date_worked || '').trim();
+      if (!region) region = 'Unclassified';
+      if (!quarterRegions[fq]) quarterRegions[fq] = {};
+      quarterRegions[fq][region] = (quarterRegions[fq][region] || 0) + hrs;
+    }
+  });
+
+  var fiscalQuarters = Object.keys(quarterTotals).sort(compareFiscalQuarterKeys_);
+
+  return {
+    fiscalQuarters: fiscalQuarters,
+    quarterTotals: quarterTotals,
+    quarterClasses: quarterClasses,
+    quarterRegions: quarterRegions,
+    grandTotal: grandTotal
+  };
+}
+
+/**
+ * Map Actuals_History storage worker_class to Mix & Trend display class.
+ * @param {string} storageClass
+ * @return {string|null}
+ */
+function historyDisplayClass_(storageClass) {
+  var wc = String(storageClass || '').trim();
+  if (wc === 'SLG' || wc === 'SLG_Real' || wc === 'SLG_Generic') return 'SLG';
+  if (wc === 'Non-SLG' || wc === 'External_NonSLG') return 'Workday Regions';
+  if (wc === 'Contractor' || wc === 'External_Contractor') return 'Contractor';
+  return null;
+}
+
+/**
+ * Compare fiscal-quarter keys chronologically (e.g. FY26-Q1 < FY26-Q4).
+ * @param {string} a
+ * @param {string} b
+ * @return {number}
+ */
+function compareFiscalQuarterKeys_(a, b) {
+  var ma = String(a || '').match(/^FY(\d{2})-(Q[1-4])$/);
+  var mb = String(b || '').match(/^FY(\d{2})-(Q[1-4])$/);
+  if (!ma || !mb) return String(a).localeCompare(String(b));
+  var ya = parseInt(ma[1], 10);
+  var yb = parseInt(mb[1], 10);
+  if (ya !== yb) return ya - yb;
+  return parseInt(ma[2].charAt(1), 10) - parseInt(mb[2].charAt(1), 10);
+}
+
 // ------------------------------------------------------------
 // WFM.23 — Soft booking projection (Stage 1)
 // ------------------------------------------------------------

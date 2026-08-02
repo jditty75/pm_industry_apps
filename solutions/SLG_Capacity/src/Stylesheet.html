@@ -4159,4 +4159,245 @@ td.cell-with-bar {
 .wfm25-pad-loose {
   padding: var(--space-6);
 }
+
+/* ── WFM.25 Stage 4: Hours & Capacity ───────────────────── */
+.wfm25-hours-capacity-wrap {
+  overflow: visible;
+  max-height: none;
+  border: 0;
+}
+.wfm25-hours-capacity-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  table-layout: fixed;
+}
+#wfm25HoursCapacityTable thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--staple);
+  background: #fff;
+  border-bottom: 1px solid var(--business-card);
+  padding: 10px 8px;
+}
+.wfm25-hc-qth {
+  text-align: center;
+  min-width: 0;
+}
+.wfm25-hc-qth.wfm25-cur-qth {
+  color: var(--ballpoint);
+}
+.wfm25-hours-capacity-cell {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 6px !important;
+  vertical-align: middle;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.wfm25-hc-line1 {
+  font-weight: 600;
+  font-size: 11px;
+}
+.wfm25-hc-line2 {
+  font-size: 11px;
+  margin-top: 2px;
+}
+.wfm25-hc-line3 {
+  font-size: 10px;
+  margin-top: 2px;
+  color: var(--staple);
+}
+.wfm25-remaining-ok {
+  color: var(--laptop);
+}
+.wfm25-remaining-tight {
+  color: var(--pencil);
+  font-weight: 600;
+}
+.wfm25-remaining-risk {
+  color: var(--thumbtack);
+  font-weight: 600;
+}
+.wfm25-hours-capacity-total-row td {
+  font-weight: 600;
+  border-bottom: 2px solid var(--business-card) !important;
+}
+.wfm25-hours-capacity-cell.has-draft .wfm25-hc-committed {
+  opacity: .75;
+}
+.wfm25-hc-draft {
+  margin-top: 4px;
+  line-height: 1.25;
+}
+.wfm25-hc-draft-rem {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--happy-hour);
+}
+
+/* ── WFM.25 Stage 4: Mix & Trend ─────────────────────────── */
+.wfm25-mix-trend-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 280px;
+}
+.wfm25-mix-trend-chart-wrap {
+  min-height: 260px;
+}
+.wfm25-mix-trend-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 12px;
+  min-height: 220px;
+  padding: 12px 8px 4px;
+  border-bottom: 1px solid var(--business-card);
+}
+.wfm25-mix-trend-bar-btn {
+  flex: 1 1 0;
+  max-width: 88px;
+  min-width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 4px 2px;
+  border-radius: 4px;
+}
+.wfm25-mix-trend-bar-btn:hover,
+.wfm25-mix-trend-bar-btn:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: 2px;
+}
+.wfm25-mix-trend-bar-btn.is-selected {
+  background: var(--paper);
+}
+.wfm25-mix-trend-bar {
+  width: 100%;
+  min-height: 4px;
+  border-radius: 4px 4px 0 0;
+  background: var(--ballpoint);
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  transition: height .2s ease;
+}
+.wfm25-mix-bar--actuals {
+  background: var(--ballpoint);
+}
+.wfm25-mix-bar--current {
+  background: var(--laptop);
+  box-shadow: inset 0 -3px 0 var(--ballpoint);
+}
+.wfm25-mix-bar--forecast {
+  background: var(--laptop);
+  position: relative;
+}
+.wfm25-mix-bar--forecast::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 4px 4px 0 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.08) 3px,
+    rgba(0, 0, 0, 0.08) 6px
+  );
+}
+.wfm25-mix-trend-bar-hours {
+  position: absolute;
+  top: -18px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--laptop);
+  white-space: nowrap;
+}
+.wfm25-mix-trend-bar-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--laptop);
+  text-align: center;
+}
+.wfm25-mix-trend-bar-kind {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--staple);
+  text-align: center;
+}
+.wfm25-mix-trend-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.wfm25-mix-trend-detail-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.wfm25-mix-trend-back {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+/* ── WFM.25 Stage 4: History drill-down tables ───────────── */
+.wfm25-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.wfm25-history-table th,
+.wfm25-history-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--business-card);
+  text-align: left;
+}
+.wfm25-history-table th.num,
+.wfm25-history-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.wfm25-history-drillable {
+  cursor: pointer;
+}
+.wfm25-history-drillable:hover td {
+  background: var(--paper);
+}
+.wfm25-history-drillable:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: -2px;
+}
+.wfm25-history-chev {
+  font-size: 9px;
+  color: var(--staple);
+  margin-left: 4px;
+}
+.wfm25-history-note {
+  font-size: 12px;
+  padding: 10px !important;
+}
+.wfm25-history-region-table {
+  margin-top: 4px;
+}
+.wfm25-history-region-table td {
+  font-size: 12px;
+  color: var(--staple);
+}
+.wfm25-history-region {
+  padding-left: 20px !important;
+}
 </style>

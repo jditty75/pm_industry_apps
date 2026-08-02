@@ -7389,6 +7389,11 @@ async function _qaRefreshPsaHours_() {
   // ── WFM.25 client state ───────────────────────────────────────
   const WFM25State = {
     scorecardData:    null,          // last api_getQuarterlyScorecard result
+    historyData:      null,          // last api_getWorkerTypeHistory result
+    historyReqId:     0,             // race-guard for history fetch
+    mixTrendReqId:    0,             // race-guard for mix-trend render
+    mixTrendSelected: null,          // selected bar descriptor or null
+    mixTrendDetailLevel: 'class',   // 'class' | 'regions'
     expandedTeam:     null,          // teamLabel string currently expanded, or null
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend'
     groupBy:          'team',        // 'team' | 'role'
@@ -7451,6 +7456,31 @@ async function _qaRefreshPsaHours_() {
     $$('.wfm25-tab-panel').forEach(function (panel) {
       panel.hidden = (panel.dataset.wfm25Panel !== tabKey);
     });
+    if (tabKey === 'hours-budget') {
+      if (WFM25State.scorecardData) {
+        renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
+      } else {
+        loadWFM25HoursCapacity_();
+      }
+    } else if (tabKey === 'mix-trend') {
+      loadWFM25MixTrend_();
+    }
+  }
+
+  /**
+   * Compare fiscal-quarter keys chronologically (client mirror of server helper).
+   * @param {string} a
+   * @param {string} b
+   * @returns {number}
+   */
+  function compareFiscalQuarterKeys_(a, b) {
+    const ma = String(a || '').match(/^FY(\d{2})-(Q[1-4])$/);
+    const mb = String(b || '').match(/^FY(\d{2})-(Q[1-4])$/);
+    if (!ma || !mb) return String(a).localeCompare(String(b));
+    const ya = parseInt(ma[1], 10);
+    const yb = parseInt(mb[1], 10);
+    if (ya !== yb) return ya - yb;
+    return parseInt(ma[2].charAt(1), 10) - parseInt(mb[2].charAt(1), 10);
   }
 
   // ── Draft util cell helpers (committed + projected overlay) ──
@@ -7825,6 +7855,9 @@ async function _qaRefreshPsaHours_() {
 
     if (scorecardData) {
       renderWFM25UtilTable_(scorecardData);
+      if (WFM25State.activeTab === 'hours-budget') {
+        renderWFM25HoursCapacityTable_(scorecardData);
+      }
     } else if (scorecardErr) {
       const body = document.getElementById('wfm25UtilBody');
       if (body) {
@@ -8003,6 +8036,9 @@ async function _qaRefreshPsaHours_() {
     closeWFM25SoftBookOverlay_();
     if (WFM25State.scorecardData) {
       renderWFM25UtilTable_(WFM25State.scorecardData);
+      if (WFM25State.activeTab === 'hours-budget') {
+        renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
+      }
     }
     if (WFM25State.selectedWorkerDetail) {
       paintWFM25WorkerPanel_(null);
@@ -8027,6 +8063,9 @@ async function _qaRefreshPsaHours_() {
       State.explorerProjection = result;
       if (WFM25State.scorecardData) {
         renderWFM25UtilTable_(WFM25State.scorecardData);
+        if (WFM25State.activeTab === 'hours-budget') {
+          renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
+        }
       }
       if (WFM25State.selectedWorkerDetail) {
         paintWFM25WorkerPanel_(result);
@@ -8261,6 +8300,582 @@ async function _qaRefreshPsaHours_() {
     }
   }
 
+  // ── Hours & Capacity (Stage 4c) ─────────────────────────────
+
+  /**
+   * Look up projected/baseline quarter metrics from api_projectSoftBookings payload.
+   * @param {Object|null} projection
+   * @param {'worker'|'team'|'orgTeam'|'org'} level
+   * @param {string} [key] resourceName or teamLabel
+   * @param {string} quarterKey
+   * @param {boolean} projected
+   * @returns {Object|null}
+   */
+  function wfm25ProjectionQuarter_(projection, level, key, quarterKey, projected) {
+    if (!projection) return null;
+    const bucket = projected ? projection.projected : projection.baseline;
+    if (!bucket) return null;
+    let row = null;
+    if (level === 'worker') {
+      row = (bucket.worker || []).find(function (w) { return w.resourceName === key; });
+    } else if (level === 'team' || level === 'orgTeam') {
+      row = (bucket.orgTeams || []).find(function (o) { return o.teamLabel === key; });
+    } else if (level === 'org') {
+      row = bucket.team;
+    }
+    if (!row) return null;
+    const q = (row.quarters || []).find(function (qq) { return qq.quarterKey === quarterKey; });
+    return q || null;
+  }
+
+  /**
+   * Aggregate scorecard data into planned hours, capacity, utilization, and remaining.
+   * Mirrors wfm25AggregateByTeam_ scope and team ordering.
+   * @param {Object} data api_getQuarterlyScorecard result
+   * @returns {{quarterKeys: string[], orgTotal: Object, teams: Array}}
+   */
+  function wfm25AggregateHoursAndCapacityByTeam_(data) {
+    const agg = wfm25AggregateByTeam_(data);
+    const quarterKeys = agg.quarterKeys;
+    const workers = (data && data.workers) || [];
+
+    const teams = agg.teams.map(function (team) {
+      const quarters = quarterKeys.map(function (qk, qi) {
+        let sumProd = 0;
+        let sumAvail = 0;
+        team.workerRows.forEach(function (w) {
+          const q = (w.quarters || [])[qi];
+          if (!q) return;
+          sumProd += Number(q.productiveHours) || 0;
+          sumAvail += Number(q.icpAvailableHours) || 0;
+        });
+        const util = sumAvail > 0 ? sumProd / sumAvail : null;
+        return {
+          qk: qk,
+          planned: sumProd,
+          capacity: sumAvail,
+          util: util,
+          remaining: sumAvail - sumProd
+        };
+      });
+      return {
+        label: team.label,
+        color: team.color,
+        icpTarget: team.icpTarget,
+        quarters: quarters
+      };
+    });
+
+    const orgTotal = {
+      label: 'SLG Total',
+      color: 'var(--ballpoint)',
+      icpTarget: teams.length ? teams[0].icpTarget : 0.75,
+      quarters: quarterKeys.map(function (qk, qi) {
+        let sumProd = 0;
+        let sumAvail = 0;
+        workers.forEach(function (w) {
+          const q = (w.quarters || [])[qi];
+          if (!q) return;
+          sumProd += Number(q.productiveHours) || 0;
+          sumAvail += Number(q.icpAvailableHours) || 0;
+        });
+        const util = sumAvail > 0 ? sumProd / sumAvail : null;
+        return {
+          qk: qk,
+          planned: sumProd,
+          capacity: sumAvail,
+          util: util,
+          remaining: sumAvail - sumProd
+        };
+      })
+    };
+
+    return { quarterKeys: quarterKeys, orgTotal: orgTotal, teams: teams };
+  }
+
+  /**
+   * Remaining-hours visual treatment (secondary to utilization heat).
+   * @param {number} remaining
+   * @returns {string} CSS class suffix
+   */
+  function wfm25RemainingClass_(remaining) {
+    const r = Number(remaining) || 0;
+    if (r < -0.5) return 'wfm25-remaining-risk';
+    if (r <= 40) return 'wfm25-remaining-tight';
+    return 'wfm25-remaining-ok';
+  }
+
+  /**
+   * Render one Hours & Capacity cell with optional draft overlay.
+   * @param {Object} committed {planned, capacity, util, remaining}
+   * @param {Object|null} projected same shape from projection API
+   * @param {number} icpTarget
+   * @param {boolean} showDraft
+   * @param {string} [extraCls]
+   * @returns {string}
+   */
+  function wfm25RenderHoursCapacityCell_(committed, projected, icpTarget, showDraft, extraCls) {
+    const hasDraft = showDraft && projected &&
+      committed && projected &&
+      (Math.abs((projected.planned || 0) - (committed.planned || 0)) > 0.05 ||
+       Math.abs((projected.util || 0) - (committed.util || 0)) > 0.0001);
+
+    const util = committed && committed.util != null ? committed.util : null;
+    const color = util != null
+      ? cellColor(util, icpTarget)
+      : { bg: 'var(--business-card)', fg: 'var(--staple)' };
+
+    const plannedStr = committed ? fmtHours(committed.planned) + 'h' : '\u2014';
+    const capStr = committed ? fmtHours(committed.capacity) + 'h' : '\u2014';
+    const utilStr = util != null ? fmtPct(util) + ' utilization' : '\u2014';
+    const remStr = committed
+      ? fmtHours(committed.remaining) + 'h remaining'
+      : '\u2014';
+    const remCls = committed ? wfm25RemainingClass_(committed.remaining) : '';
+
+    if (!hasDraft) {
+      return '<td class="wfm25-hours-capacity-cell' + (extraCls ? ' ' + extraCls : '') +
+        '" style="background:' + color.bg + ';color:' + color.fg + '">' +
+        '<div class="wfm25-hc-line1">' + plannedStr + ' / ' + capStr + '</div>' +
+        '<div class="wfm25-hc-line2">' + utilStr + '</div>' +
+        '<div class="wfm25-hc-line3 ' + remCls + '">' + remStr + '</div></td>';
+    }
+
+    const pUtil = projected.util != null ? projected.util : null;
+    const arrow = wfm25DraftArrow_(committed.util, pUtil);
+    return '<td class="wfm25-hours-capacity-cell has-draft' + (extraCls ? ' ' + extraCls : '') + '">' +
+      '<div class="wfm25-hc-committed">' +
+        '<div class="wfm25-hc-line1">' + plannedStr + ' / ' + capStr + '</div>' +
+        '<div class="wfm25-hc-line2">' + utilStr + '</div>' +
+        '<div class="wfm25-hc-line3 ' + remCls + '">' + remStr + '</div>' +
+      '</div>' +
+      '<div class="wfm25-hc-draft">' +
+        '<span class="wfm25-draft-label">Your draft</span>' +
+        '<span class="wfm25-draft-value">' +
+          fmtHours(projected.planned) + 'h / ' + fmtHours(projected.capacity) + 'h' +
+          ' \u2192 ' + (pUtil != null ? fmtPct(pUtil) : '\u2014') + ' ' + arrow +
+        '</span>' +
+        '<span class="wfm25-hc-draft-rem">' + fmtHours(projected.remaining) + 'h remaining</span>' +
+      '</div></td>';
+  }
+
+  /**
+   * Render the Hours & Capacity table from cached scorecard data.
+   * @param {Object} data api_getQuarterlyScorecard result
+   */
+  function renderWFM25HoursCapacityTable_(data) {
+    const headerRow = document.getElementById('wfm25HoursCapacityHeaderRow');
+    const body = document.getElementById('wfm25HoursCapacityBody');
+    if (!headerRow || !body) return;
+
+    const hc = wfm25AggregateHoursAndCapacityByTeam_(data);
+    const qKeys = hc.quarterKeys;
+    const curQk = fiscalQuarterKey_(new Date());
+    const projection = State.explorerProjection;
+    const hasDraft = State.softBookings && State.softBookings.length;
+    const selectedTeam = WFM25State.selectedWorkerTeam;
+    const selectedWorker = WFM25State.selectedWorker;
+
+    $$('.wfm25-hc-qth', headerRow).forEach(function (el) { el.remove(); });
+    qKeys.forEach(function (qk) {
+      const th = document.createElement('th');
+      th.className = 'wfm25-hc-qth' + (qk === curQk ? ' wfm25-cur-qth' : '');
+      th.textContent = qk + (qk === curQk ? ' \u25c6' : '');
+      headerRow.appendChild(th);
+    });
+
+    if (!hc.teams.length) {
+      body.innerHTML = '<tr><td colspan="' + (1 + qKeys.length) +
+        '" class="muted" style="padding:14px">No team data in scope.</td></tr>';
+      return;
+    }
+
+    const rows = [];
+
+    // SLG total summary row
+    const orgDraft = hasDraft && selectedWorker;
+    const orgCells = hc.orgTotal.quarters.map(function (q, qi) {
+      const qk = qKeys[qi];
+      let projQ = null;
+      if (orgDraft) {
+        const raw = wfm25ProjectionQuarter_(projection, 'org', null, qk, true);
+        if (raw) {
+          projQ = {
+            planned: Number(raw.productiveHours) || 0,
+            capacity: Number(raw.icpAvailableHours) || 0,
+            util: raw.icpUtil != null ? raw.icpUtil : null,
+            remaining: (Number(raw.icpAvailableHours) || 0) - (Number(raw.productiveHours) || 0)
+          };
+        }
+      }
+      return wfm25RenderHoursCapacityCell_(q, projQ, hc.orgTotal.icpTarget, orgDraft);
+    }).join('');
+    rows.push(
+      '<tr class="wfm25-hours-capacity-total-row">' +
+      '<td><div class="wfm25-team-name-cell">' +
+        '<span class="wfm25-team-swatch" style="background:' + hc.orgTotal.color + '"></span>' +
+        '<strong>' + escapeHtml_(hc.orgTotal.label) + '</strong>' +
+      '</div></td>' + orgCells + '</tr>'
+    );
+
+    hc.teams.forEach(function (team) {
+      const teamDraft = hasDraft && selectedTeam === team.label;
+      const teamCells = team.quarters.map(function (q, qi) {
+        const qk = qKeys[qi];
+        let projQ = null;
+        if (teamDraft) {
+          const raw = wfm25ProjectionQuarter_(projection, 'orgTeam', team.label, qk, true);
+          if (raw) {
+            projQ = {
+              planned: Number(raw.productiveHours) || 0,
+              capacity: Number(raw.icpAvailableHours) || 0,
+              util: raw.icpUtil != null ? raw.icpUtil : null,
+              remaining: (Number(raw.icpAvailableHours) || 0) - (Number(raw.productiveHours) || 0)
+            };
+          }
+        }
+        return wfm25RenderHoursCapacityCell_(q, projQ, team.icpTarget, teamDraft);
+      }).join('');
+      rows.push(
+        '<tr class="wfm25-hours-capacity-team-row">' +
+        '<td><div class="wfm25-team-name-cell">' +
+          '<span class="wfm25-team-swatch" style="background:' + team.color + '"></span>' +
+          escapeHtml_(team.label) +
+        '</div></td>' + teamCells + '</tr>'
+      );
+    });
+
+    body.innerHTML = rows.join('');
+  }
+
+  /**
+   * Fetch scorecard if needed and render Hours & Capacity tab.
+   */
+  async function loadWFM25HoursCapacity_() {
+    const body = document.getElementById('wfm25HoursCapacityBody');
+    if (body) {
+      body.innerHTML = '<tr><td colspan="5" class="wfm25-util-loading-cell">' +
+        wfm25LoadingSpinnerHtml_() + '</td></tr>';
+    }
+    if (WFM25State.scorecardData) {
+      renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
+      return;
+    }
+    try {
+      const params = buildServerParams_({ workerScope: 'SLG' });
+      const data = await call('api_getQuarterlyScorecard', params);
+      WFM25State.scorecardData = data;
+      renderWFM25HoursCapacityTable_(data);
+    } catch (err) {
+      if (body) {
+        body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px;color:var(--thumbtack)">' +
+          'Failed to load hours &amp; capacity: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
+      }
+      console.error('[WFM.25] loadWFM25HoursCapacity_ failed:', err);
+    }
+  }
+
+  // ── Mix & Trend (Stage 4b) ───────────────────────────────────
+
+  const WFM25_MIX_CLASSES_ = ['SLG', 'Workday Regions', 'Contractor'];
+
+  /**
+   * Build Mix & Trend bar descriptors from history + scorecard.
+   * @param {Object|null} history api_getWorkerTypeHistory result
+   * @param {Object|null} scorecard api_getQuarterlyScorecard result
+   * @returns {Array<Object>}
+   */
+  function wfm25BuildMixTrendBars_(history, scorecard) {
+    const bars = [];
+    const seen = {};
+    const qKeys = (scorecard && scorecard.quarterKeys) || [];
+    const teamSummary = (scorecard && scorecard.teamSummary) || [];
+    const planningKeys = {};
+    if (qKeys.length >= 3) {
+      planningKeys[qKeys[1]] = 'current';
+      planningKeys[qKeys[2]] = 'forecast';
+    }
+
+    (history && history.fiscalQuarters || []).forEach(function (fq) {
+      if (planningKeys[fq]) return;
+      seen[fq] = true;
+      bars.push({
+        quarterKey: fq,
+        totalHours: Number((history.quarterTotals || {})[fq]) || 0,
+        kind: 'actuals',
+        label: 'Actuals',
+        selectable: true
+      });
+    });
+
+    if (qKeys.length >= 3) {
+      const curIdx = 1;
+      const nextIdx = 2;
+      const curQ = qKeys[curIdx];
+      const nextQ = qKeys[nextIdx];
+      if (!seen[curQ]) {
+        const curTeam = teamSummary[curIdx] || {};
+        bars.push({
+          quarterKey: curQ,
+          totalHours: Number(curTeam.productiveHours) || 0,
+          kind: 'current',
+          label: 'Actuals + Forecast',
+          selectable: true,
+          slgHours: Number(curTeam.productiveHours) || 0
+        });
+        seen[curQ] = true;
+      }
+      if (!seen[nextQ]) {
+        const nextTeam = teamSummary[nextIdx] || {};
+        bars.push({
+          quarterKey: nextQ,
+          totalHours: Number(nextTeam.productiveHours) || 0,
+          kind: 'forecast',
+          label: 'Forecast',
+          selectable: true,
+          slgHours: Number(nextTeam.productiveHours) || 0
+        });
+        seen[nextQ] = true;
+      }
+    }
+
+    bars.sort(function (a, b) {
+      return compareFiscalQuarterKeys_(a.quarterKey, b.quarterKey);
+    });
+    return bars;
+  }
+
+  /**
+   * Render Mix & Trend bar chart.
+   * @param {Array<Object>} bars
+   */
+  function renderWFM25MixTrendChart_(bars) {
+    const chart = document.getElementById('wfm25MixTrendChart');
+    const loading = document.getElementById('wfm25MixTrendLoading');
+    const detail = document.getElementById('wfm25MixTrendDetail');
+    if (!chart) return;
+
+    if (loading) loading.hidden = true;
+    if (detail) detail.hidden = true;
+    chart.hidden = false;
+
+    if (!bars.length) {
+      chart.innerHTML = '<div class="muted wfm25-mix-trend-empty">No hours data available.</div>';
+      return;
+    }
+
+    const maxH = Math.max.apply(null, bars.map(function (b) { return b.totalHours; }).concat([1]));
+    chart.innerHTML =
+      '<div class="wfm25-mix-trend-bars" role="list">' +
+      bars.map(function (bar, idx) {
+        const pct = Math.max(2, (bar.totalHours / maxH) * 100);
+        const curTag = bar.kind === 'current' ? ' \u25c6' : '';
+        const kindCls = 'wfm25-mix-bar--' + bar.kind;
+        const selected = WFM25State.mixTrendSelected &&
+          WFM25State.mixTrendSelected.quarterKey === bar.quarterKey;
+        return '<button type="button" class="wfm25-mix-trend-bar-btn' +
+          (selected ? ' is-selected' : '') + '" role="listitem"' +
+          ' data-bar-idx="' + idx + '" aria-pressed="' + (selected ? 'true' : 'false') + '"' +
+          ' aria-label="' + escapeHtml_(bar.quarterKey) + ': ' + fmtHours(bar.totalHours) + ' hours, ' +
+            escapeHtml_(bar.label) + '">' +
+          '<div class="wfm25-mix-trend-bar ' + kindCls + '" style="height:' + pct.toFixed(1) + '%">' +
+            '<span class="wfm25-mix-trend-bar-hours">' + fmtHours(bar.totalHours) + 'h</span>' +
+          '</div>' +
+          '<div class="wfm25-mix-trend-bar-label">' + escapeHtml_(bar.quarterKey) + curTag + '</div>' +
+          '<div class="wfm25-mix-trend-bar-kind">' + escapeHtml_(bar.label) + '</div>' +
+        '</button>';
+      }).join('') +
+      '</div>';
+
+    WFM25State._mixTrendBars = bars;
+    $$('.wfm25-mix-trend-bar-btn', chart).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const i = Number(btn.dataset.barIdx);
+        const bar = (WFM25State._mixTrendBars || [])[i];
+        if (!bar) return;
+        wfm25ShowMixTrendDetail_(bar);
+      });
+    });
+  }
+
+  /**
+   * Show first-level class detail for a Mix & Trend bar.
+   * @param {Object} bar
+   */
+  function wfm25ShowMixTrendDetail_(bar) {
+    const reqId = WFM25State.mixTrendReqId;
+    WFM25State.mixTrendSelected = bar;
+    WFM25State.mixTrendDetailLevel = 'class';
+
+    const chart = document.getElementById('wfm25MixTrendChart');
+    const detail = document.getElementById('wfm25MixTrendDetail');
+    const title = document.getElementById('wfm25MixTrendDetailTitle');
+    const kindEl = document.getElementById('wfm25MixTrendDetailKind');
+    const body = document.getElementById('wfm25MixTrendDetailBody');
+    if (!detail || !body) return;
+
+    if (chart) chart.hidden = true;
+    detail.hidden = false;
+
+    const curTag = bar.kind === 'current' ? ' \u25c6' : '';
+    if (title) title.textContent = bar.quarterKey + curTag;
+    if (kindEl) kindEl.textContent = bar.label;
+
+    const total = bar.totalHours || 0;
+    let rows = [];
+
+    if (bar.kind === 'actuals') {
+      const classes = (WFM25State.historyData &&
+        WFM25State.historyData.quarterClasses &&
+        WFM25State.historyData.quarterClasses[bar.quarterKey]) || {};
+      WFM25_MIX_CLASSES_.forEach(function (cls) {
+        const hrs = Number(classes[cls]) || 0;
+        const share = total > 0 ? hrs / total : 0;
+        const drillable = cls === 'Workday Regions';
+        rows.push(
+          '<tr class="wfm25-history-row' + (drillable ? ' wfm25-history-drillable' : '') + '"' +
+          (drillable ? ' data-wfm25-drill="regions"' : '') + '>' +
+          '<td class="wfm25-history-class">' + escapeHtml_(cls) +
+            (drillable ? ' <span class="wfm25-history-chev">\u25ba</span>' : '') + '</td>' +
+          '<td class="num">' + fmtHours(hrs) + 'h</td>' +
+          '<td class="num">' + fmtPct1(share) + '</td>' +
+          '</tr>'
+        );
+      });
+    } else {
+      const slgHrs = Number(bar.slgHours) || total;
+      const share = total > 0 ? slgHrs / total : 0;
+      rows.push(
+        '<tr class="wfm25-history-row">' +
+        '<td class="wfm25-history-class">SLG</td>' +
+        '<td class="num">' + fmtHours(slgHrs) + 'h</td>' +
+        '<td class="num">' + fmtPct1(share) + '</td>' +
+        '</tr>'
+      );
+      if (bar.kind === 'current') {
+        rows.push('<tr><td colspan="3" class="muted wfm25-history-note">' +
+          'Current quarter includes actuals to date plus forecast forward. ' +
+          'Workday Regions and Contractor composition for forecast periods is not shown in Stage 4.' +
+          '</td></tr>');
+      } else if (bar.kind === 'forecast') {
+        rows.push('<tr><td colspan="3" class="muted wfm25-history-note">' +
+          'Forecast quarter shows SLG planned hours only. ' +
+          'Workday Regions and Contractor composition is deferred.' +
+          '</td></tr>');
+      }
+    }
+
+    if (reqId !== WFM25State.mixTrendReqId) return;
+    body.innerHTML =
+      '<table class="wfm25-history-table">' +
+      '<thead><tr><th>Category</th><th class="num">Hours</th><th class="num">Share</th></tr></thead>' +
+      '<tbody>' + rows.join('') + '</tbody></table>';
+
+    $$('.wfm25-history-drillable', body).forEach(function (tr) {
+      tr.addEventListener('click', function () {
+        wfm25ShowMixTrendRegionDetail_(bar);
+      });
+    });
+  }
+
+  /**
+   * Show Workday Region second-level drill-down for a historical quarter.
+   * @param {Object} bar
+   */
+  function wfm25ShowMixTrendRegionDetail_(bar) {
+    const reqId = WFM25State.mixTrendReqId;
+    WFM25State.mixTrendDetailLevel = 'regions';
+    const body = document.getElementById('wfm25MixTrendDetailBody');
+    const kindEl = document.getElementById('wfm25MixTrendDetailKind');
+    if (!body) return;
+    if (kindEl) kindEl.textContent = 'Workday Regions by region';
+
+    const regions = (WFM25State.historyData &&
+      WFM25State.historyData.quarterRegions &&
+      WFM25State.historyData.quarterRegions[bar.quarterKey]) || {};
+    const classTotal = Number(
+      (WFM25State.historyData &&
+        WFM25State.historyData.quarterClasses &&
+        WFM25State.historyData.quarterClasses[bar.quarterKey] &&
+        WFM25State.historyData.quarterClasses[bar.quarterKey]['Workday Regions']) || 0
+    );
+
+    const regionKeys = Object.keys(regions).sort(function (a, b) {
+      return (Number(regions[b]) || 0) - (Number(regions[a]) || 0);
+    });
+
+    const rows = regionKeys.map(function (rk) {
+      const hrs = Number(regions[rk]) || 0;
+      const share = classTotal > 0 ? hrs / classTotal : 0;
+      return '<tr class="wfm25-history-region-row">' +
+        '<td class="wfm25-history-region">' + escapeHtml_(rk) + '</td>' +
+        '<td class="num">' + fmtHours(hrs) + 'h</td>' +
+        '<td class="num">' + fmtPct1(share) + '</td>' +
+        '</tr>';
+    }).join('');
+
+    if (reqId !== WFM25State.mixTrendReqId) return;
+    body.innerHTML =
+      '<table class="wfm25-history-table wfm25-history-region-table">' +
+      '<thead><tr><th>Workday Region</th><th class="num">Hours</th><th class="num">Share</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>';
+  }
+
+  /**
+   * Return from Mix & Trend detail to chart.
+   */
+  function wfm25HideMixTrendDetail_() {
+    WFM25State.mixTrendSelected = null;
+    WFM25State.mixTrendDetailLevel = 'class';
+    const chart = document.getElementById('wfm25MixTrendChart');
+    const detail = document.getElementById('wfm25MixTrendDetail');
+    if (detail) detail.hidden = true;
+    if (chart) chart.hidden = false;
+    if (WFM25State._mixTrendBars) {
+      renderWFM25MixTrendChart_(WFM25State._mixTrendBars);
+    }
+  }
+
+  /**
+   * Lazy-load history + render Mix & Trend chart.
+   */
+  async function loadWFM25MixTrend_() {
+    const loading = document.getElementById('wfm25MixTrendLoading');
+    const chart = document.getElementById('wfm25MixTrendChart');
+    const reqId = ++WFM25State.mixTrendReqId;
+
+    if (loading) { loading.hidden = false; loading.textContent = 'Loading\u2026'; }
+    if (chart) chart.hidden = true;
+    wfm25HideMixTrendDetail_();
+
+    try {
+      if (!WFM25State.scorecardData) {
+        const params = buildServerParams_({ workerScope: 'SLG' });
+        WFM25State.scorecardData = await call('api_getQuarterlyScorecard', params);
+      }
+      if (reqId !== WFM25State.mixTrendReqId) return;
+
+      if (!WFM25State.historyData) {
+        const histReq = ++WFM25State.historyReqId;
+        const history = await call('api_getWorkerTypeHistory', buildServerParams_());
+        if (histReq !== WFM25State.historyReqId) return;
+        WFM25State.historyData = history;
+      }
+      if (reqId !== WFM25State.mixTrendReqId) return;
+
+      const bars = wfm25BuildMixTrendBars_(WFM25State.historyData, WFM25State.scorecardData);
+      renderWFM25MixTrendChart_(bars);
+    } catch (err) {
+      if (reqId !== WFM25State.mixTrendReqId) return;
+      if (loading) {
+        loading.hidden = false;
+        loading.textContent = 'Failed to load: ' + (err.message || String(err));
+        loading.style.color = 'var(--thumbtack)';
+      }
+      console.error('[WFM.25] loadWFM25MixTrend_ failed:', err);
+    }
+  }
+
   // ── Role group-by stub ────────────────────────────────────────
 
   /**
@@ -8344,7 +8959,19 @@ async function _qaRefreshPsaHours_() {
       });
     });
 
-    // ── Group-by toggle ──
+    // ── Mix & Trend back navigation ──
+    const mixBack = document.getElementById('wfm25MixTrendBack');
+    if (mixBack) {
+      mixBack.addEventListener('click', function () {
+        if (WFM25State.mixTrendDetailLevel === 'regions' && WFM25State.mixTrendSelected) {
+          wfm25ShowMixTrendDetail_(WFM25State.mixTrendSelected);
+        } else {
+          wfm25HideMixTrendDetail_();
+        }
+      });
+    }
+
+    // ── Group-by toggle (Team only in Stage 4) ──
     $$('.wfm25-groupby-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         $$('.wfm25-groupby-btn').forEach(function (b) { b.classList.remove('active'); });

@@ -4426,6 +4426,155 @@ function _dbg_reconcileWFM24() {
 }
 
 /**
+ * WFM.25 Stage 4 gate: Hours & Capacity parity, Mix & Trend history reconciliation.
+ * Read-only; does not mutate production data.
+ */
+function _dbg_reconcileWFM25Stage4() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.05;
+  var HIST_GRAND = 263360.8;
+  var HIST_TOL = 0.1;
+
+  function near_(a, b, tol) {
+    return Math.abs(Number(a) - Number(b)) <= (tol || TOL);
+  }
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  // ---- Check 1: Hours & Capacity utilization matches scorecard team aggregation ----
+  (function hoursCapacityParity() {
+    Logger.log('=== WFM.25 Stage 4 Check 1: Hours & Capacity utilization parity ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'SLG' });
+    var utilAgg = (function aggregateUtil_(data) {
+      var quarterKeys = data.quarterKeys || [];
+      var teamMap = {};
+      (data.workers || []).forEach(function (w) {
+        var tl = w.teamLabel || 'Unknown';
+        if (!teamMap[tl]) teamMap[tl] = [];
+        teamMap[tl].push(w);
+      });
+      var out = {};
+      Object.keys(teamMap).forEach(function (tl) {
+        out[tl] = quarterKeys.map(function (qk, qi) {
+          var sumProd = 0;
+          var sumAvail = 0;
+          teamMap[tl].forEach(function (w) {
+            var q = (w.quarters || [])[qi];
+            if (!q) return;
+            sumProd += Number(q.productiveHours) || 0;
+            sumAvail += Number(q.icpAvailableHours) || 0;
+          });
+          return sumAvail > 0 ? sumProd / sumAvail : null;
+        });
+      });
+      return out;
+    })(scorecard);
+
+    Object.keys(utilAgg).forEach(function (tl) {
+      utilAgg[tl].forEach(function (util, qi) {
+        var sumProd = 0;
+        var sumAvail = 0;
+        (scorecard.workers || []).forEach(function (w) {
+          if ((w.teamLabel || 'Unknown') !== tl) return;
+          var q = (w.quarters || [])[qi];
+          if (!q) return;
+          sumProd += Number(q.productiveHours) || 0;
+          sumAvail += Number(q.icpAvailableHours) || 0;
+        });
+        var hcUtil = sumAvail > 0 ? sumProd / sumAvail : null;
+        if (util != null && hcUtil != null && !near_(util, hcUtil, 0.0001)) {
+          failures.push('HoursCapacity: team=' + tl + ' qIdx=' + qi +
+            ' util=' + util + ' hcUtil=' + hcUtil);
+        }
+      });
+    });
+    Logger.log('  team-quarter parity checks: ' +
+      (failures.length ? 'see failures' : 'OK'));
+  })();
+
+  // ---- Check 2: Team planned/capacity sum to org totals ----
+  (function orgTotals() {
+    Logger.log('=== WFM.25 Stage 4 Check 2: org hour totals ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'SLG' });
+    var qKeys = scorecard.quarterKeys || [];
+    qKeys.forEach(function (qk, qi) {
+      var orgProd = 0;
+      var orgAvail = 0;
+      (scorecard.workers || []).forEach(function (w) {
+        var q = (w.quarters || [])[qi];
+        if (!q) return;
+        orgProd += Number(q.productiveHours) || 0;
+        orgAvail += Number(q.icpAvailableHours) || 0;
+      });
+      var teamProd = 0;
+      var teamAvail = 0;
+      var teamMap = {};
+      (scorecard.workers || []).forEach(function (w) {
+        var tl = w.teamLabel || 'Unknown';
+        teamMap[tl] = true;
+      });
+      Object.keys(teamMap).forEach(function (tl) {
+        (scorecard.workers || []).forEach(function (w) {
+          if ((w.teamLabel || 'Unknown') !== tl) return;
+          var q = (w.quarters || [])[qi];
+          if (!q) return;
+          teamProd += Number(q.productiveHours) || 0;
+          teamAvail += Number(q.icpAvailableHours) || 0;
+        });
+      });
+      if (!near_(orgProd, teamProd, 0.01)) {
+        failures.push('OrgTotal: ' + qk + ' planned org=' + orgProd + ' teamSum=' + teamProd);
+      }
+      if (!near_(orgAvail, teamAvail, 0.01)) {
+        failures.push('OrgTotal: ' + qk + ' capacity org=' + orgAvail + ' teamSum=' + teamAvail);
+      }
+    });
+    Logger.log('  org vs team sums: ' + (failures.length ? 'see failures' : 'OK'));
+  })();
+
+  // ---- Check 3–5: Mix & Trend history reconciliation ----
+  (function historyReconcile() {
+    Logger.log('=== WFM.25 Stage 4 Check 3–5: Mix & Trend history ===');
+    var history = getWorkerTypeHistory_({});
+
+    if (!near_(history.grandTotal, HIST_GRAND, HIST_TOL)) {
+      failures.push('History grand total=' + history.grandTotal + ' expect ' + HIST_GRAND);
+    }
+
+    (history.fiscalQuarters || []).forEach(function (fq) {
+      var total = Number((history.quarterTotals || {})[fq]) || 0;
+      var classes = (history.quarterClasses || {})[fq] || {};
+      var classSum = 0;
+      ['SLG', 'Workday Regions', 'Contractor'].forEach(function (cls) {
+        classSum += Number(classes[cls]) || 0;
+      });
+      if (!near_(total, classSum, 0.01)) {
+        failures.push('History class sum: ' + fq + ' total=' + total + ' classSum=' + classSum);
+      }
+
+      var wdTotal = Number(classes['Workday Regions']) || 0;
+      var regions = (history.quarterRegions || {})[fq] || {};
+      var regionSum = 0;
+      Object.keys(regions).forEach(function (rk) {
+        regionSum += Number(regions[rk]) || 0;
+      });
+      if (wdTotal > 0 && !near_(wdTotal, regionSum, 0.01)) {
+        failures.push('History region sum: ' + fq + ' wdTotal=' + wdTotal + ' regionSum=' + regionSum);
+      }
+    });
+
+    Logger.log('  grandTotal=' + history.grandTotal +
+      ' quarters=' + (history.fiscalQuarters || []).length);
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM25Stage4: ALL CHECKS OK'
+    : '_dbg_reconcileWFM25Stage4: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}
+
+/**
  * WFM.25 investigation: trace inverted worker icpUtil delta on first soft-book
  * add vs second add. Logger.log only; does not persist or mutate production data.
  */

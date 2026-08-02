@@ -1146,11 +1146,17 @@ function writeConsolidatedHistory_(values) {
   var idx = {};
   header.forEach(function (h, i) { idx[String(h).trim()] = i; });
   var out = [];
+  var iRegion = idx['workday_region_as_of_date_worked'];
+  if (iRegion === undefined) iRegion = idx['Region as of Date Worked'];
+
   for (var r = 0; r < data.length; r++) {
     var row = data[r];
     out.push(ACTUALS_HISTORY_HEADERS.map(function (h) {
       if (h === 'worked_hours') {
         return Number(row[idx[h]]) || 0;
+      }
+      if (h === 'workday_region_as_of_date_worked') {
+        return iRegion !== undefined ? String(row[iRegion] || '').trim() : '';
       }
       return String(row[idx[h]] || '').trim();
     }));

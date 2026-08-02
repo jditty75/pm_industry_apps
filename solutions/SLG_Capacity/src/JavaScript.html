@@ -3410,8 +3410,15 @@
         return committedKeys.indexOf(softBookCommitKey_(b)) < 0;
       });
       closeSoftBookCommitModal_();
-      onSoftBookingsChanged_();
-      refreshExplorer_({ reason: 'softbook-commit-all' });
+      if (WFM25_SHELL) {
+        renderExplorerSoftBookBasket_();
+        State.explorerProjection = null;
+        WFM25State.scorecardData = null;
+        await wfm25AfterSoftBookCommitRefresh_();
+      } else {
+        onSoftBookingsChanged_();
+        refreshExplorer_({ reason: 'softbook-commit-all' });
+      }
       const toastMsg = scenarioName
         ? 'Committed ' + bookings.length + ' change(s) to scenario "' + scenarioName + '".'
         : 'Committed ' + bookings.length + ' change(s).';

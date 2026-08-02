@@ -1113,6 +1113,9 @@ function api_commitSoftBookings(scenarioName, bookings) {
     });
   });
 
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+
   Logger.log('api_commitSoftBookings: scenario_id=' + scenarioId + ' count=' + committed.length);
   return {
     scenario_id: scenarioId,

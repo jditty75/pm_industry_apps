@@ -7457,10 +7457,14 @@ async function _qaRefreshPsaHours_() {
     }).join('');
     const bodyCells = quarters.map(function (q) {
       const qk = q.quarterKey;
-      const baseUtil = q.icpUtil;
+      let baseUtil = q.icpUtil;
       const projUtil = hasDraft
         ? wfm25ProjectionUtil_(projection, 'worker', workerName, qk, true)
         : null;
+      if (hasDraft && projUtil != null) {
+        const projBase = wfm25ProjectionUtil_(projection, 'worker', workerName, qk, false);
+        if (projBase != null) baseUtil = projBase;
+      }
       if (!hasDraft || projUtil == null) {
         const color = cellColor(baseUtil, icpTarget);
         return '<td class="wfm25-worker-qstrip-cell" style="background:' + color.bg +
@@ -7845,13 +7849,13 @@ async function _qaRefreshPsaHours_() {
     State.softBookings = [];
     State.explorerProjection = null;
     closeWFM25SoftBookOverlay_();
-    wfm25UpdatePendingIndicator_();
     if (WFM25State.scorecardData) {
       renderWFM25UtilTable_(WFM25State.scorecardData);
     }
     if (WFM25State.selectedWorkerDetail) {
       paintWFM25WorkerPanel_(null);
     }
+    wfm25UpdatePendingIndicator_();
   }
 
   function onWFM25SoftBookingsChanged_() {
@@ -8002,10 +8006,14 @@ async function _qaRefreshPsaHours_() {
       // Team aggregate cells
       const teamQCells = team.quarters.map(function (q, qi) {
         const qk = qKeys[qi];
-        const baseUtil = q.util;
+        let baseUtil = q.util;
         const projUtil = teamGetsDraft
           ? wfm25ProjectionUtil_(projection, 'orgTeam', team.label, qk, true)
           : null;
+        if (teamGetsDraft && projUtil != null) {
+          const projBase = wfm25ProjectionUtil_(projection, 'orgTeam', team.label, qk, false);
+          if (projBase != null) baseUtil = projBase;
+        }
         return wfm25RenderUtilCell_(baseUtil, projUtil, team.icpTarget);
       }).join('');
 
@@ -8026,10 +8034,14 @@ async function _qaRefreshPsaHours_() {
           const workerGetsDraft = hasDraft && w.name === selectedWorker;
           const wQCells = w.quarters.map(function (q, qi) {
             const qk = qKeys[qi];
-            const baseUtil = q.util;
+            let baseUtil = q.util;
             const projUtil = workerGetsDraft
               ? wfm25ProjectionUtil_(projection, 'worker', w.name, qk, true)
               : null;
+            if (workerGetsDraft && projUtil != null) {
+              const projBase = wfm25ProjectionUtil_(projection, 'worker', w.name, qk, false);
+              if (projBase != null) baseUtil = projBase;
+            }
             return wfm25RenderUtilCell_(baseUtil, projUtil, w.icpTarget);
           }).join('');
           rows.push(

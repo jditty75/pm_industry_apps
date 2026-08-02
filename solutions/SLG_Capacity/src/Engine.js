@@ -2073,7 +2073,39 @@ function computeBlendedWindowKpis_(params) {
   };
 }
 
+/**
+ * Sum Committed Opportunity_Assignment hours for one worker in a fiscal quarter.
+ * Uses enriched/canonical assignment read path; does not mutate data.
+ * @param {string} resourceName
+ * @param {string} quarterKey
+ * @param {Object} [calendar] from readCalendar_()
+ * @return {number}
+ */
+function committedAssignmentHoursForQuarter_(resourceName, quarterKey, calendar) {
+  if (!resourceName || !quarterKey) return 0;
+  calendar = calendar || readCalendar_();
+  let assignsRaw = [];
+  try {
+    assignsRaw = (typeof getEnrichedAssignments_ === 'function')
+      ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  } catch (e) {
+    assignsRaw = [];
+  }
+  let sum = 0;
+  assignsRaw.forEach(function (a) {
+    if (!a.resource_name || a.resource_name !== resourceName) return;
+    if (String(a.status || '') !== 'Committed') return;
+    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+      if (fiscalQuarterKey_(w.week_start) === quarterKey) {
+        sum += Number(w.hours) || 0;
+      }
+    });
+  });
+  return sum;
+}
+
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
+  const calendar = readCalendar_();
   return quarterKeys.map(function (qk) {
     const wd = quarterWorkdaySummary_(qk, holidays);
     const isCurrent = (qk === curQ);
@@ -2085,6 +2117,7 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     let source = 'forecast';
     let icpUtil = 0;
     let stale = false;
+    let committedAssignmentHours = 0;
 
     // D8.1: the current-quarter actuals path only applies when a same-scale
     // bonus target exists. The qtd_icp_plus_forecast numerator is bonus-scale
@@ -2094,7 +2127,8 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     // forecast path (ICP-scale consistent) rather than a mismatched ratio.
     if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
         summary.bonus_target_billable_hours_eoq > 0) {
-      productiveHours = summary.qtd_icp_plus_forecast_hours;
+      committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours;
       targetHours = summary.bonus_target_billable_hours_eoq;
       bonusAttainment = productiveHours / targetHours;
       source = 'actuals_plus_forecast';
@@ -2141,7 +2175,8 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       ratioToTarget: Number(ratioToTarget) || 0,
       bonusAttainment: Number(bonusAttainment) || 0,
       source: source,
-      stale: !!stale
+      stale: !!stale,
+      committedAssignmentHours: Number(committedAssignmentHours) || 0
     };
   });
 }

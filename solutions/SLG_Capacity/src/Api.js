@@ -776,29 +776,116 @@ function _quarterCapacityForProjection_(quarterKey, holidays) {
 
 /**
  * Build worker / team / org-team quarterly aggregates from a forecast.
+ * Current-quarter icpUtil uses D8 bonus-scale pairing (matching buildWorkerQuarters_)
+ * when actuals summary provides qtd_icp_plus_forecast_hours and bonus_target.
  * @param {Object} forecast computeWeeklyForecast_ result
  * @param {string[]} quarterKeys
  * @param {Array<{date:Date, hours:number}>} holidays
+ * @param {Object} actualsSummary from getActualsSummaryByEmployee_()
+ * @param {string} curQ fiscal quarter key for calendar today
+ * @param {Object} [baselineForecast] baseline forecast (projected path only; for curQ draft delta)
  * @return {{worker:Object[], team:Object, orgTeams:Object[]}}
  */
-function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays) {
+function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast) {
   var weeks = forecast.weeks || [];
   var workers = forecast.workers || [];
+  actualsSummary = actualsSummary || {};
+  curQ = curQ || fiscalQuarterKey_(new Date());
 
-  function quarterCell_(productiveHours, qk) {
+  var baselineByEmployeeId = {};
+  if (baselineForecast) {
+    (baselineForecast.workers || []).forEach(function (bw) {
+      baselineByEmployeeId[String(bw.employeeId || '')] = bw;
+    });
+  }
+
+  /**
+   * D8 current-quarter icpUtil numerator/denominator for one worker, or null
+   * when the standard productiveHours/icpAvailableHours path applies.
+   * @param {Object} worker forecast worker row
+   * @param {number} productiveHours forecast productive hours for the quarter
+   * @param {string} qk
+   * @return {{num:number, den:number}|null}
+   */
+  function d8IcpUtilPair_(worker, productiveHours, qk) {
+    var employeeId = String(worker.employeeId || '');
+    var summary = employeeId ? actualsSummary[employeeId] : null;
+    if (qk !== curQ || !summary || !(summary.qtd_icp_plus_forecast_hours > 0) ||
+        !(summary.bonus_target_billable_hours_eoq > 0)) {
+      return null;
+    }
+    var num = Number(summary.qtd_icp_plus_forecast_hours) || 0;
+    var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
+    if (baselineForecast) {
+      var baseWorker = baselineByEmployeeId[employeeId];
+      if (baseWorker) {
+        var baseProd = sumForecastProductiveForQuarter_(baseWorker, qk, baselineForecast.weeks || []);
+        num += (Number(productiveHours) || 0) - baseProd;
+      }
+    }
+    return { num: num, den: den };
+  }
+
+  function quarterCell_(worker, productiveHours, qk) {
     var qinfo = _quarterCapacityForProjection_(qk, holidays);
     var icpAvail = qinfo.icpAvailableHours;
     var rawCap = qinfo.rawCapacityHours;
     var prod = Number(productiveHours) || 0;
+    var d8 = d8IcpUtilPair_(worker, prod, qk);
+    var icpUtil = d8
+      ? (d8.den > 0 ? d8.num / d8.den : 0)
+      : (icpAvail > 0 ? prod / icpAvail : 0);
     return {
       quarterKey: String(qk),
       productiveHours: prod,
       icpAvailableHours: icpAvail,
       rawCapacityHours: rawCap,
-      icpUtil: icpAvail > 0 ? prod / icpAvail : 0,
+      icpUtil: icpUtil,
       financeUtil: rawCap > 0 ? prod / rawCap : 0,
       approximate: !!qinfo.approximate
     };
+  }
+
+  function aggregateQuarters_(group) {
+    return quarterKeys.map(function (qk) {
+      var sumProd = 0;
+      var sumIcpAvail = 0;
+      var sumRawCap = 0;
+      var sumIcpNum = 0;
+      var sumIcpDen = 0;
+      var approx = false;
+      var isCurQ = (qk === curQ);
+      group.forEach(function (w) {
+        var prod = sumForecastProductiveForQuarter_(w, qk, weeks);
+        var qinfo = _quarterCapacityForProjection_(qk, holidays);
+        sumProd += prod;
+        sumIcpAvail += qinfo.icpAvailableHours;
+        sumRawCap += qinfo.rawCapacityHours;
+        if (qinfo.approximate) approx = true;
+        if (isCurQ) {
+          var d8 = d8IcpUtilPair_(w, prod, qk);
+          if (d8) {
+            sumIcpNum += d8.num;
+            sumIcpDen += d8.den;
+          } else {
+            sumIcpNum += prod;
+            sumIcpDen += qinfo.icpAvailableHours;
+          }
+        }
+      });
+      var icpUtil = isCurQ
+        ? (sumIcpDen > 0 ? sumIcpNum / sumIcpDen : 0)
+        : (sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0);
+      return {
+        quarterKey: String(qk),
+        productiveHours: Number(sumProd) || 0,
+        icpAvailableHours: Number(sumIcpAvail) || 0,
+        rawCapacityHours: Number(sumRawCap) || 0,
+        icpUtil: icpUtil,
+        financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+        approximate: approx
+      };
+    });
   }
 
   var workerOut = workers.map(function (w) {
@@ -808,71 +895,25 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays) {
       teamLabel: String(w.teamLabel || ''),
       managerOrg: String(w.managerOrg || ''),
       quarters: quarterKeys.map(function (qk) {
-        return quarterCell_(sumForecastProductiveForQuarter_(w, qk, weeks), qk);
+        return quarterCell_(w, sumForecastProductiveForQuarter_(w, qk, weeks), qk);
       })
     };
   });
 
-  var teamQuarters = quarterKeys.map(function (qk) {
-    var sumProd = 0;
-    var sumIcpAvail = 0;
-    var sumRawCap = 0;
-    var approx = false;
-    workers.forEach(function (w) {
-      sumProd += sumForecastProductiveForQuarter_(w, qk, weeks);
-      var qinfo = _quarterCapacityForProjection_(qk, holidays);
-      sumIcpAvail += qinfo.icpAvailableHours;
-      sumRawCap += qinfo.rawCapacityHours;
-      if (qinfo.approximate) approx = true;
-    });
-    return {
-      quarterKey: String(qk),
-      productiveHours: Number(sumProd) || 0,
-      icpAvailableHours: Number(sumIcpAvail) || 0,
-      rawCapacityHours: Number(sumRawCap) || 0,
-      icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
-      financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
-      approximate: approx
-    };
-  });
-
-  var byLabel = {};
-  workers.forEach(function (w) {
-    var label = String(w.teamLabel || 'Unclassified');
-    if (!byLabel[label]) byLabel[label] = [];
-    byLabel[label].push(w);
-  });
-  var orgTeamsOut = Object.keys(byLabel).sort().map(function (label) {
-    var group = byLabel[label];
-    var quarters = quarterKeys.map(function (qk) {
-      var sumProd = 0;
-      var sumIcpAvail = 0;
-      var sumRawCap = 0;
-      var approx = false;
-      group.forEach(function (w) {
-        sumProd += sumForecastProductiveForQuarter_(w, qk, weeks);
-        var qinfo = _quarterCapacityForProjection_(qk, holidays);
-        sumIcpAvail += qinfo.icpAvailableHours;
-        sumRawCap += qinfo.rawCapacityHours;
-        if (qinfo.approximate) approx = true;
-      });
-      return {
-        quarterKey: String(qk),
-        productiveHours: Number(sumProd) || 0,
-        icpAvailableHours: Number(sumIcpAvail) || 0,
-        rawCapacityHours: Number(sumRawCap) || 0,
-        icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
-        financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
-        approximate: approx
-      };
-    });
-    return { teamLabel: String(label), quarters: quarters };
-  });
-
   return {
     worker: workerOut,
-    team: { quarters: teamQuarters },
-    orgTeams: orgTeamsOut
+    team: { quarters: aggregateQuarters_(workers) },
+    orgTeams: (function () {
+      var byLabel = {};
+      workers.forEach(function (w) {
+        var label = String(w.teamLabel || 'Unclassified');
+        if (!byLabel[label]) byLabel[label] = [];
+        byLabel[label].push(w);
+      });
+      return Object.keys(byLabel).sort().map(function (label) {
+        return { teamLabel: String(label), quarters: aggregateQuarters_(byLabel[label]) };
+      });
+    })()
   };
 }
 
@@ -1004,9 +1045,13 @@ function api_projectSoftBookings(params, softBookings) {
     projectedMode = 'targeted';
   }
 
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var curQ = fiscalQuarterKey_(new Date());
+
   var result = {
-    baseline: _aggregateSoftBookingProjection_(baselineForecast, quarterKeys, holidays),
-    projected: _aggregateSoftBookingProjection_(projectedForecast, quarterKeys, holidays)
+    baseline: _aggregateSoftBookingProjection_(baselineForecast, quarterKeys, holidays, actualsSummary, curQ),
+    projected: _aggregateSoftBookingProjection_(projectedForecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast)
   };
 
   Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +

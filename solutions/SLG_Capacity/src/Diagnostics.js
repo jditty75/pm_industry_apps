@@ -3114,13 +3114,20 @@ function _dbg_reconcileWFM23() {
     var blankHours = 11;
     var calendar = readCalendar_();
 
-    var preCommitW = (baselineOnly.baseline.worker || []).find(function (w) {
-      return w.resourceName === worker.resourceName;
-    });
-    var preCommitQ = preCommitW && (preCommitW.quarters || []).find(function (q) {
-      return q.quarterKey === futureQk;
-    });
-    var preCommitProductive = preCommitQ ? Number(preCommitQ.productiveHours) || 0 : 0;
+    function sumForecastProductiveQuarter_(forecastParams, workerName, quarterKey) {
+      var forecast = computeWeeklyForecast_(forecastParams);
+      var w = (forecast.workers || []).find(function (x) {
+        return x.resource === workerName;
+      });
+      if (!w) return { found: false, sum: 0 };
+      return {
+        found: true,
+        sum: sumForecastProductiveForQuarter_(w, quarterKey, forecast.weeks)
+      };
+    }
+
+    var preResult = sumForecastProductiveQuarter_(picked.params, worker.resourceName, futureQk);
+    var preCommitProductive = preResult.sum;
 
     var directPayload = {
       opportunity_id: '',
@@ -3195,26 +3202,14 @@ function _dbg_reconcileWFM23() {
       }
 
       invalidateCache_(ASSIGNMENTS);
-      var postCommit = api_projectSoftBookings(picked.params, []);
-      var postW = (postCommit.baseline.worker || []).find(function (w) {
-        return w.resourceName === worker.resourceName;
-      });
-      var postQ = postW && (postW.quarters || []).find(function (q) {
-        return q.quarterKey === futureQk;
-      });
-      var postProductive = postQ ? Number(postQ.productiveHours) || 0 : 0;
-      var preCommitQuarterKeys = (preCommitW && preCommitW.quarters || []).map(function (q) {
-        return q.quarterKey;
-      });
-      var postQuarterKeys = (postW && postW.quarters || []).map(function (q) {
-        return q.quarterKey;
-      });
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+      var postResult = sumForecastProductiveQuarter_(picked.params, worker.resourceName, futureQk);
+      var postProductive = postResult.sum;
       Logger.log('  Check 4 diag futureQk=' + futureQk);
-      Logger.log('  Check 4 diag preCommit quarterKeys=' + JSON.stringify(preCommitQuarterKeys));
-      Logger.log('  Check 4 diag postCommit quarterKeys=' + JSON.stringify(postQuarterKeys));
+      Logger.log('  Check 4 diag preCommit found=' + preResult.found +
+        ' postCommit found=' + postResult.found);
       Logger.log('  Check 4 diag preCommitProductive=' + preCommitProductive +
-        ' postProductive=' + postProductive +
-        ' postQ=' + (postQ ? 'found' : 'MISSING'));
+        ' postProductive=' + postProductive);
       var committedHoursDelta = postProductive - preCommitProductive;
       var expectedCommittedHours = 0;
       expandAssignmentToWeekly_(directPayload, calendar).forEach(function (w) {

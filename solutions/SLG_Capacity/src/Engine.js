@@ -1815,18 +1815,30 @@ function quarterWorkdaySummary_(quarterKey, holidays) {
   };
 }
 
+/** @type {{version: (string|null), map: (Object|null)}} */
+var _wowTargetIdxMemo_ = { version: null, map: null };
+/** @type {{version: (string|null), map: (Object|null)}} */
+var _committedAsgIdxMemo_ = { version: null, map: null };
+
+/**
+ * Enriched-cache version stamp (same value embedded in wfm23:baseline:vNNNN keys).
+ * @return {string}
+ */
+function _currentEnrichedVersion_() {
+  return (typeof _getEnrichedCacheVersion_ === 'function')
+    ? _getEnrichedCacheVersion_() : '';
+}
+
 /**
  * Per-request index of Utilization_Quarterly target_hours by employee and
  * fiscal quarter. Reads CFG_UTIL_QUARTERLY once. Memoized on
- * _getEnrichedCacheVersion_() (same invalidation chain as enriched getters).
+ * _currentEnrichedVersion_() (same invalidation chain as enriched getters).
  * @return {Object<string, Object<string, number>>} employeeId → { quarterKey → target_hours }
  */
 function _wowQuarterTargetIndex_() {
-  var version = (typeof _getEnrichedCacheVersion_ === 'function')
-    ? _getEnrichedCacheVersion_() : '';
-  if (_wowQuarterTargetIndex_.cache &&
-      _wowQuarterTargetIndex_.cacheVersion === version) {
-    return _wowQuarterTargetIndex_.cache;
+  var version = _currentEnrichedVersion_();
+  if (_wowTargetIdxMemo_.version === version && _wowTargetIdxMemo_.map) {
+    return _wowTargetIdxMemo_.map;
   }
   _wowQuarterTargetIndex_._dbgIndexBuildCount =
     (_wowQuarterTargetIndex_._dbgIndexBuildCount || 0) + 1;
@@ -1838,8 +1850,8 @@ function _wowQuarterTargetIndex_() {
     if (!idx[eid]) idx[eid] = {};
     idx[eid][qk] = Number(r.target_hours) || 0;
   });
-  _wowQuarterTargetIndex_.cache = idx;
-  _wowQuarterTargetIndex_.cacheVersion = version;
+  _wowTargetIdxMemo_.version = version;
+  _wowTargetIdxMemo_.map = idx;
   return idx;
 }
 
@@ -2082,17 +2094,21 @@ function computeBlendedWindowKpis_(params) {
 /**
  * Per-request index of Committed Opportunity_Assignment hours by resource and
  * fiscal quarter. Reads getEnrichedAssignments_() once and expands each
- * committed assignment once. Memoized on _getEnrichedCacheVersion_() (same
+ * committed assignment once. Memoized on _currentEnrichedVersion_() (same
  * invalidation chain as getEnrichedAssignments_).
  * @param {Object} [calendar] from readCalendar_()
  * @return {Object<string, Object<string, number>>} resource_name → { quarterKey → hours }
  */
 function committedAssignmentQuarterIndex_(calendar) {
-  var version = (typeof _getEnrichedCacheVersion_ === 'function')
-    ? _getEnrichedCacheVersion_() : '';
-  if (committedAssignmentQuarterIndex_.cache &&
-      committedAssignmentQuarterIndex_.cacheVersion === version) {
-    return committedAssignmentQuarterIndex_.cache;
+  var version = _currentEnrichedVersion_();
+  if (committedAssignmentQuarterIndex_.cache === null) {
+    _committedAsgIdxMemo_.version = null;
+    _committedAsgIdxMemo_.map = null;
+  }
+  if (_committedAsgIdxMemo_.version === version && _committedAsgIdxMemo_.map) {
+    committedAssignmentQuarterIndex_.cache = _committedAsgIdxMemo_.map;
+    committedAssignmentQuarterIndex_.cacheVersion = version;
+    return _committedAsgIdxMemo_.map;
   }
   committedAssignmentQuarterIndex_._dbgIndexBuildCount =
     (committedAssignmentQuarterIndex_._dbgIndexBuildCount || 0) + 1;
@@ -2116,6 +2132,8 @@ function committedAssignmentQuarterIndex_(calendar) {
       idx[res][qk] = (idx[res][qk] || 0) + (Number(w.hours) || 0);
     });
   });
+  _committedAsgIdxMemo_.version = version;
+  _committedAsgIdxMemo_.map = idx;
   committedAssignmentQuarterIndex_.cache = idx;
   committedAssignmentQuarterIndex_.cacheVersion = version;
   return idx;
@@ -2132,7 +2150,8 @@ function committedAssignmentQuarterIndex_(calendar) {
 function committedAssignmentHoursForQuarter_(resourceName, quarterKey, calendar) {
   if (!resourceName || !quarterKey) return 0;
   var idx = committedAssignmentQuarterIndex_(calendar);
-  return (idx[resourceName] && idx[resourceName][quarterKey]) || 0;
+  var byQ = idx && idx[resourceName];
+  return (byQ && Number(byQ[quarterKey])) || 0;
 }
 
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {

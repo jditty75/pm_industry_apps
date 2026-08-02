@@ -4479,3 +4479,148 @@ function _dbg_traceWFM25ProjectionDelta() {
 
   Logger.log('=== _dbg_traceWFM25ProjectionDelta: DONE ===');
 }
+
+/**
+ * Trace whether a committed assignment is included in computeWeeklyForecast_
+ * under workerScope:'All' vs Director-scoped params. Logger only; writes one
+ * temp assignment then deletes it (same self-clean pattern as WFM.23 check 4).
+ */
+function _dbg_traceCommittedInclusion() {
+  _dbg_requireAdmin_();
+
+  var WORKER = 'Al Romulo';
+  var EMPLOYEE_ID = '13945';
+  var TRACE_Q = 'FY27-Q4';
+  var TEMP_HOURS = 100;
+  var TOL = 0.5;
+
+  Logger.log('=== _dbg_traceCommittedInclusion: ' + WORKER + ' (' + TRACE_Q + ') ===');
+
+  // ---- 1. Resource index metadata ----
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+  var info = resIndex[WORKER] || {};
+  if (String(info.employee_id || '').trim() !== EMPLOYEE_ID) {
+    Object.keys(resIndex).some(function (nm) {
+      if (String(resIndex[nm].employee_id || '').trim() === EMPLOYEE_ID) {
+        WORKER = nm;
+        info = resIndex[nm];
+        return true;
+      }
+      return false;
+    });
+  }
+  Logger.log('--- 1. Resource index ---');
+  Logger.log('  resource_name=' + WORKER);
+  Logger.log('  employee_id=' + (info.employee_id || '(blank)'));
+  Logger.log('  resource_type=' + (info.resource_type || '(blank)'));
+  Logger.log('  worker_class=' + (info.worker_class || '(blank)'));
+  Logger.log('  manager_org=' + (info.manager_org || '(blank)'));
+
+  function resolveDirectorForWorker_(managerOrg) {
+    var mgrRows = readConfigSlgManagers_();
+    var byName = {};
+    mgrRows.forEach(function (r) { byName[r.manager_name] = r; });
+    var descendants = buildManagerDescendants_(mgrRows);
+    var cur = String(managerOrg || '').trim();
+    while (cur) {
+      if ((descendants[cur] || []).length >= 1) return cur;
+      var row = byName[cur];
+      cur = row ? String(row.parent_manager || '').trim() : '';
+    }
+    return '';
+  }
+
+  var directorName = resolveDirectorForWorker_(info.manager_org);
+  Logger.log('  director (scoped teams[0])=' + (directorName || '(unresolved)'));
+
+  function sumProductiveQuarter_(forecast, workerName, quarterKey) {
+    var w = (forecast.workers || []).find(function (x) {
+      return x.resource === workerName;
+    });
+    if (!w) return { found: false, sum: 0 };
+    return {
+      found: true,
+      sum: sumForecastProductiveForQuarter_(w, quarterKey, forecast.weeks)
+    };
+  }
+
+  var bounds = fiscalQuarterBounds_(TRACE_Q);
+  Logger.log('  quarter bounds: ' + _toIso_(bounds.start) + ' .. ' + _toIso_(bounds.end));
+
+  // ---- 2. BEFORE (workerScope:'All') ----
+  Logger.log('--- 2. BEFORE (workerScope:All) ---');
+  var beforeAll = computeWeeklyForecast_({ workerScope: 'All' });
+  var beforeResult = sumProductiveQuarter_(beforeAll, WORKER, TRACE_Q);
+  Logger.log('  found=' + beforeResult.found);
+  Logger.log('  FY27-Q4 productiveWeekly sum=' + beforeResult.sum.toFixed(4));
+
+  // ---- 3. Write temp committed assignment ----
+  var assignCountBefore = readTable_(ASSIGNMENTS).length;
+  var tempId = null;
+  var tempPayload = {
+    opportunity_id: '',
+    resource_name: WORKER,
+    resource_type: info.resource_type || '',
+    start_date: bounds.start,
+    end_date: bounds.end,
+    estimated_hours: TEMP_HOURS,
+    distribution: 'Even',
+    status: 'Committed',
+    scenario_id: '',
+    notes: ''
+  };
+
+  Logger.log('--- 3. Temp committed assignment ---');
+  var saved = saveAssignment_(tempPayload);
+  tempId = saved && saved.assignment_id ? String(saved.assignment_id) : null;
+  Logger.log('  assignment_id=' + (tempId || '(none)'));
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+
+  // ---- 4. AFTER (workerScope:'All') ----
+  Logger.log('--- 4. AFTER (workerScope:All) ---');
+  var afterAll = computeWeeklyForecast_({ workerScope: 'All' });
+  var afterResult = sumProductiveQuarter_(afterAll, WORKER, TRACE_Q);
+  var deltaAll = afterResult.sum - beforeResult.sum;
+  Logger.log('  found=' + afterResult.found);
+  Logger.log('  BEFORE=' + beforeResult.sum.toFixed(4) +
+    ' AFTER=' + afterResult.sum.toFixed(4) +
+    ' delta=' + (deltaAll >= 0 ? '+' : '') + deltaAll.toFixed(4));
+
+  // ---- 5. SCOPED (gate-style Director params) ----
+  Logger.log('--- 5. SCOPED (teams=[' + (directorName || '?') + '], includeMyManagers:true) ---');
+  var scopedParams = {
+    teams: directorName ? [directorName] : null,
+    includeMyManagers: true
+  };
+  var scopedForecast = computeWeeklyForecast_(scopedParams);
+  var scopedResult = sumProductiveQuarter_(scopedForecast, WORKER, TRACE_Q);
+  Logger.log('  found=' + scopedResult.found);
+  Logger.log('  FY27-Q4 productiveWeekly sum=' + scopedResult.sum.toFixed(4));
+  Logger.log('  forecast.worker count=' + (scopedForecast.workers || []).length);
+
+  // ---- 6. Cleanup ----
+  Logger.log('--- 6. Cleanup ---');
+  if (tempId) {
+    _dbg_wfm23DeleteAssignmentsByIds_([tempId]);
+  }
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  var assignCountAfter = readTable_(ASSIGNMENTS).length;
+  Logger.log('  row count before=' + assignCountBefore + ' after=' + assignCountAfter +
+    (assignCountBefore === assignCountAfter ? ' OK' : ' MISMATCH'));
+
+  // ---- Summary ----
+  var allCountsCommitted = beforeResult.found && afterResult.found &&
+    Math.abs(deltaAll - TEMP_HOURS) <= TOL;
+  Logger.log('--- SUMMARY ---');
+  Logger.log('  workerScope:All counts committed assignment (delta~' + TEMP_HOURS + ')? ' +
+    (allCountsCommitted ? 'YES (delta=' + deltaAll.toFixed(2) + ')' :
+      'NO (delta=' + deltaAll.toFixed(2) + ', found before=' + beforeResult.found +
+      ' after=' + afterResult.found + ')'));
+  Logger.log('  SCOPED call includes ' + WORKER + '? ' +
+    (scopedResult.found ? 'YES (FY27-Q4 sum=' + scopedResult.sum.toFixed(2) + ')' : 'NO'));
+
+  Logger.log('=== _dbg_traceCommittedInclusion: DONE ===');
+}

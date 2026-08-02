@@ -102,14 +102,14 @@
     <div class="modal-panel" style="width:920px;max-width:96vw;">
       <header class="modal-header">
         <div>
-          <div class="drawer-title">Submit all soft bookings</div>
-          <div class="muted" style="margin-top:4px;font-size:12px;">Creates Modeled assignments in a new named scenario</div>
+          <div class="drawer-title">Commit changes</div>
+          <div class="muted" style="margin-top:4px;font-size:12px;">Promotes drafts to committed assignments (optionally grouped in a scenario)</div>
         </div>
         <button class="icon-btn" data-sb-commit-close aria-label="Close">✕</button>
       </header>
       <div class="modal-body" style="padding:16px 20px;">
-        <label class="field"><span>Scenario name</span>
-          <input type="text" class="input" id="sbCommitScenarioName" placeholder="e.g. Q3 capacity plan" required>
+        <label class="field"><span>Scenario name (optional)</span>
+          <input type="text" class="input" id="sbCommitScenarioName" placeholder="e.g. Q3 capacity plan (optional)">
         </label>
         <div class="sb-commit-apply-all">
           <span class="muted">Apply to all:</span>
@@ -135,9 +135,9 @@
         <p id="sbCommitError" class="muted" style="color:var(--thumbtack);font-size:13px;margin:10px 0 0;" hidden></p>
       </div>
       <div class="modal-actions" style="padding:12px 20px;border-top:1px solid var(--business-card);">
-        <span class="muted sb-commit-footer-note">Creates Modeled assignments only</span>
+        <span class="muted sb-commit-footer-note">Drafts become shared committed capacity</span>
         <button type="button" class="btn-ghost" data-sb-commit-close>Cancel</button>
-        <button type="button" class="btn-primary" id="sbCommitSubmitBtn">Submit all as Modeled</button>
+        <button type="button" class="btn-primary" id="sbCommitSubmitBtn">Commit</button>
       </div>
     </div>
   </div>

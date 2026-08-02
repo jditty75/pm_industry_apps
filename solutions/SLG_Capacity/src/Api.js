@@ -1055,7 +1055,7 @@ function _resolveBookingResourceType_(booking) {
 }
 
 /**
- * WFM.23 Stage 3: promote soft-booking basket rows to Modeled assignments.
+ * WFM.23 Stage 3 / WFM.25 two-state: promote soft-booking drafts to Committed assignments.
  * @param {string} scenarioName non-empty → always creates a NEW scenario via saveScenario_
  * @param {Array<Object>} bookings
  * @return {{scenario_id:string, committed:Object[], count:number}}
@@ -1103,7 +1103,7 @@ function api_commitSoftBookings(scenarioName, bookings) {
       end_date: b.end_date,
       estimated_hours: Number(b.total_hours) || 0,
       distribution: 'Even',
-      status: 'Modeled',
+      status: 'Committed',
       scenario_id: scenarioId,
       notes: notes
     });

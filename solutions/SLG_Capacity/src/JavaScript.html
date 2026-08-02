@@ -3433,7 +3433,7 @@
         ? titleEl.parentElement.querySelector('.muted')
         : null;
       if (subtitleEl) {
-        subtitleEl.textContent = 'Creates Modeled assignments (optionally grouped in a scenario)';
+        subtitleEl.textContent = 'Promotes drafts to committed assignments (optionally grouped in a scenario)';
       }
     }
     const scenarioInput = $('#sbCommitScenarioName');
@@ -7686,7 +7686,7 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * After soft-book commit in WFM.25, refresh aggregate + worker panel from server
-   * so committed Modeled assignments are visible (reuses existing fetch paths).
+   * so newly committed assignments are visible in the committed view (reuses existing fetch paths).
    */
   async function wfm25AfterSoftBookCommitRefresh_() {
     wfm25UpdatePendingIndicator_();

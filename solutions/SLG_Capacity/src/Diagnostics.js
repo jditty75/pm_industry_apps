@@ -3035,9 +3035,9 @@ function _dbg_reconcileWFM23() {
     }
   })();
 
-  // ---- Check 4: commit parity (api_commitSoftBookings vs saveAssignment_) ----
+  // ---- Check 4: commit parity (api_commitSoftBookings → Committed, in committed view) ----
   (function checkCommitParity() {
-    Logger.log('=== WFM.23 Check 4: commit parity ===');
+    Logger.log('=== WFM.23 Check 4: commit parity (Committed two-state) ===');
     var idsToDelete = [];
     var scenarioIdsToDelete = [];
     var assignCountBefore = readTable_(ASSIGNMENTS).length;
@@ -3114,6 +3114,14 @@ function _dbg_reconcileWFM23() {
     var blankHours = 11;
     var calendar = readCalendar_();
 
+    var preCommitW = (baselineOnly.baseline.worker || []).find(function (w) {
+      return w.resourceName === worker.resourceName;
+    });
+    var preCommitQ = preCommitW && (preCommitW.quarters || []).find(function (q) {
+      return q.quarterKey === futureQk;
+    });
+    var preCommitProductive = preCommitQ ? Number(preCommitQ.productiveHours) || 0 : 0;
+
     var directPayload = {
       opportunity_id: '',
       resource_name: String(worker.resourceName),
@@ -3122,12 +3130,12 @@ function _dbg_reconcileWFM23() {
       end_date: bounds.end,
       estimated_hours: totalHours,
       distribution: 'Even',
-      status: 'Modeled',
+      status: 'Committed',
       scenario_id: '',
       notes: ''
     };
 
-    // Omit resource_type ΓÇö server must resolve from resource index (real soft-book path).
+  // Omit resource_type — server must resolve from resource index (real soft-book path).
     var booking = {
       employee_id: String(worker.employeeId || ''),
       resource_name: String(worker.resourceName),
@@ -3145,11 +3153,6 @@ function _dbg_reconcileWFM23() {
       idsToDelete.push(String(apiId));
     }
 
-    var directSaved = saveAssignment_(directPayload);
-    if (directSaved && directSaved.assignment_id) {
-      idsToDelete.push(String(directSaved.assignment_id));
-    }
-
     invalidateCache_(ASSIGNMENTS);
     var apiRow = readTable_(ASSIGNMENTS).find(function (r) {
       return String(r.assignment_id) === String(apiId);
@@ -3157,10 +3160,15 @@ function _dbg_reconcileWFM23() {
     if (!apiRow) {
       failures.push('Check 4: api-created assignment row not found');
     } else {
+      if (String(apiRow.status || '') !== 'Committed') {
+        failures.push('Check 4: api-created row status not Committed (got ' + apiRow.status + ')');
+      } else {
+        Logger.log('  opportunity-path status=Committed OK');
+      }
       var expectedFields = _dbg_wfm23DemandFields_(directPayload);
       var apiFields = _dbg_wfm23DemandFields_(apiRow);
       if (!_dbg_wfm23DemandFieldsEqual_(expectedFields, apiFields, TOL)) {
-        failures.push('Check 4: demand fields mismatch api vs expected ΓÇö ' +
+        failures.push('Check 4: demand fields mismatch api vs expected — ' +
           JSON.stringify({ expected: expectedFields, api: apiFields }));
       } else {
         Logger.log('  opportunity-path demand fields OK');
@@ -3185,6 +3193,35 @@ function _dbg_reconcileWFM23() {
           Logger.log('  primary blank-resource_type Unclassified/role-blank OK');
         }
       }
+
+      invalidateCache_(ASSIGNMENTS);
+      var postCommit = api_projectSoftBookings(picked.params, []);
+      var postW = (postCommit.baseline.worker || []).find(function (w) {
+        return w.resourceName === worker.resourceName;
+      });
+      var postQ = postW && (postW.quarters || []).find(function (q) {
+        return q.quarterKey === futureQk;
+      });
+      var postProductive = postQ ? Number(postQ.productiveHours) || 0 : 0;
+      var committedHoursDelta = postProductive - preCommitProductive;
+      var expectedCommittedHours = 0;
+      expandAssignmentToWeekly_(directPayload, calendar).forEach(function (w) {
+        if (fiscalQuarterKey_(w.week_start) === futureQk) {
+          expectedCommittedHours += Number(w.hours) || 0;
+        }
+      });
+      if (!near_(committedHoursDelta, expectedCommittedHours)) {
+        failures.push('Check 4: committed view productiveHours delta=' +
+          committedHoursDelta.toFixed(4) + ' expected=' + expectedCommittedHours.toFixed(4));
+      } else {
+        Logger.log('  committed view productiveHours delta=' + committedHoursDelta.toFixed(2) +
+          ' expected=' + expectedCommittedHours.toFixed(2) + ' OK');
+      }
+    }
+
+    var directSaved = saveAssignment_(directPayload);
+    if (directSaved && directSaved.assignment_id) {
+      idsToDelete.push(String(directSaved.assignment_id));
     }
 
     var labelBooking = {
@@ -3208,13 +3245,16 @@ function _dbg_reconcileWFM23() {
       if (!labelRow) {
         failures.push('Check 4: label-only assignment row not found');
       } else {
+        if (String(labelRow.status || '') !== 'Committed') {
+          failures.push('Check 4: label-only row status not Committed');
+        }
         if (String(labelRow.opportunity_id || '').trim() !== '') {
           failures.push('Check 4: label-only row has non-blank opportunity_id');
         }
         if (String(labelRow.notes || '').indexOf('Soft-book label: ') !== 0) {
           failures.push('Check 4: label-only notes missing Soft-book label: prefix');
         } else {
-          Logger.log('  label-only opportunity_id/notes OK');
+          Logger.log('  label-only status/opportunity_id/notes OK');
         }
         var labelShape = {
           resource_name: labelRow.resource_name,
@@ -3222,7 +3262,7 @@ function _dbg_reconcileWFM23() {
           end_date: labelRow.end_date,
           estimated_hours: labelHours,
           distribution: 'Even',
-          status: 'Modeled'
+          status: 'Committed'
         };
         var labelWeekly = _dbg_wfm23WeeklySignature_(labelRow, calendar);
         var labelExpectedWeekly = _dbg_wfm23WeeklySignature_(labelShape, calendar);
@@ -3257,8 +3297,8 @@ function _dbg_reconcileWFM23() {
         if (!forcedRow) {
           failures.push('Check 4: forced blank-resource_type assignment row not found');
         } else {
-          if (String(forcedRow.status || '') !== 'Modeled') {
-            failures.push('Check 4: forced blank-resource_type row status not Modeled');
+          if (String(forcedRow.status || '') !== 'Committed') {
+            failures.push('Check 4: forced blank-resource_type row status not Committed');
           }
           if (String(forcedRow.team_label || '') !== 'Unclassified') {
             failures.push('Check 4: forced blank-resource_type team_label expected Unclassified got ' +
@@ -3274,7 +3314,7 @@ function _dbg_reconcileWFM23() {
             end_date: forcedRow.end_date,
             estimated_hours: blankHours,
             distribution: 'Even',
-            status: 'Modeled'
+            status: 'Committed'
           };
           var forcedWeekly = _dbg_wfm23WeeklySignature_(forcedRow, calendar);
           var forcedExpectedWeekly = _dbg_wfm23WeeklySignature_(forcedShape, calendar);
@@ -3302,7 +3342,7 @@ function _dbg_reconcileWFM23() {
         ' before vs ' + assignCountAfter + ' after cleanup');
       Logger.log('  CLEANUP FAILED: row count changed');
     } else {
-      Logger.log('  cleanup OK ΓÇö row count unchanged (' + assignCountBefore + ')');
+      Logger.log('  cleanup OK — row count unchanged (' + assignCountBefore + ')');
     }
 
     Logger.log(failures.some(function (f) { return f.indexOf('Check 4') === 0; })
@@ -3339,6 +3379,7 @@ function _dbg_reconcileWFM23() {
       ' WFM.18=' + (ok18 ? 'OK' : 'FAIL'));
   })();
 
+  Logger.log('WFM.25 two-state: commit writes Committed; gates re-anchored — committed baseline includes committed soft-bookings.');
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM23: ALL CHECKS OK'
     : '_dbg_reconcileWFM23: ' + failures.length + ' CHECK(S) FAILED ΓÇö DO NOT SHIP');

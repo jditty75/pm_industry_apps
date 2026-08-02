@@ -3893,8 +3893,16 @@
     return html;
   }
 
-  function renderExplorerQuarterSection_(quarters, icpTarget) {
+  /**
+   * Rolling four-quarter scorecard (Explorer + WFM.25 worker panel).
+   * @param {Array} quarters
+   * @param {number} icpTarget
+   * @param {Object|null} [projection] api_projectSoftBookings result (WFM.25 draft overlay)
+   * @param {string} [workerName] resource name for projection lookup
+   */
+  function renderExplorerQuarterSection_(quarters, icpTarget, projection, workerName) {
     const metric = ExplorerQuarterState.metric;
+    const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
     let cells = (quarters || []).map(function (q) {
       const curTag = q.isCurrentQuarter ? ' <span class="qs-cur-tag">current</span>' : '';
       if (metric === 'bonus') {
@@ -3911,16 +3919,41 @@
         return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
           escapeHtml_(tip) + '">' + fmtPct(q.bonusAttainment) + '</td>';
       }
-      const color = cellColor(q.icpUtil, icpTarget);
+      const qk = q.quarterKey;
+      let baseUtil = q.icpUtil;
+      const projUtil = hasDraft
+        ? wfm25ProjectionUtil_(projection, 'worker', workerName, qk, true)
+        : null;
+      if (hasDraft && projUtil != null) {
+        const projBase = wfm25ProjectionUtil_(projection, 'worker', workerName, qk, false);
+        if (projBase != null) baseUtil = projBase;
+      }
+      if (!hasDraft || projUtil == null) {
+        const color = cellColor(q.icpUtil, icpTarget);
+        const tip = [
+          'Productive: ' + q.productiveHours.toFixed(1) + 'h',
+          'ICP available: ' + q.icpAvailableHours.toFixed(1) + 'h',
+          'ICP target: ' + fmtPct(icpTarget),
+          'Ratio to target: ' + (q.ratioToTarget * 100).toFixed(1) + '%',
+          'Tracking: ' + (q.trackingHours >= 0 ? '+' : '') + q.trackingHours.toFixed(1) + 'h'
+        ].join('\n');
+        return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
+          escapeHtml_(tip) + '">' + fmtPct(q.icpUtil) + '</td>';
+      }
+      const arrow = wfm25DraftArrow_(baseUtil, projUtil);
       const tip = [
+        'Committed: ' + fmtPct(baseUtil),
+        'Your draft: ' + fmtPct(projUtil),
         'Productive: ' + q.productiveHours.toFixed(1) + 'h',
         'ICP available: ' + q.icpAvailableHours.toFixed(1) + 'h',
         'ICP target: ' + fmtPct(icpTarget),
-        'Ratio to target: ' + (q.ratioToTarget * 100).toFixed(1) + '%',
         'Tracking: ' + (q.trackingHours >= 0 ? '+' : '') + q.trackingHours.toFixed(1) + 'h'
       ].join('\n');
-      return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
-        escapeHtml_(tip) + '">' + fmtPct(q.icpUtil) + '</td>';
+      return '<td class="qs-cell has-draft" title="' + escapeHtml_(tip) + '">' +
+        '<div class="wfm25-worker-qstrip-committed">' + fmtPct(baseUtil) + '</div>' +
+        '<div class="wfm25-draft-label">Your draft</div>' +
+        '<div class="wfm25-worker-qstrip-draft">' + fmtPct(baseUtil) +
+          ' \u2192 ' + fmtPct(projUtil) + ' ' + arrow + '</div></td>';
     }).join('');
 
     const headerCells = (quarters || []).map(function (q) {
@@ -7510,8 +7543,10 @@ async function _qaRefreshPsaHours_() {
   /**
    * Render worker panel body from api_getResourceDetailV2 (reuses Explorer renderers).
    * @param {Object} detail
+   * @param {Object|null} projection api_projectSoftBookings result
+   * @param {string} workerName
    */
-  function renderWFM25WorkerPanelBody_(detail) {
+  function renderWFM25WorkerPanelBody_(detail, projection, workerName) {
     const body = document.getElementById('wfm25WorkerPanelBody');
     if (!body) return;
     if (!detail || !detail.found) {
@@ -7525,7 +7560,7 @@ async function _qaRefreshPsaHours_() {
     body.innerHTML =
       renderExplorerSummaryStrip_(detail, meta) +
       renderExplorerWeeklyStrip_(detail.weeks || []) +
-      renderExplorerQuarterSection_(detail.quarters || [], icpTarget) +
+      renderExplorerQuarterSection_(detail.quarters || [], icpTarget, projection, workerName) +
       renderExplorerProjectsSection_(detail.projects || [], detail.weeks || []);
 
     const toggle = body.querySelector('#explorerQsMetricToggle');
@@ -7533,7 +7568,7 @@ async function _qaRefreshPsaHours_() {
       toggle.querySelectorAll('.btn-toggle').forEach(function (btn) {
         btn.addEventListener('click', function () {
           ExplorerQuarterState.metric = btn.dataset.metric || 'icp';
-          renderWFM25WorkerPanelBody_(WFM25State.selectedWorkerDetail);
+          paintWFM25WorkerPanel_(State.explorerProjection);
         });
       });
     }
@@ -7543,7 +7578,7 @@ async function _qaRefreshPsaHours_() {
         const w = WFM25State.selectedWorker || '';
         if (ExplorerProjectState.expanded.has(w)) ExplorerProjectState.expanded.delete(w);
         else ExplorerProjectState.expanded.add(w);
-        renderWFM25WorkerPanelBody_(WFM25State.selectedWorkerDetail);
+        paintWFM25WorkerPanel_(State.explorerProjection);
       });
     }
   }
@@ -7590,7 +7625,7 @@ async function _qaRefreshPsaHours_() {
     if (!detail || !WFM25State.selectedWorker) return;
     const icpTarget = (detail.weeks && detail.weeks[0]) ? detail.weeks[0].icpTarget : 0.72;
     renderWFM25WorkerQuarterStrip_(detail.quarters || [], icpTarget, projection, detail.resource);
-    renderWFM25WorkerPanelBody_(detail);
+    renderWFM25WorkerPanelBody_(detail, projection, detail.resource);
     wfm25UpdatePendingIndicator_();
   }
 

@@ -3399,7 +3399,7 @@ function _dbg_reconcileWFM23() {
 
   // ---- Check 6: current-quarter icpUtil cross-path (detailV2 / projection / scorecard) ----
   (function checkCurQUtilCrossPath() {
-    Logger.log('=== WFM.23 Check 6: current-quarter icpUtil A/B/C cross-verify ===');
+    Logger.log('=== WFM.23 Check 6: current-quarter A/B/C cross-verify + committed parity ===');
     var params = {
       viewMode: 'Committed',
       workerScope: 'All',
@@ -3408,6 +3408,63 @@ function _dbg_reconcileWFM23() {
     var curQ = fiscalQuarterKey_(new Date());
     var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
       ? getActualsSummaryByEmployee_() : {};
+    var calendar = readCalendar_();
+    var assignCountBefore = readTable_(ASSIGNMENTS).length;
+    var idsToDelete = [];
+
+    function readPaths_(workerName, employeeId) {
+      var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
+      var qA = (v2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      var projection = api_projectSoftBookings(params, []);
+      var baseWorker = (projection.baseline.worker || []).find(function (w) {
+        return w.resourceName === workerName || String(w.employeeId || '') === employeeId;
+      });
+      var qB = baseWorker ? (baseWorker.quarters || []).find(function (q) {
+        return q.quarterKey === curQ;
+      }) : null;
+      var scorecard = computeQuarterlyScorecard_(params);
+      var scWorker = (scorecard.workers || []).find(function (w) {
+        return w.worker === workerName || String(w.employeeId || '') === employeeId;
+      });
+      var qC = scWorker ? (scWorker.quarters || []).find(function (q) {
+        return q.quarterKey === curQ;
+      }) : null;
+      return { qA: qA, qB: qB, qC: qC };
+    }
+
+    function assertParity_(paths, label) {
+      var utilA = paths.qA ? Number(paths.qA.icpUtil) : NaN;
+      var utilB = paths.qB ? Number(paths.qB.icpUtil) : NaN;
+      var utilC = paths.qC ? Number(paths.qC.icpUtil) : NaN;
+      var prodA = paths.qA ? Number(paths.qA.productiveHours) : NaN;
+      var prodB = paths.qB ? Number(paths.qB.productiveHours) : NaN;
+      var prodC = paths.qC ? Number(paths.qC.productiveHours) : NaN;
+
+      Logger.log('  ' + label + ' Path A icpUtil=' + (isNaN(utilA) ? 'n/a' : utilA.toFixed(6)) +
+        ' productiveHours=' + (isNaN(prodA) ? 'n/a' : prodA.toFixed(4)));
+      Logger.log('  ' + label + ' Path B icpUtil=' + (isNaN(utilB) ? 'n/a' : utilB.toFixed(6)) +
+        ' productiveHours=' + (isNaN(prodB) ? 'n/a' : prodB.toFixed(4)));
+      Logger.log('  ' + label + ' Path C icpUtil=' + (isNaN(utilC) ? 'n/a' : utilC.toFixed(6)) +
+        ' productiveHours=' + (isNaN(prodC) ? 'n/a' : prodC.toFixed(4)));
+
+      if (isNaN(utilA) || isNaN(utilB) || isNaN(utilC) ||
+          isNaN(prodA) || isNaN(prodB) || isNaN(prodC)) {
+        failures.push('Check 6 (' + label + '): missing current-quarter values');
+        return false;
+      }
+      if (!near_(utilA, utilB) || !near_(utilA, utilC) || !near_(utilB, utilC)) {
+        failures.push('Check 6 (' + label + '): icpUtil diverges A=' + utilA.toFixed(6) +
+          ' B=' + utilB.toFixed(6) + ' C=' + utilC.toFixed(6));
+        return false;
+      }
+      if (!near_(prodA, prodB) || !near_(prodA, prodC) || !near_(prodB, prodC)) {
+        failures.push('Check 6 (' + label + '): productiveHours diverges A=' + prodA.toFixed(4) +
+          ' B=' + prodB.toFixed(4) + ' C=' + prodC.toFixed(4));
+        return false;
+      }
+      Logger.log('  ' + label + ': OK (A==B==C within ' + TOL + ')');
+      return true;
+    }
 
     var forecast = computeWeeklyForecast_(params);
     var workerPick = null;
@@ -3429,44 +3486,85 @@ function _dbg_reconcileWFM23() {
     var employeeId = String(workerPick.employeeId || '');
     Logger.log('  sample worker: ' + workerName + ' (' + employeeId + ') curQ=' + curQ);
 
-    var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
-    var qA = (v2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
-    var utilA = qA ? Number(qA.icpUtil) : NaN;
-
-    var projection = api_projectSoftBookings(params, []);
-    var baseWorker = (projection.baseline.worker || []).find(function (w) {
-      return w.resourceName === workerName || String(w.employeeId || '') === employeeId;
-    });
-    var qB = baseWorker ? (baseWorker.quarters || []).find(function (q) {
-      return q.quarterKey === curQ;
-    }) : null;
-    var utilB = qB ? Number(qB.icpUtil) : NaN;
-
-    var scorecard = computeQuarterlyScorecard_(params);
-    var scWorker = (scorecard.workers || []).find(function (w) {
-      return w.worker === workerName || String(w.employeeId || '') === employeeId;
-    });
-    var qC = scWorker ? (scWorker.quarters || []).find(function (q) {
-      return q.quarterKey === curQ;
-    }) : null;
-    var utilC = qC ? Number(qC.icpUtil) : NaN;
-
-    Logger.log('  Path A (detailV2) icpUtil=' + (isNaN(utilA) ? 'n/a' : utilA.toFixed(6)));
-    Logger.log('  Path B (projection baseline) icpUtil=' + (isNaN(utilB) ? 'n/a' : utilB.toFixed(6)));
-    Logger.log('  Path C (scorecard) icpUtil=' + (isNaN(utilC) ? 'n/a' : utilC.toFixed(6)));
-
-    if (isNaN(utilA) || isNaN(utilB) || isNaN(utilC)) {
-      failures.push('Check 6: missing current-quarter icpUtil (A=' + utilA + ' B=' + utilB + ' C=' + utilC + ')');
-      Logger.log('  Check 6: FAILED (missing value)');
+    var beforePaths = readPaths_(workerName, employeeId);
+    if (!assertParity_(beforePaths, 'before')) {
+      Logger.log('  Check 6: FAILED (before parity)');
       return;
     }
-    if (!near_(utilA, utilB) || !near_(utilA, utilC) || !near_(utilB, utilC)) {
-      failures.push('Check 6: current-quarter icpUtil diverges A=' + utilA.toFixed(6) +
-        ' B=' + utilB.toFixed(6) + ' C=' + utilC.toFixed(6));
-      Logger.log('  Check 6: FAILED');
-    } else {
-      Logger.log('  Check 6: OK (A==B==C within ' + TOL + ')');
+
+    var bounds = fiscalQuarterBounds_(curQ);
+    var commitHours = 22;
+    var booking = {
+      employee_id: employeeId,
+      resource_name: workerName,
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: commitHours,
+      what: { type: 'opportunity', opportunity_id: '' }
+    };
+    var commitShape = {
+      resource_name: workerName,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: commitHours,
+      distribution: 'Even',
+      status: 'Committed'
+    };
+    var expectedAdded = 0;
+    expandAssignmentToWeekly_(commitShape, calendar).forEach(function (w) {
+      if (fiscalQuarterKey_(w.week_start) === curQ) {
+        expectedAdded += Number(w.hours) || 0;
+      }
+    });
+    if (expectedAdded <= 0) {
+      failures.push('Check 6: expectedAdded recomputed as 0 for current quarter ' + curQ);
+      Logger.log('  Check 6: FAILED (expectedAdded=0)');
+      return;
     }
+
+    var commitResult = api_commitSoftBookings('', [booking]);
+    var commitId = commitResult.committed[0] && commitResult.committed[0].assignment_id;
+    if (!commitId) {
+      failures.push('Check 6: api_commitSoftBookings returned no assignment_id');
+      Logger.log('  Check 6: FAILED (no assignment_id)');
+      return;
+    }
+    idsToDelete.push(String(commitId));
+    invalidateCache_(ASSIGNMENTS);
+    if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+
+    var afterPaths = readPaths_(workerName, employeeId);
+    var prodDeltaA = Number(afterPaths.qA.productiveHours) - Number(beforePaths.qA.productiveHours);
+    var prodDeltaB = Number(afterPaths.qB.productiveHours) - Number(beforePaths.qB.productiveHours);
+    var prodDeltaC = Number(afterPaths.qC.productiveHours) - Number(beforePaths.qC.productiveHours);
+    Logger.log('  after commit productiveHours delta A=' + prodDeltaA.toFixed(4) +
+      ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+      ' expected=' + expectedAdded.toFixed(4));
+
+    if (!near_(prodDeltaA, expectedAdded) || !near_(prodDeltaB, expectedAdded) ||
+        !near_(prodDeltaC, expectedAdded)) {
+      failures.push('Check 6 (after): productiveHours delta A=' + prodDeltaA.toFixed(4) +
+        ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+        ' expected=' + expectedAdded.toFixed(4));
+    }
+    if (!assertParity_(afterPaths, 'after')) {
+      Logger.log('  Check 6: FAILED (after parity)');
+    }
+
+    _dbg_wfm23DeleteAssignmentsByIds_(idsToDelete);
+    invalidateCache_(ASSIGNMENTS);
+    if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+    var assignCountAfter = readTable_(ASSIGNMENTS).length;
+    if (assignCountBefore !== assignCountAfter) {
+      failures.push('Check 6: Opportunity_Assignments row count ' + assignCountBefore +
+        ' before vs ' + assignCountAfter + ' after cleanup');
+      Logger.log('  CLEANUP FAILED: row count changed');
+    } else {
+      Logger.log('  cleanup OK — row count unchanged (' + assignCountBefore + ')');
+    }
+
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 6') === 0; })
+      ? '  Check 6: FAILED' : '  Check 6: OK');
   })();
 
   // ---- Check 5: no regression (WFM.15 / 17 / 18) ----

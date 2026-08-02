@@ -1816,26 +1816,31 @@ function quarterWorkdaySummary_(quarterKey, holidays) {
 }
 
 /**
- * Build a cached index of Utilization_Quarterly rows keyed by
- * employee_id|fiscal_quarter → target_hours.
- * @return {Object<string, number>}
+ * Per-request index of Utilization_Quarterly target_hours by employee and
+ * fiscal quarter. Reads CFG_UTIL_QUARTERLY once. Memoized on
+ * _getEnrichedCacheVersion_() (same invalidation chain as enriched getters).
+ * @return {Object<string, Object<string, number>>} employeeId → { quarterKey → target_hours }
  */
 function _wowQuarterTargetIndex_() {
   var version = (typeof _getEnrichedCacheVersion_ === 'function')
     ? _getEnrichedCacheVersion_() : '';
-  if (_wowQuarterTargetIndex_.cache && _wowQuarterTargetIndex_.cacheVersion === version) {
+  if (_wowQuarterTargetIndex_.cache &&
+      _wowQuarterTargetIndex_.cacheVersion === version) {
     return _wowQuarterTargetIndex_.cache;
   }
-  var map = {};
+  _wowQuarterTargetIndex_._dbgIndexBuildCount =
+    (_wowQuarterTargetIndex_._dbgIndexBuildCount || 0) + 1;
+  var idx = {};
   cachedRead_(CFG_UTIL_QUARTERLY).forEach(function (r) {
     var eid = String(r.employee_id || '').trim();
     var qk = String(r.fiscal_quarter || '').trim();
     if (!eid || !qk) return;
-    map[eid + '|' + qk] = Number(r.target_hours) || 0;
+    if (!idx[eid]) idx[eid] = {};
+    idx[eid][qk] = Number(r.target_hours) || 0;
   });
-  _wowQuarterTargetIndex_.cache = map;
+  _wowQuarterTargetIndex_.cache = idx;
   _wowQuarterTargetIndex_.cacheVersion = version;
-  return map;
+  return idx;
 }
 
 /**
@@ -1861,9 +1866,10 @@ function quarterTargetFromWoW_(employeeId, fiscalQuarter) {
   employeeId = String(employeeId || '').trim();
   fiscalQuarter = String(fiscalQuarter || '').trim();
   if (!employeeId || !fiscalQuarter) return null;
-  var map = _wowQuarterTargetIndex_();
-  var key = employeeId + '|' + fiscalQuarter;
-  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+  var idx = _wowQuarterTargetIndex_();
+  var byQ = idx[employeeId];
+  return (byQ && Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter))
+    ? byQ[fiscalQuarter] : null;
 }
 
 /**
@@ -2126,13 +2132,13 @@ function committedAssignmentQuarterIndex_(calendar) {
 function committedAssignmentHoursForQuarter_(resourceName, quarterKey, calendar) {
   if (!resourceName || !quarterKey) return 0;
   var idx = committedAssignmentQuarterIndex_(calendar);
-  var byQ = idx[resourceName];
-  return (byQ && byQ[quarterKey]) || 0;
+  return (idx[resourceName] && idx[resourceName][quarterKey]) || 0;
 }
 
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
   const calendar = readCalendar_();
   committedAssignmentQuarterIndex_(calendar);
+  _wowQuarterTargetIndex_();
   return quarterKeys.map(function (qk) {
     const wd = quarterWorkdaySummary_(qk, holidays);
     const isCurrent = (qk === curQ);

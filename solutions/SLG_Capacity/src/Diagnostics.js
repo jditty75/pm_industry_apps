@@ -5171,3 +5171,540 @@ function _dbg_traceProjectionTiming() {
 
   Logger.log('=== _dbg_traceProjectionTiming: DONE ===');
 }
+
+/**
+ * WFM.25 perf: trace baseline cache-key stability (WRITE vs READ) and
+ * rank per-cell helper hotspots inside _aggregateSoftBookingProjection_
+ * and computeWeeklyForecast_. Logger only; no production logic changes.
+ */
+function _dbg_traceProjectionInternals() {
+  _dbg_requireAdmin_();
+
+  var params = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+  var forecastParams = {
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  };
+
+  Logger.log('=== _dbg_traceProjectionInternals (workerScope=All, bookings=0) ===');
+
+  // ----------------------------------------------------------------
+  // PART A — cache key WRITE vs READ (cold then warm, no flush)
+  // ----------------------------------------------------------------
+  Logger.log('--- PART A: baseline cache key (WRITE vs READ) ---');
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+    invalidateSoftBookingBaselineCache_();
+  }
+
+  var sigWrite = _projectionFilterSignature_(forecastParams);
+  var versionWrite = _getEnrichedCacheVersion_();
+  var writeKey = _projectionBaselineCacheKey_(forecastParams);
+
+  var cold = _getCachedBaselineForecast_(forecastParams);
+  Logger.log('1. WRITE path (cold _getCachedBaselineForecast_):');
+  Logger.log('   cacheKey=' + writeKey);
+  Logger.log('   filterSignature=' + sigWrite);
+  Logger.log('   enrichedCacheVersion=' + versionWrite);
+  Logger.log('   cacheHit=' + cold.cacheHit + ' l2Hit=' + cold.l2Hit);
+
+  var sigRead = _projectionFilterSignature_(forecastParams);
+  var versionRead = _getEnrichedCacheVersion_();
+  var readKey = _projectionBaselineCacheKey_(forecastParams);
+
+  var warm = _getCachedBaselineForecast_(forecastParams);
+  Logger.log('2. READ path (second call, no flush):');
+  Logger.log('   cacheKey=' + readKey);
+  Logger.log('   filterSignature=' + sigRead);
+  Logger.log('   enrichedCacheVersion=' + versionRead);
+  Logger.log('   cacheHit=' + warm.cacheHit + ' l2Hit=' + warm.l2Hit);
+
+  var byteIdentical = (writeKey === readKey);
+  Logger.log('3. byteIdentical=' + byteIdentical);
+  if (!byteIdentical) {
+    var writeParts = _dbg_parseBaselineCacheKey_(writeKey);
+    var readParts = _dbg_parseBaselineCacheKey_(readKey);
+    Logger.log('   key diff: version WRITE=' + writeParts.version + ' READ=' + readParts.version +
+      ' digest WRITE=' + writeParts.digest + ' READ=' + readParts.digest);
+    if (versionWrite !== versionRead) {
+      Logger.log('   enrichedCacheVersion changed between WRITE and READ');
+    }
+    if (sigWrite !== sigRead) {
+      Logger.log('   filterSignature changed between WRITE and READ');
+      _dbg_diffProjectionSignatureFields_(sigWrite, sigRead).forEach(function (line) {
+        Logger.log('     ' + line);
+      });
+    } else if (writeParts.digest !== readParts.digest) {
+      Logger.log('   signatures match but digest differs — unexpected MD5 mismatch');
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // PART B — instrumented aggregation + computeWeeklyForecast_ loops
+  // ----------------------------------------------------------------
+  Logger.log('--- PART B: per-cell helper hotspots ---');
+
+  var stats = _dbg_newProjectionHotspotStats_();
+
+  function timed_(name, fn) {
+    var bucket = stats[name];
+    if (!bucket) bucket = stats[name] = { calls: 0, ms: 0 };
+    var t0 = Date.now();
+    var result = fn();
+    bucket.calls++;
+    bucket.ms += Date.now() - t0;
+    return result;
+  }
+
+  // --- computeWeeklyForecast_ (full + replicated inner-loop counts) ---
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+    invalidateSoftBookingBaselineCache_();
+  }
+  var tFc = Date.now();
+  var forecast = computeWeeklyForecast_(forecastParams);
+  stats.computeWeeklyForecast_.calls = 1;
+  stats.computeWeeklyForecast_.ms = Date.now() - tFc;
+
+  var weeks = forecast.weeks || [];
+  var workers = forecast.workers || [];
+  Logger.log('computeWeeklyForecast_: ' + stats.computeWeeklyForecast_.ms + 'ms' +
+    ' workers=' + workers.length + ' weeks=' + weeks.length);
+
+  _dbg_profileComputeWeeklyForecastLoops_(forecastParams, forecast, stats, timed_);
+
+  var holidays = timed_('readHolidays_', function () { return readHolidays_(); });
+  var quarterKeys = timed_('_quarterKeysForSoftBookings_', function () {
+    return _quarterKeysForSoftBookings_([]);
+  });
+  var actualsSummary = timed_('getActualsSummaryByEmployee_', function () {
+    return (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+  });
+  var curQ = fiscalQuarterKey_(new Date());
+  var visibleWeeks = timed_('_deriveVisibleWeeksFiscal_', function () {
+    return _deriveVisibleWeeksFiscal_(forecast.weeks);
+  });
+  var weeklyWorkerNames = {};
+
+  committedAssignmentQuarterIndex_.cache = null;
+  committedAssignmentQuarterIndex_.cacheVersion = null;
+
+  var tAgg = Date.now();
+  _dbg_instrumentedAggregateBaseline_(
+    forecast, quarterKeys, holidays, actualsSummary, curQ,
+    null, weeklyWorkerNames, visibleWeeks, stats, timed_);
+  stats._aggregateSoftBookingProjection_.calls = 1;
+  stats._aggregateSoftBookingProjection_.ms = Date.now() - tAgg;
+
+  Logger.log('_aggregateSoftBookingProjection_ (instrumented): ' +
+    stats._aggregateSoftBookingProjection_.ms + 'ms' +
+    ' workerQuarterCells=' + (stats.workerQuarterCells || 0));
+
+  _dbg_logProjectionHotspotRankings_(stats);
+
+  Logger.log('=== _dbg_traceProjectionInternals: DONE ===');
+}
+
+/**
+ * @param {string} key
+ * @return {{version:string, digest:string}}
+ * @private
+ */
+function _dbg_parseBaselineCacheKey_(key) {
+  var m = /^wfm23:baseline:v([^:]+):([a-f0-9]+)$/.exec(String(key || ''));
+  return m ? { version: m[1], digest: m[2] } : { version: '(unparsed)', digest: String(key || '') };
+}
+
+/**
+ * @param {string} sigA
+ * @param {string} sigB
+ * @return {string[]}
+ * @private
+ */
+function _dbg_diffProjectionSignatureFields_(sigA, sigB) {
+  var a = {};
+  var b = {};
+  try { a = JSON.parse(sigA); } catch (e) { a = {}; }
+  try { b = JSON.parse(sigB); } catch (e) { b = {}; }
+  var keys = {};
+  Object.keys(a).concat(Object.keys(b)).forEach(function (k) { keys[k] = true; });
+  var diffs = [];
+  Object.keys(keys).sort().forEach(function (k) {
+    var va = JSON.stringify(a[k]);
+    var vb = JSON.stringify(b[k]);
+    if (va !== vb) {
+      diffs.push(k + ': WRITE=' + va + ' READ=' + vb);
+    }
+  });
+  return diffs;
+}
+
+/**
+ * @return {Object<string, {calls:number, ms:number}>}
+ * @private
+ */
+function _dbg_newProjectionHotspotStats_() {
+  return {
+    computeWeeklyForecast_: { calls: 0, ms: 0 },
+    _aggregateSoftBookingProjection_: { calls: 0, ms: 0 },
+    sumForecastProductiveForQuarter_: { calls: 0, ms: 0 },
+    quarterWorkdaySummary_: { calls: 0, ms: 0 },
+    _quarterCapacityForProjection_: { calls: 0, ms: 0 },
+    quarterTargetFromWoW_: { calls: 0, ms: 0 },
+    _workerQuarterProductive_: { calls: 0, ms: 0 },
+    committedAssignmentHoursForQuarter_: { calls: 0, ms: 0 },
+    committedAssignmentQuarterIndex_: { calls: 0, ms: 0 },
+    productiveHoursForWeek_: { calls: 0, ms: 0 },
+    _workerWeeklyCellsForProjection_: { calls: 0, ms: 0 },
+    expandAssignmentToWeekly_: { calls: 0, ms: 0 },
+    expandAdjustmentToWeekly_: { calls: 0, ms: 0 },
+    getEnrichedAllocations_: { calls: 0, ms: 0 },
+    getEnrichedAssignments_: { calls: 0, ms: 0 },
+    readCalendar_: { calls: 0, ms: 0 },
+    readHolidays_: { calls: 0, ms: 0 },
+    getActualsSummaryByEmployee_: { calls: 0, ms: 0 },
+    _quarterKeysForSoftBookings_: { calls: 0, ms: 0 },
+    _deriveVisibleWeeksFiscal_: { calls: 0, ms: 0 },
+    workerQuarterCells: 0,
+    workersTimesAllWeeksPasses: 0,
+    blendInnerLoopIterations: 0
+  };
+}
+
+/**
+ * Replicate computeWeeklyForecast_ inner loops with counters (read-only).
+ * @param {Object} forecastParams
+ * @param {Object} forecast
+ * @param {Object} stats
+ * @param {function(string, function):*} timed_
+ * @private
+ */
+function _dbg_profileComputeWeeklyForecastLoops_(forecastParams, forecast, stats, timed_) {
+  forecastParams = forecastParams || {};
+  var viewMode = forecastParams.viewMode || 'Committed';
+  var workerScope = forecastParams.workerScope || 'SLG';
+  var includePto = forecastParams.includeTimeOff !== false;
+
+  var settings = readSettings_();
+  var hideAllExternal = String(settings['hide_all_external'] || '').trim().toLowerCase() === 'true';
+  var excluded = readExclusions_();
+  var allocRaw = timed_('getEnrichedAllocations_', function () {
+    return (typeof getEnrichedAllocations_ === 'function')
+      ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+  });
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : _resourceIndex_(allocRaw);
+  var assignsRaw = timed_('getEnrichedAssignments_', function () {
+    return (typeof getEnrichedAssignments_ === 'function')
+      ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  });
+  var calendar = timed_('readCalendar_', function () { return readCalendar_(); });
+  var allWeeks = calendar.weeks || [];
+
+  function inScope(workerName) {
+    var info = resIndex[workerName] || {};
+    var cls = String(info.worker_class || '');
+    if (hideAllExternal && cls.startsWith('External_')) return false;
+    return _workerClassInScope_(cls, workerScope);
+  }
+
+  var allocRows = 0;
+  allocRaw.forEach(function (a) {
+    if (!a.resource_name) return;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return;
+    if (!inScope(a.resource_name)) return;
+    allocRows++;
+  });
+
+  var assignExpandWeeks = 0;
+  var assignInScope = 0;
+  if (viewMode !== 'Actual') {
+    assignsRaw.forEach(function (a) {
+      if (!a.resource_name) return;
+      if (excluded.has(_exclusionKey_(a.resource_name))) return;
+      if (!inScope(a.resource_name)) return;
+      var isCommitted = (a.status === 'Committed');
+      var isScenario = (a.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isScenario &&
+         (!forecastParams.scenarioId || a.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      assignInScope++;
+      timed_('expandAssignmentToWeekly_', function () {
+        var expanded = expandAssignmentToWeekly_(a, calendar);
+        assignExpandWeeks += expanded.length;
+        return expanded;
+      });
+    });
+  }
+
+  var adjExpandWeeks = 0;
+  if (viewMode !== 'Actual') {
+    var adjRows = [];
+    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
+    adjRows.forEach(function (adj) {
+      if (!adj.resource_name) return;
+      if (excluded.has(_exclusionKey_(adj.resource_name))) return;
+      if (!inScope(adj.resource_name)) return;
+      var isCommitted = (adj.status === 'Committed');
+      var isModeled = (adj.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isModeled &&
+         (!forecastParams.scenarioId || adj.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      timed_('expandAdjustmentToWeekly_', function () {
+        var expanded = expandAdjustmentToWeekly_(adj, calendar);
+        adjExpandWeeks += expanded.length;
+        return expanded;
+      });
+    });
+  }
+
+  var blendInner = 0;
+  var workersTimesAllWeeks = 0;
+  (forecast.workers || []).forEach(function (w) {
+    var allWeekKeys = {};
+    Object.keys(w.workerWeekly || {}).forEach(function (k) { allWeekKeys[k] = true; });
+    blendInner += Object.keys(allWeekKeys).length;
+    allWeeks.forEach(function (wk) {
+      workersTimesAllWeeks++;
+      timed_('productiveHoursForWeek_', function () {
+        return productiveHoursForWeek_(w, wk.week_key);
+      });
+    });
+  });
+
+  stats.blendInnerLoopIterations = blendInner;
+  stats.workersTimesAllWeeksPasses = workersTimesAllWeeks;
+
+  Logger.log('computeWeeklyForecast_ loop profile:');
+  Logger.log('  allocRowsInScope=' + allocRows);
+  Logger.log('  assignmentsInScope=' + assignInScope +
+    ' expandAssignmentWeekRows=' + assignExpandWeeks);
+  Logger.log('  expandAdjustmentWeekRows=' + adjExpandWeeks);
+  Logger.log('  blendInnerLoopIterations=' + blendInner +
+    ' (per-worker unique week keys, not full calendar)');
+  Logger.log('  workersTimesAllWeeksPasses=' + workersTimesAllWeeks +
+    ' (= workers × calendarWeeks; O(W×K) probe)');
+}
+
+/**
+ * Instrumented mirror of _aggregateSoftBookingProjection_ baseline path.
+ * @private
+ */
+function _dbg_instrumentedAggregateBaseline_(
+  forecast, quarterKeys, holidays, actualsSummary, curQ,
+  baselineForecast, weeklyWorkerNames, visibleWeeks, stats, timed_) {
+
+  var weeks = forecast.weeks || [];
+  var workers = forecast.workers || [];
+  actualsSummary = actualsSummary || {};
+  curQ = curQ || fiscalQuarterKey_(new Date());
+  var calendar = timed_('readCalendar_', function () { return readCalendar_(); });
+  timed_('committedAssignmentQuarterIndex_', function () {
+    return committedAssignmentQuarterIndex_(calendar);
+  });
+
+  var baselineByEmployeeId = {};
+  if (baselineForecast) {
+    (baselineForecast.workers || []).forEach(function (bw) {
+      baselineByEmployeeId[String(bw.employeeId || '')] = bw;
+    });
+  }
+
+  function workerQuarterProductive_(worker, qk) {
+    return timed_('_workerQuarterProductive_', function () {
+      if (worker.blendedWeekly || worker.productiveWeekly) {
+        return timed_('sumForecastProductiveForQuarter_', function () {
+          return sumForecastProductiveForQuarter_(worker, qk, weeks);
+        });
+      }
+      if (worker.quarterProductive && worker.quarterProductive.hasOwnProperty(qk)) {
+        return Number(worker.quarterProductive[qk]) || 0;
+      }
+      return timed_('sumForecastProductiveForQuarter_', function () {
+        return sumForecastProductiveForQuarter_(worker, qk, weeks);
+      });
+    });
+  }
+
+  function quarterCapacity_(qk) {
+    return timed_('_quarterCapacityForProjection_', function () {
+      var maxHolidayYear = 0;
+      (holidays || []).forEach(function (h) {
+        if (h.date) {
+          var y = h.date.getFullYear();
+          if (y > maxHolidayYear) maxHolidayYear = y;
+        }
+      });
+      var bounds = fiscalQuarterBounds_(qk);
+      var approximate = bounds.end.getFullYear() > maxHolidayYear;
+      var effectiveHolidays = approximate ? [] : holidays;
+      var wd = timed_('quarterWorkdaySummary_', function () {
+        return quarterWorkdaySummary_(qk, effectiveHolidays);
+      });
+      return {
+        icpAvailableHours: Number(wd.icpAvailableHours) || 0,
+        rawCapacityHours: Number(wd.rawCapacityHours) || 0,
+        approximate: approximate
+      };
+    });
+  }
+
+  function d8IcpUtilPair_(worker, productiveHours, qk) {
+    var employeeId = String(worker.employeeId || '');
+    var summary = employeeId ? actualsSummary[employeeId] : null;
+    if (qk !== curQ || !summary || !(summary.qtd_icp_plus_forecast_hours > 0) ||
+        !(summary.bonus_target_billable_hours_eoq > 0)) {
+      return null;
+    }
+    var committedHrs = timed_('committedAssignmentHoursForQuarter_', function () {
+      return committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+    });
+    var num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
+    var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
+    if (baselineForecast) {
+      var baseWorker = baselineByEmployeeId[employeeId];
+      if (baseWorker) {
+        var baseProd = workerQuarterProductive_(baseWorker, qk);
+        num += (Number(productiveHours) || 0) - baseProd;
+      }
+    }
+    timed_('quarterTargetFromWoW_', function () {
+      return quarterTargetFromWoW_(worker.employeeId, qk);
+    });
+    return { num: num, den: den };
+  }
+
+  function quarterCell_(worker, productiveHours, qk) {
+    stats.workerQuarterCells = (stats.workerQuarterCells || 0) + 1;
+    var qinfo = quarterCapacity_(qk);
+    var icpAvail = qinfo.icpAvailableHours;
+    var rawCap = qinfo.rawCapacityHours;
+    var prod = Number(productiveHours) || 0;
+    var d8 = d8IcpUtilPair_(worker, prod, qk);
+    var displayProd = d8 ? d8.num : prod;
+    var icpUtil = d8
+      ? (d8.den > 0 ? d8.num / d8.den : 0)
+      : (icpAvail > 0 ? prod / icpAvail : 0);
+    return {
+      quarterKey: String(qk),
+      productiveHours: displayProd,
+      icpAvailableHours: icpAvail,
+      rawCapacityHours: rawCap,
+      icpUtil: icpUtil,
+      financeUtil: rawCap > 0 ? displayProd / rawCap : 0,
+      approximate: !!qinfo.approximate
+    };
+  }
+
+  function aggregateQuarters_(group) {
+    return quarterKeys.map(function (qk) {
+      var sumProd = 0;
+      var sumIcpAvail = 0;
+      var sumRawCap = 0;
+      var sumIcpNum = 0;
+      var sumIcpDen = 0;
+      var approx = false;
+      var isCurQ = (qk === curQ);
+      group.forEach(function (w) {
+        var prod = workerQuarterProductive_(w, qk);
+        var qinfo = quarterCapacity_(qk);
+        sumIcpAvail += qinfo.icpAvailableHours;
+        sumRawCap += qinfo.rawCapacityHours;
+        if (qinfo.approximate) approx = true;
+        if (isCurQ) {
+          var d8 = d8IcpUtilPair_(w, prod, qk);
+          if (d8) {
+            sumProd += d8.num;
+            sumIcpNum += d8.num;
+            sumIcpDen += d8.den;
+          } else {
+            sumProd += prod;
+            sumIcpNum += prod;
+            sumIcpDen += qinfo.icpAvailableHours;
+          }
+        } else {
+          sumProd += prod;
+        }
+      });
+      var icpUtil = isCurQ
+        ? (sumIcpDen > 0 ? sumIcpNum / sumIcpDen : 0)
+        : (sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0);
+      return {
+        quarterKey: String(qk),
+        productiveHours: Number(sumProd) || 0,
+        icpAvailableHours: Number(sumIcpAvail) || 0,
+        rawCapacityHours: Number(sumRawCap) || 0,
+        icpUtil: icpUtil,
+        financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+        approximate: approx
+      };
+    });
+  }
+
+  workers.forEach(function (w) {
+    quarterKeys.forEach(function (qk) {
+      quarterCell_(w, workerQuarterProductive_(w, qk), qk);
+    });
+    if (weeklyWorkerNames && weeklyWorkerNames[w.resource] && visibleWeeks && visibleWeeks.length) {
+      timed_('_workerWeeklyCellsForProjection_', function () {
+        return _workerWeeklyCellsForProjection_(w, visibleWeeks, forecast);
+      });
+    }
+  });
+
+  aggregateQuarters_(workers);
+  var byLabel = {};
+  workers.forEach(function (w) {
+    var label = String(w.teamLabel || 'Unclassified');
+    if (!byLabel[label]) byLabel[label] = [];
+    byLabel[label].push(w);
+  });
+  Object.keys(byLabel).sort().forEach(function (label) {
+    aggregateQuarters_(byLabel[label]);
+  });
+}
+
+/**
+ * @param {Object} stats
+ * @private
+ */
+function _dbg_logProjectionHotspotRankings_(stats) {
+  var rows = [];
+  Object.keys(stats).forEach(function (name) {
+    if (name === 'workerQuarterCells' || name === 'workersTimesAllWeeksPasses' ||
+        name === 'blendInnerLoopIterations') return;
+    var bucket = stats[name];
+    if (!bucket || typeof bucket.calls !== 'number') return;
+    rows.push({ name: name, calls: bucket.calls, ms: bucket.ms || 0 });
+  });
+
+  var byCalls = rows.slice().sort(function (a, b) { return b.calls - a.calls; });
+  var byMs = rows.slice().sort(function (a, b) { return b.ms - a.ms; });
+
+  Logger.log('--- ranked by call count ---');
+  byCalls.slice(0, 12).forEach(function (r, i) {
+    Logger.log('  ' + (i + 1) + '. ' + r.name + ': calls=' + r.calls + ' ms=' + r.ms);
+  });
+
+  Logger.log('--- ranked by total ms ---');
+  byMs.slice(0, 12).forEach(function (r, i) {
+    Logger.log('  ' + (i + 1) + '. ' + r.name + ': ms=' + r.ms + ' calls=' + r.calls);
+  });
+
+  Logger.log('--- cell / loop counters ---');
+  Logger.log('  workerQuarterCells=' + (stats.workerQuarterCells || 0));
+  Logger.log('  workersTimesAllWeeksPasses=' + (stats.workersTimesAllWeeksPasses || 0));
+  Logger.log('  blendInnerLoopIterations=' + (stats.blendInnerLoopIterations || 0));
+}

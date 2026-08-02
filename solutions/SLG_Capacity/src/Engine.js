@@ -1815,33 +1815,24 @@ function quarterWorkdaySummary_(quarterKey, holidays) {
   };
 }
 
-/** @type {{version: (string|null), map: (Object|null)}} */
-var _wowTargetIdxMemo_ = { version: null, map: null };
-/** @type {{version: (string|null), map: (Object|null)}} */
-var _committedAsgIdxMemo_ = { version: null, map: null };
+var _committedAsgIdxMemo_ = null;
+var _wowTargetIdxMemo_ = null;
 
 /**
- * Enriched-cache version stamp (same value embedded in wfm23:baseline:vNNNN keys).
- * @return {string}
+ * Clear per-execution projection indexes (committed assignments, WoW targets).
  */
-function _currentEnrichedVersion_() {
-  return (typeof _getEnrichedCacheVersion_ === 'function')
-    ? _getEnrichedCacheVersion_() : '';
+function _resetProjectionMemos_() {
+  _committedAsgIdxMemo_ = null;
+  _wowTargetIdxMemo_ = null;
 }
 
 /**
  * Per-request index of Utilization_Quarterly target_hours by employee and
- * fiscal quarter. Reads CFG_UTIL_QUARTERLY once. Memoized on
- * _currentEnrichedVersion_() (same invalidation chain as enriched getters).
+ * fiscal quarter. Reads CFG_UTIL_QUARTERLY once; plain per-execution memo.
  * @return {Object<string, Object<string, number>>} employeeId → { quarterKey → target_hours }
  */
 function _wowQuarterTargetIndex_() {
-  var version = _currentEnrichedVersion_();
-  if (_wowTargetIdxMemo_.version === version && _wowTargetIdxMemo_.map) {
-    return _wowTargetIdxMemo_.map;
-  }
-  _wowQuarterTargetIndex_._dbgIndexBuildCount =
-    (_wowQuarterTargetIndex_._dbgIndexBuildCount || 0) + 1;
+  if (_wowTargetIdxMemo_) return _wowTargetIdxMemo_;
   var idx = {};
   cachedRead_(CFG_UTIL_QUARTERLY).forEach(function (r) {
     var eid = String(r.employee_id || '').trim();
@@ -1850,8 +1841,7 @@ function _wowQuarterTargetIndex_() {
     if (!idx[eid]) idx[eid] = {};
     idx[eid][qk] = Number(r.target_hours) || 0;
   });
-  _wowTargetIdxMemo_.version = version;
-  _wowTargetIdxMemo_.map = idx;
+  _wowTargetIdxMemo_ = idx;
   return idx;
 }
 
@@ -2094,24 +2084,12 @@ function computeBlendedWindowKpis_(params) {
 /**
  * Per-request index of Committed Opportunity_Assignment hours by resource and
  * fiscal quarter. Reads getEnrichedAssignments_() once and expands each
- * committed assignment once. Memoized on _currentEnrichedVersion_() (same
- * invalidation chain as getEnrichedAssignments_).
+ * committed assignment once; plain per-execution memo.
  * @param {Object} [calendar] from readCalendar_()
  * @return {Object<string, Object<string, number>>} resource_name → { quarterKey → hours }
  */
 function committedAssignmentQuarterIndex_(calendar) {
-  var version = _currentEnrichedVersion_();
-  if (committedAssignmentQuarterIndex_.cache === null) {
-    _committedAsgIdxMemo_.version = null;
-    _committedAsgIdxMemo_.map = null;
-  }
-  if (_committedAsgIdxMemo_.version === version && _committedAsgIdxMemo_.map) {
-    committedAssignmentQuarterIndex_.cache = _committedAsgIdxMemo_.map;
-    committedAssignmentQuarterIndex_.cacheVersion = version;
-    return _committedAsgIdxMemo_.map;
-  }
-  committedAssignmentQuarterIndex_._dbgIndexBuildCount =
-    (committedAssignmentQuarterIndex_._dbgIndexBuildCount || 0) + 1;
+  if (_committedAsgIdxMemo_) return _committedAsgIdxMemo_;
   calendar = calendar || readCalendar_();
   var assignsRaw = [];
   try {
@@ -2132,10 +2110,7 @@ function committedAssignmentQuarterIndex_(calendar) {
       idx[res][qk] = (idx[res][qk] || 0) + (Number(w.hours) || 0);
     });
   });
-  _committedAsgIdxMemo_.version = version;
-  _committedAsgIdxMemo_.map = idx;
-  committedAssignmentQuarterIndex_.cache = idx;
-  committedAssignmentQuarterIndex_.cacheVersion = version;
+  _committedAsgIdxMemo_ = idx;
   return idx;
 }
 

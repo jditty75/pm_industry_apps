@@ -385,6 +385,7 @@ function api_flushCaches() {
   if (typeof invalidateEnrichedCaches_ === 'function') {
     invalidateEnrichedCaches_();
   }
+  if (typeof _resetProjectionMemos_ === 'function') _resetProjectionMemos_();
   invalidateSoftBookingBaselineCache_();
   return { ok: true, flushedAt: new Date().toISOString() };
 }
@@ -1404,6 +1405,7 @@ function api_commitSoftBookings(scenarioName, bookings) {
 
   invalidateCache_(ASSIGNMENTS);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  if (typeof _resetProjectionMemos_ === 'function') _resetProjectionMemos_();
 
   Logger.log('api_commitSoftBookings: scenario_id=' + scenarioId + ' count=' + committed.length);
   return {

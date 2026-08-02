@@ -4619,3 +4619,204 @@ function _dbg_traceCommittedInclusion() {
 
   Logger.log('=== _dbg_traceCommittedInclusion: DONE ===');
 }
+
+/**
+ * Trace committed-util divergence for one worker across detailV2, projection
+ * baseline, and scorecard paths. Admin-gated; Logger only; read-only.
+ */
+function _dbg_traceCommittedUtilDivergence() {
+  _dbg_requireAdmin_();
+
+  var WORKER = 'Al Romulo';
+  var EMPLOYEE_ID = '13945';
+  var TRACE_Q = 'FY27-Q3';
+  var TOL = 0.0001;
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+
+  var curQ = fiscalQuarterKey_(new Date());
+  Logger.log('=== _dbg_traceCommittedUtilDivergence: ' + WORKER + ' (' + TRACE_Q + ') ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' calendarCurrentQuarter=' + curQ);
+  if (TRACE_Q !== curQ) {
+    Logger.log('  NOTE: TRACE_Q=' + TRACE_Q + ' differs from calendar current quarter=' + curQ);
+  }
+
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+  var info = resIndex[WORKER] || {};
+  if (String(info.employee_id || '').trim() !== EMPLOYEE_ID) {
+    Object.keys(resIndex).some(function (nm) {
+      if (String(resIndex[nm].employee_id || '').trim() === EMPLOYEE_ID) {
+        WORKER = nm;
+        info = resIndex[nm];
+        return true;
+      }
+      return false;
+    });
+  }
+  Logger.log('  resolved worker=' + WORKER + ' employee_id=' + (info.employee_id || '(blank)'));
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function pct_(v) {
+    return (Number(v) * 100).toFixed(2) + '%';
+  }
+
+  /**
+   * Derive icpUtil numerator/denominator labels from a buildWorkerQuarters_ cell.
+   * @param {Object} q
+   * @return {{num:number, den:number, denLabel:string, usedD8BonusScale:boolean}}
+   */
+  function quarterNumDen_(q) {
+    var prod = Number(q.productiveHours) || 0;
+    var icpAvail = Number(q.icpAvailableHours) || 0;
+    var target = Number(q.targetHours) || 0;
+    var usedD8 = String(q.source || '') === 'actuals_plus_forecast';
+    if (usedD8 && target > 0) {
+      return {
+        num: prod,
+        den: target,
+        denLabel: 'bonus_target (D8 bonus-scale)',
+        usedD8BonusScale: true
+      };
+    }
+    return {
+      num: prod,
+      den: icpAvail,
+      denLabel: 'icpAvailableHours',
+      usedD8BonusScale: false
+    };
+  }
+
+  function logQuarterPath_(label, q, extra) {
+    if (!q) {
+      Logger.log('--- ' + label + ': quarter ' + TRACE_Q + ' NOT FOUND ---');
+      return null;
+    }
+    var nd = quarterNumDen_(q);
+    Logger.log('--- ' + label + ' ---');
+    Logger.log('  quarterKey=' + q.quarterKey);
+    Logger.log('  icpUtil=' + Number(q.icpUtil).toFixed(6) + ' (' + pct_(q.icpUtil) + ')');
+    Logger.log('  productiveHours=' + Number(q.productiveHours).toFixed(4));
+    Logger.log('  icpAvailableHours=' + Number(q.icpAvailableHours).toFixed(4));
+    if (q.targetHours != null) {
+      Logger.log('  targetHours=' + Number(q.targetHours).toFixed(4));
+    }
+    if (q.source != null) {
+      Logger.log('  source=' + q.source);
+    }
+    Logger.log('  D8 bonus-scale denominator? ' + (nd.usedD8BonusScale ? 'YES' : 'NO'));
+    Logger.log('  numerator=' + nd.num.toFixed(4) + ' denominator=' + nd.den.toFixed(4) +
+      ' (' + nd.denLabel + ')');
+    if (extra) {
+      Object.keys(extra).forEach(function (k) {
+        Logger.log('  ' + k + '=' + extra[k]);
+      });
+    }
+    return {
+      icpUtil: Number(q.icpUtil) || 0,
+      num: nd.num,
+      den: nd.den,
+      denLabel: nd.denLabel,
+      usedD8BonusScale: nd.usedD8BonusScale
+    };
+  }
+
+  // ---- PATH A: api_getResourceDetailV2 ----
+  var v2 = api_getResourceDetailV2(Object.assign({ resource: WORKER }, baseParams));
+  if (!v2.found) {
+    Logger.log('PATH A: worker not found in api_getResourceDetailV2');
+  }
+  var pathA = logQuarterPath_('PATH A (api_getResourceDetailV2)',
+    (v2.quarters || []).find(function (q) { return q.quarterKey === TRACE_Q; }));
+
+  // ---- PATH B: api_projectSoftBookings baseline.worker ----
+  var projection = api_projectSoftBookings(baseParams, []);
+  var baseWorker = (projection.baseline.worker || []).find(function (w) {
+    return w.resourceName === WORKER ||
+      String(w.employeeId || '').trim() === EMPLOYEE_ID;
+  });
+  var pathB = null;
+  if (!baseWorker) {
+    Logger.log('--- PATH B (api_projectSoftBookings baseline.worker): worker NOT FOUND ---');
+  } else {
+    var bq = (baseWorker.quarters || []).find(function (q) { return q.quarterKey === TRACE_Q; });
+    if (!bq) {
+      Logger.log('--- PATH B: quarter ' + TRACE_Q + ' NOT FOUND ---');
+    } else {
+      var bProd = Number(bq.productiveHours) || 0;
+      var bDen = Number(bq.icpAvailableHours) || 0;
+      Logger.log('--- PATH B (api_projectSoftBookings baseline.worker) ---');
+      Logger.log('  quarterKey=' + bq.quarterKey);
+      Logger.log('  icpUtil=' + Number(bq.icpUtil).toFixed(6) + ' (' + pct_(bq.icpUtil) + ')');
+      Logger.log('  productiveHours=' + bProd.toFixed(4));
+      Logger.log('  icpAvailableHours=' + bDen.toFixed(4) + ' (denominator)');
+      Logger.log('  D8 bonus-scale denominator? NO (projection always uses icpAvailableHours)');
+      Logger.log('  numerator=' + bProd.toFixed(4) + ' denominator=' + bDen.toFixed(4) +
+        ' (icpAvailableHours)');
+      pathB = {
+        icpUtil: Number(bq.icpUtil) || 0,
+        num: bProd,
+        den: bDen,
+        denLabel: 'icpAvailableHours',
+        usedD8BonusScale: false
+      };
+    }
+  }
+
+  // ---- PATH C: computeQuarterlyScorecard_ ----
+  var scorecard = computeQuarterlyScorecard_(baseParams);
+  var scWorker = (scorecard.workers || []).find(function (w) {
+    return w.worker === WORKER || String(w.employeeId || '').trim() === EMPLOYEE_ID;
+  });
+  var pathC = logQuarterPath_('PATH C (computeQuarterlyScorecard_)',
+    scWorker ? (scWorker.quarters || []).find(function (q) { return q.quarterKey === TRACE_Q; }) : null);
+
+  // ---- SUMMARY ----
+  function fmtPath_(tag, p) {
+    if (!p) return tag + ' icpUtil=n/a (num=n/a / den=n/a)';
+    return tag + ' icpUtil=' + p.icpUtil.toFixed(6) +
+      ' (num=' + p.num.toFixed(4) + ' / den=' + p.den.toFixed(4) +
+      ' [' + p.denLabel + '])';
+  }
+
+  var allPresent = pathA && pathB && pathC;
+  var abMatch = allPresent && near_(pathA.icpUtil, pathB.icpUtil);
+  var acMatch = allPresent && near_(pathA.icpUtil, pathC.icpUtil);
+  var bcMatch = allPresent && near_(pathB.icpUtil, pathC.icpUtil);
+  var allMatch = abMatch && acMatch && bcMatch;
+
+  Logger.log('--- SUMMARY ---');
+  Logger.log('Path A icpUtil=' + (pathA ? pathA.icpUtil.toFixed(6) : 'n/a') +
+    ' | Path B icpUtil=' + (pathB ? pathB.icpUtil.toFixed(6) : 'n/a') +
+    ' | Path C icpUtil=' + (pathC ? pathC.icpUtil.toFixed(6) : 'n/a') +
+    ' — MATCH? ' + (allMatch ? 'yes' : 'no'));
+  Logger.log('  ' + fmtPath_('Path A', pathA));
+  Logger.log('  ' + fmtPath_('Path B', pathB));
+  Logger.log('  ' + fmtPath_('Path C', pathC));
+  if (allPresent && !allMatch) {
+    if (!abMatch) {
+      Logger.log('  A vs B: denominator differs? ' +
+        (pathA.denLabel !== pathB.denLabel ? 'YES (' + pathA.denLabel + ' vs ' + pathB.denLabel + ')' :
+          'same label; num/den values differ'));
+    }
+    if (!acMatch) {
+      Logger.log('  A vs C: denominator differs? ' +
+        (pathA.denLabel !== pathC.denLabel ? 'YES (' + pathA.denLabel + ' vs ' + pathC.denLabel + ')' :
+          'same label; num/den values differ'));
+    }
+    if (!bcMatch) {
+      Logger.log('  B vs C: denominator differs? ' +
+        (pathB.denLabel !== pathC.denLabel ? 'YES (' + pathB.denLabel + ' vs ' + pathC.denLabel + ')' :
+          'same label; num/den values differ'));
+    }
+  }
+
+  Logger.log('=== _dbg_traceCommittedUtilDivergence: DONE ===');
+}

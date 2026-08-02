@@ -821,6 +821,7 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
   var workers = forecast.workers || [];
   actualsSummary = actualsSummary || {};
   curQ = curQ || fiscalQuarterKey_(new Date());
+  var calendar = readCalendar_();
 
   var baselineByEmployeeId = {};
   if (baselineForecast) {
@@ -844,7 +845,8 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
         !(summary.bonus_target_billable_hours_eoq > 0)) {
       return null;
     }
-    var num = Number(summary.qtd_icp_plus_forecast_hours) || 0;
+    var committedHrs = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+    var num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
     var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
     if (baselineForecast) {
       var baseWorker = baselineByEmployeeId[employeeId];
@@ -862,16 +864,17 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
     var rawCap = qinfo.rawCapacityHours;
     var prod = Number(productiveHours) || 0;
     var d8 = d8IcpUtilPair_(worker, prod, qk);
+    var displayProd = d8 ? d8.num : prod;
     var icpUtil = d8
       ? (d8.den > 0 ? d8.num / d8.den : 0)
       : (icpAvail > 0 ? prod / icpAvail : 0);
     return {
       quarterKey: String(qk),
-      productiveHours: prod,
+      productiveHours: displayProd,
       icpAvailableHours: icpAvail,
       rawCapacityHours: rawCap,
       icpUtil: icpUtil,
-      financeUtil: rawCap > 0 ? prod / rawCap : 0,
+      financeUtil: rawCap > 0 ? displayProd / rawCap : 0,
       approximate: !!qinfo.approximate
     };
   }
@@ -888,19 +891,22 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
       group.forEach(function (w) {
         var prod = sumForecastProductiveForQuarter_(w, qk, weeks);
         var qinfo = _quarterCapacityForProjection_(qk, holidays);
-        sumProd += prod;
         sumIcpAvail += qinfo.icpAvailableHours;
         sumRawCap += qinfo.rawCapacityHours;
         if (qinfo.approximate) approx = true;
         if (isCurQ) {
           var d8 = d8IcpUtilPair_(w, prod, qk);
           if (d8) {
+            sumProd += d8.num;
             sumIcpNum += d8.num;
             sumIcpDen += d8.den;
           } else {
+            sumProd += prod;
             sumIcpNum += prod;
             sumIcpDen += qinfo.icpAvailableHours;
           }
+        } else {
+          sumProd += prod;
         }
       });
       var icpUtil = isCurQ

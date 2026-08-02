@@ -611,13 +611,69 @@ function _projectionBaselineCacheKey_(forecastParams) {
 }
 
 /**
- * JSON-safe forecast payload for CacheService (no Date objects).
+ * Pre-compute per-quarter productive hours for lean baseline caching.
+ * @param {Object} worker computeWeeklyForecast_ worker row
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @return {Object<string, number>}
+ */
+function _quarterProductiveForWorker_(worker, weeks) {
+  var qp = {};
+  (weeks || []).forEach(function (wk) {
+    var qk = fiscalQuarterKey_(wk.week_start);
+    qp[qk] = (qp[qk] || 0) + productiveHoursForWeek_(worker, wk.week_key);
+  });
+  return qp;
+}
+
+/**
+ * Productive hours for one worker-quarter (lean cache or live weekly maps).
+ * @param {Object} worker
+ * @param {string} qk
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @return {number}
+ */
+function _workerQuarterProductive_(worker, qk, weeks) {
+  if (worker.blendedWeekly || worker.productiveWeekly) {
+    return sumForecastProductiveForQuarter_(worker, qk, weeks);
+  }
+  if (worker.quarterProductive && worker.quarterProductive.hasOwnProperty(qk)) {
+    return Number(worker.quarterProductive[qk]) || 0;
+  }
+  return sumForecastProductiveForQuarter_(worker, qk, weeks);
+}
+
+/**
+ * Lean worker row for L2 baseline cache (quarter sums only; no weekly maps).
+ * @param {Object} worker
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @return {Object}
+ */
+function _leanWorkerForCache_(worker, weeks) {
+  return {
+    resource: worker.resource,
+    jobProfile: worker.jobProfile,
+    level: worker.level,
+    managerOrg: worker.managerOrg,
+    managersManager: worker.managersManager,
+    icpRole: worker.icpRole,
+    teamLabel: worker.teamLabel,
+    workerClass: worker.workerClass,
+    icpTarget: worker.icpTarget,
+    employeeId: worker.employeeId,
+    quarterProductive: _quarterProductiveForWorker_(worker, weeks)
+  };
+}
+
+/**
+ * JSON-safe lean forecast payload for CacheService (no Date objects, no
+ * per-worker weekly maps — quarterProductive only; must stay <100KB).
  * @param {Object} forecast
  * @return {Object}
  */
 function _serializeForecastForCache_(forecast) {
+  var weeks = forecast.weeks || [];
   return {
-    weeks: (forecast.weeks || []).map(function (w) {
+    weeks: weeks.map(function (w) {
       return {
         week_start: _toIso_(w.week_start),
         week_key: String(w.week_key || ''),
@@ -627,7 +683,9 @@ function _serializeForecastForCache_(forecast) {
         holiday_hours: Number(w.holiday_hours) || 0
       };
     }),
-    workers: JSON.parse(JSON.stringify(forecast.workers || [])),
+    workers: (forecast.workers || []).map(function (w) {
+      return _leanWorkerForCache_(w, weeks);
+    }),
     icp: forecast.icp,
     rawCapacity: Number(forecast.rawCapacity) || 40,
     holidayHoursByWeek: forecast.holidayHoursByWeek || {}
@@ -706,7 +764,12 @@ function _getCachedBaselineForecast_(forecastParams) {
   }
 
   var forecast = computeWeeklyForecast_(forecastParams);
-  _enrichedCacheWrite_(cacheKey, _serializeForecastForCache_(forecast), 21600);
+  var serialized = _serializeForecastForCache_(forecast);
+  var serializedBytes = JSON.stringify(serialized).length;
+  Logger.log('_getCachedBaselineForecast_: serializedBytes=' + serializedBytes +
+    ' workers=' + (forecast.workers || []).length +
+    (serializedBytes < 100000 ? '' : ' OVER_LIMIT'));
+  _enrichedCacheWrite_(cacheKey, serialized, 21600);
   _softBookingBaselineCache_.signature = sig;
   _softBookingBaselineCache_.forecast = forecast;
   return { forecast: forecast, cacheHit: false, l2Hit: false };
@@ -772,6 +835,121 @@ function _quarterCapacityForProjection_(quarterKey, holidays) {
     rawCapacityHours: Number(wd.rawCapacityHours) || 0,
     approximate: approximate
   };
+}
+
+/**
+ * On-demand weekly maps for projection-affected workers when the L2
+ * baseline is lean (no workerWeekly / blendedWeekly). Scoped to named
+ * resources only — avoids a full computeWeeklyForecast_ rebuild.
+ * @param {Object} forecast baseline or projected forecast (mutates workers in place)
+ * @param {string[]} resourceNames
+ * @param {Object} forecastParams computeWeeklyForecast_ params
+ */
+function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastParams) {
+  if (!forecast || !resourceNames || !resourceNames.length) return;
+  var targets = {};
+  resourceNames.forEach(function (rn) {
+    rn = String(rn || '').trim();
+    if (rn) targets[rn] = true;
+  });
+  if (!Object.keys(targets).length) return;
+
+  var needs = false;
+  (forecast.workers || []).forEach(function (w) {
+    if (targets[w.resource] && !w.blendedWeekly) needs = true;
+  });
+  if (!needs) return;
+
+  forecastParams = forecastParams || {};
+  var viewMode = forecastParams.viewMode || 'Committed';
+  var includePto = forecastParams.includeTimeOff !== false;
+  var excluded = readExclusions_();
+  var calendar = readCalendar_();
+  var assignsRaw = (typeof getEnrichedAssignments_ === 'function')
+    ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  var allocRaw = (typeof getEnrichedAllocations_ === 'function')
+    ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+  var actualsByWorker = (typeof getActualsByWorkerWeek_ === 'function')
+    ? getActualsByWorkerWeek_() : {};
+
+  var workerByName = {};
+  (forecast.workers || []).forEach(function (w) {
+    if (!targets[w.resource] || w.blendedWeekly) return;
+    w.workerWeekly = {};
+    w.productiveWeekly = {};
+    w.projects = {};
+    workerByName[w.resource] = w;
+  });
+
+  function addHours(resourceName, weekKey, project, hours, isProductive) {
+    var w = workerByName[resourceName];
+    if (!w || !hours) return;
+    w.workerWeekly[weekKey] = (w.workerWeekly[weekKey] || 0) + hours;
+    if (isProductive) {
+      w.productiveWeekly[weekKey] = (w.productiveWeekly[weekKey] || 0) + hours;
+    }
+    var proj = project || 'Unassigned';
+    if (!w.projects[proj]) w.projects[proj] = {};
+    w.projects[proj][weekKey] = (w.projects[proj][weekKey] || 0) + hours;
+  }
+
+  allocRaw.forEach(function (a) {
+    if (!a.resource_name || !targets[a.resource_name] || !a.week_key) return;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return;
+    if (a.allocation_type === 'PTO_Holiday' && !includePto) return;
+    var h = Number(a.hours) || 0;
+    if (!h) return;
+    addHours(a.resource_name, a.week_key, a.project_name, h, a.allocation_type !== 'PTO_Holiday');
+  });
+
+  if (viewMode !== 'Actual') {
+    assignsRaw.forEach(function (a) {
+      if (!a.resource_name || !targets[a.resource_name]) return;
+      if (excluded.has(_exclusionKey_(a.resource_name))) return;
+      var isCommitted = (a.status === 'Committed');
+      var isScenario = (a.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isScenario &&
+         (!forecastParams.scenarioId || a.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      var label = 'Assignment' + (a.opportunity_id ? (' — ' + a.opportunity_id) : '');
+      expandAssignmentToWeekly_(a, calendar).forEach(function (wk) {
+        addHours(a.resource_name, wk.week_key, label, wk.hours, true);
+      });
+    });
+
+    var adjRows = [];
+    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
+    adjRows.forEach(function (adj) {
+      if (!adj.resource_name || !targets[adj.resource_name]) return;
+      if (excluded.has(_exclusionKey_(adj.resource_name))) return;
+      var isCommitted = (adj.status === 'Committed');
+      var isModeled = (adj.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isModeled &&
+         (!forecastParams.scenarioId || adj.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
+        addHours(adj.resource_name, wk.week_key, 'Capacity Adjustment', -wk.hours_reduction, true);
+      });
+    });
+  }
+
+  Object.keys(workerByName).forEach(function (rn) {
+    var w = workerByName[rn];
+    var wActuals = (w.employeeId && actualsByWorker[w.employeeId]) ? actualsByWorker[w.employeeId] : {};
+    w.blendedWeekly = {};
+    var allWeekKeys = {};
+    Object.keys(w.workerWeekly).forEach(function (k) { allWeekKeys[k] = true; });
+    Object.keys(wActuals).forEach(function (k) { allWeekKeys[k] = true; });
+    Object.keys(allWeekKeys).forEach(function (wk) {
+      if (wActuals.hasOwnProperty(wk)) {
+        w.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
+      } else {
+        w.blendedWeekly[wk] = { hours: w.workerWeekly[wk] || 0, isActual: false };
+      }
+    });
+  });
 }
 
 /**
@@ -852,7 +1030,7 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
     if (baselineForecast) {
       var baseWorker = baselineByEmployeeId[employeeId];
       if (baseWorker) {
-        var baseProd = sumForecastProductiveForQuarter_(baseWorker, qk, baselineForecast.weeks || []);
+        var baseProd = _workerQuarterProductive_(baseWorker, qk, baselineForecast.weeks || []);
         num += (Number(productiveHours) || 0) - baseProd;
       }
     }
@@ -890,7 +1068,7 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
       var approx = false;
       var isCurQ = (qk === curQ);
       group.forEach(function (w) {
-        var prod = sumForecastProductiveForQuarter_(w, qk, weeks);
+        var prod = _workerQuarterProductive_(w, qk, weeks);
         var qinfo = _quarterCapacityForProjection_(qk, holidays);
         sumIcpAvail += qinfo.icpAvailableHours;
         sumRawCap += qinfo.rawCapacityHours;
@@ -932,7 +1110,7 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
       teamLabel: String(w.teamLabel || ''),
       managerOrg: String(w.managerOrg || ''),
       quarters: quarterKeys.map(function (qk) {
-        return quarterCell_(w, sumForecastProductiveForQuarter_(w, qk, weeks), qk);
+        return quarterCell_(w, _workerQuarterProductive_(w, qk, weeks), qk);
       })
     };
     if (weeklyWorkerNames && weeklyWorkerNames[w.resource] && visibleWeeks && visibleWeeks.length) {
@@ -1076,16 +1254,6 @@ function api_projectSoftBookings(params, softBookings) {
       !isNaN(a.end_date.getTime()) && a.estimated_hours > 0;
   });
 
-  var projectedForecast = baselineForecast;
-  var affectedWorkerCount = 0;
-  var projectedMode = 'baseline';
-  if (inMemoryModeledAssignments.length) {
-    var deltaResult = _buildProjectedForecastDelta_(baselineForecast, inMemoryModeledAssignments);
-    projectedForecast = deltaResult.forecast;
-    affectedWorkerCount = deltaResult.affectedWorkers;
-    projectedMode = 'targeted';
-  }
-
   var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
     ? getActualsSummaryByEmployee_() : {};
   var curQ = fiscalQuarterKey_(new Date());
@@ -1105,6 +1273,21 @@ function api_projectSoftBookings(params, softBookings) {
         weeklyWorkerNames[a.resource_name] = true;
       }
     });
+  }
+
+  var hydrateNames = Object.keys(weeklyWorkerNames);
+  if (hydrateNames.length) {
+    _hydrateWorkersWeeklyForProjection_(baselineForecast, hydrateNames, forecastParams);
+  }
+
+  var projectedForecast = baselineForecast;
+  var affectedWorkerCount = 0;
+  var projectedMode = 'baseline';
+  if (inMemoryModeledAssignments.length) {
+    var deltaResult = _buildProjectedForecastDelta_(baselineForecast, inMemoryModeledAssignments);
+    projectedForecast = deltaResult.forecast;
+    affectedWorkerCount = deltaResult.affectedWorkers;
+    projectedMode = 'targeted';
   }
 
   var result = {

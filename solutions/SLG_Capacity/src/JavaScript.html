@@ -3360,10 +3360,6 @@
     const errEl = $('#sbCommitError');
     if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
     const scenarioName = ($('#sbCommitScenarioName') && $('#sbCommitScenarioName').value || '').trim();
-    if (!scenarioName) {
-      if (errEl) { errEl.textContent = 'Scenario name is required.'; errEl.hidden = false; }
-      return;
-    }
     const draft = State.softBookCommitDraft || [];
     if (!draft.length) {
       if (errEl) { errEl.textContent = 'No bookings to commit.'; errEl.hidden = false; }
@@ -3409,14 +3405,17 @@
     try {
       await withLoading_(btn, async function () {
         await call('api_commitSoftBookings', scenarioName, bookings);
-      }, { label: 'Submitting...' });
+      }, { label: 'Committing...' });
       State.softBookings = (State.softBookings || []).filter(function (b) {
         return committedKeys.indexOf(softBookCommitKey_(b)) < 0;
       });
       closeSoftBookCommitModal_();
       onSoftBookingsChanged_();
       refreshExplorer_({ reason: 'softbook-commit-all' });
-      toast('Committed ' + bookings.length + ' Modeled assignment(s) to scenario "' + scenarioName + '".', 'ok');
+      const toastMsg = scenarioName
+        ? 'Committed ' + bookings.length + ' change(s) to scenario "' + scenarioName + '".'
+        : 'Committed ' + bookings.length + ' change(s).';
+      toast(toastMsg, 'ok');
     } catch (e) {
       if (errEl) {
         errEl.textContent = 'Submit failed: ' + (e.message || e);
@@ -3426,6 +3425,26 @@
   }
 
   function initSoftBookCommitModal_() {
+    const modal = $('#softBookCommitModal');
+    if (modal) {
+      const titleEl = modal.querySelector('.drawer-title');
+      if (titleEl) titleEl.textContent = 'Commit changes';
+      const subtitleEl = titleEl && titleEl.parentElement
+        ? titleEl.parentElement.querySelector('.muted')
+        : null;
+      if (subtitleEl) {
+        subtitleEl.textContent = 'Creates Modeled assignments (optionally grouped in a scenario)';
+      }
+    }
+    const scenarioInput = $('#sbCommitScenarioName');
+    if (scenarioInput) {
+      scenarioInput.removeAttribute('required');
+      scenarioInput.placeholder = 'e.g. Q3 capacity plan (optional)';
+      const labelSpan = scenarioInput.closest('label') && scenarioInput.closest('label').querySelector('span');
+      if (labelSpan) labelSpan.textContent = 'Scenario name (optional)';
+    }
+    const submitBtn = $('#sbCommitSubmitBtn');
+    if (submitBtn) submitBtn.textContent = 'Commit';
     $$('[data-sb-commit-close]').forEach(function (el) {
       el.addEventListener('click', closeSoftBookCommitModal_);
     });

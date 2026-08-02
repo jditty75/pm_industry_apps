@@ -7774,38 +7774,83 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * After soft-book commit in WFM.25, refresh aggregate + worker panel from server
-   * so newly committed assignments are visible in the committed view (reuses existing fetch paths).
+   * so newly committed assignments are visible in the committed view.
+   * Fetches scorecard and worker detail in parallel, then paints both in one tick.
    */
   async function wfm25AfterSoftBookCommitRefresh_() {
     wfm25UpdatePendingIndicator_();
     if (!State.softBookings.length) {
       State.explorerProjection = null;
     }
-    try {
-      await loadWFM25Utilization_();
-    } catch (e) { /* loadWFM25Utilization_ handles UI errors */ }
-    if (WFM25State.selectedWorker) {
-      const workerName = WFM25State.selectedWorker;
-      const reqId = ++WFM25State.workerReqId;
-      try {
-        const detail = await call(
+
+    const workerName = WFM25State.selectedWorker;
+    const reqId = workerName ? ++WFM25State.workerReqId : null;
+
+    const panelBody = document.getElementById('wfm25WorkerPanelBody');
+    if (workerName && panelBody) {
+      panelBody.innerHTML = wfm25LoadingSpinnerHtml_();
+    }
+
+    const scorecardPromise = call(
+      'api_getQuarterlyScorecard',
+      buildServerParams_({ workerScope: 'SLG' })
+    );
+    const workerPromise = workerName
+      ? call(
           'api_getResourceDetailV2',
           buildServerParams_({ resource: workerName, workerScope: 'SLG' })
-        );
-        if (reqId !== WFM25State.workerReqId) return;
-        WFM25State.selectedWorkerDetail = detail;
+        )
+      : null;
+
+    let scorecardData = null;
+    let scorecardErr = null;
+    let workerDetail = null;
+    let workerErr = null;
+
+    const fetchPromises = [
+      scorecardPromise
+        .then(function (data) { scorecardData = data; })
+        .catch(function (e) { scorecardErr = e; }),
+    ];
+    if (workerPromise) {
+      fetchPromises.push(
+        workerPromise
+          .then(function (data) { workerDetail = data; })
+          .catch(function (e) { workerErr = e; })
+      );
+    }
+    await Promise.all(fetchPromises);
+
+    if (workerName && reqId !== WFM25State.workerReqId) return;
+
+    if (scorecardData) {
+      renderWFM25UtilTable_(scorecardData);
+    } else if (scorecardErr) {
+      const body = document.getElementById('wfm25UtilBody');
+      if (body) {
+        body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px;color:var(--thumbtack)">' +
+          'Failed to load utilization data: ' + escapeHtml_(scorecardErr.message || String(scorecardErr)) +
+          '</td></tr>';
+      }
+      console.error('[WFM.25] wfm25AfterSoftBookCommitRefresh_ scorecard failed:', scorecardErr);
+    }
+
+    if (workerName) {
+      if (workerDetail) {
+        WFM25State.selectedWorkerDetail = workerDetail;
         if (State.softBookings.length) {
           scheduleWFM25Projection_();
         } else {
           paintWFM25WorkerPanel_(null);
         }
-      } catch (err) {
-        if (reqId !== WFM25State.workerReqId) return;
-        toast('Failed to refresh worker detail: ' + err.message, 'err');
+      } else if (workerErr) {
+        toast('Failed to refresh worker detail: ' + workerErr.message, 'err');
       }
     } else if (State.softBookings.length) {
       scheduleWFM25Projection_();
     }
+
+    wfm25UpdatePendingIndicator_();
   }
 
   /**

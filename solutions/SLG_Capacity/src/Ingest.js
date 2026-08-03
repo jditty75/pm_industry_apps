@@ -740,7 +740,7 @@ function sumConsolidatedPrimary_(sheetName, values, warnings) {
 }
 
 /**
- * Compare manifest primary_total (rounded to 1 decimal) against app sum.
+ * Compare manifest primary_total against app-computed sum (0.1 tolerance).
  * @param {number} expected manifest primary_total
  * @param {number} actual app-computed sum
  * @return {boolean}

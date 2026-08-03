@@ -19,8 +19,14 @@
     </div>
     <div class="wfm25-topbar-end">
       <div class="user-chip wfm25-user-chip" id="userChip">…</div>
-      <button class="wfm25-search-btn" id="wfm25SearchBtn"
-              aria-label="Search (coming soon)" title="Search — coming in a later stage">⌕</button>
+      <button type="button" class="wfm25-chrome-search-trigger" id="wfm25SearchTrigger"
+              aria-label="Search teams, workers, and roles" title="Search (Ctrl+K)">
+        <span class="wfm25-chrome-search-icon" aria-hidden="true">⌕</span>
+        <span class="wfm25-chrome-search-placeholder">Search teams, workers, roles…</span>
+        <kbd class="wfm25-chrome-search-kbd" aria-hidden="true">Ctrl K</kbd>
+      </button>
+      <button class="wfm25-search-btn" id="wfm25SearchBtn" hidden
+              aria-label="Search" title="Search">⌕</button>
     </div>
   </header>
 
@@ -144,6 +150,29 @@
 
   <!-- ============ Toasts ============ -->
   <div class="toast-stack" id="toastStack"></div>
+
+  <!-- ============ WFM.25 Global Search Overlay ============ -->
+  <div class="wfm25-search-overlay" id="wfm25SearchOverlay" hidden role="dialog"
+       aria-modal="true" aria-label="Global search">
+    <button type="button" class="wfm25-search-backdrop" id="wfm25SearchBackdrop"
+            aria-label="Close search" tabindex="-1"></button>
+    <div class="wfm25-search-palette" role="document">
+      <div class="wfm25-search-input-wrap">
+        <span class="wfm25-chrome-search-icon" aria-hidden="true">⌕</span>
+        <input type="search" class="wfm25-search-input" id="wfm25SearchInput"
+               placeholder="Search teams, workers, roles…"
+               autocomplete="off" autocorrect="off" spellcheck="false"
+               aria-controls="wfm25SearchResults" aria-autocomplete="list">
+        <div class="wfm25-search-hints" aria-hidden="true">
+          <span class="wfm25-search-hint">↑↓</span>
+          <span class="wfm25-search-hint">↵</span>
+          <span class="wfm25-search-hint">esc</span>
+        </div>
+      </div>
+      <div class="wfm25-search-results" id="wfm25SearchResults" role="listbox"
+           aria-label="Search results"></div>
+    </div>
+  </div>
 
 </div><!-- /#app -->
 

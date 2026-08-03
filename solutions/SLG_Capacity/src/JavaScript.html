@@ -7565,24 +7565,57 @@ async function _qaRefreshPsaHours_() {
     if (WFM25State.selectedWorker) {
       wfm25CloseWorkerPanel_();
     }
+    const prevTab = WFM25State.activeTab;
     WFM25State.activeTab = tabKey;
     $$('.wfm25-tab').forEach(function (btn) {
       const on = btn.dataset.wfm25Tab === tabKey;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    $$('.wfm25-tab-panel').forEach(function (panel) {
-      panel.hidden = (panel.dataset.wfm25Panel !== tabKey);
-    });
-    if (tabKey === 'hours-budget') {
-      if (WFM25State.scorecardData) {
-        renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
-      } else {
-        loadWFM25HoursCapacity_();
-      }
-    } else if (tabKey === 'mix-trend') {
-      loadWFM25MixTrend_();
+
+    function applyPanelVisibility_() {
+      $$('.wfm25-tab-panel').forEach(function (panel) {
+        panel.hidden = (panel.dataset.wfm25Panel !== tabKey);
+      });
     }
+
+    function loadTabData_() {
+      if (tabKey === 'hours-budget') {
+        if (WFM25State.scorecardData) {
+          renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
+        } else {
+          loadWFM25HoursCapacity_();
+        }
+      } else if (tabKey === 'mix-trend') {
+        loadWFM25MixTrend_();
+      }
+    }
+
+    const panels = $$('.wfm25-tab-panel');
+    const outgoing = panels.find(function (p) { return p.dataset.wfm25Panel === prevTab && !p.hidden; });
+    const incoming = panels.find(function (p) { return p.dataset.wfm25Panel === tabKey; });
+
+    if (!outgoing || !incoming || outgoing === incoming || prevTab === tabKey || wfm25MotionReduced_()) {
+      applyPanelVisibility_();
+      loadTabData_();
+      return;
+    }
+
+    incoming.hidden = false;
+    outgoing.classList.add('wfm25-motion-tab-exit');
+    incoming.classList.add('wfm25-motion-tab-enter');
+    let finished = 0;
+    const finish = function () {
+      finished++;
+      if (finished < 2) return;
+      outgoing.hidden = true;
+      outgoing.classList.remove('wfm25-motion-tab-exit');
+      incoming.classList.remove('wfm25-motion-tab-enter');
+      loadTabData_();
+    };
+    outgoing.addEventListener('animationend', finish, { once: true });
+    incoming.addEventListener('animationend', finish, { once: true });
+    setTimeout(finish, wfm25MotionDurationMs_() + 40);
   }
 
   /**
@@ -8020,7 +8053,17 @@ async function _qaRefreshPsaHours_() {
     const panel = document.getElementById('wfm25WorkerPanel');
     const body = document.getElementById('wfm25CapacityBody');
     const addBtn = document.getElementById('wfm25AdjustHoursBtn');
-    if (panel) panel.hidden = false;
+    if (panel) {
+      panel.hidden = false;
+      if (!wfm25MotionReduced_()) {
+        panel.classList.remove('wfm25-motion-panel-exit');
+        panel.classList.add('wfm25-motion-panel-enter');
+        panel.addEventListener('animationend', function onEnterEnd() {
+          panel.classList.remove('wfm25-motion-panel-enter');
+          panel.removeEventListener('animationend', onEnterEnd);
+        });
+      }
+    }
     if (body) body.classList.add('wfm25-panel-open');
     if (addBtn) addBtn.hidden = false;
 
@@ -8065,7 +8108,7 @@ async function _qaRefreshPsaHours_() {
   /**
    * Close the worker panel and return to full-width aggregate.
    */
-  function wfm25CloseWorkerPanel_() {
+  function wfm25CloseWorkerPanelCore_() {
     WFM25State.workerReqId++;
     WFM25State.selectedWorker = null;
     WFM25State.selectedWorkerTeam = null;
@@ -8094,6 +8137,26 @@ async function _qaRefreshPsaHours_() {
     } else {
       wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
     }
+  }
+
+  /**
+   * Close the worker panel with optional slide-out motion.
+   */
+  function wfm25CloseWorkerPanel_() {
+    const panel = document.getElementById('wfm25WorkerPanel');
+    if (panel && !panel.hidden && !wfm25MotionReduced_()) {
+      panel.classList.remove('wfm25-motion-panel-enter');
+      panel.classList.add('wfm25-motion-panel-exit');
+      const onEnd = function () {
+        panel.removeEventListener('animationend', onEnd);
+        panel.classList.remove('wfm25-motion-panel-exit');
+        wfm25CloseWorkerPanelCore_();
+      };
+      panel.addEventListener('animationend', onEnd);
+      setTimeout(onEnd, wfm25MotionDurationMs_() + 40);
+      return;
+    }
+    wfm25CloseWorkerPanelCore_();
   }
 
   // ── WFM.25 soft-booking overlay + live projection ─────────────
@@ -8488,7 +8551,6 @@ async function _qaRefreshPsaHours_() {
       return;
     }
 
-    const colCount = 1 + qKeys.length;
     const rows = [];
     const projection = State.explorerProjection;
     const hasDraft = State.softBookings && State.softBookings.length;
@@ -8558,35 +8620,43 @@ async function _qaRefreshPsaHours_() {
       }
     });
 
-    body.innerHTML = rows.join('');
+    const wrap = document.getElementById('wfm25UtilWrap');
 
-    // ── Wire team-row clicks (expand / collapse + breadcrumb) ──
-    $$('.wfm25-team-row', body).forEach(function (tr) {
-      tr.addEventListener('click', function () {
-        if (WFM25State.selectedWorker) {
-          wfm25CloseWorkerPanel_();
-        }
-        const tl = tr.dataset.wfm25Team;
-        if (WFM25State.expandedTeam === tl) {
-          WFM25State.expandedTeam = null;
-          wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
-        } else {
-          WFM25State.expandedTeam = tl;
-          wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, tl]);
-        }
-        renderWFM25UtilTable_(WFM25State.scorecardData);
-      });
-    });
+    function paintAndWire_() {
+      body.innerHTML = rows.join('');
 
-    // ── Wire worker-row clicks → open right-side panel ──
-    $$('.wfm25-worker-row', body).forEach(function (tr) {
-      tr.addEventListener('click', function (e) {
-        e.stopPropagation();
-        const wName = tr.dataset.wfm25Worker;
-        const tName = tr.dataset.wfm25Team;
-        wfm25OpenWorkerPanel_(wName, tName);
+      $$('.wfm25-team-row', body).forEach(function (tr) {
+        tr.addEventListener('click', function () {
+          if (WFM25State.selectedWorker) {
+            wfm25CloseWorkerPanel_();
+          }
+          const tl = tr.dataset.wfm25Team;
+          if (WFM25State.expandedTeam === tl) {
+            WFM25State.expandedTeam = null;
+            wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+          } else {
+            WFM25State.expandedTeam = tl;
+            wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, tl]);
+          }
+          renderWFM25UtilTable_(WFM25State.scorecardData);
+        });
       });
-    });
+
+      $$('.wfm25-worker-row', body).forEach(function (tr) {
+        tr.addEventListener('click', function (e) {
+          e.stopPropagation();
+          const wName = tr.dataset.wfm25Worker;
+          const tName = tr.dataset.wfm25Team;
+          wfm25OpenWorkerPanel_(wName, tName);
+        });
+      });
+    }
+
+    if (wrap) {
+      wfm25MotionDrillUpdate_(wrap, paintAndWire_);
+    } else {
+      paintAndWire_();
+    }
   }
 
   /**
@@ -8625,7 +8695,23 @@ async function _qaRefreshPsaHours_() {
     }
   }
 
-  // ── Reusable collapse transition ─────────────────────────────
+  // ── Reusable motion / collapse transition primitive ─────────
+
+  /**
+   * Whether the user prefers reduced motion.
+   * @returns {boolean}
+   */
+  function wfm25MotionReduced_() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  /**
+   * Standard motion duration in ms (0 when reduced motion).
+   * @returns {number}
+   */
+  function wfm25MotionDurationMs_() {
+    return wfm25MotionReduced_() ? 0 : 220;
+  }
 
   /**
    * Show or hide a collapse host with height + opacity transition.
@@ -8635,7 +8721,37 @@ async function _qaRefreshPsaHours_() {
   function wfm25CollapseSetVisible_(hostEl, visible) {
     if (!hostEl) return;
     hostEl.classList.toggle('wfm25-collapse-hidden', !visible);
+    hostEl.classList.toggle('wfm25-motion-collapse-hidden', !visible);
     hostEl.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  }
+
+  /**
+   * Run a DOM update with drill zoom-in-place motion on a host element.
+   * @param {HTMLElement|null} hostEl
+   * @param {function():void} updateFn
+   */
+  function wfm25MotionDrillUpdate_(hostEl, updateFn) {
+    if (!hostEl || wfm25MotionReduced_()) {
+      updateFn();
+      return;
+    }
+    hostEl.classList.add('wfm25-motion-drill-exit');
+    const finishExit = function (e) {
+      if (e && e.propertyName && e.propertyName !== 'opacity') return;
+      hostEl.removeEventListener('transitionend', finishExit);
+      updateFn();
+      hostEl.classList.remove('wfm25-motion-drill-exit');
+      hostEl.classList.add('wfm25-motion-drill-enter');
+      const finishEnter = function () {
+        hostEl.classList.remove('wfm25-motion-drill-enter');
+        hostEl.removeEventListener('animationend', finishEnter);
+      };
+      hostEl.addEventListener('animationend', finishEnter);
+    };
+    hostEl.addEventListener('transitionend', finishExit);
+    setTimeout(function () {
+      if (hostEl.classList.contains('wfm25-motion-drill-exit')) finishExit(null);
+    }, wfm25MotionDurationMs_() + 40);
   }
 
   /**
@@ -9778,6 +9894,323 @@ async function _qaRefreshPsaHours_() {
     }
   }
 
+  // ── WFM.25 Global Search overlay ─────────────────────────────
+
+  const WFM25SearchState = {
+    flatResults: [],
+    groupedResults: { teams: [], workers: [], roles: [] },
+    activeIndex: -1,
+    reqId: 0,
+    debounceTimer: null
+  };
+
+  /**
+   * Ensure Capacity view is active before navigating from search.
+   */
+  function wfm25EnsureCapacityView_() {
+    if (WFM25State.activeView === 'capacity') return;
+    const capBtn = document.querySelector('.wfm25-strip-btn[data-wfm25-nav="capacity"]');
+    if (capBtn) capBtn.click();
+  }
+
+  /**
+   * Drill to a team using existing breadcrumb/zoom navigation.
+   * @param {string|null} teamLabel
+   */
+  function wfm25NavigateToTeam_(teamLabel) {
+    wfm25EnsureCapacityView_();
+    wfm25ActivateTab_('utilization');
+    WFM25State.expandedTeam = teamLabel || null;
+    if (teamLabel) {
+      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, teamLabel]);
+    } else {
+      wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+    }
+    if (WFM25State.scorecardData) {
+      renderWFM25UtilTable_(WFM25State.scorecardData);
+    } else {
+      loadWFM25Utilization_();
+    }
+  }
+
+  /**
+   * Navigate to a search result via existing routing only.
+   * @param {{type:string, label?:string, name?:string, teamLabel?:string, sampleTeam?:string}} item
+   */
+  function wfm25NavigateSearchResult_(item) {
+    if (!item || !item.type) return;
+    wfm25CloseGlobalSearch_();
+    if (item.type === 'team') {
+      wfm25NavigateToTeam_(item.label || '');
+    } else if (item.type === 'worker') {
+      wfm25NavigateToTeam_(item.teamLabel || null);
+      wfm25OpenWorkerPanel_(item.name, item.teamLabel || null);
+    } else if (item.type === 'role') {
+      wfm25NavigateToTeam_(item.sampleTeam || null);
+    }
+  }
+
+  /**
+   * Flatten grouped api_searchDirectory results for keyboard nav.
+   * @param {{teams:Object[], workers:Object[], roles:Object[]}} data
+   * @returns {Object[]}
+   */
+  function wfm25FlattenSearchResults_(data) {
+    const flat = [];
+    (data.teams || []).forEach(function (t) {
+      flat.push({ type: 'team', label: t.label });
+    });
+    (data.workers || []).forEach(function (w) {
+      flat.push({
+        type: 'worker',
+        name: w.name,
+        teamLabel: w.teamLabel || '',
+        roleCategory: w.roleCategory || ''
+      });
+    });
+    (data.roles || []).forEach(function (r) {
+      flat.push({
+        type: 'role',
+        label: r.label,
+        sampleTeam: r.sampleTeam || '',
+        count: r.count || 0
+      });
+    });
+    return flat;
+  }
+
+  /**
+   * Render grouped search results in the overlay listbox.
+   * @param {{teams:Object[], workers:Object[], roles:Object[]}} data
+   */
+  function wfm25RenderSearchResults_(data) {
+    const container = document.getElementById('wfm25SearchResults');
+    if (!container) return;
+
+    WFM25SearchState.flatResults = wfm25FlattenSearchResults_(data);
+    WFM25SearchState.groupedResults = data || { teams: [], workers: [], roles: [] };
+    if (!WFM25SearchState.flatResults.length) {
+      container.innerHTML = '<div class="wfm25-search-empty muted">No matches</div>';
+      WFM25SearchState.activeIndex = -1;
+      return;
+    }
+
+    let html = '';
+    let flatIdx = 0;
+
+    function itemBtn_(item, meta) {
+      const idx = flatIdx++;
+      const active = idx === WFM25SearchState.activeIndex ? ' wfm25-search-item-active' : '';
+      const dot = item.type === 'team'
+        ? '<span class="wfm25-team-dot" style="background:' +
+          wfm25TeamColor_(item.label) + '"></span>'
+        : '';
+      const label = item.type === 'worker' ? item.name : item.label;
+      return '<button type="button" class="wfm25-search-item' + active + '"' +
+        ' role="option" data-wfm25-search-idx="' + idx + '"' +
+        (idx === WFM25SearchState.activeIndex ? ' aria-selected="true"' : '') + '>' +
+        dot + '<span>' + escapeHtml_(label) + '</span>' +
+        (meta ? '<span class="wfm25-search-item-meta">' + escapeHtml_(meta) + '</span>' : '') +
+        '</button>';
+    }
+
+    if ((data.teams || []).length) {
+      html += '<div class="wfm25-search-group-label">Teams</div>';
+      data.teams.forEach(function (t) {
+        html += itemBtn_({ type: 'team', label: t.label }, '');
+      });
+    }
+    if ((data.workers || []).length) {
+      html += '<div class="wfm25-search-group-label">Workers</div>';
+      data.workers.forEach(function (w) {
+        html += itemBtn_({
+          type: 'worker',
+          name: w.name,
+          teamLabel: w.teamLabel || ''
+        }, w.teamLabel || '');
+      });
+    }
+    if ((data.roles || []).length) {
+      html += '<div class="wfm25-search-group-label">Roles</div>';
+      data.roles.forEach(function (r) {
+        html += itemBtn_({
+          type: 'role',
+          label: r.label,
+          sampleTeam: r.sampleTeam || '',
+          count: r.count || 0
+        }, r.count ? String(r.count) : '');
+      });
+    }
+
+    container.innerHTML = html;
+    $$('.wfm25-search-item', container).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = Number(btn.dataset.wfm25SearchIdx);
+        const item = WFM25SearchState.flatResults[idx];
+        if (item) wfm25NavigateSearchResult_(item);
+      });
+    });
+  }
+
+  /**
+   * Fetch directory matches from read-only api_searchDirectory.
+   * @param {string} query
+   */
+  async function wfm25FetchSearchResults_(query) {
+    const reqId = ++WFM25SearchState.reqId;
+    try {
+      const data = await call('api_searchDirectory', query);
+      if (reqId !== WFM25SearchState.reqId) return;
+      wfm25RenderSearchResults_(data || { teams: [], workers: [], roles: [] });
+    } catch (err) {
+      if (reqId !== WFM25SearchState.reqId) return;
+      const container = document.getElementById('wfm25SearchResults');
+      if (container) {
+        container.innerHTML = '<div class="wfm25-search-empty muted">Search failed: ' +
+          escapeHtml_(err.message || String(err)) + '</div>';
+      }
+    }
+  }
+
+  /**
+   * Open the global search command palette.
+   */
+  function wfm25OpenGlobalSearch_() {
+    const overlay = document.getElementById('wfm25SearchOverlay');
+    const input = document.getElementById('wfm25SearchInput');
+    if (!overlay) return;
+    overlay.hidden = false;
+    overlay.classList.remove('wfm25-motion-overlay-exit');
+    if (!wfm25MotionReduced_()) overlay.classList.add('wfm25-motion-overlay-enter');
+    document.body.style.overflow = 'hidden';
+    WFM25SearchState.activeIndex = -1;
+    WFM25SearchState.flatResults = [];
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    wfm25RenderSearchResults_({ teams: [], workers: [], roles: [] });
+    const container = document.getElementById('wfm25SearchResults');
+    if (container) {
+      container.innerHTML = '<div class="wfm25-search-empty muted">Type to search teams, workers, or roles</div>';
+    }
+  }
+
+  /**
+   * Close the global search overlay with motion.
+   */
+  function wfm25CloseGlobalSearch_() {
+    const overlay = document.getElementById('wfm25SearchOverlay');
+    if (!overlay || overlay.hidden) return;
+    WFM25SearchState.reqId++;
+
+    function hide_() {
+      overlay.hidden = true;
+      overlay.classList.remove('wfm25-motion-overlay-enter', 'wfm25-motion-overlay-exit');
+      document.body.style.overflow = '';
+    }
+
+    if (wfm25MotionReduced_()) {
+      hide_();
+      return;
+    }
+    overlay.classList.remove('wfm25-motion-overlay-enter');
+    overlay.classList.add('wfm25-motion-overlay-exit');
+    overlay.addEventListener('animationend', hide_, { once: true });
+    setTimeout(hide_, wfm25MotionDurationMs_() + 40);
+  }
+
+  /**
+   * Move keyboard selection within search results.
+   * @param {number} delta
+   */
+  function wfm25MoveSearchSelection_(delta) {
+    const total = WFM25SearchState.flatResults.length;
+    if (!total) return;
+    let next = WFM25SearchState.activeIndex + delta;
+    if (next < 0) next = total - 1;
+    if (next >= total) next = 0;
+    WFM25SearchState.activeIndex = next;
+    wfm25RenderSearchResults_(WFM25SearchState.groupedResults);
+    const activeBtn = document.querySelector(
+      '.wfm25-search-item[data-wfm25-search-idx="' + next + '"]'
+    );
+    if (activeBtn) activeBtn.scrollIntoView({ block: 'nearest' });
+  }
+
+  /**
+   * Wire global search overlay: open/close, debounced fetch, keyboard nav, focus trap.
+   */
+  function initWFM25GlobalSearch_() {
+    const overlay = document.getElementById('wfm25SearchOverlay');
+    const input = document.getElementById('wfm25SearchInput');
+    const trigger = document.getElementById('wfm25SearchTrigger');
+    const legacyBtn = document.getElementById('wfm25SearchBtn');
+    const backdrop = document.getElementById('wfm25SearchBackdrop');
+
+    function onQueryInput_() {
+      const q = (input && input.value) ? input.value.trim() : '';
+      WFM25SearchState.activeIndex = -1;
+      if (WFM25SearchState.debounceTimer) clearTimeout(WFM25SearchState.debounceTimer);
+      if (!q) {
+        const container = document.getElementById('wfm25SearchResults');
+        if (container) {
+          container.innerHTML = '<div class="wfm25-search-empty muted">Type to search teams, workers, or roles</div>';
+        }
+        WFM25SearchState.flatResults = [];
+        WFM25SearchState.groupedResults = { teams: [], workers: [], roles: [] };
+        return;
+      }
+      WFM25SearchState.debounceTimer = setTimeout(function () {
+        wfm25FetchSearchResults_(q);
+      }, 180);
+    }
+
+    if (trigger) trigger.addEventListener('click', wfm25OpenGlobalSearch_);
+    if (legacyBtn) legacyBtn.addEventListener('click', wfm25OpenGlobalSearch_);
+    if (backdrop) backdrop.addEventListener('click', wfm25CloseGlobalSearch_);
+
+    if (input) {
+      input.addEventListener('input', onQueryInput_);
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          wfm25MoveSearchSelection_(1);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          wfm25MoveSearchSelection_(-1);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const item = WFM25SearchState.flatResults[WFM25SearchState.activeIndex];
+          if (item) {
+            wfm25NavigateSearchResult_(item);
+          } else if (WFM25SearchState.flatResults.length === 1) {
+            wfm25NavigateSearchResult_(WFM25SearchState.flatResults[0]);
+          } else if ((input.value || '').trim()) {
+            wfm25FetchSearchResults_(input.value.trim());
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          wfm25CloseGlobalSearch_();
+        }
+      });
+    }
+
+    document.addEventListener('keydown', function (e) {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (overlay && !overlay.hidden) {
+          wfm25CloseGlobalSearch_();
+        } else {
+          wfm25OpenGlobalSearch_();
+        }
+      } else if (e.key === 'Escape' && overlay && !overlay.hidden) {
+        wfm25CloseGlobalSearch_();
+      }
+    });
+  }
+
   // ── WFM.25 main init ──────────────────────────────────────────
 
   /**
@@ -9838,13 +10271,8 @@ async function _qaRefreshPsaHours_() {
       });
     });
 
-    // ── Search icon (stub) ──
-    const searchBtn = document.getElementById('wfm25SearchBtn');
-    if (searchBtn) {
-      searchBtn.addEventListener('click', function () {
-        toast('Global search is coming in a later stage', '');
-      });
-    }
+    // ── Global search overlay ──
+    initWFM25GlobalSearch_();
 
     // ── Worker panel close + soft-booking overlay ──
     const panelClose = document.getElementById('wfm25WorkerPanelClose');

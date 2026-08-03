@@ -3899,6 +3899,66 @@ function api_listAllWorkers() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Read-only directory search for WFM.25 global search overlay.
+ * Matches teams, workers, and roles from enriched resource index — no writes.
+ * @param {string} query
+ * @return {{teams:Object[], workers:Object[], roles:Object[]}}
+ */
+function api_searchDirectory(query) {
+  _requireAuthorized_();
+  var q = String(query || '').trim().toLowerCase();
+  if (!q) return { teams: [], workers: [], roles: [] };
+
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_()
+    : _resourceIndex_(readTable_(ALLOC_NORM));
+
+  var teamSet = {};
+  var workers = [];
+  var roleMap = {};
+  var workerCap = 12;
+  var teamCap = 8;
+  var roleCap = 8;
+
+  Object.keys(resIndex || {}).forEach(function (key) {
+    var res = resIndex[key];
+    if (!res) return;
+    var name = String(res.name || '').trim();
+    var team = String(res.resolved_team || '').trim();
+    var role = String(res.role_category || res.icp || '').trim();
+    if (!name) return;
+
+    if (team && team.toLowerCase().indexOf(q) >= 0) {
+      teamSet[team] = true;
+    }
+    if (name.toLowerCase().indexOf(q) >= 0 && workers.length < workerCap) {
+      workers.push({
+        name: name,
+        teamLabel: team,
+        roleCategory: role
+      });
+    }
+    if (role && role.toLowerCase().indexOf(q) >= 0) {
+      if (!roleMap[role]) {
+        roleMap[role] = { label: role, count: 0, sampleTeam: team || '' };
+      }
+      roleMap[role].count++;
+      if (!roleMap[role].sampleTeam && team) roleMap[role].sampleTeam = team;
+    }
+  });
+
+  var teams = Object.keys(teamSet).sort(function (a, b) { return a.localeCompare(b); })
+    .slice(0, teamCap)
+    .map(function (label) { return { label: label }; });
+
+  var roles = Object.keys(roleMap).sort(function (a, b) { return a.localeCompare(b); })
+    .slice(0, roleCap)
+    .map(function (k) { return roleMap[k]; });
+
+  return { teams: teams, workers: workers, roles: roles };
+}
+
 function api_uploadStaffFile(base64, filename) {
   _requireAuthorized_();
   return uploadStaffFile(base64, filename);

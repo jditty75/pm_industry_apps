@@ -1278,6 +1278,9 @@ function _blendWorkerWeeklyMaps_(worker, actualsByWorker) {
   Object.keys(allWeekKeys).forEach(function (wk) {
     if (wActuals.hasOwnProperty(wk)) {
       worker.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
+      // Actual weeks are non-reducible; zero forecast productive so clamp cannot
+      // consume assignment hours on weeks already closed in D8 actuals.
+      worker.productiveWeekly[wk] = 0;
     } else {
       worker.blendedWeekly[wk] = {
         hours: worker.workerWeekly[wk] || 0,
@@ -2339,7 +2342,6 @@ function committedReductionHoursForQuarter_(worker, quarterKey, calendar) {
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
   const calendar = readCalendar_();
   committedAssignmentQuarterIndex_(calendar);
-  committedReductionQuarterIndex_(calendar);
   _wowQuarterTargetIndex_();
   return quarterKeys.map(function (qk) {
     const wd = quarterWorkdaySummary_(qk, holidays);
@@ -2353,7 +2355,6 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     let icpUtil = 0;
     let stale = false;
     let committedAssignmentHours = 0;
-    let committedReductionHours = 0;
 
     // D8.1: the current-quarter actuals path only applies when a same-scale
     // bonus target exists. The qtd_icp_plus_forecast numerator is bonus-scale
@@ -2364,9 +2365,7 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
         summary.bonus_target_billable_hours_eoq > 0) {
       committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
-      committedReductionHours = committedReductionHoursForQuarter_(worker, qk, calendar);
-      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours
-        - committedReductionHours;
+      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours;
       targetHours = summary.bonus_target_billable_hours_eoq;
       bonusAttainment = productiveHours / targetHours;
       source = 'actuals_plus_forecast';
@@ -2414,8 +2413,7 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       bonusAttainment: Number(bonusAttainment) || 0,
       source: source,
       stale: !!stale,
-      committedAssignmentHours: Number(committedAssignmentHours) || 0,
-      committedReductionHours: Number(committedReductionHours) || 0
+      committedAssignmentHours: Number(committedAssignmentHours) || 0
     };
   });
 }

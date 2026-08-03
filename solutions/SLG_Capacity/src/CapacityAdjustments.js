@@ -96,6 +96,7 @@ function saveCapacityAdjustment_(adj) {
 
   invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') invalidateSoftBookingBaselineCache_();
   return adj;
 }
 
@@ -122,6 +123,7 @@ function deleteCapacityAdjustment_(adjustment_id) {
       sh.deleteRow(r + 1);
       invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
       if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+      if (typeof invalidateSoftBookingBaselineCache_ === 'function') invalidateSoftBookingBaselineCache_();
       return { deleted: true };
     }
   }

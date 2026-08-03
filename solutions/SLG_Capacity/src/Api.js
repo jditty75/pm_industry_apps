@@ -1037,9 +1037,12 @@ function _quarterCapacityForProjection_(quarterKey, holidays) {
  * @param {Object} forecast baseline or projected forecast (mutates workers in place)
  * @param {string[]} resourceNames
  * @param {Object} forecastParams computeWeeklyForecast_ params
+ * @param {{forceRefresh?:boolean}} [options] when true, rebuild weekly maps even if blendedWeekly exists
  */
-function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastParams) {
+function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastParams, options) {
   if (!forecast || !resourceNames || !resourceNames.length) return;
+  options = options || {};
+  var forceRefresh = !!options.forceRefresh;
   var targets = {};
   resourceNames.forEach(function (rn) {
     rn = String(rn || '').trim();
@@ -1049,7 +1052,7 @@ function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastPa
 
   var needs = false;
   (forecast.workers || []).forEach(function (w) {
-    if (targets[w.resource] && !w.blendedWeekly) needs = true;
+    if (targets[w.resource] && (!w.blendedWeekly || forceRefresh)) needs = true;
   });
   if (!needs) return;
 
@@ -1067,10 +1070,11 @@ function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastPa
 
   var workerByName = {};
   (forecast.workers || []).forEach(function (w) {
-    if (!targets[w.resource] || w.blendedWeekly) return;
+    if (!targets[w.resource] || (w.blendedWeekly && !forceRefresh)) return;
     w.workerWeekly = {};
     w.productiveWeekly = {};
     w.projects = {};
+    delete w.quarterProductive;
     workerByName[w.resource] = w;
   });
 
@@ -1449,6 +1453,7 @@ function _buildProjectedReductionDelta_(baselineForecast, adjustments) {
       projects: JSON.parse(JSON.stringify(w.projects || {})),
       blendedWeekly: JSON.parse(JSON.stringify(w.blendedWeekly || {}))
     };
+    delete clone.quarterProductive;
     adjustments.forEach(function (adj) {
       if (adj.resource_name !== w.resource) return;
       applyCapacityAdjustmentWeekly_(function () { return clone; }, adj, calendar);
@@ -1489,22 +1494,18 @@ function _reductionClampWarnings_(baselineForecast, adjustments) {
   var warnings = [];
   adjustments.forEach(function (adj) {
     if (!adj.resource_name || !workerByName[adj.resource_name]) return;
-    var w = workerByName[adj.resource_name];
-    var requested = 0;
-    var applied = 0;
-    expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
-      var hrs = Number(wk.hours_reduction) || 0;
-      if (hrs <= 0) return;
-      requested += hrs;
-      var currentProd = (w.productiveWeekly && w.productiveWeekly[wk.week_key]) ||
-        (w.workerWeekly && w.workerWeekly[wk.week_key]) || 0;
-      applied += Math.min(hrs, Math.max(0, currentProd));
-    });
-    if (requested > applied + 0.05) {
+    var src = workerByName[adj.resource_name];
+    var snap = {
+      productiveWeekly: Object.assign({}, src.productiveWeekly || {}),
+      workerWeekly: Object.assign({}, src.workerWeekly || {}),
+      projects: JSON.parse(JSON.stringify(src.projects || {}))
+    };
+    var clamped = expandClampedAdjustmentWeekly_(snap, adj, calendar, false);
+    if (clamped.requested > clamped.applied + 0.05) {
       warnings.push({
         resource_name: String(adj.resource_name),
-        requested_hours: requested,
-        effective_hours: applied
+        requested_hours: clamped.requested,
+        effective_hours: clamped.applied
       });
     }
   });
@@ -1600,7 +1601,9 @@ function api_projectSoftBookings(params, softBookings) {
 
   var hydrateNames = Object.keys(weeklyWorkerNames);
   if (hydrateNames.length) {
-    _hydrateWorkersWeeklyForProjection_(baselineForecast, hydrateNames, forecastParams);
+    _hydrateWorkersWeeklyForProjection_(baselineForecast, hydrateNames, forecastParams, {
+      forceRefresh: inMemoryDraftReductions.length > 0
+    });
   }
 
   var projectedForecast = baselineForecast;
@@ -1761,6 +1764,7 @@ function api_commitSoftBookings(scenarioName, bookings) {
   invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   if (typeof _resetProjectionMemos_ === 'function') _resetProjectionMemos_();
+  invalidateSoftBookingBaselineCache_();
 
   Logger.log('api_commitSoftBookings: scenario_id=' + scenarioId + ' count=' + committed.length);
   return {

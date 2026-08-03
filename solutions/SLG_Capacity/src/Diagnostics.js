@@ -3710,12 +3710,15 @@ function _dbg_reconcileWFM23() {
       direction: 'reduce'
     };
     var expectedReduced = 0;
-    expandAdjustmentToWeekly_(commitShape, calendar).forEach(function (w) {
+    var clampSnap = {
+      productiveWeekly: Object.assign({}, workerPick.productiveWeekly || {}),
+      workerWeekly: Object.assign({}, workerPick.workerWeekly || {}),
+      projects: JSON.parse(JSON.stringify(workerPick.projects || {}))
+    };
+    var clamped = expandClampedAdjustmentWeekly_(clampSnap, commitShape, calendar, false);
+    clamped.weeks.forEach(function (w) {
       if (fiscalQuarterKey_(w.week_start) !== curQ) return;
-      var weekKey = w.week_key;
-      var current = Number(workerPick.productiveWeekly[weekKey]) || 0;
-      var requested = Number(w.hours_reduction) || 0;
-      expectedReduced += Math.min(requested, Math.max(0, current));
+      expectedReduced += Number(w.hours_reduction) || 0;
     });
     if (expectedReduced <= 0) {
       failures.push('Check 7: expectedReduced recomputed as 0 for ' + curQ);

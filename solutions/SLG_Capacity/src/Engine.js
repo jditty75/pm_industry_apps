@@ -1262,6 +1262,73 @@ function computeUtilization(params) {
  * }}
  */
 /**
+ * Productive hours available for per-week reduction zero-clamp (WFM.25).
+ * Single basis for preview and committed — productiveWeekly only, never workerWeekly.
+ * @param {Object} worker forecast worker row
+ * @param {string} weekKey
+ * @return {number}
+ */
+function productiveHoursAvailableForReductionClamp_(worker, weekKey) {
+  return Math.max(0, Number(worker.productiveWeekly && worker.productiveWeekly[weekKey]) || 0);
+}
+
+/**
+ * Expand an adjustment to weekly rows with per-week zero-clamp on productive hours.
+ * Sequential: each week clamps against productive hours remaining after prior weeks.
+ * @param {Object} worker forecast worker row (mutated when apply is true)
+ * @param {Object} adj
+ * @param {{weeks:Array}} calendar
+ * @param {boolean} [apply] when true, write clamped deltas to worker weekly maps
+ * @return {{
+ *   weeks: Array<{week_key:string, week_start:Date, hours_reduction:number}>,
+ *   applied: number,
+ *   requested: number
+ * }}
+ */
+function expandClampedAdjustmentWeekly_(worker, adj, calendar, apply) {
+  const out = { weeks: [], applied: 0, requested: 0 };
+  if (!worker || !adj) return out;
+  const projLabel = 'Capacity Adjustment';
+  expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
+    const hrs = Number(wk.hours_reduction) || 0;
+    if (!hrs) return;
+    const weekKey = wk.week_key;
+    if (hrs > 0) {
+      out.requested += hrs;
+      const currentProd = productiveHoursAvailableForReductionClamp_(worker, weekKey);
+      const weekApplied = Math.min(hrs, currentProd);
+      if (!weekApplied) return;
+      out.applied += weekApplied;
+      out.weeks.push({
+        week_key: weekKey,
+        week_start: wk.week_start,
+        hours_reduction: weekApplied
+      });
+      if (!apply) return;
+      worker.workerWeekly[weekKey] = Math.max(0, (worker.workerWeekly[weekKey] || 0) - weekApplied);
+      worker.productiveWeekly[weekKey] = currentProd - weekApplied;
+      if (!worker.projects[projLabel]) worker.projects[projLabel] = {};
+      worker.projects[projLabel][weekKey] = (worker.projects[projLabel][weekKey] || 0) - weekApplied;
+    } else {
+      const addAmt = -hrs;
+      out.requested += addAmt;
+      out.applied += addAmt;
+      out.weeks.push({
+        week_key: weekKey,
+        week_start: wk.week_start,
+        hours_reduction: -addAmt
+      });
+      if (!apply) return;
+      worker.workerWeekly[weekKey] = (worker.workerWeekly[weekKey] || 0) + addAmt;
+      worker.productiveWeekly[weekKey] = (worker.productiveWeekly[weekKey] || 0) + addAmt;
+      if (!worker.projects[projLabel]) worker.projects[projLabel] = {};
+      worker.projects[projLabel][weekKey] = (worker.projects[projLabel][weekKey] || 0) + addAmt;
+    }
+  });
+  return out;
+}
+
+/**
  * Apply weekly expansion of a capacity adjustment to worker weekly maps.
  * Reductions (positive hours_reduction) are zero-clamped per week on productive hours.
  * @param {function(string):Object} ensureWorker
@@ -1272,34 +1339,8 @@ function computeUtilization(params) {
 function applyCapacityAdjustmentWeekly_(ensureWorker, adj, calendar) {
   if (!adj || !adj.resource_name) return { applied: 0, requested: 0 };
   const w = ensureWorker(adj.resource_name);
-  let applied = 0;
-  let requested = 0;
-  const projLabel = 'Capacity Adjustment';
-  expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
-    const hrs = Number(wk.hours_reduction) || 0;
-    if (!hrs) return;
-    const weekKey = wk.week_key;
-    if (hrs > 0) {
-      requested += hrs;
-      const currentProd = w.productiveWeekly[weekKey] || 0;
-      const weekApplied = Math.min(hrs, Math.max(0, currentProd));
-      if (!weekApplied) return;
-      applied += weekApplied;
-      w.workerWeekly[weekKey] = Math.max(0, (w.workerWeekly[weekKey] || 0) - weekApplied);
-      w.productiveWeekly[weekKey] = currentProd - weekApplied;
-      if (!w.projects[projLabel]) w.projects[projLabel] = {};
-      w.projects[projLabel][weekKey] = (w.projects[projLabel][weekKey] || 0) - weekApplied;
-    } else {
-      const addAmt = -hrs;
-      requested += addAmt;
-      applied += addAmt;
-      w.workerWeekly[weekKey] = (w.workerWeekly[weekKey] || 0) + addAmt;
-      w.productiveWeekly[weekKey] = (w.productiveWeekly[weekKey] || 0) + addAmt;
-      if (!w.projects[projLabel]) w.projects[projLabel] = {};
-      w.projects[projLabel][weekKey] = (w.projects[projLabel][weekKey] || 0) + addAmt;
-    }
-  });
-  return { applied: applied, requested: requested };
+  const result = expandClampedAdjustmentWeekly_(w, adj, calendar, true);
+  return { applied: result.applied, requested: result.requested };
 }
 
 function computeWeeklyForecast_(params) {

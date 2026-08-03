@@ -3587,9 +3587,9 @@ function _dbg_reconcileWFM23() {
       ? '  Check 6: FAILED' : '  Check 6: OK');
   })();
 
-  // ---- Check 7: reduction draft preview == committed (A==B==C, zero-clamp) ----
+  // ---- Check 7: reduction draft preview == committed (A==B==C, forecast-remaining clamp) ----
   (function checkReductionReconciliation() {
-    Logger.log('=== WFM.25 Check 7: reduction preview == committed, A==B==C, zero-clamp ===');
+    Logger.log('=== WFM.25 Check 7: reduction preview == committed, A==B==C, forecast-remaining clamp ===');
     var params = {
       viewMode: 'Committed',
       workerScope: 'All',
@@ -3597,25 +3597,63 @@ function _dbg_reconcileWFM23() {
     };
     var curQ = fiscalQuarterKey_(new Date());
     var calendar = readCalendar_();
+    var forecast = computeWeeklyForecast_(params);
+    var weeks = forecast.weeks || [];
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
     var adjCountBefore = readTable_(CAPACITY_ADJUSTMENTS_SHEET).length;
-    var idsToDelete = [];
 
-    function readPaths_(workerName, employeeId) {
+    function forecastRemainingQuarter_(worker, quarterKey) {
+      return forecastRemainingProductiveForQuarter_(worker, quarterKey, weeks);
+    }
+
+    function clampSnapForWorker_(worker) {
+      return {
+        employeeId: worker.employeeId,
+        productiveWeekly: Object.assign({}, worker.productiveWeekly || {}),
+        workerWeekly: Object.assign({}, worker.workerWeekly || {}),
+        projects: JSON.parse(JSON.stringify(worker.projects || {})),
+        blendedWeekly: JSON.parse(JSON.stringify(worker.blendedWeekly || {}))
+      };
+    }
+
+    function expectedReduced_(worker, reduceHours, quarterKey) {
+      var bounds = fiscalQuarterBounds_(quarterKey);
+      var commitShape = {
+        resource_name: String(worker.resource || ''),
+        start_date: bounds.start,
+        end_date: bounds.end,
+        hours_reduction: reduceHours,
+        distribution: 'Even',
+        direction: 'reduce'
+      };
+      var clamped = expandClampedAdjustmentWeekly_(
+        clampSnapForWorker_(worker), commitShape, calendar, false);
+      var total = 0;
+      clamped.weeks.forEach(function (w) {
+        if (fiscalQuarterKey_(w.week_start) !== quarterKey) return;
+        total += Number(w.hours_reduction) || 0;
+      });
+      return total;
+    }
+
+    function readPaths_(workerName, employeeId, quarterKey) {
+      quarterKey = quarterKey || curQ;
       var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
-      var qA = (v2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      var qA = (v2.quarters || []).find(function (q) { return q.quarterKey === quarterKey; });
       var projection = api_projectSoftBookings(params, []);
       var baseWorker = (projection.baseline.worker || []).find(function (w) {
         return w.resourceName === workerName || String(w.employeeId || '') === employeeId;
       });
       var qB = baseWorker ? (baseWorker.quarters || []).find(function (q) {
-        return q.quarterKey === curQ;
+        return q.quarterKey === quarterKey;
       }) : null;
       var scorecard = computeQuarterlyScorecard_(params);
       var scWorker = (scorecard.workers || []).find(function (w) {
         return w.worker === workerName || String(w.employeeId || '') === employeeId;
       });
       var qC = scWorker ? (scWorker.quarters || []).find(function (q) {
-        return q.quarterKey === curQ;
+        return q.quarterKey === quarterKey;
       }) : null;
       return { qA: qA, qB: qB, qC: qC };
     }
@@ -3629,7 +3667,7 @@ function _dbg_reconcileWFM23() {
       var prodC = paths.qC ? Number(paths.qC.productiveHours) : NaN;
       if (isNaN(utilA) || isNaN(utilB) || isNaN(utilC) ||
           isNaN(prodA) || isNaN(prodB) || isNaN(prodC)) {
-        failures.push('Check 7 (' + label + '): missing current-quarter values');
+        failures.push('Check 7 (' + label + '): missing quarter values');
         return false;
       }
       if (!near_(utilA, utilB) || !near_(utilA, utilC) || !near_(utilB, utilC)) {
@@ -3646,148 +3684,173 @@ function _dbg_reconcileWFM23() {
       return true;
     }
 
-    var forecast = computeWeeklyForecast_(params);
-    var workerPick = null;
-    (forecast.workers || []).some(function (w) {
-      var prod = 0;
-      Object.keys(w.productiveWeekly || {}).forEach(function (wk) {
-        if (fiscalQuarterKey_(wk) === curQ) prod += Number(w.productiveWeekly[wk]) || 0;
+    function makeBooking_(worker, quarterKey, reduceHours) {
+      var bounds = fiscalQuarterBounds_(quarterKey);
+      return {
+        employee_id: String(worker.employeeId || ''),
+        resource_name: String(worker.resource || ''),
+        start_date: _toIso_(bounds.start),
+        end_date: _toIso_(bounds.end),
+        total_hours: reduceHours,
+        direction: 'reduce',
+        what: { type: 'label', label: 'WFM25 Check 7 test' }
+      };
+    }
+
+    function runReductionCase_(label, worker, quarterKey, reduceHours) {
+      var workerName = String(worker.resource || '');
+      var employeeId = String(worker.employeeId || '');
+      var forecastRemaining = forecastRemainingQuarter_(worker, quarterKey);
+      var expectedApplied = expectedReduced_(worker, reduceHours, quarterKey);
+
+      Logger.log('  --- ' + label + ': ' + workerName + ' ' + quarterKey +
+        ' draft=' + reduceHours + 'h forecastRemaining=' + forecastRemaining.toFixed(4) +
+        ' expectedApplied=' + expectedApplied.toFixed(4) + ' ---');
+
+      if (!near_(expectedApplied, Math.min(reduceHours, forecastRemaining))) {
+        failures.push('Check 7 (' + label + '): expectedApplied ' + expectedApplied.toFixed(4) +
+          ' != min(draft, forecastRemaining) ' + Math.min(reduceHours, forecastRemaining).toFixed(4));
+      }
+
+      var beforePaths = readPaths_(workerName, employeeId, quarterKey);
+      var beforeUtil = beforePaths.qA ? Number(beforePaths.qA.icpUtil) : NaN;
+
+      var preview = api_projectSoftBookings(params, [makeBooking_(worker, quarterKey, reduceHours)]);
+      var previewWorker = (preview.projected.worker || []).find(function (w) {
+        return w.resourceName === workerName;
       });
-      if (prod >= 30) {
-        workerPick = w;
+      var previewQ = previewWorker ? (previewWorker.quarters || []).find(function (q) {
+        return q.quarterKey === quarterKey;
+      }) : null;
+      var previewUtil = previewQ ? Number(previewQ.icpUtil) : NaN;
+      if (isNaN(previewUtil)) {
+        failures.push('Check 7 (' + label + '): preview projected icpUtil missing');
+        return;
+      }
+
+      (previewWorker && previewWorker.weeks ? previewWorker.weeks : []).forEach(function (wk) {
+        if (Number(wk.hours) < -0.001) {
+          failures.push('Check 7 (' + label + '): preview week ' + wk.weekKey +
+            ' hours below zero: ' + wk.hours);
+        }
+      });
+
+      if (expectedApplied <= 0.001) {
+        if (!near_(previewUtil, beforeUtil)) {
+          failures.push('Check 7 (' + label + '): zero-clamp preview util ' +
+            previewUtil.toFixed(6) + ' != baseline ' + beforeUtil.toFixed(6));
+        }
+      }
+
+      var commitResult = api_commitSoftBookings('', [makeBooking_(worker, quarterKey, reduceHours)]);
+      var commitId = commitResult.committed[0] && commitResult.committed[0].adjustment_id;
+      if (!commitId) {
+        failures.push('Check 7 (' + label + '): api_commitSoftBookings returned no adjustment_id');
+        return;
+      }
+      var caseIds = [String(commitId)];
+      invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+
+      var committedBaseline = api_projectSoftBookings(params, []);
+      var committedWorker = (committedBaseline.baseline.worker || []).find(function (w) {
+        return w.resourceName === workerName;
+      });
+      var committedQ = committedWorker ? (committedWorker.quarters || []).find(function (q) {
+        return q.quarterKey === quarterKey;
+      }) : null;
+      var committedUtil = committedQ ? Number(committedQ.icpUtil) : NaN;
+      if (!near_(previewUtil, committedUtil)) {
+        failures.push('Check 7 (' + label + '): preview util ' + previewUtil.toFixed(6) +
+          ' != committed baseline util ' + committedUtil.toFixed(6));
+      }
+
+      var afterPaths = readPaths_(workerName, employeeId, quarterKey);
+      if (!assertParity_(afterPaths, label + ' after')) {
+        Logger.log('  Check 7 (' + label + '): FAILED (after parity)');
+      }
+
+      var prodDeltaA = Number(afterPaths.qA.productiveHours) - Number(beforePaths.qA.productiveHours);
+      var prodDeltaB = Number(afterPaths.qB.productiveHours) - Number(beforePaths.qB.productiveHours);
+      var prodDeltaC = Number(afterPaths.qC.productiveHours) - Number(beforePaths.qC.productiveHours);
+      Logger.log('  ' + label + ' productiveHours delta A=' + prodDeltaA.toFixed(4) +
+        ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+        ' expected=' + (-expectedApplied).toFixed(4));
+
+      if (!near_(prodDeltaA, -expectedApplied) || !near_(prodDeltaB, -expectedApplied) ||
+          !near_(prodDeltaC, -expectedApplied)) {
+        failures.push('Check 7 (' + label + ' after): productiveHours delta A=' +
+          prodDeltaA.toFixed(4) + ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+          ' expected=' + (-expectedApplied).toFixed(4));
+      }
+
+      var v2After = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
+      (v2After.weeks || []).forEach(function (wk) {
+        if (!wk.isActual && Number(wk.hours) < -0.001) {
+          failures.push('Check 7 (' + label + '): committed week ' + wk.weekKey +
+            ' hours below zero: ' + wk.hours);
+        }
+      });
+
+      _dbg_wfm25DeleteAdjustmentsByIds_(caseIds);
+      invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+    }
+
+    // Sub-case (a): all-actuals current quarter — zero forecast-remaining, no util change.
+    var allActualsWorker = (forecast.workers || []).find(function (w) {
+      return String(w.resource || '') === 'Aidan Votaw';
+    });
+    if (!allActualsWorker) {
+      (forecast.workers || []).some(function (w) {
+        if (forecastRemainingQuarter_(w, curQ) > 0.05) return false;
+        var summary = w.employeeId ? actualsSummary[w.employeeId] : null;
+        if (!summary || !(summary.qtd_icp_plus_forecast_hours > 0)) return false;
+        allActualsWorker = w;
         return true;
+      });
+    }
+    if (!allActualsWorker) {
+      Logger.log('  SKIPPED sub-case (a): no all-actuals worker with zero forecast-remaining in ' + curQ);
+    } else {
+      Logger.log('  sub-case (a) worker: ' + allActualsWorker.resource + ' curQ=' + curQ +
+        ' forecastRemaining=' + forecastRemainingQuarter_(allActualsWorker, curQ).toFixed(4));
+      runReductionCase_('7a zero-clamp', allActualsWorker, curQ, 18);
+    }
+
+    // Sub-case (b): worker/quarter with forecast-remaining — under- and over-draft.
+    var forecastPick = null;
+    var forecastQk = null;
+    var windowKeys = scorecardWindowKeys_();
+    (forecast.workers || []).some(function (w) {
+      for (var i = 1; i < windowKeys.length; i++) {
+        var qk = windowKeys[i];
+        var remaining = forecastRemainingQuarter_(w, qk);
+        if (remaining >= 10) {
+          forecastPick = w;
+          forecastQk = qk;
+          return true;
+        }
       }
       return false;
     });
-    if (!workerPick) {
-      Logger.log('  SKIPPED: no worker with >=30h productive in ' + curQ);
-      return;
-    }
-    var workerName = String(workerPick.resource || '');
-    var employeeId = String(workerPick.employeeId || '');
-    Logger.log('  sample worker: ' + workerName + ' (' + employeeId + ') curQ=' + curQ);
-
-    var bounds = fiscalQuarterBounds_(curQ);
-    var reduceHours = 18;
-    var booking = {
-      employee_id: employeeId,
-      resource_name: workerName,
-      start_date: _toIso_(bounds.start),
-      end_date: _toIso_(bounds.end),
-      total_hours: reduceHours,
-      direction: 'reduce',
-      what: { type: 'label', label: 'WFM25 Check 7 test' }
-    };
-
-    var preview = api_projectSoftBookings(params, [booking]);
-    var previewWorker = (preview.projected.worker || []).find(function (w) {
-      return w.resourceName === workerName;
-    });
-    var previewQ = previewWorker ? (previewWorker.quarters || []).find(function (q) {
-      return q.quarterKey === curQ;
-    }) : null;
-    var previewUtil = previewQ ? Number(previewQ.icpUtil) : NaN;
-    if (isNaN(previewUtil)) {
-      failures.push('Check 7: preview projected icpUtil missing');
-      Logger.log('  Check 7: FAILED (preview util missing)');
-      return;
+    if (!forecastPick) {
+      Logger.log('  SKIPPED sub-case (b): no worker with >=10h forecast-remaining in current/forward quarter');
+    } else {
+      var remainingHrs = forecastRemainingQuarter_(forecastPick, forecastQk);
+      Logger.log('  sub-case (b) worker: ' + forecastPick.resource + ' quarter=' + forecastQk +
+        ' forecastRemaining=' + remainingHrs.toFixed(4));
+      var underDraft = Math.max(1, Math.min(8, Math.floor(remainingHrs * 0.4)));
+      runReductionCase_('7b under-draft', forecastPick, forecastQk, underDraft);
+      forecast = computeWeeklyForecast_(params);
+      forecastPick = (forecast.workers || []).find(function (w) {
+        return String(w.resource || '') === String(forecastPick.resource || '');
+      }) || forecastPick;
+      remainingHrs = forecastRemainingQuarter_(forecastPick, forecastQk);
+      var overDraft = Math.ceil(remainingHrs + 12);
+      runReductionCase_('7b over-draft', forecastPick, forecastQk, overDraft);
     }
 
-  // Zero-clamp: no forecast week below zero in preview weekly cells
-    var previewWeeks = previewWorker && previewWorker.weeks ? previewWorker.weeks : [];
-    previewWeeks.forEach(function (wk) {
-      if (Number(wk.hours) < -0.001) {
-        failures.push('Check 7: preview week ' + wk.weekKey + ' hours below zero: ' + wk.hours);
-      }
-    });
-
-    var commitShape = {
-      resource_name: workerName,
-      start_date: bounds.start,
-      end_date: bounds.end,
-      hours_reduction: reduceHours,
-      distribution: 'Even',
-      direction: 'reduce'
-    };
-    var expectedReduced = 0;
-    var clampSnap = {
-      employeeId: workerPick.employeeId,
-      productiveWeekly: Object.assign({}, workerPick.productiveWeekly || {}),
-      workerWeekly: Object.assign({}, workerPick.workerWeekly || {}),
-      projects: JSON.parse(JSON.stringify(workerPick.projects || {})),
-      blendedWeekly: JSON.parse(JSON.stringify(workerPick.blendedWeekly || {}))
-    };
-    var clamped = expandClampedAdjustmentWeekly_(clampSnap, commitShape, calendar, false);
-    clamped.weeks.forEach(function (w) {
-      if (fiscalQuarterKey_(w.week_start) !== curQ) return;
-      expectedReduced += Number(w.hours_reduction) || 0;
-    });
-    if (expectedReduced <= 0) {
-      failures.push('Check 7: expectedReduced recomputed as 0 for ' + curQ);
-      Logger.log('  Check 7: FAILED (expectedReduced=0)');
-      return;
-    }
-
-    var beforePaths = readPaths_(workerName, employeeId);
-    var beforeUtil = beforePaths.qA ? Number(beforePaths.qA.icpUtil) : NaN;
-    Logger.log('  preview util=' + previewUtil.toFixed(6) + ' before util=' +
-      (isNaN(beforeUtil) ? 'n/a' : beforeUtil.toFixed(6)) +
-      ' expectedReduced=' + expectedReduced.toFixed(4));
-
-    var commitResult = api_commitSoftBookings('', [booking]);
-    var commitId = commitResult.committed[0] && commitResult.committed[0].adjustment_id;
-    if (!commitId) {
-      failures.push('Check 7: api_commitSoftBookings returned no adjustment_id');
-      Logger.log('  Check 7: FAILED (no adjustment_id)');
-      return;
-    }
-    idsToDelete.push(String(commitId));
-    invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
-    if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
-
-    var committedBaseline = api_projectSoftBookings(params, []);
-    var committedWorker = (committedBaseline.baseline.worker || []).find(function (w) {
-      return w.resourceName === workerName;
-    });
-    var committedQ = committedWorker ? (committedWorker.quarters || []).find(function (q) {
-      return q.quarterKey === curQ;
-    }) : null;
-    var committedUtil = committedQ ? Number(committedQ.icpUtil) : NaN;
-    if (!near_(previewUtil, committedUtil)) {
-      failures.push('Check 7: preview util ' + previewUtil.toFixed(6) +
-        ' != committed baseline util ' + committedUtil.toFixed(6));
-    }
-
-    var afterPaths = readPaths_(workerName, employeeId);
-    if (!assertParity_(afterPaths, 'after')) {
-      Logger.log('  Check 7: FAILED (after parity)');
-    }
-
-    var prodDeltaA = Number(afterPaths.qA.productiveHours) - Number(beforePaths.qA.productiveHours);
-    var prodDeltaB = Number(afterPaths.qB.productiveHours) - Number(beforePaths.qB.productiveHours);
-    var prodDeltaC = Number(afterPaths.qC.productiveHours) - Number(beforePaths.qC.productiveHours);
-    Logger.log('  after commit productiveHours delta A=' + prodDeltaA.toFixed(4) +
-      ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
-      ' expectedReduced=' + expectedReduced.toFixed(4));
-
-    if (!near_(prodDeltaA, -expectedReduced) || !near_(prodDeltaB, -expectedReduced) ||
-        !near_(prodDeltaC, -expectedReduced)) {
-      failures.push('Check 7 (after): productiveHours delta A=' + prodDeltaA.toFixed(4) +
-        ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
-        ' expected=' + (-expectedReduced).toFixed(4));
-    }
-
-    // Zero-clamp after commit via resource detail weeks
-    var v2After = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
-    (v2After.weeks || []).forEach(function (wk) {
-      if (!wk.isActual && Number(wk.hours) < -0.001) {
-        failures.push('Check 7: committed week ' + wk.weekKey + ' hours below zero: ' + wk.hours);
-      }
-    });
-
-    _dbg_wfm25DeleteAdjustmentsByIds_(idsToDelete);
-    invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
-    if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
     var adjCountAfter = readTable_(CAPACITY_ADJUSTMENTS_SHEET).length;
     if (adjCountBefore !== adjCountAfter) {
       failures.push('Check 7: Capacity_Adjustments row count ' + adjCountBefore +

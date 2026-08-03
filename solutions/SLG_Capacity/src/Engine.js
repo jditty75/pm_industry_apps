@@ -1322,6 +1322,24 @@ function productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsByWo
 }
 
 /**
+ * Sum forecast-remaining productive hours reducible in a fiscal quarter (WFM.25).
+ * Single basis for clamp expected totals: actual/closed weeks contribute 0.
+ * @param {Object} worker computeWeeklyForecast_ worker row (blendedWeekly built)
+ * @param {string} quarterKey
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @param {Object} [actualsByWorker] optional preloaded map from getActualsByWorkerWeek_()
+ * @return {number}
+ */
+function forecastRemainingProductiveForQuarter_(worker, quarterKey, weeks, actualsByWorker) {
+  var sum = 0;
+  (weeks || []).forEach(function (wk) {
+    if (fiscalQuarterKey_(wk.week_start) !== quarterKey) return;
+    sum += productiveHoursAvailableForReductionClamp_(worker, wk.week_key, actualsByWorker);
+  });
+  return sum;
+}
+
+/**
  * Expand an adjustment to weekly rows with per-week zero-clamp on productive hours.
  * Sequential: each week clamps against productive hours remaining after prior weeks.
  * @param {Object} worker forecast worker row (mutated when apply is true)
@@ -2342,6 +2360,7 @@ function committedReductionHoursForQuarter_(worker, quarterKey, calendar) {
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
   const calendar = readCalendar_();
   committedAssignmentQuarterIndex_(calendar);
+  committedReductionQuarterIndex_(calendar);
   _wowQuarterTargetIndex_();
   return quarterKeys.map(function (qk) {
     const wd = quarterWorkdaySummary_(qk, holidays);
@@ -2355,6 +2374,7 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     let icpUtil = 0;
     let stale = false;
     let committedAssignmentHours = 0;
+    let committedReductionHours = 0;
 
     // D8.1: the current-quarter actuals path only applies when a same-scale
     // bonus target exists. The qtd_icp_plus_forecast numerator is bonus-scale
@@ -2365,7 +2385,9 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
         summary.bonus_target_billable_hours_eoq > 0) {
       committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
-      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours;
+      committedReductionHours = committedReductionHoursForQuarter_(worker, qk, calendar);
+      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours
+        - committedReductionHours;
       targetHours = summary.bonus_target_billable_hours_eoq;
       bonusAttainment = productiveHours / targetHours;
       source = 'actuals_plus_forecast';

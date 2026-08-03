@@ -1216,7 +1216,9 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
       return null;
     }
     var committedHrs = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
-    var num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
+    var committedReductionHrs = committedReductionHoursForQuarter_(worker, qk, calendar);
+    var num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs
+      - committedReductionHrs;
     var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
     if (baselineForecast) {
       var baseWorker = baselineByEmployeeId[employeeId];

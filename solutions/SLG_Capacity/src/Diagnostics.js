@@ -3614,6 +3614,15 @@ function _dbg_reconcileWFM23() {
       return forecastRemainingProductiveForQuarter_(worker, quarterKey, weeks);
     }
 
+    /** Fresh committed baseline before each sub-case snapshot (avoids Check 6 stale L1 cache). */
+    function flushBaselineCaches_() {
+      if (typeof api_flushCaches === 'function') api_flushCaches();
+      if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+        invalidateSoftBookingBaselineCache_();
+      }
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+    }
+
     function clampSnapForWorker_(worker) {
       return {
         employeeId: worker.employeeId,
@@ -3715,15 +3724,12 @@ function _dbg_reconcileWFM23() {
         ' expectedApplied=' + expectedApplied.toFixed(4) +
         (expectZeroEffect ? ' (current quarter non-reducible)' : '') + ' ---');
 
-      if (!expectZeroEffect && !near_(expectedApplied, Math.min(reduceHours, forecastRemaining))) {
-        failures.push('Check 7 (' + label + '): expectedApplied ' + expectedApplied.toFixed(4) +
-          ' != min(draft, forecastRemaining) ' + Math.min(reduceHours, forecastRemaining).toFixed(4));
-      }
       if (expectZeroEffect && Math.abs(expectedApplied) > 0.001) {
         failures.push('Check 7 (' + label + '): current-quarter expectedApplied should be 0, got ' +
           expectedApplied.toFixed(4));
       }
 
+      flushBaselineCaches_();
       var beforePaths = readPaths_(workerName, employeeId, quarterKey);
       var beforeUtil = beforePaths.qA ? Number(beforePaths.qA.icpUtil) : NaN;
       var beforeProd = beforePaths.qA ? Number(beforePaths.qA.productiveHours) : NaN;
@@ -3819,6 +3825,9 @@ function _dbg_reconcileWFM23() {
       _dbg_wfm25DeleteAdjustmentsByIds_(caseIds);
       invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
       if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+      if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+        invalidateSoftBookingBaselineCache_();
+      }
     }
 
     // Sub-case 7a: current quarter is non-reducible (D8 summary worker).

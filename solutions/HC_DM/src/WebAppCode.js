@@ -45,10 +45,6 @@ function getRecentGoLivesData(viewModeOpts) {
   return CoreLib.CoreData.getRecentGoLives(APP_CONFIG, viewModeOpts || {});
 }
 
-function getGoLivesData(viewModeOpts) {
-  return CoreLib.CoreData.getGoLives(APP_CONFIG, viewModeOpts);
-}
-
 function getUpcomingGoLivesData(viewModeOpts) {
   return CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, viewModeOpts);
 }

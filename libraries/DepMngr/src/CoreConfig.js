@@ -244,16 +244,11 @@ var CoreConfig = (function () {
     // Sheets
     // -------------------------------------------------------------------------
     cfg.sheets = cfg.sheets || {};
-    if (!cfg.sheets.activeDeployments)     cfg.sheets.activeDeployments     = 'ActiveDeployments';
-    if (!cfg.sheets.goLives)               cfg.sheets.goLives               = 'Go Lives';
     if (!cfg.sheets.deploymentOverrides)   cfg.sheets.deploymentOverrides   = 'DeploymentOverrides';
     if (!cfg.sheets.goLivesOverrides)      cfg.sheets.goLivesOverrides      = 'GoLivesOverrides';
     if (!cfg.sheets.deploymentsMeta)       cfg.sheets.deploymentsMeta       = 'DeploymentsMeta';
-    if (!cfg.sheets.changeLog)             cfg.sheets.changeLog             = 'ChangeLog';
     if (!cfg.sheets.execSummary)           cfg.sheets.execSummary           = 'ExecSummary';
     if (!cfg.sheets.healthReportSnapshots) cfg.sheets.healthReportSnapshots = 'HealthReportSnapshots';
-    if (!cfg.sheets.healthMonthlySummary)  cfg.sheets.healthMonthlySummary  = 'HealthMonthlySummary';
-    if (!cfg.sheets.healthYtdSummary)      cfg.sheets.healthYtdSummary      = 'HealthYtdSummary';
     if (!cfg.sheets.dashboard)             cfg.sheets.dashboard             = 'Dashboard';
     if (!cfg.sheets.appUsers)              cfg.sheets.appUsers              = 'AppUsers';
     if (!cfg.sheets.ddAssignment)          cfg.sheets.ddAssignment          = 'DD Assignment';

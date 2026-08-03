@@ -1187,125 +1187,6 @@ function _sfdcDataVersion_(cfg) {
   // PUBLIC: GO LIVES
   // ===========================================================================
 
-  // DEPRECATED in Phase 3i. Reads from the legacy 'Go Lives' sheet which is no
-  // longer being updated by the Salesforce Connector. Use getRecentGoLives()
-  // for all new callers. This function is kept in place until the Go Lives sheet
-  // is manually deleted by Jeff (post-validation per Phase 3i acceptance criteria).
-  function getGoLives(config, viewModeOpts) {
-    var cfg = CoreConfig.withDefaults(config);
-    var ss = getSpreadsheet_();
-    var sheet = ss.getSheetByName(cfg.sheets.goLives);
-    if (!sheet) throw new Error('Go Lives sheet not found: ' + cfg.sheets.goLives);
-
-    var lastRow = sheet.getLastRow();
-    if (lastRow < 2) return [];
-
-    var dataRange = sheet.getRange(2, 1, lastRow - 1, 10);
-    var values = dataRange.getValues();
-    var cols = cfg.columns.goLives;
-
-    var now = new Date();
-    var windowDays = cfg.report.goLivesWindowDays;
-    var windowStart = null;
-    var windowEnd = null;
-    if (windowDays && windowDays > 0) {
-      windowEnd = now;
-      windowStart = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
-    }
-
-    var allGoLives = values
-      .map(function (row, index) {
-        var rawDate = row[cols.GO_LIVE_DATE_ACTUAL - 1];
-        var dateObj = null;
-        var dateString = '';
-        if (rawDate) {
-          dateObj = (rawDate instanceof Date) ? rawDate : new Date(rawDate);
-          if (!isNaN(dateObj.getTime())) {
-            dateString = CoreUtils.formatDateToIsoString(dateObj);
-          }
-        }
-        return {
-          rowIndex:         index + 2,
-          accountName:      String(row[cols.ACCOUNT_NAME - 1] || ''),
-          industry:         String(row[cols.INDUSTRY - 1] || ''),
-          dam:              String(row[cols.DAM_FULL_NAME - 1] || ''),
-          wdEngManager:     String(row[cols.WD_ENG_MANAGER - 1] || ''),
-          partner:          String(row[cols.PARTNER - 1] || ''),
-          deploymentName:   String(row[cols.DEPLOYMENT_NAME - 1] || ''),
-          approach:         String(row[cols.SERVICES_APPROACH - 1] || ''),
-          productArea:      String(row[cols.PRODUCT_AREA - 1] || ''),
-          dateObj:          dateObj,
-          goLiveDateString: dateString,
-          inProduction:     String(row[cols.IN_PRODUCTION - 1] || '')
-        };
-      })
-      .filter(function (row) {
-        if (!(row.accountName || row.deploymentName) || !row.dateObj) return false;
-        if (isNaN(row.dateObj.getTime())) return false;
-        if (windowStart && windowEnd) {
-          return row.dateObj >= windowStart && row.dateObj <= windowEnd;
-        }
-        return true;
-      });
-
-    var groupedByAccount = {};
-    allGoLives.forEach(function (row) {
-      var key = row.accountName;
-      if (!groupedByAccount[key]) {
-        groupedByAccount[key] = {
-          accountName:        row.accountName,
-          industry:           row.industry,
-          dam:                row.dam,
-          wdEngManager:       row.wdEngManager,
-          partner:            row.partner,
-          deploymentName:     row.deploymentName,
-          approach:           row.approach,
-          productAreas:       [],
-          earliestDate:       row.dateObj,
-          earliestDateString: row.goLiveDateString,
-          inProduction:       row.inProduction
-        };
-      }
-      if (row.productArea && groupedByAccount[key].productAreas.indexOf(row.productArea) === -1) {
-        groupedByAccount[key].productAreas.push(row.productArea);
-      }
-      if (row.dateObj && row.dateObj < groupedByAccount[key].earliestDate) {
-        groupedByAccount[key].earliestDate = row.dateObj;
-        groupedByAccount[key].earliestDateString = row.goLiveDateString;
-      }
-    });
-
-    var overrides = getGoLivesOverridesMap_(cfg);
-    var effective = Object.keys(groupedByAccount)
-      .map(function (acct) {
-        var row = groupedByAccount[acct];
-        var ov = overrides[acct] || {};
-        if (ov.exclude) return null;
-        var effDate = ov.overrideDate
-          ? CoreUtils.formatDateToIsoString(ov.overrideDate)
-          : row.earliestDateString;
-        return {
-          accountName:       row.accountName,
-          industry:          row.industry,
-          dam:               row.dam,
-          wdEngManager:      row.wdEngManager,
-          partner:           ov.overridePartner || row.partner,
-          deploymentName:    row.deploymentName,
-          approach:          row.approach,
-          productArea:       row.productAreas.join(', '),
-          goLiveDate:        effDate,
-          inProduction:      row.inProduction,
-          excludeFromReport: !!ov.exclude,
-          reviewUsername:    ov.lastEditedBy || '',
-          reviewTimestamp:   ov.lastEditedAt || ''
-        };
-      })
-      .filter(Boolean)
-      .sort(function (a, b) { return new Date(a.goLiveDate) - new Date(b.goLiveDate); });
-
-    return applyViewModeFilter_(cfg, effective, viewModeOpts);
-  }
-
   /**
    * Phase 3a: Returns upcoming go-live rows for the 90-day window.
    *
@@ -4279,7 +4160,6 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
     _validateEffectiveDeployments:       _validateEffectiveDeployments,
-    getGoLives:                          getGoLives,
     getUpcomingGoLives:                  getUpcomingGoLives,
     updateDeploymentMeta:                updateDeploymentMeta,
     updateDeploymentOverride:            updateDeploymentOverride,

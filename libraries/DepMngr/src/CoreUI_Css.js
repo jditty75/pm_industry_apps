@@ -1328,6 +1328,17 @@ function _CoreUI_Css_getStylesheet() {
     '  letter-spacing: 0.5px; text-transform: uppercase;',
     '}',
 
+    '.ph-slide-frame { position:fixed; left:-10000px; top:0; width:1920px; height:1080px; background:#ffffff; overflow:hidden; padding:32px; box-sizing:border-box; }',
+    '.ph-slide-export .ph-kpis { display:flex; gap:16px; margin-bottom:24px; }',
+    '.ph-slide-export .ph-kpis > * { flex:1; }',
+    '.ph-slide-export .ph-grid { display:flex; gap:24px; }',
+    '.ph-slide-export .ph-grid > .ph-col { flex:1; }',
+    '.ph-slide-export .ph-header { padding: 18px 22px; margin-bottom: 22px; }',
+    '.ph-slide-export .ph-header .ph-title { font-size: 22px; }',
+    '.ph-slide-export .ph-kpi { padding: 16px 18px; }',
+    '.ph-slide-export .ph-kpi .ph-kpi-value { font-size: 36px; }',
+    '.ph-slide-export .ph-card { padding: 18px 20px; }',
+
     '@media (max-width: 900px) {',
     '  .ph-grid { grid-template-columns: 1fr; }',
     '  .ph-kpis { grid-template-columns: repeat(2, 1fr); }',

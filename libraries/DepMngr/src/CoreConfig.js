@@ -349,6 +349,8 @@ var CoreConfig = (function () {
       cfg.report.portfolioHealth.recentGoLivesWindowDays = cfg.report.goLivesWindowDays || 60;
     if (cfg.report.portfolioHealth.historyWindowMonths === undefined)
       cfg.report.portfolioHealth.historyWindowMonths = 6;
+    if (cfg.report.portfolioHealth.slideExportEnabled === undefined)
+      cfg.report.portfolioHealth.slideExportEnabled = true;
 
     // -------------------------------------------------------------------------
     // Data freshness (N4)

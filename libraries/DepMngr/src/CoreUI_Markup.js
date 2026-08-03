@@ -688,6 +688,7 @@ function _CoreUI_Markup_buildPortfolioTab_(ui, cfg) {
   var showIndicator = ui.personalization && ui.personalization.enabled &&
                       ui.personalization.showFullPortfolioIndicator !== false;
   var momentumEnabled = cfg && cfg.momentum && cfg.momentum.enabled === true;
+  var slideExportEnabled = !(cfg && cfg.report && cfg.report.portfolioHealth && cfg.report.portfolioHealth.slideExportEnabled === false);
 
   var toggleHtml = momentumEnabled ? [
     '  <div class="portfolio-subview-toggle seg-control no-export" id="portfolio-subview-toggle">',
@@ -731,6 +732,7 @@ function _CoreUI_Markup_buildPortfolioTab_(ui, cfg) {
     '  <div class="ph-toolbar no-export">',
     '    <button class="btn btn-secondary" onclick="loadPortfolioHealth()" style="margin-right: 8px;">🔄 Refresh</button>',
     (ui._isReadOnly ? '' : '    <button class="btn btn-primary" onclick="downloadPortfolioHealthPng()">⬇ Download PNG <span id="ph-spinner" class="spinner hidden"></span></button>'),
+    (ui._isReadOnly || !slideExportEnabled ? '' : '    <button class="btn btn-secondary" onclick="downloadPortfolioHealthSlidePng()">⬇ Download PNG (16:9 Slide) <span id="ph-slide-spinner" class="spinner hidden"></span></button>'),
     '  </div>',
     toggleHtml,
     '  <div id="portfolio-current-state">',

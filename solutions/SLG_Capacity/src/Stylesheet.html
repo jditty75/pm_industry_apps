@@ -3894,8 +3894,11 @@ td.cell-with-bar {
   cursor: pointer;
   transition: background .1s;
 }
-.wfm25-team-row:hover td {
-  background: var(--paper) !important;
+.wfm25-team-row:hover td:first-child {
+  background: var(--paper);
+}
+.wfm25-team-row:hover td:not(:first-child) {
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, .08);
 }
 .wfm25-team-row td {
   font-weight: 600;
@@ -3940,8 +3943,11 @@ td.cell-with-bar {
   transition: background .12s;
   position: relative;
 }
-.wfm25-worker-row:hover td {
-  background: var(--paper) !important;
+.wfm25-worker-row:hover td:first-child {
+  background: var(--paper);
+}
+.wfm25-worker-row:hover td:not(:first-child) {
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, .08);
 }
 .wfm25-worker-row td:first-child {
   padding-left: 36px !important;
@@ -4207,8 +4213,11 @@ td.cell-with-bar {
   border-bottom: 0;
 }
 
-.wfm25-table tbody tr:hover td {
+.wfm25-table tbody tr:hover td:first-child {
   background: var(--paper);
+}
+.wfm25-table tbody tr:hover td:not(:first-child) {
+  box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, .08);
 }
 
 /* Team identity helpers (for statically-classed rows) */

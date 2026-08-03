@@ -3845,9 +3845,12 @@
   }
 
   function renderExplorerWeeklyStrip_(weeks, projection, workerName) {
+    const weekEndingCaption =
+      '<span class="muted wfm25-week-ending-caption">Week ending</span>';
     if (!weeks || !weeks.length) {
-      return '<div class="explorer-section"><div class="explorer-section-title">Weekly capacity</div>' +
-        '<div class="muted">No weeks in scope.</div></div>';
+      return '<div class="explorer-section"><div class="explorer-section-head">' +
+        '<div class="explorer-section-title">Weekly capacity</div>' + weekEndingCaption +
+        '</div><div class="muted">No weeks in scope.</div></div>';
     }
     const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
     const projWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, true) : null;
@@ -3861,8 +3864,9 @@
     const actualSpan = seamColIdx >= 0 ? seamColIdx : 0;
     const forecastSpan = seamColIdx >= 0 ? weeks.length - seamColIdx : weeks.length;
 
-    let html = '<div class="explorer-section"><div class="explorer-section-title">Weekly capacity</div>' +
-      '<div class="explorer-weekly-scroll"><table class="data-table explorer-weekly-table"><thead>';
+    let html = '<div class="explorer-section"><div class="explorer-section-head">' +
+      '<div class="explorer-section-title">Weekly capacity</div>' + weekEndingCaption +
+      '</div><div class="explorer-weekly-scroll"><table class="data-table explorer-weekly-table"><thead>';
     if (seamWeekKey && seamColIdx > 0) {
       html += '<tr class="wf-zone-header">' +
         (actualSpan ? '<th class="wf-zone-actual" colspan="' + actualSpan + '">actual</th>' : '') +
@@ -3940,8 +3944,9 @@
    * @param {Object|null} [projection] api_projectSoftBookings result (WFM.25 draft overlay)
    * @param {string} [workerName] resource name for projection lookup
    */
-  function renderExplorerQuarterSection_(quarters, icpTarget, projection, workerName) {
-    const metric = ExplorerQuarterState.metric;
+  function renderExplorerQuarterSection_(quarters, icpTarget, projection, workerName, scorecardOpts) {
+    const opts = scorecardOpts || {};
+    const metric = opts.lockIcpView ? 'icp' : ExplorerQuarterState.metric;
     const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
     let cells = (quarters || []).map(function (q) {
       const curTag = q.isCurrentQuarter ? ' <span class="qs-cur-tag">current</span>' : '';
@@ -4001,16 +4006,25 @@
       return '<th class="qs-col-quarter">' + escapeHtml_(q.quarterLabel || q.quarterKey) + curTag + '</th>';
     }).join('');
 
-    const activeIcp = metric === 'icp' ? ' active' : '';
-    const activeBonus = metric === 'bonus' ? ' active' : '';
+    let metricControl;
+    if (opts.lockIcpView) {
+      // WFM.25 Stage 4: Bonus Attainment intentionally hidden pending keep/cut decision (Stage 6).
+      // Calculation/render path for bonus remains; only the toggle is suppressed and ICP is locked.
+      metricControl = '<span class="wfm25-scorecard-view-label">ICP Utilization</span>';
+    } else {
+      const activeIcp = metric === 'icp' ? ' active' : '';
+      const activeBonus = metric === 'bonus' ? ' active' : '';
+      metricControl =
+        '<div class="metric-toggle" id="explorerQsMetricToggle">' +
+          '<button type="button" class="btn-toggle' + activeIcp + '" data-metric="icp">ICP Utilization</button>' +
+          '<button type="button" class="btn-toggle' + activeBonus + '" data-metric="bonus">Bonus Attainment</button>' +
+        '</div>';
+    }
 
     return '<div class="explorer-section explorer-quarter-section">' +
       '<div class="explorer-section-head">' +
         '<div class="explorer-section-title">Rolling four-quarter scorecard</div>' +
-        '<div class="metric-toggle" id="explorerQsMetricToggle">' +
-          '<button type="button" class="btn-toggle' + activeIcp + '" data-metric="icp">ICP Utilization</button>' +
-          '<button type="button" class="btn-toggle' + activeBonus + '" data-metric="bonus">Bonus Attainment</button>' +
-        '</div></div>' +
+        metricControl + '</div>' +
       '<div class="explorer-quarter-scroll"><table class="data-table quarterly-scorecard-table explorer-quarter-table">' +
         '<thead><tr>' + headerCells + '</tr></thead>' +
         '<tbody><tr>' + cells + '</tr></tbody></table></div></div>';
@@ -7457,6 +7471,9 @@ async function _qaRefreshPsaHours_() {
    * @param {string} tabKey  'utilization' | 'hours-budget' | 'mix-trend'
    */
   function wfm25ActivateTab_(tabKey) {
+    if (WFM25State.selectedWorker) {
+      wfm25CloseWorkerPanel_();
+    }
     WFM25State.activeTab = tabKey;
     $$('.wfm25-tab').forEach(function (btn) {
       const on = btn.dataset.wfm25Tab === tabKey;
@@ -7646,18 +7663,9 @@ async function _qaRefreshPsaHours_() {
     body.innerHTML =
       renderExplorerSummaryStrip_(detail, meta) +
       renderExplorerWeeklyStrip_(detail.weeks || [], projection, workerName) +
-      renderExplorerQuarterSection_(detail.quarters || [], icpTarget, projection, workerName) +
+      renderExplorerQuarterSection_(detail.quarters || [], icpTarget, projection, workerName,
+        { lockIcpView: true }) +
       renderExplorerProjectsSection_(detail.projects || [], detail.weeks || []);
-
-    const toggle = body.querySelector('#explorerQsMetricToggle');
-    if (toggle) {
-      toggle.querySelectorAll('.btn-toggle').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          ExplorerQuarterState.metric = btn.dataset.metric || 'icp';
-          paintWFM25WorkerPanel_(State.explorerProjection);
-        });
-      });
-    }
     const projToggle = body.querySelector('.explorer-projects-toggle');
     if (projToggle) {
       projToggle.addEventListener('click', function () {
@@ -7902,6 +7910,7 @@ async function _qaRefreshPsaHours_() {
    * @param {string} teamLabel
    */
   async function wfm25OpenWorkerPanel_(workerName, teamLabel) {
+    ExplorerQuarterState.metric = 'icp';
     WFM25State.selectedWorker = workerName;
     WFM25State.selectedWorkerTeam = teamLabel || null;
     WFM25State.selectedWorkerDetail = null;
@@ -7971,7 +7980,10 @@ async function _qaRefreshPsaHours_() {
     closeWFM25SoftBookOverlay_();
 
     if (WFM25State.scorecardData) {
-      renderWFM25UtilAllocationBanner_(WFM25State.scorecardData);
+      renderWFM25UtilTable_(WFM25State.scorecardData);
+      if (WFM25State.activeTab === 'hours-budget') {
+        renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
+      }
     } else {
       wfm25CollapseSetVisible_(document.getElementById('wfm25UtilBannerCollapse'), true);
     }
@@ -8438,6 +8450,9 @@ async function _qaRefreshPsaHours_() {
     // ── Wire team-row clicks (expand / collapse + breadcrumb) ──
     $$('.wfm25-team-row', body).forEach(function (tr) {
       tr.addEventListener('click', function () {
+        if (WFM25State.selectedWorker) {
+          wfm25CloseWorkerPanel_();
+        }
         const tl = tr.dataset.wfm25Team;
         if (WFM25State.expandedTeam === tl) {
           WFM25State.expandedTeam = null;
@@ -8462,22 +8477,33 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Show or hide the Utilization panel loading shell (spinner only — no partial content).
+   * @param {boolean} loading
+   */
+  function wfm25SetUtilLoading_(loading) {
+    const loadingEl = document.getElementById('wfm25UtilLoading');
+    const contentEl = document.getElementById('wfm25UtilContent');
+    if (loadingEl) loadingEl.hidden = !loading;
+    if (contentEl) contentEl.hidden = loading;
+  }
+
+  /**
    * Fetch and render the Utilization tab via existing api_getQuarterlyScorecard.
    * Aggregates by team client-side. No new server endpoint.
    */
   async function loadWFM25Utilization_() {
-    const body = document.getElementById('wfm25UtilBody');
-    const headerRow = document.getElementById('wfm25UtilHeaderRow');
-    if (body) {
-      body.innerHTML = '<tr><td colspan="5" class="wfm25-util-loading-cell">' +
-        wfm25LoadingSpinnerHtml_() + '</td></tr>';
-    }
+    wfm25SetUtilLoading_(true);
     try {
       // Use SLG worker scope (same default as Dashboard; directors scoped via State.filters)
       const params = buildServerParams_({ workerScope: 'SLG' });
       const data = await call('api_getQuarterlyScorecard', params);
       renderWFM25UtilTable_(data);
+      wfm25SetUtilLoading_(false);
     } catch (err) {
+      wfm25SetUtilLoading_(false);
+      const body = document.getElementById('wfm25UtilBody');
+      const contentEl = document.getElementById('wfm25UtilContent');
+      if (contentEl) contentEl.hidden = false;
       if (body) {
         body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px;color:var(--thumbtack)">' +
           'Failed to load utilization data: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
@@ -9598,6 +9624,9 @@ async function _qaRefreshPsaHours_() {
    * Does NOT fake data. Makes the stub obvious as required by the spec.
    */
   function renderWFM25RoleStub_() {
+    wfm25SetUtilLoading_(false);
+    const contentEl = document.getElementById('wfm25UtilContent');
+    if (contentEl) contentEl.hidden = false;
     const headerRow = document.getElementById('wfm25UtilHeaderRow');
     const body      = document.getElementById('wfm25UtilBody');
     if (headerRow) $$('.wfm25-qth', headerRow).forEach(function (el) { el.remove(); });
@@ -9677,6 +9706,9 @@ async function _qaRefreshPsaHours_() {
     // ── Group-by toggle (Team only in Stage 4) ──
     $$('.wfm25-groupby-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        if (WFM25State.selectedWorker) {
+          wfm25CloseWorkerPanel_();
+        }
         $$('.wfm25-groupby-btn').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
         WFM25State.groupBy = btn.dataset.wfm25Groupby;

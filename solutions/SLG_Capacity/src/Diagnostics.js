@@ -3587,9 +3587,9 @@ function _dbg_reconcileWFM23() {
       ? '  Check 6: FAILED' : '  Check 6: OK');
   })();
 
-  // ---- Check 7: reduction draft preview == committed (A==B==C, forecast-remaining clamp) ----
+  // ---- Check 7: reduction scoped to forward quarters (WFM.25 item 3) ----
   (function checkReductionReconciliation() {
-    Logger.log('=== WFM.25 Check 7: reduction preview == committed, A==B==C, forecast-remaining clamp ===');
+    Logger.log('=== WFM.25 Check 7: forward-quarter reductions only; current quarter non-reducible ===');
     var params = {
       viewMode: 'Committed',
       workerScope: 'All',
@@ -3602,6 +3602,13 @@ function _dbg_reconcileWFM23() {
     var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
       ? getActualsSummaryByEmployee_() : {};
     var adjCountBefore = readTable_(CAPACITY_ADJUSTMENTS_SHEET).length;
+    var windowKeys = scorecardWindowKeys_();
+    var forwardKeys = [];
+    var pastCurQ = false;
+    windowKeys.forEach(function (qk) {
+      if (qk === curQ) { pastCurQ = true; return; }
+      if (pastCurQ) forwardKeys.push(qk);
+    });
 
     function forecastRemainingQuarter_(worker, quarterKey) {
       return forecastRemainingProductiveForQuarter_(worker, quarterKey, weeks);
@@ -3697,23 +3704,29 @@ function _dbg_reconcileWFM23() {
       };
     }
 
-    function runReductionCase_(label, worker, quarterKey, reduceHours) {
+    function runReductionCase_(label, worker, quarterKey, reduceHours, expectZeroEffect) {
       var workerName = String(worker.resource || '');
       var employeeId = String(worker.employeeId || '');
       var forecastRemaining = forecastRemainingQuarter_(worker, quarterKey);
-      var expectedApplied = expectedReduced_(worker, reduceHours, quarterKey);
+      var expectedApplied = expectZeroEffect ? 0 : expectedReduced_(worker, reduceHours, quarterKey);
 
       Logger.log('  --- ' + label + ': ' + workerName + ' ' + quarterKey +
         ' draft=' + reduceHours + 'h forecastRemaining=' + forecastRemaining.toFixed(4) +
-        ' expectedApplied=' + expectedApplied.toFixed(4) + ' ---');
+        ' expectedApplied=' + expectedApplied.toFixed(4) +
+        (expectZeroEffect ? ' (current quarter non-reducible)' : '') + ' ---');
 
-      if (!near_(expectedApplied, Math.min(reduceHours, forecastRemaining))) {
+      if (!expectZeroEffect && !near_(expectedApplied, Math.min(reduceHours, forecastRemaining))) {
         failures.push('Check 7 (' + label + '): expectedApplied ' + expectedApplied.toFixed(4) +
           ' != min(draft, forecastRemaining) ' + Math.min(reduceHours, forecastRemaining).toFixed(4));
+      }
+      if (expectZeroEffect && Math.abs(expectedApplied) > 0.001) {
+        failures.push('Check 7 (' + label + '): current-quarter expectedApplied should be 0, got ' +
+          expectedApplied.toFixed(4));
       }
 
       var beforePaths = readPaths_(workerName, employeeId, quarterKey);
       var beforeUtil = beforePaths.qA ? Number(beforePaths.qA.icpUtil) : NaN;
+      var beforeProd = beforePaths.qA ? Number(beforePaths.qA.productiveHours) : NaN;
 
       var preview = api_projectSoftBookings(params, [makeBooking_(worker, quarterKey, reduceHours)]);
       var previewWorker = (preview.projected.worker || []).find(function (w) {
@@ -3735,9 +3748,9 @@ function _dbg_reconcileWFM23() {
         }
       });
 
-      if (expectedApplied <= 0.001) {
+      if (expectZeroEffect || expectedApplied <= 0.001) {
         if (!near_(previewUtil, beforeUtil)) {
-          failures.push('Check 7 (' + label + '): zero-clamp preview util ' +
+          failures.push('Check 7 (' + label + '): zero-effect preview util ' +
             previewUtil.toFixed(6) + ' != baseline ' + beforeUtil.toFixed(6));
         }
       }
@@ -3773,15 +3786,26 @@ function _dbg_reconcileWFM23() {
       var prodDeltaA = Number(afterPaths.qA.productiveHours) - Number(beforePaths.qA.productiveHours);
       var prodDeltaB = Number(afterPaths.qB.productiveHours) - Number(beforePaths.qB.productiveHours);
       var prodDeltaC = Number(afterPaths.qC.productiveHours) - Number(beforePaths.qC.productiveHours);
+      var expectedDelta = expectZeroEffect ? 0 : -expectedApplied;
       Logger.log('  ' + label + ' productiveHours delta A=' + prodDeltaA.toFixed(4) +
         ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
-        ' expected=' + (-expectedApplied).toFixed(4));
+        ' expected=' + expectedDelta.toFixed(4));
 
-      if (!near_(prodDeltaA, -expectedApplied) || !near_(prodDeltaB, -expectedApplied) ||
-          !near_(prodDeltaC, -expectedApplied)) {
+      if (!near_(prodDeltaA, expectedDelta) || !near_(prodDeltaB, expectedDelta) ||
+          !near_(prodDeltaC, expectedDelta)) {
         failures.push('Check 7 (' + label + ' after): productiveHours delta A=' +
           prodDeltaA.toFixed(4) + ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
-          ' expected=' + (-expectedApplied).toFixed(4));
+          ' expected=' + expectedDelta.toFixed(4));
+      }
+
+      if (expectZeroEffect) {
+        if (!near_(afterPaths.qA.icpUtil, beforeUtil) || !near_(afterPaths.qB.icpUtil, beforeUtil) ||
+            !near_(afterPaths.qC.icpUtil, beforeUtil)) {
+          failures.push('Check 7 (' + label + '): current-quarter util changed after reduction');
+        }
+        if (!near_(Number(afterPaths.qA.productiveHours), beforeProd)) {
+          failures.push('Check 7 (' + label + '): current-quarter productiveHours changed');
+        }
       }
 
       var v2After = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
@@ -3797,58 +3821,52 @@ function _dbg_reconcileWFM23() {
       if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
     }
 
-    // Sub-case (a): all-actuals current quarter — zero forecast-remaining, no util change.
-    var allActualsWorker = (forecast.workers || []).find(function (w) {
-      return String(w.resource || '') === 'Aidan Votaw';
+    // Sub-case 7a: current quarter is non-reducible (D8 summary worker).
+    var d8Worker = null;
+    (forecast.workers || []).some(function (w) {
+      var summary = w.employeeId ? actualsSummary[w.employeeId] : null;
+      if (!summary || !(summary.qtd_icp_plus_forecast_hours > 0) ||
+          !(summary.bonus_target_billable_hours_eoq > 0)) return false;
+      d8Worker = w;
+      return true;
     });
-    if (!allActualsWorker) {
-      (forecast.workers || []).some(function (w) {
-        if (forecastRemainingQuarter_(w, curQ) > 0.05) return false;
-        var summary = w.employeeId ? actualsSummary[w.employeeId] : null;
-        if (!summary || !(summary.qtd_icp_plus_forecast_hours > 0)) return false;
-        allActualsWorker = w;
-        return true;
-      });
-    }
-    if (!allActualsWorker) {
-      Logger.log('  SKIPPED sub-case (a): no all-actuals worker with zero forecast-remaining in ' + curQ);
+    if (!d8Worker) {
+      Logger.log('  SKIPPED sub-case 7a: no worker with current-quarter D8 summary');
     } else {
-      Logger.log('  sub-case (a) worker: ' + allActualsWorker.resource + ' curQ=' + curQ +
-        ' forecastRemaining=' + forecastRemainingQuarter_(allActualsWorker, curQ).toFixed(4));
-      runReductionCase_('7a zero-clamp', allActualsWorker, curQ, 18);
+      Logger.log('  sub-case 7a worker: ' + d8Worker.resource + ' curQ=' + curQ);
+      runReductionCase_('7a current-quarter', d8Worker, curQ, 18, true);
     }
 
-    // Sub-case (b): worker/quarter with forecast-remaining — under- and over-draft.
+    // Sub-case 7b: forward-quarter reduction (under- and over-draft).
     var forecastPick = null;
     var forecastQk = null;
-    var windowKeys = scorecardWindowKeys_();
-    (forecast.workers || []).some(function (w) {
-      for (var i = 1; i < windowKeys.length; i++) {
-        var qk = windowKeys[i];
+    forwardKeys.some(function (qk) {
+      return (forecast.workers || []).some(function (w) {
         var remaining = forecastRemainingQuarter_(w, qk);
         if (remaining >= 10) {
           forecastPick = w;
           forecastQk = qk;
           return true;
         }
-      }
-      return false;
+        return false;
+      });
     });
     if (!forecastPick) {
-      Logger.log('  SKIPPED sub-case (b): no worker with >=10h forecast-remaining in current/forward quarter');
+      Logger.log('SKIPPED: no forward forecast-remaining worker (checked ' +
+        forwardKeys.join(', ') + ')');
     } else {
       var remainingHrs = forecastRemainingQuarter_(forecastPick, forecastQk);
-      Logger.log('  sub-case (b) worker: ' + forecastPick.resource + ' quarter=' + forecastQk +
+      Logger.log('  sub-case 7b worker: ' + forecastPick.resource + ' quarter=' + forecastQk +
         ' forecastRemaining=' + remainingHrs.toFixed(4));
       var underDraft = Math.max(1, Math.min(8, Math.floor(remainingHrs * 0.4)));
-      runReductionCase_('7b under-draft', forecastPick, forecastQk, underDraft);
+      runReductionCase_('7b under-draft', forecastPick, forecastQk, underDraft, false);
       forecast = computeWeeklyForecast_(params);
       forecastPick = (forecast.workers || []).find(function (w) {
         return String(w.resource || '') === String(forecastPick.resource || '');
       }) || forecastPick;
       remainingHrs = forecastRemainingQuarter_(forecastPick, forecastQk);
       var overDraft = Math.ceil(remainingHrs + 12);
-      runReductionCase_('7b over-draft', forecastPick, forecastQk, overDraft);
+      runReductionCase_('7b over-draft', forecastPick, forecastQk, overDraft, false);
     }
 
     var adjCountAfter = readTable_(CAPACITY_ADJUSTMENTS_SHEET).length;

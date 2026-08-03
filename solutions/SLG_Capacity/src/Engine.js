@@ -1311,7 +1311,9 @@ function _syncBlendedWeeklyForecastCells_(worker) {
  * @param {Object} [actualsByWorker] optional preloaded map from getActualsByWorkerWeek_()
  * @return {number}
  */
-function productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsByWorker) {
+function productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsByWorker, weekStart) {
+  // WFM.25 item 3: current-quarter weeks are D8 actuals-driven and non-reducible.
+  if (weekStart && fiscalQuarterKey_(weekStart) === fiscalQuarterKey_(new Date())) return 0;
   var blended = worker.blendedWeekly && worker.blendedWeekly[weekKey];
   if (blended && blended.isActual) return 0;
   if (!blended && worker.employeeId && actualsByWorker) {
@@ -1331,10 +1333,11 @@ function productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsByWo
  * @return {number}
  */
 function forecastRemainingProductiveForQuarter_(worker, quarterKey, weeks, actualsByWorker) {
+  if (quarterKey === fiscalQuarterKey_(new Date())) return 0;
   var sum = 0;
   (weeks || []).forEach(function (wk) {
     if (fiscalQuarterKey_(wk.week_start) !== quarterKey) return;
-    sum += productiveHoursAvailableForReductionClamp_(worker, wk.week_key, actualsByWorker);
+    sum += productiveHoursAvailableForReductionClamp_(worker, wk.week_key, actualsByWorker, wk.week_start);
   });
   return sum;
 }
@@ -1367,7 +1370,8 @@ function expandClampedAdjustmentWeekly_(worker, adj, calendar, apply) {
         actualsByWorker = (typeof getActualsByWorkerWeek_ === 'function')
           ? getActualsByWorkerWeek_() : {};
       }
-      const currentProd = productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsByWorker);
+      const currentProd = productiveHoursAvailableForReductionClamp_(
+        worker, weekKey, actualsByWorker, wk.week_start);
       const weekApplied = Math.min(hrs, currentProd);
       if (!weekApplied) return;
       out.applied += weekApplied;
@@ -2360,7 +2364,6 @@ function committedReductionHoursForQuarter_(worker, quarterKey, calendar) {
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
   const calendar = readCalendar_();
   committedAssignmentQuarterIndex_(calendar);
-  committedReductionQuarterIndex_(calendar);
   _wowQuarterTargetIndex_();
   return quarterKeys.map(function (qk) {
     const wd = quarterWorkdaySummary_(qk, holidays);
@@ -2374,7 +2377,6 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     let icpUtil = 0;
     let stale = false;
     let committedAssignmentHours = 0;
-    let committedReductionHours = 0;
 
     // D8.1: the current-quarter actuals path only applies when a same-scale
     // bonus target exists. The qtd_icp_plus_forecast numerator is bonus-scale
@@ -2385,9 +2387,9 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
         summary.bonus_target_billable_hours_eoq > 0) {
       committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
-      committedReductionHours = committedReductionHoursForQuarter_(worker, qk, calendar);
-      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours
-        - committedReductionHours;
+      // WFM.25 item 3: current quarter is D8 actuals-driven; reductions apply on
+      // forward-quarter weekly maps only — never subtract from this numerator.
+      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours;
       targetHours = summary.bonus_target_billable_hours_eoq;
       bonusAttainment = productiveHours / targetHours;
       source = 'actuals_plus_forecast';

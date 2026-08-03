@@ -2818,6 +2818,29 @@
     return fiscalQuarterKey_(new Date());
   }
 
+  /** True when both dates fall entirely within the calendar current fiscal quarter. */
+  function isRangeEntirelyInCurrentQuarter_(startIso, endIso) {
+    const curQ = getExplorerCurQuarter_();
+    const startQ = fiscalQuarterKey_(new Date(startIso + 'T12:00:00'));
+    const endQ = fiscalQuarterKey_(new Date(endIso + 'T12:00:00'));
+    return startQ === curQ && endQ === curQ;
+  }
+
+  /** True when a reduction date range touches current quarter and extends into a forward quarter. */
+  function reductionRangeSpansCurrentAndForward_(startIso, endIso) {
+    const curQ = getExplorerCurQuarter_();
+    const startQ = fiscalQuarterKey_(new Date(startIso + 'T12:00:00'));
+    const endQ = fiscalQuarterKey_(new Date(endIso + 'T12:00:00'));
+    return (startQ === curQ || endQ === curQ) && !(startQ === curQ && endQ === curQ);
+  }
+
+  function getReductionClampEffectiveHours_(resourceName) {
+    const warnings = State.explorerProjection && State.explorerProjection.clampWarnings;
+    if (!warnings || !warnings.length) return null;
+    const match = warnings.find(function (w) { return w.resource_name === resourceName; });
+    return match ? Number(match.effective_hours) : null;
+  }
+
   function getExplorerWorkerBaseline_(resourceName) {
     const proj = State.explorerBaselineProjection;
     if (!proj || !proj.baseline) return null;
@@ -3115,6 +3138,8 @@
       reduceBtn.setAttribute('aria-pressed', isReduce ? 'true' : 'false');
     }
     if (title) title.textContent = 'Adjust hours';
+    const reduceNote = document.getElementById('wfm25SbReduceNote');
+    if (reduceNote) reduceNote.hidden = !isReduce;
     if (submitBtn) {
       submitBtn.textContent = isReduce ? 'Reduce to draft' : 'Add to draft';
     }
@@ -3126,8 +3151,19 @@
       const req = Number(w.requested_hours) || 0;
       const eff = Number(w.effective_hours) || 0;
       if (req > eff + 0.05) {
-        toast('Reduction for ' + (w.resource_name || 'worker') +
-          ' clamped to ' + Math.round(eff) + 'h (requested ' + Math.round(req) + 'h).', 'warn');
+        let msg = 'Reduction for ' + (w.resource_name || 'worker') +
+          ' clamped to ' + Math.round(eff) + 'h forward (requested ' + Math.round(req) + 'h).';
+        msg += ' Current-quarter weeks are excluded.';
+        toast(msg, 'warn');
+      }
+    });
+    (State.softBookings || []).forEach(function (b) {
+      if (String(b.direction || 'add') !== 'reduce') return;
+      if (!reductionRangeSpansCurrentAndForward_(b.start_date, b.end_date)) return;
+      const eff = getReductionClampEffectiveHours_(b.resource_name);
+      if (eff != null && eff > 0.05 && Math.abs(eff - Number(b.total_hours)) <= 0.05) {
+        toast('Reduction for ' + b.resource_name + ' applies ' + Math.round(eff) +
+          'h to forward weeks only (current quarter excluded).', 'warn');
       }
     });
   }
@@ -7811,12 +7847,19 @@ async function _qaRefreshPsaHours_() {
     body.innerHTML = bookings.map(function (b, idx) {
       const isReduce = String(b.direction || 'add') === 'reduce';
       const dirCls = isReduce ? 'is-reduce' : 'is-add';
+      const effHrs = isReduce ? getReductionClampEffectiveHours_(b.resource_name) : null;
+      const showEff = isReduce && effHrs != null && Math.abs(effHrs - Number(b.total_hours)) > 0.05;
+      const dirLabel = showEff
+        ? softBookDirectionLabel_(Object.assign({}, b, { total_hours: effHrs })) + ' forward'
+        : softBookDirectionLabel_(b);
+      const spanNote = isReduce && reductionRangeSpansCurrentAndForward_(b.start_date, b.end_date)
+        ? ' <span class="muted">(current quarter excluded)</span>' : '';
       return '<div class="wfm25-draft-tray-row">' +
         '<div class="wfm25-draft-tray-row-main">' +
           '<div class="wfm25-draft-tray-worker">' + escapeHtml_(b.resource_name) + '</div>' +
           '<div class="wfm25-draft-tray-meta">' +
             '<span class="wfm25-draft-tray-direction ' + dirCls + '">' +
-              escapeHtml_(softBookDirectionLabel_(b)) + '</span>' +
+              escapeHtml_(dirLabel) + '</span>' + spanNote +
             '<span class="wfm25-draft-tray-span muted">' + escapeHtml_(formatSoftBookSpan_(b)) + '</span>' +
           '</div>' +
         '</div>' +
@@ -8107,6 +8150,10 @@ async function _qaRefreshPsaHours_() {
       return;
     }
     const direction = wfm25GetSoftBookDirection_();
+    if (direction === 'reduce' && isRangeEntirelyInCurrentQuarter_(start, end)) {
+      toast('Current-quarter hours are actuals and cannot be reduced. Reduce forward-quarter hours instead.', 'err');
+      return;
+    }
     State.softBookings.push({
       employee_id: wfm25GetEmployeeId_(resourceName),
       resource_name: resourceName,
@@ -8117,8 +8164,11 @@ async function _qaRefreshPsaHours_() {
     });
     closeWFM25SoftBookOverlay_();
     onWFM25SoftBookingsChanged_();
-    toast(direction === 'reduce' ? 'Reduction draft added — watch utilization fall.' :
-      'Draft added — watch the numbers shift.', '');
+    toast(direction === 'reduce'
+      ? (reductionRangeSpansCurrentAndForward_(start, end)
+        ? 'Reduction draft added — forward weeks only (current quarter excluded).'
+        : 'Reduction draft added — watch utilization fall.')
+      : 'Draft added — watch the numbers shift.', '');
   }
 
   function clearWFM25SoftBookings_(reason) {

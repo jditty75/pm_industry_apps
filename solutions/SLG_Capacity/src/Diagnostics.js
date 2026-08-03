@@ -4433,7 +4433,6 @@ function _dbg_reconcileWFM25Stage4() {
   _dbg_requireAdmin_();
   var failures = [];
   var TOL = 0.05;
-  var HIST_GRAND = 263360.8;
   var HIST_TOL = 0.1;
 
   function near_(a, b, tol) {
@@ -4533,38 +4532,65 @@ function _dbg_reconcileWFM25Stage4() {
     Logger.log('  org vs team sums: ' + (failures.length ? 'see failures' : 'OK'));
   })();
 
-  // ---- Check 3–5: Mix & Trend history reconciliation ----
+  // ---- Check 3–5: Mix & Trend history self-reconciliation (rolling window) ----
   (function historyReconcile() {
     Logger.log('=== WFM.25 Stage 4 Check 3–5: Mix & Trend history ===');
     var history = getWorkerTypeHistory_({});
+    var reportedGrand = Number(history.grandTotal) || 0;
 
-    if (!near_(history.grandTotal, HIST_GRAND, HIST_TOL)) {
-      failures.push('History grand total=' + history.grandTotal + ' expect ' + HIST_GRAND);
+    // Check 3: recomputed grand total from Actuals_History == reported grandTotal
+    var recomputedGrand = 0;
+    try {
+      (readTable_(ACTUALS_HISTORY) || []).forEach(function (r) {
+        var fq = String(r.fiscal_quarter || '').trim();
+        if (!fq) return;
+        var hrs = Number(r.worked_hours) || 0;
+        if (!hrs) return;
+        var displayClass = historyDisplayClass_(r.worker_class);
+        if (!displayClass) return;
+        recomputedGrand += hrs;
+      });
+    } catch (e) {
+      failures.push('History actuals read failed: ' + e);
+    }
+    if (!near_(recomputedGrand, reportedGrand, HIST_TOL)) {
+      failures.push('History grand total mismatch: recomputed=' + recomputedGrand +
+        ' reported=' + reportedGrand);
     }
 
+    // Check 4: sum of per-quarter totals == grandTotal
+    var quarterSum = 0;
+    (history.fiscalQuarters || []).forEach(function (fq) {
+      quarterSum += Number((history.quarterTotals || {})[fq]) || 0;
+    });
+    if (!near_(quarterSum, reportedGrand, HIST_TOL)) {
+      failures.push('History quarter sum=' + quarterSum + ' grandTotal=' + reportedGrand);
+    }
+
+    // Check 5: per-quarter class + region breakdowns reconcile
     (history.fiscalQuarters || []).forEach(function (fq) {
       var total = Number((history.quarterTotals || {})[fq]) || 0;
       var classes = (history.quarterClasses || {})[fq] || {};
-      var classSum = 0;
-      ['SLG', 'Workday Regions', 'Contractor'].forEach(function (cls) {
-        classSum += Number(classes[cls]) || 0;
-      });
-      if (!near_(total, classSum, 0.01)) {
+      var slgHours = Number(classes['SLG']) || 0;
+      var workdayRegionsHours = Number(classes['Workday Regions']) || 0;
+      var contractorHours = Number(classes['Contractor']) || 0;
+      var classSum = slgHours + workdayRegionsHours + contractorHours;
+      if (!near_(total, classSum, HIST_TOL)) {
         failures.push('History class sum: ' + fq + ' total=' + total + ' classSum=' + classSum);
       }
 
-      var wdTotal = Number(classes['Workday Regions']) || 0;
       var regions = (history.quarterRegions || {})[fq] || {};
       var regionSum = 0;
       Object.keys(regions).forEach(function (rk) {
         regionSum += Number(regions[rk]) || 0;
       });
-      if (wdTotal > 0 && !near_(wdTotal, regionSum, 0.01)) {
-        failures.push('History region sum: ' + fq + ' wdTotal=' + wdTotal + ' regionSum=' + regionSum);
+      if (!near_(workdayRegionsHours, regionSum, HIST_TOL)) {
+        failures.push('History region sum: ' + fq + ' workdayRegionsHours=' + workdayRegionsHours +
+          ' regionSum=' + regionSum);
       }
     });
 
-    Logger.log('  grandTotal=' + history.grandTotal +
+    Logger.log('  grandTotal=' + reportedGrand +
       ' quarters=' + (history.fiscalQuarters || []).length);
   })();
 

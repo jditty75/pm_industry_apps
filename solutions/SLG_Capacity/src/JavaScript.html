@@ -7411,7 +7411,8 @@ async function _qaRefreshPsaHours_() {
     selectedWorker:   null,          // worker name when panel is open
     selectedWorkerTeam: null,       // team label for breadcrumb + live aggregate shift
     selectedWorkerDetail: null,     // last api_getResourceDetailV2 result
-    workerReqId:      0              // race-guard for worker detail fetch
+    workerReqId:      0,             // race-guard for worker detail fetch
+    utilAllocFilter:  null           // null | 'over' | 'under' — tile filter within scope
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -7913,6 +7914,8 @@ async function _qaRefreshPsaHours_() {
     if (body) body.classList.add('wfm25-panel-open');
     if (addBtn) addBtn.hidden = false;
 
+    wfm25CollapseSetVisible_(document.getElementById('wfm25UtilBannerCollapse'), false);
+
     setWFM25WorkerPanelHeader_(workerName, teamLabel);
 
     const crumbs = [WFM25State.landingBreadcrumb];
@@ -7966,6 +7969,12 @@ async function _qaRefreshPsaHours_() {
     if (body) body.classList.remove('wfm25-panel-open');
     if (addBtn) addBtn.hidden = true;
     closeWFM25SoftBookOverlay_();
+
+    if (WFM25State.scorecardData) {
+      renderWFM25UtilAllocationBanner_(WFM25State.scorecardData);
+    } else {
+      wfm25CollapseSetVisible_(document.getElementById('wfm25UtilBannerCollapse'), true);
+    }
 
     if (WFM25State.expandedTeam) {
       wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, WFM25State.expandedTeam]);
@@ -8156,6 +8165,164 @@ async function _qaRefreshPsaHours_() {
     return { quarterKeys: quarterKeys, teams: teamList };
   }
 
+  /**
+   * Count allocation bands for workers in current scope at current quarter.
+   * @param {Object} data
+   * @returns {{over:number, under:number, ontrack:number, qi:number, scopeUtil:number|null, tightestTeam:Object|null}}
+   */
+  function wfm25ComputeAllocationSummary_(data) {
+    const quarterKeys = (data && data.quarterKeys) || [];
+    const qi = wfm25CurQuarterIndex_(quarterKeys);
+    const thresholds = wfm25AllocThresholds_();
+    const scopeWorkers = wfm25ScopeWorkers_(data);
+    const counts = { over: 0, under: 0, ontrack: 0 };
+    let sumProd = 0;
+    let sumAvail = 0;
+
+    scopeWorkers.forEach(function (w) {
+      const q = (w.quarters || [])[qi];
+      if (!q) return;
+      const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
+      counts[band]++;
+      sumProd += Number(q.productiveHours) || 0;
+      sumAvail += Number(q.icpAvailableHours) || 0;
+    });
+
+    const scopeUtil = sumAvail > 0 ? sumProd / sumAvail : null;
+    let tightestTeam = null;
+    let tightestRatio = -Infinity;
+
+    if (!WFM25State.expandedTeam) {
+      const agg = wfm25AggregateByTeam_(data);
+      agg.teams.forEach(function (team) {
+        const tq = team.quarters[qi];
+        if (!tq || tq.util == null) return;
+        const ratio = team.icpTarget > 0 ? tq.util / team.icpTarget : 0;
+        if (ratio > tightestRatio) {
+          tightestRatio = ratio;
+          tightestTeam = { label: team.label, util: tq.util };
+        }
+      });
+    }
+
+    return {
+      over: counts.over,
+      under: counts.under,
+      ontrack: counts.ontrack,
+      qi: qi,
+      scopeUtil: scopeUtil,
+      tightestTeam: tightestTeam
+    };
+  }
+
+  /**
+   * Update the allocation filter chip below the Utilization banner.
+   */
+  function wfm25UpdateUtilFilterChip_() {
+    const wrap = document.getElementById('wfm25UtilFilterChipWrap');
+    const chip = document.getElementById('wfm25UtilFilterChip');
+    if (!wrap || !chip) return;
+    const filter = WFM25State.utilAllocFilter;
+    if (!filter || !WFM25State.scorecardData) {
+      wrap.hidden = true;
+      return;
+    }
+    const summary = wfm25ComputeAllocationSummary_(WFM25State.scorecardData);
+    const count = filter === 'over' ? summary.over : summary.under;
+    const label = filter === 'over' ? 'Over-allocated' : 'Under-allocated';
+    chip.textContent = 'Showing: ' + label + ' (' + count + ')';
+    wrap.hidden = false;
+  }
+
+  /**
+   * Render scope-aware Utilization allocation banner (current quarter).
+   * @param {Object} data api_getQuarterlyScorecard result
+   */
+  function renderWFM25UtilAllocationBanner_(data) {
+    const grid = document.getElementById('wfm25UtilBannerGrid');
+    const collapseHost = document.getElementById('wfm25UtilBannerCollapse');
+    if (!grid) return;
+
+    if (WFM25State.selectedWorker) {
+      wfm25CollapseSetVisible_(collapseHost, false);
+      return;
+    }
+    wfm25CollapseSetVisible_(collapseHost, true);
+
+    const teamScope = !!WFM25State.expandedTeam;
+    const summary = wfm25ComputeAllocationSummary_(data);
+    const activeFilter = WFM25State.utilAllocFilter;
+
+    const overPressed = activeFilter === 'over';
+    const underPressed = activeFilter === 'under';
+
+    const overTile =
+      '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--over"' +
+        ' data-wfm25-alloc-filter="over" aria-pressed="' + (overPressed ? 'true' : 'false') + '">' +
+        '<div class="wfm25-util-banner-label">Over-allocated</div>' +
+        '<div class="wfm25-util-banner-value">' + summary.over + '</div>' +
+      '</button>';
+
+    const underTile =
+      '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--under"' +
+        ' data-wfm25-alloc-filter="under" aria-pressed="' + (underPressed ? 'true' : 'false') + '">' +
+        '<div class="wfm25-util-banner-label">Under-allocated</div>' +
+        '<div class="wfm25-util-banner-value">' + summary.under + '</div>' +
+      '</button>';
+
+    const onTrackTile =
+      '<div class="wfm25-util-banner-tile">' +
+        '<div class="wfm25-util-banner-label">On Track</div>' +
+        '<div class="wfm25-util-banner-value">' + summary.ontrack + '</div>' +
+      '</div>';
+
+    const utilLabel = teamScope ? 'Team Utilization' : 'SLG Utilization';
+    const utilTile =
+      '<div class="wfm25-util-banner-tile">' +
+        '<div class="wfm25-util-banner-label">' + utilLabel + '</div>' +
+        '<div class="wfm25-util-banner-value">' +
+          (summary.scopeUtil != null ? fmtPct(summary.scopeUtil) : '\u2014') + '</div>' +
+      '</div>';
+
+    let tiles = overTile + underTile + onTrackTile + utilTile;
+
+    if (!teamScope && summary.tightestTeam) {
+      tiles +=
+        '<div class="wfm25-util-banner-tile">' +
+          '<div class="wfm25-util-banner-label">Tightest Team</div>' +
+          '<div class="wfm25-util-banner-value" style="font-size:16px">' +
+            escapeHtml_(summary.tightestTeam.label) + ' \u00b7 ' +
+            fmtPct(summary.tightestTeam.util) + '</div>' +
+        '</div>';
+    }
+
+    grid.className = 'wfm25-util-banner-grid' + (teamScope ? ' wfm25-util-banner-grid--team-scope' : '');
+    grid.innerHTML = tiles;
+
+    $$('[data-wfm25-alloc-filter]', grid).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const key = btn.dataset.wfm25AllocFilter;
+        WFM25State.utilAllocFilter = (WFM25State.utilAllocFilter === key) ? null : key;
+        if (WFM25State.scorecardData) {
+          renderWFM25UtilTable_(WFM25State.scorecardData);
+        }
+      });
+    });
+
+    wfm25UpdateUtilFilterChip_();
+
+    const chip = document.getElementById('wfm25UtilFilterChip');
+    if (chip && !chip.dataset.wfm25Wired) {
+      chip.dataset.wfm25Wired = '1';
+      chip.addEventListener('click', function () {
+        WFM25State.utilAllocFilter = null;
+        if (WFM25State.scorecardData) {
+          renderWFM25UtilTable_(WFM25State.scorecardData);
+        }
+      });
+    }
+  }
+
   // ── Render Utilization table ──────────────────────────────────
 
   /**
@@ -8172,9 +8339,13 @@ async function _qaRefreshPsaHours_() {
     const body      = document.getElementById('wfm25UtilBody');
     if (!headerRow || !body) return;
 
+    renderWFM25UtilAllocationBanner_(data);
+
     const agg   = wfm25AggregateByTeam_(data);
     const qKeys = agg.quarterKeys;
     const curQk = fiscalQuarterKey_(new Date());
+    const allocQi = wfm25CurQuarterIndex_(qKeys);
+    const hasAllocFilter = !!WFM25State.utilAllocFilter;
 
     // ── Header ──
     $$('.wfm25-qth', headerRow).forEach(function (el) { el.remove(); });
@@ -8231,6 +8402,12 @@ async function _qaRefreshPsaHours_() {
       // Worker rows — only injected when this team is expanded
       if (isExpanded) {
         team.workers.forEach(function (w) {
+          const workerRow = (data.workers || []).find(function (wr) {
+            return wr.worker === w.name;
+          });
+          if (hasAllocFilter && workerRow && !wfm25WorkerMatchesAllocFilter_(workerRow, allocQi)) {
+            return;
+          }
           const workerGetsDraft = hasDraft && w.name === selectedWorker;
           const wQCells = w.quarters.map(function (q, qi) {
             const qk = qKeys[qi];
@@ -8307,6 +8484,102 @@ async function _qaRefreshPsaHours_() {
       }
       console.error('[WFM.25] loadWFM25Utilization_ failed:', err);
     }
+  }
+
+  // ── Reusable collapse transition ─────────────────────────────
+
+  /**
+   * Show or hide a collapse host with height + opacity transition.
+   * @param {HTMLElement|null} hostEl
+   * @param {boolean} visible
+   */
+  function wfm25CollapseSetVisible_(hostEl, visible) {
+    if (!hostEl) return;
+    hostEl.classList.toggle('wfm25-collapse-hidden', !visible);
+    hostEl.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  }
+
+  /**
+   * Index of the current fiscal quarter in the scorecard window.
+   * @param {string[]} quarterKeys
+   * @returns {number}
+   */
+  function wfm25CurQuarterIndex_(quarterKeys) {
+    const curQk = fiscalQuarterKey_(new Date());
+    const idx = (quarterKeys || []).indexOf(curQk);
+    return idx >= 0 ? idx : 1;
+  }
+
+  /**
+   * Allocation thresholds from api_getReference (Config_Settings fallbacks).
+   * @returns {{over:number, under:number}}
+   */
+  function wfm25AllocThresholds_() {
+    const ref = State.ref || {};
+    const over = Number(ref.allocOverRatio);
+    const under = Number(ref.allocUnderRatio);
+    return {
+      over: over > 0 ? over : 1.10,
+      under: under > 0 ? under : 0.85
+    };
+  }
+
+  /**
+   * Classify a worker's ratio-to-target into allocation bands.
+   * @param {number} ratioToTarget
+   * @param {{over:number, under:number}} thresholds
+   * @returns {'over'|'under'|'ontrack'}
+   */
+  function wfm25ClassifyAllocation_(ratioToTarget, thresholds) {
+    const r = Number(ratioToTarget) || 0;
+    if (r >= thresholds.over) return 'over';
+    if (r < thresholds.under) return 'under';
+    return 'ontrack';
+  }
+
+  /**
+   * Workers in the current breadcrumb scope (org or expanded team).
+   * @param {Object} data api_getQuarterlyScorecard result
+   * @returns {Array}
+   */
+  function wfm25ScopeWorkers_(data) {
+    const workers = (data && data.workers) || [];
+    const team = WFM25State.expandedTeam;
+    if (!team) return workers.slice();
+    return workers.filter(function (w) { return (w.teamLabel || 'Unknown') === team; });
+  }
+
+  /**
+   * Whether a worker matches the active allocation tile filter at current quarter.
+   * @param {Object} worker
+   * @param {number} qi quarter index
+   * @returns {boolean}
+   */
+  function wfm25WorkerMatchesAllocFilter_(worker, qi) {
+    const filter = WFM25State.utilAllocFilter;
+    if (!filter) return true;
+    const q = (worker.quarters || [])[qi];
+    if (!q) return false;
+    const thresholds = wfm25AllocThresholds_();
+    const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
+    return band === filter;
+  }
+
+  /**
+   * Hand-rendered utilization bar for Hours & Capacity cells.
+   * @param {number|null} util
+   * @param {number} icpTarget
+   * @returns {string}
+   */
+  function wfm25HcUtilBarHtml_(util, icpTarget) {
+    if (util == null) {
+      return '<div class="wfm25-hc-util-bar-wrap"><div class="wfm25-hc-util-bar" style="width:0"></div></div>';
+    }
+    const color = cellColor(util, icpTarget);
+    const widthPct = Math.min(Math.max(Number(util) || 0, 0), 1.25) / 1.25 * 100;
+    return '<div class="wfm25-hc-util-bar-wrap">' +
+      '<div class="wfm25-hc-util-bar" style="width:' + widthPct.toFixed(1) + '%;background:' +
+      color.bg + '"></div></div>';
   }
 
   // ── Hours & Capacity (Stage 4c) ─────────────────────────────
@@ -8416,6 +8689,7 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * Render one Hours & Capacity cell with optional draft overlay.
+   * Calm white cell with health-colored utilization bar (no full-cell wash).
    * @param {Object} committed {planned, capacity, util, remaining}
    * @param {Object|null} projected same shape from projection API
    * @param {number} icpTarget
@@ -8430,42 +8704,105 @@ async function _qaRefreshPsaHours_() {
        Math.abs((projected.util || 0) - (committed.util || 0)) > 0.0001);
 
     const util = committed && committed.util != null ? committed.util : null;
-    const color = util != null
-      ? cellColor(util, icpTarget)
-      : { bg: 'var(--business-card)', fg: 'var(--staple)' };
-
     const plannedStr = committed ? fmtHours(committed.planned) + 'h' : '\u2014';
     const capStr = committed ? fmtHours(committed.capacity) + 'h' : '\u2014';
-    const utilStr = util != null ? fmtPct(util) + ' utilization' : '\u2014';
+    const utilStr = util != null ? fmtPct(util) : '\u2014';
     const remStr = committed
       ? fmtHours(committed.remaining) + 'h remaining'
       : '\u2014';
     const remCls = committed ? wfm25RemainingClass_(committed.remaining) : '';
 
+    const committedInner =
+      wfm25HcUtilBarHtml_(util, icpTarget) +
+      '<div class="wfm25-hc-util-pct">' + utilStr + '</div>' +
+      '<div class="wfm25-hc-detail">' + plannedStr + ' / ' + capStr + '</div>' +
+      '<div class="wfm25-hc-remaining ' + remCls + '">' + remStr + '</div>';
+
     if (!hasDraft) {
-      return '<td class="wfm25-hours-capacity-cell' + (extraCls ? ' ' + extraCls : '') +
-        '" style="background:' + color.bg + ';color:' + color.fg + '">' +
-        '<div class="wfm25-hc-line1">' + plannedStr + ' / ' + capStr + '</div>' +
-        '<div class="wfm25-hc-line2">' + utilStr + '</div>' +
-        '<div class="wfm25-hc-line3 ' + remCls + '">' + remStr + '</div></td>';
+      return '<td class="wfm25-hours-capacity-cell' + (extraCls ? ' ' + extraCls : '') + '">' +
+        '<div class="wfm25-hc-cell-inner">' + committedInner + '</div></td>';
     }
 
     const pUtil = projected.util != null ? projected.util : null;
     const arrow = wfm25DraftArrow_(committed.util, pUtil);
     return '<td class="wfm25-hours-capacity-cell has-draft' + (extraCls ? ' ' + extraCls : '') + '">' +
-      '<div class="wfm25-hc-committed">' +
-        '<div class="wfm25-hc-line1">' + plannedStr + ' / ' + capStr + '</div>' +
-        '<div class="wfm25-hc-line2">' + utilStr + '</div>' +
-        '<div class="wfm25-hc-line3 ' + remCls + '">' + remStr + '</div>' +
-      '</div>' +
-      '<div class="wfm25-hc-draft">' +
-        '<span class="wfm25-draft-label">Your draft</span>' +
-        '<span class="wfm25-draft-value">' +
-          fmtHours(projected.planned) + 'h / ' + fmtHours(projected.capacity) + 'h' +
-          ' \u2192 ' + (pUtil != null ? fmtPct(pUtil) : '\u2014') + ' ' + arrow +
-        '</span>' +
-        '<span class="wfm25-hc-draft-rem">' + fmtHours(projected.remaining) + 'h remaining</span>' +
+      '<div class="wfm25-hc-cell-inner">' +
+        '<div class="wfm25-hc-committed">' + committedInner + '</div>' +
+        '<div class="wfm25-hc-draft">' +
+          '<span class="wfm25-draft-label">Your draft</span>' +
+          '<span class="wfm25-draft-value">' +
+            fmtHours(projected.planned) + 'h / ' + fmtHours(projected.capacity) + 'h' +
+            ' \u2192 ' + (pUtil != null ? fmtPct(pUtil) : '\u2014') + ' ' + arrow +
+          '</span>' +
+          '<span class="wfm25-hc-draft-rem">' + fmtHours(projected.remaining) + 'h remaining</span>' +
+        '</div>' +
       '</div></td>';
+  }
+
+  /**
+   * Render static Hours & Capacity banner (whole org, current quarter).
+   * @param {Object} data api_getQuarterlyScorecard result
+   */
+  function renderWFM25HoursCapacityBanner_(data) {
+    const banner = document.getElementById('wfm25HoursCapacityBanner');
+    const grid = document.getElementById('wfm25HoursCapacityBannerGrid');
+    if (!banner || !grid) return;
+
+    const hc = wfm25AggregateHoursAndCapacityByTeam_(data);
+    const qi = wfm25CurQuarterIndex_(hc.quarterKeys);
+    const curQk = hc.quarterKeys[qi] || fiscalQuarterKey_(new Date());
+    const orgQ = hc.orgTotal.quarters[qi];
+    if (!orgQ) {
+      banner.hidden = true;
+      grid.innerHTML = '';
+      return;
+    }
+
+    let tightestTeam = null;
+    let tightestRatio = -Infinity;
+    hc.teams.forEach(function (team) {
+      const tq = team.quarters[qi];
+      if (!tq || tq.util == null) return;
+      const ratio = team.icpTarget > 0 ? tq.util / team.icpTarget : 0;
+      if (ratio > tightestRatio) {
+        tightestRatio = ratio;
+        tightestTeam = {
+          label: team.label,
+          util: tq.util,
+          ratioToTarget: ratio
+        };
+      }
+    });
+
+    const tightestHtml = tightestTeam
+      ? escapeHtml_(tightestTeam.label) + ' \u00b7 ' + fmtPct(tightestTeam.util)
+      : '\u2014';
+
+    grid.innerHTML =
+      '<div class="wfm25-hours-capacity-banner-tile wfm25-hours-capacity-banner-tile--hero">' +
+        '<div class="wfm25-hours-capacity-banner-label">Remaining Capacity (Current Quarter)</div>' +
+        '<div class="wfm25-hours-capacity-banner-value">' + fmtHours(orgQ.remaining) + 'h</div>' +
+        '<div class="wfm25-hours-capacity-banner-sub">' + escapeHtml_(curQk) + '</div>' +
+      '</div>' +
+      '<div class="wfm25-hours-capacity-banner-tile">' +
+        '<div class="wfm25-hours-capacity-banner-label">SLG Utilization</div>' +
+        '<div class="wfm25-hours-capacity-banner-value">' +
+          (orgQ.util != null ? fmtPct(orgQ.util) : '\u2014') + '</div>' +
+      '</div>' +
+      '<div class="wfm25-hours-capacity-banner-tile">' +
+        '<div class="wfm25-hours-capacity-banner-label">Planned Hours</div>' +
+        '<div class="wfm25-hours-capacity-banner-value">' + fmtHours(orgQ.planned) + 'h</div>' +
+      '</div>' +
+      '<div class="wfm25-hours-capacity-banner-tile">' +
+        '<div class="wfm25-hours-capacity-banner-label">Total Capacity</div>' +
+        '<div class="wfm25-hours-capacity-banner-value">' + fmtHours(orgQ.capacity) + 'h</div>' +
+      '</div>' +
+      '<div class="wfm25-hours-capacity-banner-tile">' +
+        '<div class="wfm25-hours-capacity-banner-label">Tightest Team</div>' +
+        '<div class="wfm25-hours-capacity-banner-value" style="font-size:16px">' + tightestHtml + '</div>' +
+      '</div>';
+
+    banner.hidden = false;
   }
 
   /**
@@ -8476,6 +8813,8 @@ async function _qaRefreshPsaHours_() {
     const headerRow = document.getElementById('wfm25HoursCapacityHeaderRow');
     const body = document.getElementById('wfm25HoursCapacityBody');
     if (!headerRow || !body) return;
+
+    renderWFM25HoursCapacityBanner_(data);
 
     const hc = wfm25AggregateHoursAndCapacityByTeam_(data);
     const qKeys = hc.quarterKeys;

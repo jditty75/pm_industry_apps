@@ -30,6 +30,12 @@ const CFG_SETTINGS = 'Config_Settings';         // key/value settings
 //   fiscal_year_start_month -- 1-indexed calendar month the fiscal year
 //                               starts in (2 = February; keep in sync with
 //                               FISCAL_YEAR_START_MONTH above)
+//   alloc_over_ratio        -- ratio-to-target at/above which a worker is
+//                               over-allocated in the Utilization banner
+//                               (default 1.10)
+//   alloc_under_ratio       -- ratio-to-target below which a worker is
+//                               under-allocated in the Utilization banner
+//                               (default 0.85)
 // Existing keys (planning_window_months, etc.) are unchanged.
 const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
 const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership

@@ -4160,7 +4160,96 @@ td.cell-with-bar {
   padding: var(--space-6);
 }
 
+/* ── WFM.25 reusable collapse transition ─────────────────── */
+.wfm25-collapse-host {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.28s ease, opacity 0.28s ease;
+  opacity: 1;
+}
+.wfm25-collapse-host.wfm25-collapse-hidden {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+.wfm25-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wfm25-collapse-host {
+    transition: none;
+  }
+}
+
 /* ── WFM.25 Stage 4: Hours & Capacity ───────────────────── */
+.wfm25-hours-capacity-banner {
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--business-card);
+  background: #fff;
+}
+.wfm25-hours-capacity-banner-caption {
+  margin: 10px 0 0;
+  font-size: 11px;
+  text-align: center;
+}
+.wfm25-hours-capacity-banner-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1200px) {
+  .wfm25-hours-capacity-banner-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wfm25-hours-capacity-banner-tile--hero {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 640px) {
+  .wfm25-hours-capacity-banner-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.wfm25-hours-capacity-banner-tile {
+  background: var(--paper);
+  border: 1px solid var(--business-card);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  text-align: right;
+}
+.wfm25-hours-capacity-banner-tile--hero {
+  padding: 16px 18px;
+  background: #fff;
+  text-align: left;
+}
+.wfm25-hours-capacity-banner-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--staple);
+  line-height: 1.3;
+}
+.wfm25-hours-capacity-banner-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--laptop);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.wfm25-hours-capacity-banner-tile--hero .wfm25-hours-capacity-banner-value {
+  font-size: 30px;
+}
+.wfm25-hours-capacity-banner-sub {
+  font-size: 11px;
+  color: var(--staple);
+  font-variant-numeric: tabular-nums;
+}
 .wfm25-hours-capacity-wrap {
   overflow: visible;
   max-height: none;
@@ -4190,12 +4279,46 @@ td.cell-with-bar {
   color: var(--ballpoint);
 }
 .wfm25-hours-capacity-cell {
-  text-align: center;
+  text-align: right;
   font-variant-numeric: tabular-nums;
-  padding: 8px 6px !important;
+  padding: 10px 10px !important;
   vertical-align: middle;
   font-size: 11px;
   line-height: 1.35;
+  background: #fff !important;
+  color: var(--laptop) !important;
+  border-left: 1px solid var(--business-card);
+}
+.wfm25-hc-cell-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.wfm25-hc-util-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: var(--business-card);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wfm25-hc-util-bar {
+  height: 100%;
+  border-radius: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+.wfm25-hc-util-pct {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--laptop);
+  font-variant-numeric: tabular-nums;
+}
+.wfm25-hc-detail,
+.wfm25-hc-remaining {
+  font-size: 10px;
+  color: var(--staple);
+  font-variant-numeric: tabular-nums;
 }
 .wfm25-hc-line1 {
   font-weight: 600;
@@ -4237,6 +4360,131 @@ td.cell-with-bar {
   font-size: 10px;
   font-weight: 600;
   color: var(--happy-hour);
+}
+
+.wfm25-hc-draft-rem {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--happy-hour);
+}
+
+/* ── WFM.25 Utilization allocation banner ───────────────── */
+.wfm25-util-banner {
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--business-card);
+  background: #fff;
+}
+.wfm25-util-banner-caption {
+  margin: 10px 0 0;
+  font-size: 11px;
+  text-align: center;
+}
+.wfm25-util-banner-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.wfm25-util-banner-grid--team-scope {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1fr);
+}
+@media (max-width: 1100px) {
+  .wfm25-util-banner-grid,
+  .wfm25-util-banner-grid--team-scope {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .wfm25-util-banner-grid,
+  .wfm25-util-banner-grid--team-scope {
+    grid-template-columns: 1fr;
+  }
+}
+.wfm25-util-banner-tile {
+  background: var(--paper);
+  border: 1px solid var(--business-card);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  text-align: right;
+  font: inherit;
+  cursor: default;
+  width: 100%;
+}
+.wfm25-util-banner-tile--interactive {
+  cursor: pointer;
+  text-align: left;
+}
+.wfm25-util-banner-tile--interactive:hover {
+  border-color: var(--staple);
+}
+.wfm25-util-banner-tile--interactive:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: 2px;
+}
+.wfm25-util-banner-tile--interactive[aria-pressed="true"] {
+  border-color: var(--ballpoint);
+  box-shadow: inset 0 0 0 1px var(--ballpoint);
+}
+.wfm25-util-banner-tile--over {
+  box-shadow: inset 3px 0 0 var(--thumbtack);
+}
+.wfm25-util-banner-tile--under {
+  box-shadow: inset 3px 0 0 var(--blue-sky);
+}
+.wfm25-util-banner-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--staple);
+  line-height: 1.3;
+}
+.wfm25-util-banner-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--laptop);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.wfm25-util-banner-sub {
+  font-size: 11px;
+  color: var(--staple);
+  font-variant-numeric: tabular-nums;
+}
+.wfm25-util-filter-chip-wrap {
+  padding: 0 20px 12px;
+  background: #fff;
+  border-bottom: 1px solid var(--business-card);
+}
+.wfm25-util-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--ballpoint);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ballpoint);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.wfm25-util-filter-chip:hover {
+  background: var(--paper);
+}
+.wfm25-util-filter-chip:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: 2px;
+}
+.wfm25-util-filter-chip::after {
+  content: "\00d7";
+  font-size: 14px;
+  line-height: 1;
 }
 
 /* ── WFM.25 Stage 4b: Mix & Trend leadership view ─────────── */

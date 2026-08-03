@@ -2612,6 +2612,26 @@ function api_getReference() {
     icp: icp,
     roles: roles,
     planningWindowMonths: planningWindowMonths,
+    allocOverRatio: (function () {
+      try {
+        const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+        const raw = String(settings.alloc_over_ratio || '').trim();
+        const v = raw ? Number(raw) : NaN;
+        return (v > 0) ? v : 1.10;
+      } catch (e) {
+        return 1.10;
+      }
+    })(),
+    allocUnderRatio: (function () {
+      try {
+        const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+        const raw = String(settings.alloc_under_ratio || '').trim();
+        const v = raw ? Number(raw) : NaN;
+        return (v > 0) ? v : 0.85;
+      } catch (e) {
+        return 0.85;
+      }
+    })(),
     // WFM-FIX.1: no longer used to drive boot behavior (see
     // applyAutoManagerDefaults_, JavaScript.html, which now personalizes
     // the boot default off matchedManager/userIsAdmin instead). Left in
@@ -4126,7 +4146,9 @@ function api_listSettings() {
     { key: 'weekly_target_default',   label: 'Weekly target hours (default)',  description: 'Default weekly capacity target hours per worker (weekly-forecast-migration).', defaultValue: '32.8' },
     { key: 'weekly_target_P6',        label: 'Weekly target hours (P6)',       description: 'Weekly capacity target hours for P6-level workers (Job Profile starts with P6).', defaultValue: '26.0' },
     { key: 'week_month_split_basis',  label: 'Week\u2192month split basis',    description: '"calendar" splits a week\'s hours across months by calendar days; "weekday" splits by Mon\u2013Fri days only.', defaultValue: 'calendar' },
-    { key: 'fiscal_year_start_month', label: 'Fiscal year start month',        description: '1-indexed calendar month the fiscal year starts in (2 = February, Workday\u2019s fiscal anchor).', defaultValue: '2' }
+    { key: 'fiscal_year_start_month', label: 'Fiscal year start month',        description: '1-indexed calendar month the fiscal year starts in (2 = February, Workday\u2019s fiscal anchor).', defaultValue: '2' },
+    { key: 'alloc_over_ratio',        label: 'Over-allocation ratio threshold', description: 'Ratio-to-target at or above which a worker counts as over-allocated in the Utilization allocation banner.', defaultValue: '1.10' },
+    { key: 'alloc_under_ratio',       label: 'Under-allocation ratio threshold', description: 'Ratio-to-target below which a worker counts as under-allocated in the Utilization allocation banner.', defaultValue: '0.85' }
   ];
   const currentSettings = readSettings_();
   return KNOWN_SETTINGS.map(function (s) {

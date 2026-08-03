@@ -32,6 +32,18 @@
       <!-- ─ Utilization panel (active by default) ─ -->
       <div class="wfm25-tab-panel" id="wfm25PanelUtilization"
            data-wfm25-panel="utilization">
+        <div class="wfm25-collapse-host" id="wfm25UtilBannerCollapse">
+          <div class="wfm25-collapse-inner">
+            <div class="wfm25-util-banner" id="wfm25UtilAllocationBanner">
+              <div class="wfm25-util-banner-grid" id="wfm25UtilBannerGrid"></div>
+              <p class="wfm25-util-banner-caption muted">Current quarter</p>
+            </div>
+            <div class="wfm25-util-filter-chip-wrap" id="wfm25UtilFilterChipWrap" hidden>
+              <button type="button" class="wfm25-util-filter-chip" id="wfm25UtilFilterChip"
+                      aria-label="Clear allocation filter"></button>
+            </div>
+          </div>
+        </div>
         <div class="table-wrap" id="wfm25UtilWrap">
           <table class="wfm25-util-table wfm25-table" id="wfm25UtilTable">
             <thead>
@@ -52,6 +64,10 @@
       <!-- ─ Hours & Capacity panel ─ -->
       <div class="wfm25-tab-panel" id="wfm25PanelHoursBudget"
            data-wfm25-panel="hours-budget" hidden>
+        <div class="wfm25-hours-capacity-banner" id="wfm25HoursCapacityBanner">
+          <div class="wfm25-hours-capacity-banner-grid" id="wfm25HoursCapacityBannerGrid"></div>
+          <p class="wfm25-hours-capacity-banner-caption muted">Current quarter, whole org</p>
+        </div>
         <div class="table-wrap wfm25-hours-capacity-wrap" id="wfm25HoursCapacityWrap">
           <table class="wfm25-hours-capacity-table wfm25-table" id="wfm25HoursCapacityTable"
                  aria-label="Hours and capacity by team">

@@ -7402,7 +7402,7 @@ async function _qaRefreshPsaHours_() {
     historyReqId:     0,             // race-guard for history fetch
     mixTrendReqId:    0,             // race-guard for mix-trend render
     mixTrendSelected: null,          // selected bar descriptor or null
-    mixTrendRegionsExpanded: false,  // Workday Regions inline expansion
+    mixTrendSelectedCategory: null,  // 'SLG' | 'Workday Regions' | 'Contractor' | null
     expandedTeam:     null,          // teamLabel string currently expanded, or null
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend'
     groupBy:          'team',        // 'team' | 'role'
@@ -8587,7 +8587,155 @@ async function _qaRefreshPsaHours_() {
   // ── Mix & Trend (Stage 4b) ───────────────────────────────────
 
   const WFM25_MIX_CLASSES_ = ['SLG', 'Workday Regions', 'Contractor'];
-  const WFM25_MIX_TREND_PLOT_H_ = 240;
+  const WFM25_MIX_TREND_PLOT_H_ = 230;
+  const WFM25_MIX_TREND_BAR_MIN_W_ = 44;
+
+  /**
+   * CSS suffix for a Mix & Trend display category.
+   * @param {string} cls
+   * @returns {string}
+   */
+  function wfm25MixTrendCatCss_(cls) {
+    if (cls === 'SLG') return 'slg';
+    if (cls === 'Workday Regions') return 'wd-regions';
+    if (cls === 'Contractor') return 'contractor';
+    return '';
+  }
+
+  /**
+   * Stroke/fill color token for a Mix & Trend display category.
+   * @param {string} cls
+   * @returns {string}
+   */
+  function wfm25MixTrendCatColor_(cls) {
+    if (cls === 'SLG') return 'var(--wc-slg)';
+    if (cls === 'Workday Regions') return 'var(--wc-nonslg)';
+    if (cls === 'Contractor') return 'var(--wc-partner)';
+    return 'var(--staple)';
+  }
+
+  /**
+   * Lightweight inline SVG sparkline (no charting library).
+   * @param {number[]} values
+   * @param {string} color
+   * @param {number} [width]
+   * @param {number} [height]
+   * @returns {string}
+   */
+  function wfm25MixTrendSparklineSvg_(values, color, width, height) {
+    if (!values || !values.length) return '';
+    const w = width || 80;
+    const h = height || 22;
+    const pad = 2;
+    const min = Math.min.apply(null, values);
+    const max = Math.max.apply(null, values);
+    const range = max - min || 1;
+    const denom = Math.max(values.length - 1, 1);
+    const pts = values.map(function (v, i) {
+      const x = pad + (i / denom) * (w - 2 * pad);
+      const y = pad + (1 - ((Number(v) || 0) - min) / range) * (h - 2 * pad);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    return '<svg class="wfm25-mix-trend-sparkline" width="' + w + '" height="' + h + '" aria-hidden="true">' +
+      '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" points="' + pts + '"/></svg>';
+  }
+
+  /**
+   * Drift arrow comparing earliest vs latest value in a series.
+   * @param {number[]} series
+   * @returns {string}
+   */
+  function wfm25MixTrendDriftHtml_(series) {
+    if (!series || series.length < 2) {
+      return '<span class="wfm25-mix-trend-drift wfm25-mix-trend-drift--flat" aria-hidden="true">\u2192</span>';
+    }
+    const first = Number(series[0]) || 0;
+    const last = Number(series[series.length - 1]) || 0;
+    const eps = 0.0005;
+    if (last > first + eps) {
+      return '<span class="wfm25-mix-trend-drift wfm25-mix-trend-drift--up" aria-label="Trending up">\u2191</span>';
+    }
+    if (last < first - eps) {
+      return '<span class="wfm25-mix-trend-drift wfm25-mix-trend-drift--down" aria-label="Trending down">\u2193</span>';
+    }
+    return '<span class="wfm25-mix-trend-drift wfm25-mix-trend-drift--flat" aria-label="Flat trend">\u2192</span>';
+  }
+
+  /**
+   * QoQ change line for the hero banner tile.
+   * @param {number} qoqAbs
+   * @param {number} qoqPct
+   * @returns {string}
+   */
+  function wfm25MixTrendQoqHtml_(qoqAbs, qoqPct) {
+    const eps = 0.5;
+    const cls = qoqAbs > eps ? 'up' : (qoqAbs < -eps ? 'down' : 'flat');
+    const arrow = cls === 'up' ? '\u2191' : (cls === 'down' ? '\u2193' : '\u2192');
+    const sign = qoqAbs > 0 ? '+' : '';
+    const pctSign = qoqPct >= 0 ? '+' : '';
+    return '<span class="wfm25-mix-trend-qoq wfm25-mix-trend-qoq--' + cls + '">' +
+      '<span aria-hidden="true">' + arrow + '</span> ' +
+      sign + fmtHours(qoqAbs) + 'h (' + pctSign + fmtPct1(qoqPct) + ')' +
+    '</span>';
+  }
+
+  /**
+   * Render static metrics banner (historical actual quarters only).
+   * @param {Object|null} bannerSummary
+   */
+  function renderWFM25MixTrendBanner_(bannerSummary) {
+    const banner = document.getElementById('wfm25MixTrendBanner');
+    const grid = document.getElementById('wfm25MixTrendBannerGrid');
+    if (!banner || !grid) return;
+
+    if (!bannerSummary || !bannerSummary.latestQuarter) {
+      banner.hidden = true;
+      grid.innerHTML = '';
+      return;
+    }
+
+    const bs = bannerSummary;
+    const heroQoq = (bs.priorQuarter && bs.priorQuarter !== bs.latestQuarter)
+      ? wfm25MixTrendQoqHtml_(bs.qoqAbsHours, bs.qoqPct)
+      : '<span class="wfm25-mix-trend-qoq wfm25-mix-trend-qoq--flat muted">No prior quarter</span>';
+
+    const shareTiles = [
+      { key: 'SLG', label: 'SLG Share', share: bs.pooledShareSLG, series: bs.shareSeriesSLG, css: 'slg' },
+      { key: 'Workday Regions', label: 'Workday Regions Share', share: bs.pooledShareWorkdayRegions,
+        series: bs.shareSeriesWorkdayRegions, css: 'wd-regions' },
+      { key: 'Contractor', label: 'Contractor Share', share: bs.pooledShareContractor,
+        series: bs.shareSeriesContractor, css: 'contractor' }
+    ];
+
+    const shareHtml = shareTiles.map(function (t) {
+      const color = wfm25MixTrendCatColor_(t.key);
+      return '<div class="wfm25-mix-trend-banner-tile wfm25-mix-trend-banner-tile--' + t.css + '">' +
+        '<div class="wfm25-mix-trend-banner-label">' + escapeHtml_(t.label) + '</div>' +
+        '<div class="wfm25-mix-trend-banner-meta">' +
+          '<span class="wfm25-mix-trend-banner-value">' + fmtPct1(t.share) + '</span>' +
+          wfm25MixTrendDriftHtml_(t.series) +
+        '</div>' +
+        wfm25MixTrendSparklineSvg_(t.series, color, 88, 22) +
+      '</div>';
+    }).join('');
+
+    grid.innerHTML =
+      '<div class="wfm25-mix-trend-banner-tile wfm25-mix-trend-banner-tile--hero">' +
+        '<div class="wfm25-mix-trend-banner-label">Latest Quarter Actual Hours</div>' +
+        '<div class="wfm25-mix-trend-banner-value">' + fmtHours(bs.latestQuarterHours) + 'h</div>' +
+        '<div class="wfm25-mix-trend-banner-meta">' + heroQoq + '</div>' +
+      '</div>' +
+      '<div class="wfm25-mix-trend-banner-tile">' +
+        '<div class="wfm25-mix-trend-banner-label">Avg Quarterly Hours</div>' +
+        '<div class="wfm25-mix-trend-banner-meta">' +
+          '<span class="wfm25-mix-trend-banner-value">' + fmtHours(bs.avgQuarterlyHours) + 'h</span>' +
+        '</div>' +
+        wfm25MixTrendSparklineSvg_(bs.totalHoursSeries, 'var(--ballpoint)', 88, 22) +
+      '</div>' +
+      shareHtml;
+
+    banner.hidden = false;
+  }
 
   /**
    * Advance a fiscal-quarter key by one quarter.
@@ -8752,11 +8900,52 @@ async function _qaRefreshPsaHours_() {
   function wfm25SelectMixTrendBar_(bar) {
     if (!bar || bar.kind === 'nodata' || bar.selectable === false) return;
     WFM25State.mixTrendSelected = bar;
-    WFM25State.mixTrendRegionsExpanded = false;
+    WFM25State.mixTrendSelectedCategory = null;
     if (WFM25State._mixTrendTimeline) {
       renderWFM25MixTrendChart_(WFM25State._mixTrendTimeline);
     }
     wfm25RenderMixTrendDetail_(bar);
+  }
+
+  /**
+   * Select a category row in the drill-down left panel.
+   * @param {Object} bar
+   * @param {string} category
+   */
+  function wfm25SelectMixTrendCategory_(bar, category) {
+    if (!bar || bar.kind !== 'actuals') return;
+    if (category !== 'Workday Regions') return;
+    WFM25State.mixTrendSelectedCategory =
+      WFM25State.mixTrendSelectedCategory === category ? null : category;
+    wfm25RenderMixTrendDetail_(bar);
+  }
+
+  /**
+   * State chip label/class for a bar kind.
+   * @param {Object} bar
+   * @returns {{label:string, chipCls:string}}
+   */
+  function wfm25MixTrendStateChip_(bar) {
+    if (bar.kind === 'current') return { label: 'Actuals + Forecast', chipCls: 'current' };
+    if (bar.kind === 'forecast') return { label: 'Forecast', chipCls: 'forecast' };
+    return { label: 'Actuals', chipCls: 'actuals' };
+  }
+
+  /**
+   * Category hours for a selected quarter.
+   * @param {Object} bar
+   * @param {string} cls
+   * @returns {number}
+   */
+  function wfm25MixTrendCategoryHours_(bar, cls) {
+    if (bar.kind === 'actuals') {
+      const classes = (WFM25State.historyData &&
+        WFM25State.historyData.quarterClasses &&
+        WFM25State.historyData.quarterClasses[bar.quarterKey]) || {};
+      return Number(classes[cls]) || 0;
+    }
+    if (cls === 'SLG') return Number(bar.slgHours) || Number(bar.totalHours) || 0;
+    return 0;
   }
 
   /**
@@ -8780,6 +8969,7 @@ async function _qaRefreshPsaHours_() {
     const maxH = Math.max.apply(null, dataBars.map(function (b) { return b.totalHours; }).concat([1]));
     const plotH = WFM25_MIX_TREND_PLOT_H_;
     const yTicks = [maxH, maxH / 2, 0];
+    const barsMinW = timeline.length * WFM25_MIX_TREND_BAR_MIN_W_;
 
     const gridHtml = yTicks.map(function (tick, i) {
       const pct = (1 - i / (yTicks.length - 1)) * 100;
@@ -8795,13 +8985,12 @@ async function _qaRefreshPsaHours_() {
 
       if (bar.kind === 'nodata') {
         return '<div class="wfm25-mix-trend-bar-slot wfm25-mix-trend-bar-slot--nodata" role="listitem"' +
-          ' aria-label="' + escapeHtml_(bar.quarterKey) + ': No data, historical source data not loaded">' +
+          ' aria-label="' + escapeHtml_(bar.quarterKey) + ': No data">' +
           '<div class="wfm25-mix-trend-bar-col">' +
-            '<div class="wfm25-mix-trend-bar wfm25-mix-bar--nodata" title="Historical source data not loaded"></div>' +
+            '<div class="wfm25-mix-trend-bar wfm25-mix-bar--nodata" title="No data"></div>' +
           '</div>' +
           '<div class="wfm25-mix-trend-bar-label">' + escapeHtml_(bar.quarterKey) + '</div>' +
           '<div class="wfm25-mix-trend-bar-kind">No data</div>' +
-          '<div class="wfm25-mix-trend-bar-nodata-hint">Historical source data not loaded</div>' +
         '</div>';
       }
 
@@ -8828,9 +9017,12 @@ async function _qaRefreshPsaHours_() {
 
     chart.innerHTML =
       '<div class="wfm25-mix-trend-chart-inner" role="img" aria-label="Total delivery hours by fiscal quarter">' +
-        '<div class="wfm25-mix-trend-plot-area" style="height:' + plotH + 'px">' +
-          '<div class="wfm25-mix-trend-grid" aria-hidden="true">' + gridHtml + '</div>' +
-          '<div class="wfm25-mix-trend-bars" role="list">' + barsHtml + '</div>' +
+        '<div class="wfm25-mix-trend-plot-scroll">' +
+          '<div class="wfm25-mix-trend-plot-area" style="height:' + plotH + 'px;min-width:' +
+            barsMinW + 'px">' +
+            '<div class="wfm25-mix-trend-grid" aria-hidden="true">' + gridHtml + '</div>' +
+            '<div class="wfm25-mix-trend-bars" role="list">' + barsHtml + '</div>' +
+          '</div>' +
         '</div>' +
       '</div>' +
       '<div class="wfm25-mix-trend-legend" aria-hidden="true">' +
@@ -8852,131 +9044,153 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Build Workday Region inline rows for a historical quarter.
+   * Build one category row for the drill-down left panel.
    * @param {Object} bar
+   * @param {string} cls
+   * @param {number} hrs
+   * @param {number} total
+   * @param {boolean} interactive
    * @returns {string}
    */
-  function wfm25MixTrendRegionRowsHtml_(bar) {
-    const regions = (WFM25State.historyData &&
-      WFM25State.historyData.quarterRegions &&
-      WFM25State.historyData.quarterRegions[bar.quarterKey]) || {};
-    const classTotal = Number(
-      (WFM25State.historyData &&
-        WFM25State.historyData.quarterClasses &&
-        WFM25State.historyData.quarterClasses[bar.quarterKey] &&
-        WFM25State.historyData.quarterClasses[bar.quarterKey]['Workday Regions']) || 0
-    );
-
-    const regionKeys = Object.keys(regions).sort(function (a, b) {
-      return (Number(regions[b]) || 0) - (Number(regions[a]) || 0);
-    });
-
-    return regionKeys.map(function (rk) {
-      const hrs = Number(regions[rk]) || 0;
-      const share = classTotal > 0 ? hrs / classTotal : 0;
-      return '<tr class="wfm25-mix-trend-region-row">' +
-        '<td class="wfm25-mix-trend-region-name">' + escapeHtml_(rk) + '</td>' +
-        '<td class="num">' + fmtHours(hrs) + 'h</td>' +
-        '<td class="num">' + fmtPct1(share) + '</td>' +
-      '</tr>';
-    }).join('');
+  function wfm25MixTrendCatRowHtml_(bar, cls, hrs, total, interactive) {
+    const share = total > 0 ? hrs / total : 0;
+    const css = wfm25MixTrendCatCss_(cls);
+    const selected = WFM25State.mixTrendSelectedCategory === cls;
+    const isWd = cls === 'Workday Regions';
+    const tag = interactive && isWd ? 'button' : 'div';
+    const extraCls = (interactive ? '' : ' wfm25-mix-trend-cat-row--static') +
+      (selected ? ' is-selected' : '');
+    const typeAttr = tag === 'button' ? ' type="button"' : '';
+    const aria = interactive && isWd
+      ? ' aria-expanded="' + (selected ? 'true' : 'false') + '"' +
+        ' aria-pressed="' + (selected ? 'true' : 'false') + '"' +
+        ' data-wfm25-cat="' + escapeHtml_(cls) + '"'
+      : '';
+    return '<' + tag + typeAttr + ' class="wfm25-mix-trend-cat-row' + extraCls + '"' + aria + '>' +
+      '<span class="wfm25-mix-trend-cat-dot wfm25-mix-trend-cat-dot--' + css + '" aria-hidden="true"></span>' +
+      '<span class="wfm25-mix-trend-cat-name">' + escapeHtml_(cls) + '</span>' +
+      '<span class="wfm25-mix-trend-cat-hours">' + fmtHours(hrs) + 'h</span>' +
+      '<span class="wfm25-mix-trend-cat-pct">' + fmtPct1(share) + '</span>' +
+      '<div class="wfm25-mix-trend-cat-bar-wrap" aria-hidden="true">' +
+        '<div class="wfm25-mix-trend-cat-bar wfm25-mix-trend-cat-bar--' + css + '"' +
+          ' style="width:' + (share * 100).toFixed(1) + '%"></div>' +
+      '</div>' +
+    '</' + tag + '>';
   }
 
   /**
-   * Render selected-quarter detail panel below the chart.
+   * Render Workday Regions breakdown in the right drill-down panel.
+   * @param {Object} bar
+   * @returns {string}
+   */
+  function wfm25MixTrendRegionPanelHtml_(bar) {
+    const history = WFM25State.historyData || {};
+    const regionRows = (history.regionByQuarter && history.regionByQuarter[bar.quarterKey]) || null;
+    const classTotal = wfm25MixTrendCategoryHours_(bar, 'Workday Regions');
+
+    let rows = [];
+    if (regionRows && regionRows.length) {
+      rows = regionRows;
+    } else {
+      const regions = (history.quarterRegions && history.quarterRegions[bar.quarterKey]) || {};
+      rows = Object.keys(regions).map(function (rk) {
+        return { workdayRegion: rk, hours: Number(regions[rk]) || 0 };
+      }).sort(function (a, b) { return b.hours - a.hours; });
+    }
+
+    const gridHtml = rows.map(function (row) {
+      const hrs = Number(row.hours) || 0;
+      const name = row.workdayRegion || row.region || '';
+      const share = classTotal > 0 ? hrs / classTotal : 0;
+      return '<div class="wfm25-mix-trend-region-row">' +
+        '<span class="wfm25-mix-trend-region-name">' + escapeHtml_(name) + '</span>' +
+        '<span class="wfm25-mix-trend-region-hours">' + fmtHours(hrs) + 'h</span>' +
+        '<span class="wfm25-mix-trend-region-pct">' + fmtPct1(share) + '</span>' +
+        '<div class="wfm25-mix-trend-region-bar-wrap" aria-hidden="true">' +
+          '<div class="wfm25-mix-trend-region-bar" style="width:' + (share * 100).toFixed(1) + '%"></div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="wfm25-mix-trend-detail-right-header">' +
+        '<h4 class="wfm25-mix-trend-detail-right-title">Workday Regions breakdown \u2014 ' +
+          escapeHtml_(bar.quarterKey) + '</h4>' +
+        '<span class="wfm25-mix-trend-detail-right-total">' + fmtHours(classTotal) + 'h</span>' +
+      '</div>' +
+      '<div class="wfm25-mix-trend-region-grid" role="list">' +
+        (gridHtml || '<div class="muted">No region data.</div>') +
+      '</div>';
+  }
+
+  /**
+   * Render selected-quarter drill-down (two-panel B-3 layout).
    * @param {Object} bar
    */
   function wfm25RenderMixTrendDetail_(bar) {
     const reqId = WFM25State.mixTrendReqId;
     const detail = document.getElementById('wfm25MixTrendDetail');
-    const title = document.getElementById('wfm25MixTrendDetailTitle');
-    const totalEl = document.getElementById('wfm25MixTrendDetailTotal');
-    const body = document.getElementById('wfm25MixTrendDetailBody');
-    if (!detail || !body) return;
+    const left = document.getElementById('wfm25MixTrendDetailLeft');
+    const right = document.getElementById('wfm25MixTrendDetailRight');
+    if (!detail || !left) return;
 
     detail.hidden = false;
 
     const curTag = bar.kind === 'current' ? ' \u25c6' : '';
-    if (title) title.textContent = bar.quarterKey + curTag + ' \u00b7 ' + bar.label;
-    if (totalEl) totalEl.textContent = fmtHours(bar.totalHours) + 'h';
-
+    const chip = wfm25MixTrendStateChip_(bar);
     const total = bar.totalHours || 0;
-    let rows = [];
-    const regionsExpanded = WFM25State.mixTrendRegionsExpanded;
+    let catRows = '';
+    let noteHtml = '';
 
     if (bar.kind === 'actuals') {
-      const classes = (WFM25State.historyData &&
-        WFM25State.historyData.quarterClasses &&
-        WFM25State.historyData.quarterClasses[bar.quarterKey]) || {};
       WFM25_MIX_CLASSES_.forEach(function (cls) {
-        const hrs = Number(classes[cls]) || 0;
-        const share = total > 0 ? hrs / total : 0;
-        const expandable = cls === 'Workday Regions';
-        if (expandable) {
-          rows.push(
-            '<tr class="wfm25-mix-trend-expand-row">' +
-            '<td class="wfm25-history-class">' +
-            '<button type="button" class="wfm25-mix-trend-expand-btn' +
-              (regionsExpanded ? ' is-expanded' : '') + '"' +
-              ' aria-expanded="' + (regionsExpanded ? 'true' : 'false') + '"' +
-              ' data-wfm25-expand="regions">' +
-              escapeHtml_(cls) +
-              ' <span class="wfm25-mix-trend-expand-chev" aria-hidden="true">' +
-                (regionsExpanded ? '\u25bc' : '\u25b6') + '</span>' +
-            '</button></td>' +
-            '<td class="num">' + fmtHours(hrs) + 'h</td>' +
-            '<td class="num">' + fmtPct1(share) + '</td>' +
-            '</tr>'
-          );
-          if (regionsExpanded) {
-            rows.push(wfm25MixTrendRegionRowsHtml_(bar));
-          }
-        } else {
-          rows.push(
-            '<tr class="wfm25-mix-trend-class-row">' +
-            '<td class="wfm25-history-class">' + escapeHtml_(cls) + '</td>' +
-            '<td class="num">' + fmtHours(hrs) + 'h</td>' +
-            '<td class="num">' + fmtPct1(share) + '</td>' +
-            '</tr>'
-          );
-        }
+        const hrs = wfm25MixTrendCategoryHours_(bar, cls);
+        catRows += wfm25MixTrendCatRowHtml_(bar, cls, hrs, total, true);
       });
     } else {
-      const slgHrs = Number(bar.slgHours) || total;
-      const share = total > 0 ? slgHrs / total : 0;
-      rows.push(
-        '<tr class="wfm25-mix-trend-class-row">' +
-        '<td class="wfm25-history-class">SLG</td>' +
-        '<td class="num">' + fmtHours(slgHrs) + 'h</td>' +
-        '<td class="num">' + fmtPct1(share) + '</td>' +
-        '</tr>'
-      );
+      const slgHrs = wfm25MixTrendCategoryHours_(bar, 'SLG');
+      catRows += wfm25MixTrendCatRowHtml_(bar, 'SLG', slgHrs, total, false);
       if (bar.kind === 'current') {
-        rows.push('<tr><td colspan="3" class="muted wfm25-history-note">' +
-          'Current quarter includes actuals to date plus forecast forward. ' +
-          'Workday Regions and Contractor composition for forecast periods is not shown in Stage 4.' +
-          '</td></tr>');
+        noteHtml = '<p class="muted wfm25-mix-trend-note">Current quarter includes actuals to date plus forecast forward. ' +
+          'Workday Regions and Contractor composition for forecast periods is not shown in Stage 4.</p>';
       } else if (bar.kind === 'forecast') {
-        rows.push('<tr><td colspan="3" class="muted wfm25-history-note">' +
-          'Forecast quarter shows SLG planned hours only. ' +
-          'Workday Regions and Contractor composition is deferred.' +
-          '</td></tr>');
+        noteHtml = '<p class="muted wfm25-mix-trend-note">Forecast quarter shows SLG planned hours only. ' +
+          'Workday Regions and Contractor composition is deferred.</p>';
       }
     }
 
     if (reqId !== WFM25State.mixTrendReqId) return;
-    body.innerHTML =
-      '<table class="wfm25-history-table wfm25-mix-trend-detail-table">' +
-      '<thead><tr><th>Category</th><th class="num">Hours</th><th class="num">Share</th></tr></thead>' +
-      '<tbody>' + rows.join('') + '</tbody></table>';
 
-    const expandBtn = $('.wfm25-mix-trend-expand-btn', body);
-    if (expandBtn) {
-      expandBtn.addEventListener('click', function () {
-        WFM25State.mixTrendRegionsExpanded = !WFM25State.mixTrendRegionsExpanded;
-        wfm25RenderMixTrendDetail_(bar);
-      });
+    left.innerHTML =
+      '<div class="wfm25-mix-trend-detail-header">' +
+        '<div class="wfm25-mix-trend-detail-title-row">' +
+          '<h3 class="wfm25-mix-trend-detail-title">' + escapeHtml_(bar.quarterKey) + curTag + '</h3>' +
+          '<span class="wfm25-mix-trend-state-chip wfm25-mix-trend-state-chip--' + chip.chipCls + '">' +
+            escapeHtml_(chip.label) + '</span>' +
+        '</div>' +
+        '<div class="wfm25-mix-trend-detail-total">' + fmtHours(total) + 'h</div>' +
+      '</div>' +
+      '<div class="wfm25-mix-trend-cat-list" role="list">' + catRows + '</div>' +
+      noteHtml;
+
+    const showRegions = bar.kind === 'actuals' &&
+      WFM25State.mixTrendSelectedCategory === 'Workday Regions';
+    if (right) {
+      if (showRegions) {
+        right.hidden = false;
+        right.innerHTML = wfm25MixTrendRegionPanelHtml_(bar);
+      } else {
+        right.hidden = true;
+        right.innerHTML = '';
+      }
     }
+
+    $$('[data-wfm25-cat]', left).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const cat = btn.getAttribute('data-wfm25-cat');
+        if (!cat) return;
+        wfm25SelectMixTrendCategory_(bar, cat);
+      });
+    });
   }
 
   /**
@@ -8989,7 +9203,10 @@ async function _qaRefreshPsaHours_() {
     const reqId = ++WFM25State.mixTrendReqId;
 
     WFM25State.mixTrendSelected = null;
-    WFM25State.mixTrendRegionsExpanded = false;
+    WFM25State.mixTrendSelectedCategory = null;
+
+    const banner = document.getElementById('wfm25MixTrendBanner');
+    if (banner) banner.hidden = true;
 
     if (loading) { loading.hidden = false; loading.textContent = 'Loading\u2026'; }
     if (chart) chart.hidden = true;
@@ -9015,6 +9232,9 @@ async function _qaRefreshPsaHours_() {
       const def = wfm25MixTrendDefaultSelection_(timeline);
       if (def) WFM25State.mixTrendSelected = def;
 
+      renderWFM25MixTrendBanner_(
+        WFM25State.historyData && WFM25State.historyData.bannerSummary
+      );
       renderWFM25MixTrendChart_(timeline);
       if (def) {
         wfm25RenderMixTrendDetail_(def);

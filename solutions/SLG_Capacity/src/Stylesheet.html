@@ -4239,18 +4239,124 @@ td.cell-with-bar {
   color: var(--happy-hour);
 }
 
-/* ── WFM.25 Stage 4: Mix & Trend ─────────────────────────── */
+/* ── WFM.25 Stage 4b: Mix & Trend leadership view ─────────── */
 .wfm25-mix-trend-root {
+  min-height: 0;
+}
+.wfm25-mix-trend-card {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
 }
-.wfm25-mix-trend-chart-wrap {
+.wfm25-mix-trend-banner {
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--business-card);
+}
+.wfm25-mix-trend-banner-caption {
+  margin: 10px 0 0;
+  font-size: 11px;
+  text-align: center;
+}
+.wfm25-mix-trend-banner-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 1200px) {
+  .wfm25-mix-trend-banner-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wfm25-mix-trend-banner-tile--hero {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 640px) {
+  .wfm25-mix-trend-banner-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.wfm25-mix-trend-banner-tile {
+  background: var(--paper);
+  border: 1px solid var(--business-card);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.wfm25-mix-trend-banner-tile--hero {
+  padding: 16px 18px;
+  background: #fff;
+}
+.wfm25-mix-trend-banner-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--staple);
+  line-height: 1.3;
+}
+.wfm25-mix-trend-banner-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--laptop);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.wfm25-mix-trend-banner-tile--hero .wfm25-mix-trend-banner-value {
+  font-size: 30px;
+}
+.wfm25-mix-trend-banner-tile--slg {
+  box-shadow: inset 3px 0 0 var(--wc-slg);
+}
+.wfm25-mix-trend-banner-tile--wd-regions {
+  box-shadow: inset 3px 0 0 var(--wc-nonslg);
+}
+.wfm25-mix-trend-banner-tile--contractor {
+  box-shadow: inset 3px 0 0 var(--wc-partner);
+}
+.wfm25-mix-trend-banner-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+}
+.wfm25-mix-trend-qoq {
+  font-size: 12px;
+  font-weight: 600;
+}
+.wfm25-mix-trend-qoq--up { color: #1e7a3c; }
+.wfm25-mix-trend-qoq--down { color: var(--thumbtack); }
+.wfm25-mix-trend-qoq--flat { color: var(--staple); }
+.wfm25-mix-trend-drift {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.wfm25-mix-trend-drift--up { color: #1e7a3c; }
+.wfm25-mix-trend-drift--down { color: var(--thumbtack); }
+.wfm25-mix-trend-drift--flat { color: var(--staple); }
+.wfm25-mix-trend-sparkline {
+  display: block;
+  flex-shrink: 0;
+}
+.wfm25-mix-trend-chart-section {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--business-card);
   min-height: 0;
 }
 .wfm25-mix-trend-chart-inner {
   display: flex;
   flex-direction: column;
+}
+.wfm25-mix-trend-plot-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 .wfm25-mix-trend-plot-area {
   position: relative;
@@ -4259,6 +4365,7 @@ td.cell-with-bar {
   justify-content: flex-end;
   border-bottom: 1px solid var(--business-card);
   padding: 0 4px 0 52px;
+  min-width: 100%;
 }
 .wfm25-mix-trend-grid {
   position: absolute;
@@ -4287,16 +4394,17 @@ td.cell-with-bar {
   z-index: 1;
   display: flex;
   align-items: flex-end;
-  justify-content: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 6px;
   height: 100%;
   padding-top: 20px;
+  min-width: 100%;
 }
 .wfm25-mix-trend-bar-btn,
 .wfm25-mix-trend-bar-slot {
   flex: 1 1 0;
-  max-width: 80px;
   min-width: 44px;
+  max-width: none;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4334,6 +4442,7 @@ td.cell-with-bar {
   white-space: nowrap;
   margin-bottom: 2px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 .wfm25-mix-trend-bar {
   width: 72%;
@@ -4391,6 +4500,7 @@ td.cell-with-bar {
 }
 .wfm25-mix-trend-bar-slot--nodata {
   opacity: 0.75;
+  cursor: default;
 }
 .wfm25-mix-trend-bar-label {
   font-size: 11px;
@@ -4444,10 +4554,142 @@ td.cell-with-bar {
   font-size: 11px;
 }
 .wfm25-mix-trend-detail {
-  border-top: 1px solid var(--business-card);
-  padding-top: 16px;
+  padding: 16px 20px 20px;
+}
+.wfm25-mix-trend-detail-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .wfm25-mix-trend-detail-panels {
+    grid-template-columns: 1fr;
+  }
+}
+.wfm25-mix-trend-detail-left,
+.wfm25-mix-trend-detail-right {
+  min-width: 0;
 }
 .wfm25-mix-trend-detail-header {
+  margin-bottom: 14px;
+}
+.wfm25-mix-trend-detail-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.wfm25-mix-trend-detail-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.wfm25-mix-trend-state-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--paper);
+  border: 1px solid var(--business-card);
+  color: var(--staple);
+}
+.wfm25-mix-trend-state-chip--current {
+  border-color: var(--ballpoint);
+  color: var(--ballpoint);
+}
+.wfm25-mix-trend-state-chip--forecast {
+  border-style: dashed;
+}
+.wfm25-mix-trend-detail-total {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--laptop);
+}
+.wfm25-mix-trend-cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wfm25-mix-trend-cat-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--business-card);
+  border-radius: var(--radius);
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.wfm25-mix-trend-cat-row:hover,
+.wfm25-mix-trend-cat-row:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: 1px;
+}
+.wfm25-mix-trend-cat-row.is-selected {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 2px var(--ballpoint);
+}
+.wfm25-mix-trend-cat-row--static {
+  cursor: default;
+}
+.wfm25-mix-trend-cat-row--static:hover,
+.wfm25-mix-trend-cat-row--static:focus-visible {
+  outline: none;
+}
+.wfm25-mix-trend-cat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.wfm25-mix-trend-cat-dot--slg { background: var(--wc-slg); }
+.wfm25-mix-trend-cat-dot--wd-regions { background: var(--wc-nonslg); }
+.wfm25-mix-trend-cat-dot--contractor { background: var(--wc-partner); }
+.wfm25-mix-trend-cat-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--laptop);
+  min-width: 0;
+}
+.wfm25-mix-trend-cat-hours,
+.wfm25-mix-trend-cat-pct {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--laptop);
+  white-space: nowrap;
+}
+.wfm25-mix-trend-cat-pct {
+  min-width: 48px;
+  text-align: right;
+  color: var(--staple);
+}
+.wfm25-mix-trend-cat-bar-wrap {
+  grid-column: 1 / -1;
+  height: 4px;
+  background: var(--paper);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wfm25-mix-trend-cat-bar {
+  height: 100%;
+  border-radius: 2px;
+  min-width: 2px;
+}
+.wfm25-mix-trend-cat-bar--slg { background: var(--wc-slg); }
+.wfm25-mix-trend-cat-bar--wd-regions { background: var(--wc-nonslg); }
+.wfm25-mix-trend-cat-bar--contractor { background: var(--wc-partner); }
+.wfm25-mix-trend-detail-right-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -4455,52 +4697,73 @@ td.cell-with-bar {
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.wfm25-mix-trend-detail-title {
+.wfm25-mix-trend-detail-right-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
-.wfm25-mix-trend-detail-total {
-  font-size: 15px;
+.wfm25-mix-trend-detail-right-total {
+  font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--laptop);
 }
-.wfm25-mix-trend-detail-table {
-  margin-top: 0;
+.wfm25-mix-trend-region-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
-.wfm25-mix-trend-expand-btn {
-  display: inline-flex;
+@media (max-width: 900px) {
+  .wfm25-mix-trend-region-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.wfm25-mix-trend-region-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: 4px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-  color: inherit;
-}
-.wfm25-mix-trend-expand-btn:hover,
-.wfm25-mix-trend-expand-btn:focus-visible {
-  outline: 2px solid var(--ballpoint);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-.wfm25-mix-trend-expand-chev {
-  font-size: 9px;
-  color: var(--staple);
-}
-.wfm25-mix-trend-expand-row:hover td {
-  background: var(--paper);
-}
-.wfm25-mix-trend-region-row td {
-  font-size: 12px;
-  color: var(--staple);
+  gap: 8px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--business-card);
+  font-size: 12px;
 }
 .wfm25-mix-trend-region-name {
-  padding-left: 28px !important;
+  color: var(--laptop);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wfm25-mix-trend-region-hours,
+.wfm25-mix-trend-region-pct {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wfm25-mix-trend-region-pct {
+  min-width: 44px;
+  text-align: right;
+  color: var(--staple);
+}
+.wfm25-mix-trend-region-bar-wrap {
+  grid-column: 1 / -1;
+  height: 3px;
+  background: var(--paper);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wfm25-mix-trend-region-bar {
+  height: 100%;
+  background: var(--wc-nonslg);
+  border-radius: 2px;
+  min-width: 2px;
+}
+.wfm25-mix-trend-note {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* ── WFM.25 Stage 4: History drill-down tables ───────────── */

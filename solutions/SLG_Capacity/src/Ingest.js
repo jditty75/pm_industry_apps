@@ -747,9 +747,7 @@ function sumConsolidatedPrimary_(sheetName, values, warnings) {
  * @private
  */
 function compareManifestPrimaryTotal_(expected, actual) {
-  var e = Math.round(Number(expected) * 10) / 10;
-  var a = Math.round(Number(actual) * 10) / 10;
-  return Math.abs(e - a) <= 0.01;
+  return Math.abs(Number(expected) - Number(actual)) < 0.1;
 }
 
 /**

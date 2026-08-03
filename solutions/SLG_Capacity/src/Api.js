@@ -628,13 +628,118 @@ function getWorkerTypeHistory_(params) {
   });
 
   var fiscalQuarters = Object.keys(quarterTotals).sort(compareFiscalQuarterKeys_);
+  var summaries = buildWorkerTypeHistorySummaries_(
+    fiscalQuarters, quarterTotals, quarterClasses, quarterRegions
+  );
 
   return {
     fiscalQuarters: fiscalQuarters,
     quarterTotals: quarterTotals,
     quarterClasses: quarterClasses,
     quarterRegions: quarterRegions,
-    grandTotal: grandTotal
+    grandTotal: grandTotal,
+    quarters: summaries.quarters,
+    categoryByQuarter: summaries.categoryByQuarter,
+    regionByQuarter: summaries.regionByQuarter,
+    bannerSummary: summaries.bannerSummary
+  };
+}
+
+/**
+ * Pre-aggregated Mix & Trend summaries for banner sparklines and drill-down.
+ * Historical actual quarters only (caller supplies Actuals_History aggregates).
+ * @param {string[]} fiscalQuarters
+ * @param {Object<string,number>} quarterTotals
+ * @param {Object<string,Object<string,number>>} quarterClasses
+ * @param {Object<string,Object<string,number>>} quarterRegions
+ * @return {Object}
+ * @private
+ */
+function buildWorkerTypeHistorySummaries_(fiscalQuarters, quarterTotals, quarterClasses, quarterRegions) {
+  var DISPLAY_CLASSES = ['SLG', 'Workday Regions', 'Contractor'];
+
+  var quarters = fiscalQuarters.map(function (fq) {
+    return { fiscalQuarter: fq, totalHours: Number(quarterTotals[fq]) || 0 };
+  });
+
+  var categoryByQuarter = fiscalQuarters.map(function (fq) {
+    var cls = quarterClasses[fq] || {};
+    return {
+      fiscalQuarter: fq,
+      slgHours: Number(cls['SLG']) || 0,
+      workdayRegionsHours: Number(cls['Workday Regions']) || 0,
+      contractorHours: Number(cls['Contractor']) || 0
+    };
+  });
+
+  var regionByQuarter = {};
+  fiscalQuarters.forEach(function (fq) {
+    var regions = quarterRegions[fq] || {};
+    var rows = Object.keys(regions).map(function (rk) {
+      return { workdayRegion: rk, hours: Number(regions[rk]) || 0 };
+    });
+    rows.sort(function (a, b) { return b.hours - a.hours; });
+    regionByQuarter[fq] = rows;
+  });
+
+  var n = fiscalQuarters.length;
+  var latestQ = n ? fiscalQuarters[n - 1] : '';
+  var priorQ = n > 1 ? fiscalQuarters[n - 2] : '';
+  var latestHours = n ? (Number(quarterTotals[latestQ]) || 0) : 0;
+  var priorHours = n > 1 ? (Number(quarterTotals[priorQ]) || 0) : 0;
+  var qoqAbs = latestHours - priorHours;
+  var qoqPct = priorHours > 0 ? qoqAbs / priorHours : 0;
+
+  var histGrand = 0;
+  var catTotals = { 'SLG': 0, 'Workday Regions': 0, 'Contractor': 0 };
+  fiscalQuarters.forEach(function (fq) {
+    histGrand += Number(quarterTotals[fq]) || 0;
+    var cls = quarterClasses[fq] || {};
+    DISPLAY_CLASSES.forEach(function (c) {
+      catTotals[c] += Number(cls[c]) || 0;
+    });
+  });
+  var avgQuarterlyHours = n > 0 ? histGrand / n : 0;
+
+  var shareSeriesSLG = [];
+  var shareSeriesWorkdayRegions = [];
+  var shareSeriesContractor = [];
+  var totalHoursSeries = [];
+
+  fiscalQuarters.forEach(function (fq) {
+    var total = Number(quarterTotals[fq]) || 0;
+    var cls = quarterClasses[fq] || {};
+    totalHoursSeries.push(total);
+    if (total > 0) {
+      shareSeriesSLG.push((Number(cls['SLG']) || 0) / total);
+      shareSeriesWorkdayRegions.push((Number(cls['Workday Regions']) || 0) / total);
+      shareSeriesContractor.push((Number(cls['Contractor']) || 0) / total);
+    } else {
+      shareSeriesSLG.push(0);
+      shareSeriesWorkdayRegions.push(0);
+      shareSeriesContractor.push(0);
+    }
+  });
+
+  return {
+    quarters: quarters,
+    categoryByQuarter: categoryByQuarter,
+    regionByQuarter: regionByQuarter,
+    bannerSummary: {
+      latestQuarter: latestQ,
+      latestQuarterHours: latestHours,
+      priorQuarter: priorQ,
+      qoqAbsHours: qoqAbs,
+      qoqPct: qoqPct,
+      avgQuarterlyHours: avgQuarterlyHours,
+      pooledShareSLG: histGrand > 0 ? catTotals['SLG'] / histGrand : 0,
+      pooledShareWorkdayRegions: histGrand > 0 ? catTotals['Workday Regions'] / histGrand : 0,
+      pooledShareContractor: histGrand > 0 ? catTotals['Contractor'] / histGrand : 0,
+      shareSeriesSLG: shareSeriesSLG,
+      shareSeriesWorkdayRegions: shareSeriesWorkdayRegions,
+      shareSeriesContractor: shareSeriesContractor,
+      totalHoursSeries: totalHoursSeries
+    }
   };
 }
 

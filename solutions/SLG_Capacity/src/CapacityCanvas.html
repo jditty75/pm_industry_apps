@@ -74,16 +74,21 @@
       <div class="wfm25-tab-panel" id="wfm25PanelMixTrend"
            data-wfm25-panel="mix-trend" hidden>
         <div class="wfm25-mix-trend-root" id="wfm25MixTrendRoot">
-          <div class="wfm25-mix-trend-chart-wrap" id="wfm25MixTrendChartWrap">
-            <div class="wfm25-mix-trend-loading muted" id="wfm25MixTrendLoading">Loading…</div>
-            <div class="wfm25-mix-trend-chart" id="wfm25MixTrendChart" hidden></div>
-          </div>
-          <div class="wfm25-mix-trend-detail" id="wfm25MixTrendDetail" hidden>
-            <div class="wfm25-mix-trend-detail-header">
-              <h3 class="wfm25-mix-trend-detail-title" id="wfm25MixTrendDetailTitle"></h3>
-              <span class="wfm25-mix-trend-detail-total" id="wfm25MixTrendDetailTotal"></span>
+          <div class="wfm25-mix-trend-card wfm25-card">
+            <div class="wfm25-mix-trend-banner" id="wfm25MixTrendBanner" hidden>
+              <div class="wfm25-mix-trend-banner-grid" id="wfm25MixTrendBannerGrid"></div>
+              <p class="wfm25-mix-trend-banner-caption muted">Across all historical actual quarters</p>
             </div>
-            <div class="wfm25-mix-trend-detail-body" id="wfm25MixTrendDetailBody"></div>
+            <div class="wfm25-mix-trend-chart-section" id="wfm25MixTrendChartWrap">
+              <div class="wfm25-mix-trend-loading muted" id="wfm25MixTrendLoading">Loading…</div>
+              <div class="wfm25-mix-trend-chart" id="wfm25MixTrendChart" hidden></div>
+            </div>
+            <div class="wfm25-mix-trend-detail" id="wfm25MixTrendDetail" hidden>
+              <div class="wfm25-mix-trend-detail-panels">
+                <div class="wfm25-mix-trend-detail-left" id="wfm25MixTrendDetailLeft"></div>
+                <div class="wfm25-mix-trend-detail-right" id="wfm25MixTrendDetailRight" hidden></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

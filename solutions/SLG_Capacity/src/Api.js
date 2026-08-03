@@ -1114,7 +1114,13 @@ function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastPa
         addHours(a.resource_name, wk.week_key, label, wk.hours, true);
       });
     });
+  }
 
+  Object.keys(workerByName).forEach(function (rn) {
+    _blendWorkerWeeklyMaps_(workerByName[rn], actualsByWorker);
+  });
+
+  if (viewMode !== 'Actual') {
     var adjRows = [];
     try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
     adjRows.forEach(function (adj) {
@@ -1130,23 +1136,10 @@ function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastPa
         return workerByName[rn];
       }, adj, calendar);
     });
-  }
-
-  Object.keys(workerByName).forEach(function (rn) {
-    var w = workerByName[rn];
-    var wActuals = (w.employeeId && actualsByWorker[w.employeeId]) ? actualsByWorker[w.employeeId] : {};
-    w.blendedWeekly = {};
-    var allWeekKeys = {};
-    Object.keys(w.workerWeekly).forEach(function (k) { allWeekKeys[k] = true; });
-    Object.keys(wActuals).forEach(function (k) { allWeekKeys[k] = true; });
-    Object.keys(allWeekKeys).forEach(function (wk) {
-      if (wActuals.hasOwnProperty(wk)) {
-        w.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
-      } else {
-        w.blendedWeekly[wk] = { hours: w.workerWeekly[wk] || 0, isActual: false };
-      }
+    Object.keys(workerByName).forEach(function (rn) {
+      _syncBlendedWeeklyForecastCells_(workerByName[rn]);
     });
-  });
+  }
 }
 
 /**
@@ -1458,11 +1451,7 @@ function _buildProjectedReductionDelta_(baselineForecast, adjustments) {
       if (adj.resource_name !== w.resource) return;
       applyCapacityAdjustmentWeekly_(function () { return clone; }, adj, calendar);
     });
-    Object.keys(clone.blendedWeekly || {}).forEach(function (wk) {
-      var cell = clone.blendedWeekly[wk];
-      if (!cell || cell.isActual) return;
-      cell.hours = Math.max(0, Number(clone.productiveWeekly[wk]) || 0);
-    });
+    _syncBlendedWeeklyForecastCells_(clone);
     return clone;
   });
 
@@ -1487,6 +1476,8 @@ function _buildProjectedReductionDelta_(baselineForecast, adjustments) {
 function _reductionClampWarnings_(baselineForecast, adjustments) {
   if (!adjustments || !adjustments.length) return [];
   var calendar = readCalendar_();
+  var actualsByWorker = (typeof getActualsByWorkerWeek_ === 'function')
+    ? getActualsByWorkerWeek_() : {};
   var workerByName = {};
   (baselineForecast.workers || []).forEach(function (w) {
     workerByName[w.resource] = w;
@@ -1496,10 +1487,17 @@ function _reductionClampWarnings_(baselineForecast, adjustments) {
     if (!adj.resource_name || !workerByName[adj.resource_name]) return;
     var src = workerByName[adj.resource_name];
     var snap = {
+      employeeId: src.employeeId,
       productiveWeekly: Object.assign({}, src.productiveWeekly || {}),
       workerWeekly: Object.assign({}, src.workerWeekly || {}),
-      projects: JSON.parse(JSON.stringify(src.projects || {}))
+      projects: JSON.parse(JSON.stringify(src.projects || {})),
+      blendedWeekly: src.blendedWeekly
+        ? JSON.parse(JSON.stringify(src.blendedWeekly))
+        : undefined
     };
+    if (!snap.blendedWeekly) {
+      _blendWorkerWeeklyMaps_(snap, actualsByWorker);
+    }
     var clamped = expandClampedAdjustmentWeekly_(snap, adj, calendar, false);
     if (clamped.requested > clamped.applied + 0.05) {
       warnings.push({

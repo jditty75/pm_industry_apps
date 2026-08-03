@@ -1262,13 +1262,59 @@ function computeUtilization(params) {
  * }}
  */
 /**
- * Productive hours available for per-week reduction zero-clamp (WFM.25).
- * Single basis for preview and committed — productiveWeekly only, never workerWeekly.
- * @param {Object} worker forecast worker row
+ * Build blendedWeekly on a worker from forecast weekly maps + actuals overlay.
+ * Must run before reduction clamp so actual weeks are non-reducible (WFM.25).
+ * @param {Object} worker
+ * @param {Object} actualsByWorker employeeId → { weekKey: hours }
+ */
+function _blendWorkerWeeklyMaps_(worker, actualsByWorker) {
+  actualsByWorker = actualsByWorker || {};
+  var wActuals = (worker.employeeId && actualsByWorker[worker.employeeId])
+    ? actualsByWorker[worker.employeeId] : {};
+  worker.blendedWeekly = {};
+  var allWeekKeys = {};
+  Object.keys(worker.workerWeekly || {}).forEach(function (k) { allWeekKeys[k] = true; });
+  Object.keys(wActuals).forEach(function (k) { allWeekKeys[k] = true; });
+  Object.keys(allWeekKeys).forEach(function (wk) {
+    if (wActuals.hasOwnProperty(wk)) {
+      worker.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
+    } else {
+      worker.blendedWeekly[wk] = {
+        hours: worker.workerWeekly[wk] || 0,
+        isActual: false
+      };
+    }
+  });
+}
+
+/**
+ * Sync non-actual blendedWeekly cells from productiveWeekly after reductions.
+ * @param {Object} worker
+ */
+function _syncBlendedWeeklyForecastCells_(worker) {
+  Object.keys(worker.blendedWeekly || {}).forEach(function (wk) {
+    var cell = worker.blendedWeekly[wk];
+    if (!cell || cell.isActual) return;
+    cell.hours = Math.max(0, Number(worker.productiveWeekly[wk]) || 0);
+  });
+}
+
+/**
+ * Forecast-remaining productive hours for per-week reduction zero-clamp (WFM.25).
+ * Single basis for preview and committed: actual weeks (D8 blended) are not
+ * reducible; forecast weeks clamp on productiveWeekly only, never workerWeekly.
+ * @param {Object} worker forecast worker row (blendedWeekly should be built first)
  * @param {string} weekKey
+ * @param {Object} [actualsByWorker] optional preloaded map from getActualsByWorkerWeek_()
  * @return {number}
  */
-function productiveHoursAvailableForReductionClamp_(worker, weekKey) {
+function productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsByWorker) {
+  var blended = worker.blendedWeekly && worker.blendedWeekly[weekKey];
+  if (blended && blended.isActual) return 0;
+  if (!blended && worker.employeeId && actualsByWorker) {
+    var wActuals = actualsByWorker[worker.employeeId];
+    if (wActuals && wActuals.hasOwnProperty(weekKey)) return 0;
+  }
   return Math.max(0, Number(worker.productiveWeekly && worker.productiveWeekly[weekKey]) || 0);
 }
 
@@ -1288,6 +1334,7 @@ function productiveHoursAvailableForReductionClamp_(worker, weekKey) {
 function expandClampedAdjustmentWeekly_(worker, adj, calendar, apply) {
   const out = { weeks: [], applied: 0, requested: 0 };
   if (!worker || !adj) return out;
+  var actualsByWorker = null;
   const projLabel = 'Capacity Adjustment';
   expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
     const hrs = Number(wk.hours_reduction) || 0;
@@ -1295,7 +1342,11 @@ function expandClampedAdjustmentWeekly_(worker, adj, calendar, apply) {
     const weekKey = wk.week_key;
     if (hrs > 0) {
       out.requested += hrs;
-      const currentProd = productiveHoursAvailableForReductionClamp_(worker, weekKey);
+      if (!worker.blendedWeekly && worker.employeeId && actualsByWorker === null) {
+        actualsByWorker = (typeof getActualsByWorkerWeek_ === 'function')
+          ? getActualsByWorkerWeek_() : {};
+      }
+      const currentProd = productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsByWorker);
       const weekApplied = Math.min(hrs, currentProd);
       if (!weekApplied) return;
       out.applied += weekApplied;
@@ -1507,6 +1558,12 @@ function computeWeeklyForecast_(params) {
     });
   }
 
+  // Blend actuals before reductions so the clamp uses forecast-remaining only
+  // (actual weeks are non-reducible — WFM.25 current-quarter D8 parity).
+  Object.values(workers).forEach(function (w) {
+    _blendWorkerWeeklyMaps_(w, actualsByWorker);
+  });
+
   // 2.5) Capacity adjustments — committed reductions zero-clamped per week (WFM.25).
   if (viewMode !== 'Actual') {
     let adjRows = [];
@@ -1522,23 +1579,10 @@ function computeWeeklyForecast_(params) {
       if (!include) return;
       applyCapacityAdjustmentWeekly_(ensureWorker, adj, calendar);
     });
-  }
-
-  // Blend actuals at read time: additive blendedWeekly alongside intact workerWeekly.
-  Object.values(workers).forEach(function (w) {
-    var wActuals = (w.employeeId && actualsByWorker[w.employeeId]) ? actualsByWorker[w.employeeId] : {};
-    w.blendedWeekly = {};
-    var allWeekKeys = {};
-    Object.keys(w.workerWeekly).forEach(function (k) { allWeekKeys[k] = true; });
-    Object.keys(wActuals).forEach(function (k) { allWeekKeys[k] = true; });
-    Object.keys(allWeekKeys).forEach(function (wk) {
-      if (wActuals.hasOwnProperty(wk)) {
-        w.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
-      } else {
-        w.blendedWeekly[wk] = { hours: w.workerWeekly[wk] || 0, isActual: false };
-      }
+    Object.values(workers).forEach(function (w) {
+      _syncBlendedWeeklyForecastCells_(w);
     });
-  });
+  }
 
   // 3) Apply manager + Team filters (same semantics as computeUtilization).
   const filteredWorkers = Object.values(workers).filter(w => {

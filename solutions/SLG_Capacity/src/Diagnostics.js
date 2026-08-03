@@ -3711,9 +3711,11 @@ function _dbg_reconcileWFM23() {
     };
     var expectedReduced = 0;
     var clampSnap = {
+      employeeId: workerPick.employeeId,
       productiveWeekly: Object.assign({}, workerPick.productiveWeekly || {}),
       workerWeekly: Object.assign({}, workerPick.workerWeekly || {}),
-      projects: JSON.parse(JSON.stringify(workerPick.projects || {}))
+      projects: JSON.parse(JSON.stringify(workerPick.projects || {})),
+      blendedWeekly: JSON.parse(JSON.stringify(workerPick.blendedWeekly || {}))
     };
     var clamped = expandClampedAdjustmentWeekly_(clampSnap, commitShape, calendar, false);
     clamped.weeks.forEach(function (w) {

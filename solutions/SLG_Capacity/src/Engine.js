@@ -1261,6 +1261,47 @@ function computeUtilization(params) {
  *   holidayHoursByWeek: Object<string, number>
  * }}
  */
+/**
+ * Apply weekly expansion of a capacity adjustment to worker weekly maps.
+ * Reductions (positive hours_reduction) are zero-clamped per week on productive hours.
+ * @param {function(string):Object} ensureWorker
+ * @param {Object} adj
+ * @param {{weeks:Array}} calendar
+ * @return {{applied:number, requested:number}}
+ */
+function applyCapacityAdjustmentWeekly_(ensureWorker, adj, calendar) {
+  if (!adj || !adj.resource_name) return { applied: 0, requested: 0 };
+  const w = ensureWorker(adj.resource_name);
+  let applied = 0;
+  let requested = 0;
+  const projLabel = 'Capacity Adjustment';
+  expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
+    const hrs = Number(wk.hours_reduction) || 0;
+    if (!hrs) return;
+    const weekKey = wk.week_key;
+    if (hrs > 0) {
+      requested += hrs;
+      const currentProd = w.productiveWeekly[weekKey] || 0;
+      const weekApplied = Math.min(hrs, Math.max(0, currentProd));
+      if (!weekApplied) return;
+      applied += weekApplied;
+      w.workerWeekly[weekKey] = Math.max(0, (w.workerWeekly[weekKey] || 0) - weekApplied);
+      w.productiveWeekly[weekKey] = currentProd - weekApplied;
+      if (!w.projects[projLabel]) w.projects[projLabel] = {};
+      w.projects[projLabel][weekKey] = (w.projects[projLabel][weekKey] || 0) - weekApplied;
+    } else {
+      const addAmt = -hrs;
+      requested += addAmt;
+      applied += addAmt;
+      w.workerWeekly[weekKey] = (w.workerWeekly[weekKey] || 0) + addAmt;
+      w.productiveWeekly[weekKey] = (w.productiveWeekly[weekKey] || 0) + addAmt;
+      if (!w.projects[projLabel]) w.projects[projLabel] = {};
+      w.projects[projLabel][weekKey] = (w.projects[projLabel][weekKey] || 0) + addAmt;
+    }
+  });
+  return { applied: applied, requested: requested };
+}
+
 function computeWeeklyForecast_(params) {
   params = params || {};
   const viewMode = params.viewMode || 'Committed';
@@ -1425,7 +1466,7 @@ function computeWeeklyForecast_(params) {
     });
   }
 
-  // 2.5) Capacity adjustments (signed: positive = reduce, so we subtract).
+  // 2.5) Capacity adjustments — committed reductions zero-clamped per week (WFM.25).
   if (viewMode !== 'Actual') {
     let adjRows = [];
     try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
@@ -1438,9 +1479,7 @@ function computeWeeklyForecast_(params) {
         (viewMode === 'Scenario' && isModeled &&
          (!params.scenarioId || adj.scenario_id === params.scenarioId));
       if (!include) return;
-      expandAdjustmentToWeekly_(adj, calendar).forEach(w => {
-        addHours(adj.resource_name, w.week_key, 'Capacity Adjustment', -w.hours_reduction, true);
-      });
+      applyCapacityAdjustmentWeekly_(ensureWorker, adj, calendar);
     });
   }
 

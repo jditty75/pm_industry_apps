@@ -3420,7 +3420,7 @@ td.cell-with-bar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wfm25-add-hours-btn {
+.wfm25-adjust-hours-btn {
   font-size: 12px;
   padding: 5px 12px;
   flex-shrink: 0;
@@ -3565,6 +3565,31 @@ td.cell-with-bar {
 }
 .wfm25-softbook-body .field-label:first-child {
   margin-top: 0;
+}
+.wfm25-adjust-direction {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.wfm25-adjust-direction .btn-toggle {
+  flex: 1;
+  min-width: 0;
+}
+.wfm25-draft-tray-direction {
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 6px;
+}
+.wfm25-draft-tray-direction.is-reduce {
+  color: var(--thumbtack);
+}
+.wfm25-draft-tray-direction.is-add {
+  color: var(--marker);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wfm25-draft-panel {
+    transition: none;
+  }
 }
 .wfm25-softbook-actions {
   display: flex;

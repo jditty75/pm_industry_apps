@@ -3051,11 +3051,15 @@
     basket.hidden = false;
     if (countEl) countEl.textContent = String(bookings.length);
     body.innerHTML = bookings.map(function (b, idx) {
+      const isReduce = String(b.direction || 'add') === 'reduce';
+      const dirCls = isReduce ? 'is-reduce' : 'is-add';
       return '<div class="explorer-basket-row">' +
         '<div class="explorer-basket-row-main">' +
           '<div class="explorer-basket-worker">' + escapeHtml_(b.resource_name) + '</div>' +
-          '<div class="explorer-basket-meta muted">' + escapeHtml_(formatSoftBookSpan_(b)) +
-            ' \u00b7 ' + fmtHours(b.total_hours) + 'h</div>' +
+          '<div class="explorer-basket-meta muted">' +
+            '<span class="wfm25-draft-tray-direction ' + dirCls + '">' +
+              escapeHtml_(softBookDirectionLabel_(b)) + '</span>' +
+            escapeHtml_(formatSoftBookSpan_(b)) + '</div>' +
         '</div>' +
         '<button type="button" class="btn-ghost explorer-basket-remove" data-idx="' + idx +
           '" aria-label="Remove booking">\u2715</button>' +
@@ -3075,7 +3079,57 @@
   }
 
   function softBookCommitKey_(b) {
-    return [b.resource_name, b.start_date, b.end_date, String(b.total_hours)].join('|');
+    return [b.resource_name, String(b.direction || 'add'), b.start_date, b.end_date,
+      String(b.total_hours)].join('|');
+  }
+
+  /**
+   * Direction label for draft tray / basket (arrow + signed hours).
+   * @param {Object} b soft booking
+   * @returns {string}
+   */
+  function softBookDirectionLabel_(b) {
+    const isReduce = String(b.direction || 'add') === 'reduce';
+    const arrow = isReduce ? '\u2193' : '\u2191';
+    const sign = isReduce ? '-' : '+';
+    return arrow + ' ' + sign + fmtHours(b.total_hours) + 'h';
+  }
+
+  function wfm25GetSoftBookDirection_() {
+    const reduceBtn = document.getElementById('wfm25SbDirReduce');
+    return (reduceBtn && reduceBtn.classList.contains('on')) ? 'reduce' : 'add';
+  }
+
+  function wfm25SetSoftBookDirection_(direction) {
+    const isReduce = direction === 'reduce';
+    const addBtn = document.getElementById('wfm25SbDirAdd');
+    const reduceBtn = document.getElementById('wfm25SbDirReduce');
+    const title = document.getElementById('wfm25SoftBookTitle');
+    const submitBtn = document.getElementById('wfm25SbAdd');
+    if (addBtn) {
+      addBtn.classList.toggle('on', !isReduce);
+      addBtn.setAttribute('aria-pressed', !isReduce ? 'true' : 'false');
+    }
+    if (reduceBtn) {
+      reduceBtn.classList.toggle('on', isReduce);
+      reduceBtn.setAttribute('aria-pressed', isReduce ? 'true' : 'false');
+    }
+    if (title) title.textContent = 'Adjust hours';
+    if (submitBtn) {
+      submitBtn.textContent = isReduce ? 'Reduce to draft' : 'Add to draft';
+    }
+  }
+
+  function showReductionClampWarnings_(warnings) {
+    if (!warnings || !warnings.length) return;
+    warnings.forEach(function (w) {
+      const req = Number(w.requested_hours) || 0;
+      const eff = Number(w.effective_hours) || 0;
+      if (req > eff + 0.05) {
+        toast('Reduction for ' + (w.resource_name || 'worker') +
+          ' clamped to ' + Math.round(eff) + 'h (requested ' + Math.round(req) + 'h).', 'warn');
+      }
+    });
   }
 
   function getResourceTypeForWorker_(resourceName) {
@@ -3224,7 +3278,7 @@
         '<td><button type="button" class="sb-commit-worker-link" data-worker="' +
           escapeHtml_(row.resource_name) + '">' + escapeHtml_(row.resource_name) + '</button></td>' +
         '<td class="muted">' + escapeHtml_(formatSoftBookSpan_(row)) + '</td>' +
-        '<td class="num">' + escapeHtml_(fmtHours(row.total_hours)) + 'h</td>' +
+        '<td class="num">' + escapeHtml_(softBookDirectionLabel_(row)) + '</td>' +
         '<td class="sb-commit-what-cell">' +
           '<div class="seg seg-sm sb-commit-what-seg">' +
             '<button type="button" data-val="deployment">Deployment</button>' +
@@ -3330,6 +3384,7 @@
         start_date: b.start_date,
         end_date: b.end_date,
         total_hours: b.total_hours,
+        direction: b.direction || 'add',
         whatType: 'opportunity',
         linkId: '',
         label: ''
@@ -3406,6 +3461,7 @@
         start_date: row.start_date,
         end_date: row.end_date,
         total_hours: row.total_hours,
+        direction: row.direction || 'add',
         resource_type: getResourceTypeForWorker_(row.resource_name),
         what: what
       };
@@ -3614,6 +3670,7 @@
       if (reqId !== State.explorerProjectionReqId) return;
       hideExplorerProjectionPending_();
       State.explorerProjection = result;
+      showReductionClampWarnings_(result.clampWarnings);
       renderExplorerImpactBand_(result, { tier: 'fast', reqId: reqId });
       setTimeout(function () {
         if (reqId !== State.explorerProjectionReqId) return;
@@ -3845,11 +3902,9 @@
   }
 
   function renderExplorerWeeklyStrip_(weeks, projection, workerName) {
-    const weekEndingCaption =
-      '<span class="muted wfm25-week-ending-caption">Week ending</span>';
     if (!weeks || !weeks.length) {
       return '<div class="explorer-section"><div class="explorer-section-head">' +
-        '<div class="explorer-section-title">Weekly capacity</div>' + weekEndingCaption +
+        '<div class="explorer-section-title">Weekly Capacity (all dates are week ending)</div>' +
         '</div><div class="muted">No weeks in scope.</div></div>';
     }
     const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
@@ -3865,7 +3920,7 @@
     const forecastSpan = seamColIdx >= 0 ? weeks.length - seamColIdx : weeks.length;
 
     let html = '<div class="explorer-section"><div class="explorer-section-head">' +
-      '<div class="explorer-section-title">Weekly capacity</div>' + weekEndingCaption +
+      '<div class="explorer-section-title">Weekly Capacity (all dates are week ending)</div>' +
       '</div><div class="explorer-weekly-scroll"><table class="data-table explorer-weekly-table"><thead>';
     if (seamWeekKey && seamColIdx > 0) {
       html += '<tr class="wf-zone-header">' +
@@ -7754,11 +7809,14 @@ async function _qaRefreshPsaHours_() {
       return;
     }
     body.innerHTML = bookings.map(function (b, idx) {
+      const isReduce = String(b.direction || 'add') === 'reduce';
+      const dirCls = isReduce ? 'is-reduce' : 'is-add';
       return '<div class="wfm25-draft-tray-row">' +
         '<div class="wfm25-draft-tray-row-main">' +
           '<div class="wfm25-draft-tray-worker">' + escapeHtml_(b.resource_name) + '</div>' +
           '<div class="wfm25-draft-tray-meta">' +
-            '<span class="wfm25-draft-tray-hours wfm25-draft">+' + escapeHtml_(fmtHours(b.total_hours)) + 'h</span>' +
+            '<span class="wfm25-draft-tray-direction ' + dirCls + '">' +
+              escapeHtml_(softBookDirectionLabel_(b)) + '</span>' +
             '<span class="wfm25-draft-tray-span muted">' + escapeHtml_(formatSoftBookSpan_(b)) + '</span>' +
           '</div>' +
         '</div>' +
@@ -7918,7 +7976,7 @@ async function _qaRefreshPsaHours_() {
 
     const panel = document.getElementById('wfm25WorkerPanel');
     const body = document.getElementById('wfm25CapacityBody');
-    const addBtn = document.getElementById('wfm25AddHoursBtn');
+    const addBtn = document.getElementById('wfm25AdjustHoursBtn');
     if (panel) panel.hidden = false;
     if (body) body.classList.add('wfm25-panel-open');
     if (addBtn) addBtn.hidden = false;
@@ -7973,7 +8031,7 @@ async function _qaRefreshPsaHours_() {
 
     const panel = document.getElementById('wfm25WorkerPanel');
     const body = document.getElementById('wfm25CapacityBody');
-    const addBtn = document.getElementById('wfm25AddHoursBtn');
+    const addBtn = document.getElementById('wfm25AdjustHoursBtn');
     if (panel) panel.hidden = true;
     if (body) body.classList.remove('wfm25-panel-open');
     if (addBtn) addBtn.hidden = true;
@@ -8014,6 +8072,7 @@ async function _qaRefreshPsaHours_() {
     if (startInput) startInput.value = today;
     if (endInput) endInput.value = today;
     if (hoursInput) hoursInput.value = '';
+    wfm25SetSoftBookDirection_('add');
     overlay.hidden = false;
     if (hoursInput) hoursInput.focus();
   }
@@ -8047,16 +8106,19 @@ async function _qaRefreshPsaHours_() {
       toast('Start date must be on or before end date.', 'err');
       return;
     }
+    const direction = wfm25GetSoftBookDirection_();
     State.softBookings.push({
       employee_id: wfm25GetEmployeeId_(resourceName),
       resource_name: resourceName,
       start_date: start,
       end_date: end,
-      total_hours: hours
+      total_hours: hours,
+      direction: direction
     });
     closeWFM25SoftBookOverlay_();
     onWFM25SoftBookingsChanged_();
-    toast('Draft added — watch the numbers shift.', '');
+    toast(direction === 'reduce' ? 'Reduction draft added — watch utilization fall.' :
+      'Draft added — watch the numbers shift.', '');
   }
 
   function clearWFM25SoftBookings_(reason) {
@@ -8091,6 +8153,7 @@ async function _qaRefreshPsaHours_() {
       const result = await call('api_projectSoftBookings', buildServerParams_(), State.softBookings);
       if (reqId !== State.explorerProjectionReqId) return;
       State.explorerProjection = result;
+      showReductionClampWarnings_(result.clampWarnings);
       if (WFM25State.scorecardData) {
         renderWFM25UtilTable_(WFM25State.scorecardData);
         if (WFM25State.activeTab === 'hours-budget') {
@@ -9737,11 +9800,19 @@ async function _qaRefreshPsaHours_() {
     const panelClose = document.getElementById('wfm25WorkerPanelClose');
     if (panelClose) panelClose.addEventListener('click', wfm25CloseWorkerPanel_);
 
-    const addHoursBtn = document.getElementById('wfm25AddHoursBtn');
-    if (addHoursBtn) {
-      addHoursBtn.addEventListener('click', function () {
+    const adjustHoursBtn = document.getElementById('wfm25AdjustHoursBtn');
+    if (adjustHoursBtn) {
+      adjustHoursBtn.addEventListener('click', function () {
         if (WFM25State.selectedWorker) openWFM25SoftBookOverlay_(WFM25State.selectedWorker);
       });
+    }
+    const sbDirAdd = document.getElementById('wfm25SbDirAdd');
+    const sbDirReduce = document.getElementById('wfm25SbDirReduce');
+    if (sbDirAdd) {
+      sbDirAdd.addEventListener('click', function () { wfm25SetSoftBookDirection_('add'); });
+    }
+    if (sbDirReduce) {
+      sbDirReduce.addEventListener('click', function () { wfm25SetSoftBookDirection_('reduce'); });
     }
     const sbClose = document.getElementById('wfm25SoftBookClose');
     const sbCancel = document.getElementById('wfm25SbCancel');

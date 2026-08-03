@@ -1122,9 +1122,9 @@ function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastPa
         (viewMode === 'Scenario' && isModeled &&
          (!forecastParams.scenarioId || adj.scenario_id === forecastParams.scenarioId));
       if (!include) return;
-      expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
-        addHours(adj.resource_name, wk.week_key, 'Capacity Adjustment', -wk.hours_reduction, true);
-      });
+      applyCapacityAdjustmentWeekly_(function (rn) {
+        return workerByName[rn];
+      }, adj, calendar);
     });
   }
 
@@ -1405,6 +1405,113 @@ function _buildProjectedForecastDelta_(baselineForecast, assignments) {
 }
 
 /**
+ * WFM.25: apply draft reduction hours as a subtractive delta on the cached
+ * baseline forecast — per-week zero-clamp on productive hours (never Modeled).
+ * @param {Object} baselineForecast computeWeeklyForecast_ result
+ * @param {Array<Object>} adjustments in-memory reduction shapes (hours_reduction > 0)
+ * @return {{forecast:Object, affectedWorkers:number}}
+ */
+function _buildProjectedReductionDelta_(baselineForecast, adjustments) {
+  if (!adjustments || !adjustments.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+  var calendar = readCalendar_();
+  var workerByName = {};
+  (baselineForecast.workers || []).forEach(function (w) {
+    workerByName[w.resource] = w;
+  });
+
+  var affectedNames = [];
+  adjustments.forEach(function (adj) {
+    if (!adj.resource_name || !workerByName[adj.resource_name]) return;
+    if (affectedNames.indexOf(adj.resource_name) < 0) affectedNames.push(adj.resource_name);
+  });
+
+  if (!affectedNames.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+
+  var projectedWorkers = (baselineForecast.workers || []).map(function (w) {
+    if (affectedNames.indexOf(w.resource) < 0) return w;
+    var clone = {
+      resource: w.resource,
+      jobProfile: w.jobProfile,
+      level: w.level,
+      managerOrg: w.managerOrg,
+      managersManager: w.managersManager,
+      icpRole: w.icpRole,
+      teamLabel: w.teamLabel,
+      workerClass: w.workerClass,
+      icpTarget: w.icpTarget,
+      employeeId: w.employeeId,
+      workerWeekly: Object.assign({}, w.workerWeekly || {}),
+      productiveWeekly: Object.assign({}, w.productiveWeekly || {}),
+      projects: JSON.parse(JSON.stringify(w.projects || {})),
+      blendedWeekly: JSON.parse(JSON.stringify(w.blendedWeekly || {}))
+    };
+    adjustments.forEach(function (adj) {
+      if (adj.resource_name !== w.resource) return;
+      applyCapacityAdjustmentWeekly_(function () { return clone; }, adj, calendar);
+    });
+    Object.keys(clone.blendedWeekly || {}).forEach(function (wk) {
+      var cell = clone.blendedWeekly[wk];
+      if (!cell || cell.isActual) return;
+      cell.hours = Math.max(0, Number(clone.productiveWeekly[wk]) || 0);
+    });
+    return clone;
+  });
+
+  return {
+    forecast: {
+      weeks: baselineForecast.weeks,
+      workers: projectedWorkers,
+      icp: baselineForecast.icp,
+      rawCapacity: baselineForecast.rawCapacity,
+      holidayHoursByWeek: baselineForecast.holidayHoursByWeek
+    },
+    affectedWorkers: affectedNames.length
+  };
+}
+
+/**
+ * Summarize per-resource clamp for draft reductions (requested vs applied totals).
+ * @param {Object} baselineForecast
+ * @param {Array<Object>} adjustments
+ * @return {Array<{resource_name:string, requested_hours:number, effective_hours:number}>}
+ */
+function _reductionClampWarnings_(baselineForecast, adjustments) {
+  if (!adjustments || !adjustments.length) return [];
+  var calendar = readCalendar_();
+  var workerByName = {};
+  (baselineForecast.workers || []).forEach(function (w) {
+    workerByName[w.resource] = w;
+  });
+  var warnings = [];
+  adjustments.forEach(function (adj) {
+    if (!adj.resource_name || !workerByName[adj.resource_name]) return;
+    var w = workerByName[adj.resource_name];
+    var requested = 0;
+    var applied = 0;
+    expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
+      var hrs = Number(wk.hours_reduction) || 0;
+      if (hrs <= 0) return;
+      requested += hrs;
+      var currentProd = (w.productiveWeekly && w.productiveWeekly[wk.week_key]) ||
+        (w.workerWeekly && w.workerWeekly[wk.week_key]) || 0;
+      applied += Math.min(hrs, Math.max(0, currentProd));
+    });
+    if (requested > applied + 0.05) {
+      warnings.push({
+        resource_name: String(adj.resource_name),
+        requested_hours: requested,
+        effective_hours: applied
+      });
+    }
+  });
+  return warnings;
+}
+
+/**
  * WFM.23: project soft-booking overlay utilization at worker / team /
  * org-team levels. Empty softBookings ⇒ projected deep-equals baseline.
  * @param {Object} params standard buildServerParams_ shape
@@ -1433,7 +1540,9 @@ function api_projectSoftBookings(params, softBookings) {
   var holidays = readHolidays_();
   var quarterKeys = _quarterKeysForSoftBookings_(softBookings);
 
-  var inMemoryModeledAssignments = softBookings.map(function (sb) {
+  var inMemoryModeledAssignments = softBookings.filter(function (sb) {
+    return String(sb.direction || 'add') !== 'reduce';
+  }).map(function (sb) {
     return {
       resource_name: String(sb.resource_name || ''),
       employee_id: String(sb.employee_id || ''),
@@ -1448,6 +1557,21 @@ function api_projectSoftBookings(params, softBookings) {
       !isNaN(a.end_date.getTime()) && a.estimated_hours > 0;
   });
 
+  var inMemoryDraftReductions = softBookings.filter(function (sb) {
+    return String(sb.direction || 'add') === 'reduce';
+  }).map(function (sb) {
+    return {
+      resource_name: String(sb.resource_name || ''),
+      start_date: sb.start_date ? new Date(sb.start_date) : null,
+      end_date: sb.end_date ? new Date(sb.end_date) : null,
+      hours_reduction: Number(sb.total_hours) || 0,
+      distribution: 'Even'
+    };
+  }).filter(function (a) {
+    return a.resource_name && a.start_date && a.end_date && !isNaN(a.start_date.getTime()) &&
+      !isNaN(a.end_date.getTime()) && a.hours_reduction > 0;
+  });
+
   var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
     ? getActualsSummaryByEmployee_() : {};
   var curQ = fiscalQuarterKey_(new Date());
@@ -1457,12 +1581,17 @@ function api_projectSoftBookings(params, softBookings) {
     var rn = String(sb.resource_name || '');
     if (rn) weeklyWorkerNames[rn] = true;
   });
-  if (inMemoryModeledAssignments.length) {
+  if (inMemoryModeledAssignments.length || inMemoryDraftReductions.length) {
     var baselineByName = {};
     (baselineForecast.workers || []).forEach(function (w) {
       baselineByName[w.resource] = w;
     });
     inMemoryModeledAssignments.forEach(function (a) {
+      if (a.resource_name && baselineByName[a.resource_name]) {
+        weeklyWorkerNames[a.resource_name] = true;
+      }
+    });
+    inMemoryDraftReductions.forEach(function (a) {
       if (a.resource_name && baselineByName[a.resource_name]) {
         weeklyWorkerNames[a.resource_name] = true;
       }
@@ -1477,10 +1606,18 @@ function api_projectSoftBookings(params, softBookings) {
   var projectedForecast = baselineForecast;
   var affectedWorkerCount = 0;
   var projectedMode = 'baseline';
+  var clampWarnings = [];
   if (inMemoryModeledAssignments.length) {
     var deltaResult = _buildProjectedForecastDelta_(baselineForecast, inMemoryModeledAssignments);
     projectedForecast = deltaResult.forecast;
     affectedWorkerCount = deltaResult.affectedWorkers;
+    projectedMode = 'targeted';
+  }
+  if (inMemoryDraftReductions.length) {
+    clampWarnings = _reductionClampWarnings_(projectedForecast, inMemoryDraftReductions);
+    var reduceResult = _buildProjectedReductionDelta_(projectedForecast, inMemoryDraftReductions);
+    projectedForecast = reduceResult.forecast;
+    affectedWorkerCount = Math.max(affectedWorkerCount, reduceResult.affectedWorkers);
     projectedMode = 'targeted';
   }
 
@@ -1488,7 +1625,8 @@ function api_projectSoftBookings(params, softBookings) {
     baseline: _aggregateSoftBookingProjection_(
       baselineForecast, quarterKeys, holidays, actualsSummary, curQ, null, weeklyWorkerNames, visibleWeeks),
     projected: _aggregateSoftBookingProjection_(
-      projectedForecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast, weeklyWorkerNames, visibleWeeks)
+      projectedForecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast, weeklyWorkerNames, visibleWeeks),
+    clampWarnings: clampWarnings
   };
 
   Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +
@@ -1559,23 +1697,46 @@ function api_commitSoftBookings(scenarioName, bookings) {
 
   var committed = [];
   bookings.forEach(function (b) {
+    var direction = String(b.direction || 'add').toLowerCase();
     var what = b.what || {};
     var whatType = String(what.type || '');
     var opportunityId = '';
+    var deploymentId = '';
     var notes = '';
+
     if (whatType === 'opportunity') {
       opportunityId = String(what.opportunity_id || '');
     } else if (whatType === 'deployment') {
-      opportunityId = String(what.deployment_id || what.opportunity_id || '');
-      if (opportunityId) {
-        notes = 'Soft-book deployment: ' + opportunityId;
+      deploymentId = String(what.deployment_id || what.opportunity_id || '');
+      if (deploymentId) {
+        notes = 'Soft-book deployment: ' + deploymentId;
       }
     } else if (whatType === 'label') {
-      opportunityId = '';
       notes = 'Soft-book label: ' + String(what.label || '');
     }
 
     var resolvedResourceType = _resolveBookingResourceType_(b);
+
+    if (direction === 'reduce') {
+      var savedAdj = saveCapacityAdjustment_({
+        resource_name: String(b.resource_name || ''),
+        start_date: b.start_date,
+        end_date: b.end_date,
+        hours_reduction: Number(b.total_hours) || 0,
+        direction: 'reduce',
+        distribution: 'Even',
+        status: 'Committed',
+        scenario_id: scenarioId,
+        deployment_id: deploymentId,
+        reason: notes || (opportunityId ? 'Opportunity: ' + opportunityId : '')
+      });
+      committed.push({
+        resource_name: String(savedAdj.resource_name || b.resource_name || ''),
+        adjustment_id: String(savedAdj.adjustment_id || ''),
+        direction: 'reduce'
+      });
+      return;
+    }
 
     var saved = saveAssignment_({
       opportunity_id: opportunityId,
@@ -1591,11 +1752,13 @@ function api_commitSoftBookings(scenarioName, bookings) {
     });
     committed.push({
       resource_name: String(saved.resource_name || b.resource_name || ''),
-      assignment_id: String(saved.assignment_id || '')
+      assignment_id: String(saved.assignment_id || ''),
+      direction: 'add'
     });
   });
 
   invalidateCache_(ASSIGNMENTS);
+  invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   if (typeof _resetProjectionMemos_ === 'function') _resetProjectionMemos_();
 

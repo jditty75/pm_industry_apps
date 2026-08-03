@@ -5,12 +5,18 @@
   <div class="wfm25-softbook-backdrop" id="wfm25SoftBookBackdrop"></div>
   <div class="wfm25-softbook-drawer" role="dialog" aria-labelledby="wfm25SoftBookTitle">
     <header class="wfm25-softbook-header">
-      <h3 class="wfm25-softbook-title" id="wfm25SoftBookTitle">Add hours</h3>
+      <h3 class="wfm25-softbook-title" id="wfm25SoftBookTitle">Adjust hours</h3>
       <button type="button" class="icon-btn" id="wfm25SoftBookClose" aria-label="Close">✕</button>
     </header>
     <div class="wfm25-softbook-body">
       <label class="field-label">Worker</label>
       <input type="text" class="input" id="wfm25SbWorker" readonly>
+      <div class="wfm25-adjust-direction" role="group" aria-label="Adjustment direction">
+        <button type="button" class="btn-toggle on" id="wfm25SbDirAdd" data-direction="add"
+                aria-pressed="true">Add</button>
+        <button type="button" class="btn-toggle" id="wfm25SbDirReduce" data-direction="reduce"
+                aria-pressed="false">Reduce</button>
+      </div>
       <label class="field-label">Start date</label>
       <input type="date" class="input" id="wfm25SbStart">
       <label class="field-label">End date</label>

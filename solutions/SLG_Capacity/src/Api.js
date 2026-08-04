@@ -442,6 +442,7 @@ function api_getResourceDetailV2(params) {
     weeks: [],
     quarters: [],
     projects: [],
+    roleCategoryRollup: [],
     blendedSummary: null
   };
   if (!resourceName) return emptyPayload;
@@ -523,6 +524,14 @@ function api_getResourceDetailV2(params) {
     };
   });
 
+  const roleCategoryPayload = buildResourceRoleCategoryRollup_(
+    resourceName, projectsOut, curQ, visibleWeeks
+  );
+  const roleCategoryRollup = roleCategoryPayload.rollup;
+  projectsOut.forEach(function (p, i) {
+    p.roleCategory = roleCategoryPayload.roleCategories[i] || 'Unclassified';
+  });
+
   let totalProductive = 0;
   let totalIcpAvailable = 0;
   let totalRawCapacity = 0;
@@ -555,6 +564,7 @@ function api_getResourceDetailV2(params) {
     weeks: weeksOut,
     quarters: quartersOut,
     projects: projectsOut,
+    roleCategoryRollup: roleCategoryRollup,
     blendedSummary: {
       avgIcpProductiveUtilization: Number(avgIcpProductiveUtilization) || 0,
       avgFinancialUtilization: Number(avgFinancialUtilization) || 0,
@@ -568,6 +578,76 @@ function api_getResourceDetailV2(params) {
       windowLabel: String(blendedFiscalWindowLabel_() || '')
     }
   };
+}
+
+/**
+ * ADD-ONLY: passthrough Project Role Category rollup for api_getResourceDetailV2.
+ * Maps project hours to role_category from allocation rows; does not alter hours.
+ * @param {string} resourceName
+ * @param {Array<{project:string, weekly:Array}>} projectsOut
+ * @param {string} curQ current fiscal quarter key
+ * @param {Array<{week_key:string, week_start:Date}>} visibleWeeks
+ * @return {{rollup: Array<{roleCategory:string, currentQuarterHours:number}>, roleCategories: string[]}}
+ */
+function buildResourceRoleCategoryRollup_(resourceName, projectsOut, curQ, visibleWeeks) {
+  var curWeekKeys = {};
+  (visibleWeeks || []).forEach(function (vw) {
+    if (fiscalQuarterKey_(vw.week_start) === curQ) {
+      curWeekKeys[String(vw.week_key)] = true;
+    }
+  });
+
+  var projRoleVotes = {};
+  var workerRoleVotes = {};
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  allocRows.forEach(function (a) {
+    if (String(a.resource_name || '') !== resourceName) return;
+    var rc = String(a.role_category || '').trim() || 'Unclassified';
+    workerRoleVotes[rc] = (workerRoleVotes[rc] || 0) + 1;
+    var proj = String(a.project_name || '').trim();
+    if (!proj) return;
+    if (!projRoleVotes[proj]) projRoleVotes[proj] = {};
+    projRoleVotes[proj][rc] = (projRoleVotes[proj][rc] || 0) + 1;
+  });
+
+  function pickTop_(counts) {
+    var keys = Object.keys(counts || {});
+    if (!keys.length) return '';
+    keys.sort(function (a, b) { return (counts[b] || 0) - (counts[a] || 0); });
+    return keys[0];
+  }
+
+  var workerDefaultRole = pickTop_(workerRoleVotes) || 'Unclassified';
+  var roleCategories = (projectsOut || []).map(function (p) {
+    return pickTop_(projRoleVotes[p.project]) || workerDefaultRole;
+  });
+
+  var roleCatHours = {};
+  (projectsOut || []).forEach(function (p, idx) {
+    var rc = roleCategories[idx] || workerDefaultRole;
+    (p.weekly || []).forEach(function (wk) {
+      if (!curWeekKeys[wk.weekKey]) return;
+      var hrs = Number(wk.hours) || 0;
+      if (!hrs) return;
+      roleCatHours[rc] = (roleCatHours[rc] || 0) + hrs;
+    });
+  });
+
+  var rollup = Object.keys(roleCatHours).map(function (rc) {
+    return {
+      roleCategory: rc,
+      currentQuarterHours: Number(roleCatHours[rc]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
+
+  return { rollup: rollup, roleCategories: roleCategories };
 }
 
 /**

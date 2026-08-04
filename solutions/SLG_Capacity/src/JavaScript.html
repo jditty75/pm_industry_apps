@@ -7722,6 +7722,143 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Count workers in a team (or all teams when teamLabel null) matching scope + alloc filter.
+   * @param {string|null} teamLabel
+   * @param {Object} data api_getQuarterlyScorecard result
+   * @param {number} qi current-quarter index
+   * @returns {number}
+   */
+  function wfm25CountScopedTeamWorkers_(teamLabel, data, qi) {
+    const workers = (data && data.workers) || [];
+    const expanded = WFM25State.expandedTeam;
+    let count = 0;
+    workers.forEach(function (w) {
+      const tl = w.teamLabel || 'Unknown';
+      if (teamLabel && tl !== teamLabel) return;
+      if (!teamLabel && expanded && tl !== expanded) return;
+      if (WFM25State.utilAllocFilter && !wfm25WorkerMatchesAllocFilter_(w, qi)) return;
+      count++;
+    });
+    return count;
+  }
+
+  /**
+   * Heat color for signed tracking-hours KPI (ahead = calm green, behind = bonus heat).
+   * @param {number} trackingHours
+   * @param {Object|null} curQuarter
+   * @returns {{bg:string, fg:string}}
+   */
+  function wfm25TrackingKpiColor_(trackingHours, curQuarter) {
+    if (Number(trackingHours) >= 0) {
+      return { bg: '#c8e6c9', fg: '#1b5e20' };
+    }
+    return bonusCellColor_(curQuarter ? curQuarter.bonusAttainment : 0);
+  }
+
+  /**
+   * Sum forward-quarter productive hours from existing quarter payload (reduction-rule basis).
+   * @param {Array} quarters
+   * @returns {number}
+   */
+  function wfm25ForwardForecastRemaining_(quarters) {
+    const curQk = fiscalQuarterKey_(new Date());
+    let sum = 0;
+    (quarters || []).forEach(function (q) {
+      if (q.isCurrentQuarter) return;
+      if (compareFiscalQuarterKeys_(q.quarterKey, curQk) <= 0) return;
+      sum += Number(q.productiveHours) || 0;
+    });
+    return sum;
+  }
+
+  /**
+   * WFM.25 worker-panel KPI tiles (current-quarter metrics + trend sparkline).
+   * @param {Object} detail api_getResourceDetailV2 result
+   * @param {number} icpTarget
+   * @returns {string}
+   */
+  function renderWFM25WorkerKpiTiles_(detail, icpTarget) {
+    const quarters = detail.quarters || [];
+    const bs = detail.blendedSummary || {};
+    const curQ = quarters.find(function (q) { return q.isCurrentQuarter; }) || null;
+
+    const attainment = curQ ? curQ.bonusAttainment : 0;
+    const attainColor = bonusCellColor_(attainment);
+    const tracking = curQ ? curQ.trackingHours : 0;
+    const trackColor = wfm25TrackingKpiColor_(tracking, curQ);
+    const trackSign = tracking >= 0 ? '+' : '';
+    const forecastRemaining = wfm25ForwardForecastRemaining_(quarters);
+
+    let statusLabel = 'On track';
+    let statusClass = 'explorer-status-ok';
+    if (bs.isOverUtilized) {
+      statusLabel = 'Over target';
+      statusClass = 'explorer-status-over';
+    } else if (bs.isUnderUtilized) {
+      statusLabel = 'Under target';
+      statusClass = 'explorer-status-under';
+    }
+
+    const icpSeries = quarters.map(function (q) { return q.icpUtil; });
+    const sparkBase = curQ ? curQ.icpUtil : (icpTarget || 0.75);
+    const sparkColor = cellColor(sparkBase, icpTarget).fg;
+    const spark = wfm25MixTrendSparklineSvg_(icpSeries, sparkColor, 72, 26);
+
+    return '<div class="wfm25-worker-kpi-strip qs-summary-strip" role="group" aria-label="Worker KPIs">' +
+      '<div class="wfm25-worker-kpi-tile" style="background:' + attainColor.bg + ';color:' + attainColor.fg + '">' +
+        '<div class="wfm25-worker-kpi-label">Current Qtr Attainment</div>' +
+        '<div class="wfm25-worker-kpi-value">' + fmtPct(attainment) + '</div>' +
+      '</div>' +
+      '<div class="wfm25-worker-kpi-tile" style="background:' + trackColor.bg + ';color:' + trackColor.fg + '">' +
+        '<div class="wfm25-worker-kpi-label">Tracking to Target</div>' +
+        '<div class="wfm25-worker-kpi-value">' + trackSign + Math.round(tracking) + 'h</div>' +
+      '</div>' +
+      '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--neutral">' +
+        '<div class="wfm25-worker-kpi-label">Forecast Remaining</div>' +
+        '<div class="wfm25-worker-kpi-value">' + Math.round(forecastRemaining).toLocaleString() + 'h</div>' +
+      '</div>' +
+      '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--neutral">' +
+        '<div class="wfm25-worker-kpi-label">Status</div>' +
+        '<div class="wfm25-worker-kpi-value ' + statusClass + '">' + escapeHtml_(statusLabel) + '</div>' +
+      '</div>' +
+      '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--trend">' +
+        '<div class="wfm25-worker-kpi-label">Trend</div>' +
+        '<div class="wfm25-worker-kpi-value wfm25-worker-kpi-spark">' + spark + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /**
+   * WFM.25 worker-panel Projects card grouped by Project Role Category (current quarter).
+   * @param {Object} detail api_getResourceDetailV2 result
+   * @returns {string}
+   */
+  function renderWFM25WorkerProjectsSection_(detail) {
+    const rollup = detail.roleCategoryRollup || [];
+    const curQk = fiscalQuarterKey_(new Date());
+    let html = '<div class="wfm25-chrome-card wfm25-worker-projects-card">' +
+      '<div class="wfm25-worker-projects-head">' +
+        '<span class="wfm25-worker-projects-title">Projects</span>' +
+        '<span class="muted wfm25-worker-projects-qtr">' + escapeHtml_(curQk) + '</span>' +
+      '</div>';
+    if (!rollup.length) {
+      html += '<div class="muted wfm25-worker-projects-empty">No project hours this quarter.</div>';
+    } else {
+      html += '<ul class="wfm25-worker-projects-list" aria-label="Projects by role category">';
+      rollup.forEach(function (r) {
+        html += '<li class="wfm25-worker-projects-row">' +
+          '<span class="wfm25-worker-projects-label">' + escapeHtml_(r.roleCategory) + '</span>' +
+          '<span class="wfm25-worker-projects-hours">' +
+            Math.round(r.currentQuarterHours).toLocaleString() + 'h</span>' +
+        '</li>';
+      });
+      html += '</ul>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /**
    * Render quarter strip cells for the worker panel header.
    * @param {Array} quarters from api_getResourceDetailV2
    * @param {number} icpTarget
@@ -7780,12 +7917,10 @@ async function _qaRefreshPsaHours_() {
       body.innerHTML = '<div class="muted" style="padding:12px">This worker is not in the current filter scope.</div>';
       return;
     }
-    const meta = (State.ref && State.ref.resources || []).find(function (r) {
-      return r.name === detail.resource;
-    }) || {};
     const icpTarget = (detail.weeks && detail.weeks[0]) ? detail.weeks[0].icpTarget : 0.72;
     body.innerHTML =
-      renderExplorerSummaryStrip_(detail, meta) +
+      renderWFM25WorkerKpiTiles_(detail, icpTarget) +
+      renderWFM25WorkerProjectsSection_(detail) +
       renderExplorerWeeklyStrip_(detail.weeks || [], projection, workerName) +
       renderExplorerQuarterSection_(detail.quarters || [], icpTarget, projection, workerName,
         { lockIcpView: true }) +
@@ -8560,6 +8695,7 @@ async function _qaRefreshPsaHours_() {
     agg.teams.forEach(function (team) {
       const isExpanded = WFM25State.expandedTeam === team.label;
       const teamGetsDraft = hasDraft && selectedTeam === team.label;
+      const teamCount = wfm25CountScopedTeamWorkers_(team.label, data, allocQi);
 
       // Team aggregate cells
       const teamQCells = team.quarters.map(function (q, qi) {
@@ -8581,6 +8717,7 @@ async function _qaRefreshPsaHours_() {
         '<td><div class="wfm25-team-name-cell">' +
           '<span class="wfm25-team-swatch" style="background:' + team.color + '"></span>' +
           escapeHtml_(team.label) +
+          ' <span class="wfm25-team-count muted">(' + teamCount + ')</span>' +
           '<span class="wfm25-expand-chev">\u25ba</span>' +
         '</div></td>' +
         teamQCells + '</tr>'
@@ -8619,6 +8756,34 @@ async function _qaRefreshPsaHours_() {
         });
       }
     });
+
+    const totalCount = wfm25CountScopedTeamWorkers_(null, data, allocQi);
+    const teamSummary = (data && data.teamSummary) || [];
+    const orgIcpTarget = agg.teams.length ? agg.teams[0].icpTarget : 0.75;
+    const orgGetsDraft = hasDraft && selectedWorker;
+    const orgQCells = qKeys.map(function (qk, qi) {
+      const tq = teamSummary[qi];
+      let baseUtil = tq ? tq.icpUtil : null;
+      let projUtil = null;
+      if (orgGetsDraft) {
+        const raw = wfm25ProjectionQuarter_(projection, 'org', null, qk, true);
+        projUtil = raw && raw.icpUtil != null ? raw.icpUtil : null;
+        if (projUtil != null) {
+          const rawBase = wfm25ProjectionQuarter_(projection, 'org', null, qk, false);
+          if (rawBase && rawBase.icpUtil != null) baseUtil = rawBase.icpUtil;
+        }
+      }
+      return wfm25RenderUtilCell_(baseUtil, projUtil, orgIcpTarget);
+    }).join('');
+    rows.push(
+      '<tr class="wfm25-team-row wfm25-org-total-row">' +
+      '<td><div class="wfm25-team-name-cell">' +
+        '<span class="wfm25-team-swatch" style="background:var(--ballpoint)"></span>' +
+        '<strong>SLG Total</strong>' +
+        ' <span class="wfm25-team-count muted">(' + totalCount + ')</span>' +
+      '</div></td>' +
+      orgQCells + '</tr>'
+    );
 
     const wrap = document.getElementById('wfm25UtilWrap');
 

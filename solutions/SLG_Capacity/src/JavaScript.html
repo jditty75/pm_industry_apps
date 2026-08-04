@@ -7801,16 +7801,51 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Heat color for signed tracking-hours KPI (ahead = calm green, behind = bonus heat).
+   * Current-quarter attainment ratio for worker-panel KPI tiles (bonusAttainment).
+   * @param {Object|null} curQ
+   * @returns {number}
+   */
+  function wfm25WorkerPanelCurQAttainment_(curQ) {
+    return curQ ? (Number(curQ.bonusAttainment) || 0) : 0;
+  }
+
+  /**
+   * Warm/red heat for over-allocated worker-panel tiles (reuses cellColor over bands).
+   * @param {number} attainmentRatio curQ.bonusAttainment
+   * @returns {{bg:string, fg:string}}
+   */
+  function wfm25WorkerPanelOverAllocatedTileColor_(attainmentRatio) {
+    return cellColor(Number(attainmentRatio) || 0, 1);
+  }
+
+  /**
+   * Heat color for Current Qtr Attainment tile.
+   * @param {Object|null} curQ
+   * @returns {{bg:string, fg:string}}
+   */
+  function wfm25WorkerPanelAttainmentTileColor_(curQ) {
+    const ratio = wfm25WorkerPanelCurQAttainment_(curQ);
+    if (ratio > WFM25_OVER_ALLOCATED_CEILING) {
+      return wfm25WorkerPanelOverAllocatedTileColor_(ratio);
+    }
+    return bonusCellColor_(ratio);
+  }
+
+  /**
+   * Heat color for signed tracking-hours KPI — follows current-quarter verdict, not hour sign.
    * @param {number} trackingHours
    * @param {Object|null} curQuarter
    * @returns {{bg:string, fg:string}}
    */
   function wfm25TrackingKpiColor_(trackingHours, curQuarter) {
+    const ratio = wfm25WorkerPanelCurQAttainment_(curQuarter);
+    if (ratio > WFM25_OVER_ALLOCATED_CEILING) {
+      return wfm25WorkerPanelOverAllocatedTileColor_(ratio);
+    }
     if (Number(trackingHours) >= 0) {
       return { bg: '#c8e6c9', fg: '#1b5e20' };
     }
-    return bonusCellColor_(curQuarter ? curQuarter.bonusAttainment : 0);
+    return bonusCellColor_(ratio);
   }
 
   /**
@@ -7835,7 +7870,7 @@ async function _qaRefreshPsaHours_() {
    * @returns {{label: string, className: string}}
    */
   function wfm25WorkerPanelStatus_(curQ) {
-    const ratio = curQ ? (Number(curQ.bonusAttainment) || 0) : 0;
+    const ratio = wfm25WorkerPanelCurQAttainment_(curQ);
     if (ratio > WFM25_OVER_ALLOCATED_CEILING) {
       return { label: 'Over-allocated', className: 'explorer-status-over' };
     }
@@ -7856,7 +7891,7 @@ async function _qaRefreshPsaHours_() {
     const curQ = quarters.find(function (q) { return q.isCurrentQuarter; }) || null;
 
     const attainment = curQ ? curQ.bonusAttainment : 0;
-    const attainColor = bonusCellColor_(attainment);
+    const attainColor = wfm25WorkerPanelAttainmentTileColor_(curQ);
     const tracking = curQ ? curQ.trackingHours : 0;
     const trackColor = wfm25TrackingKpiColor_(tracking, curQ);
     const trackSign = tracking >= 0 ? '+' : '';

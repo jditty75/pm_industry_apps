@@ -528,8 +528,11 @@ function api_getResourceDetailV2(params) {
     resourceName, projectsOut, curQ, visibleWeeks
   );
   const roleCategoryRollup = roleCategoryPayload.rollup;
+  const projectNameEnrichment = enrichResourceProjectNames_(resourceName, projectsOut);
   projectsOut.forEach(function (p, i) {
     p.roleCategory = roleCategoryPayload.roleCategories[i] || 'Unclassified';
+    p.account_name = projectNameEnrichment[i].account_name;
+    p.project_name = projectNameEnrichment[i].project_name;
   });
 
   let totalProductive = 0;
@@ -648,6 +651,48 @@ function buildResourceRoleCategoryRollup_(resourceName, projectsOut, curQ, visib
   });
 
   return { rollup: rollup, roleCategories: roleCategories };
+}
+
+/**
+ * ADD-ONLY: passthrough account_name + project_name for api_getResourceDetailV2 projects[].
+ * Votes from Allocations_Normalized rows; does not alter hours or existing fields.
+ * @param {string} resourceName
+ * @param {Array<{project:string}>} projectsOut
+ * @return {Array<{account_name:string, project_name:string}>}
+ */
+function enrichResourceProjectNames_(resourceName, projectsOut) {
+  var projMeta = {};
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  allocRows.forEach(function (a) {
+    if (String(a.resource_name || '') !== resourceName) return;
+    var proj = String(a.project_name || '').trim();
+    if (!proj) return;
+    if (!projMeta[proj]) projMeta[proj] = { accountVotes: {} };
+    var acct = String(a.account_name || '').trim();
+    if (acct) {
+      projMeta[proj].accountVotes[acct] = (projMeta[proj].accountVotes[acct] || 0) + 1;
+    }
+  });
+
+  function pickTop_(counts) {
+    var keys = Object.keys(counts || {});
+    if (!keys.length) return '';
+    keys.sort(function (a, b) { return (counts[b] || 0) - (counts[a] || 0); });
+    return keys[0];
+  }
+
+  return (projectsOut || []).map(function (p) {
+    var meta = projMeta[p.project] || {};
+    return {
+      account_name: pickTop_(meta.accountVotes) || '',
+      project_name: String(p.project || '')
+    };
+  });
 }
 
 /**

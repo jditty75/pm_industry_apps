@@ -7730,16 +7730,70 @@ async function _qaRefreshPsaHours_() {
    */
   function wfm25CountScopedTeamWorkers_(teamLabel, data, qi) {
     const workers = (data && data.workers) || [];
-    const expanded = WFM25State.expandedTeam;
     let count = 0;
     workers.forEach(function (w) {
       const tl = w.teamLabel || 'Unknown';
       if (teamLabel && tl !== teamLabel) return;
-      if (!teamLabel && expanded && tl !== expanded) return;
       if (WFM25State.utilAllocFilter && !wfm25WorkerMatchesAllocFilter_(w, qi)) return;
       count++;
     });
     return count;
+  }
+
+  /**
+   * Sum a project's hours within the current fiscal quarter.
+   * @param {Object} project
+   * @param {Array} weeks detail.weeks (with fiscalQuarterKey)
+   * @param {string} curQk
+   * @returns {number}
+   */
+  function wfm25ProjectCurQuarterHours_(project, weeks, curQk) {
+    const curWeekKeys = {};
+    (weeks || []).forEach(function (w) {
+      if (w.fiscalQuarterKey === curQk) curWeekKeys[w.weekKey] = true;
+    });
+    let sum = 0;
+    (project.weekly || []).forEach(function (wk) {
+      if (curWeekKeys[wk.weekKey]) sum += Number(wk.hours) || 0;
+    });
+    return sum;
+  }
+
+  /**
+   * Whether a project row is non-productive (display-only, excluded from util/attainment).
+   * @param {Object} project
+   * @returns {boolean}
+   */
+  function wfm25IsDisplayOnlyProject_(project) {
+    const proj = String(project.project_name || project.project || '').trim().toLowerCase();
+    if (proj === 'pto/holiday' || proj === '(blank)') return true;
+    if (/travel/i.test(proj)) return true;
+    return false;
+  }
+
+  /**
+   * Human label for a non-productive project row.
+   * @param {Object} project
+   * @returns {string}
+   */
+  function wfm25DisplayOnlyProjectLabel_(project) {
+    const proj = String(project.project_name || project.project || '').trim();
+    if (/travel/i.test(proj)) return 'Travel';
+    return 'PTO / Holiday';
+  }
+
+  /**
+   * Primary display label for a worker-panel project row.
+   * @param {Object} project
+   * @returns {string}
+   */
+  function wfm25ProjectPrimaryLabel_(project) {
+    if (wfm25IsDisplayOnlyProject_(project)) {
+      return wfm25DisplayOnlyProjectLabel_(project);
+    }
+    const acct = String(project.account_name || '').trim();
+    const proj = String(project.project_name || project.project || '').trim() || 'Unclassified';
+    return acct ? (acct + ' \u2014 ' + proj) : proj;
   }
 
   /**
@@ -7799,7 +7853,11 @@ async function _qaRefreshPsaHours_() {
       statusClass = 'explorer-status-under';
     }
 
-    const icpSeries = quarters.map(function (q) { return q.icpUtil; });
+    const curQk = fiscalQuarterKey_(new Date());
+    const curWeeks = (detail.weeks || []).filter(function (w) {
+      return w.fiscalQuarterKey === curQk;
+    });
+    const icpSeries = curWeeks.map(function (w) { return w.icpUtil; });
     const sparkBase = curQ ? curQ.icpUtil : (icpTarget || 0.75);
     const sparkColor = cellColor(sparkBase, icpTarget).fg;
     const spark = wfm25MixTrendSparklineSvg_(icpSeries, sparkColor, 72, 26);
@@ -7822,35 +7880,56 @@ async function _qaRefreshPsaHours_() {
         '<div class="wfm25-worker-kpi-value ' + statusClass + '">' + escapeHtml_(statusLabel) + '</div>' +
       '</div>' +
       '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--trend">' +
-        '<div class="wfm25-worker-kpi-label">Trend</div>' +
+        '<div class="wfm25-worker-kpi-label">Current Qtr Trend</div>' +
         '<div class="wfm25-worker-kpi-value wfm25-worker-kpi-spark">' + spark + '</div>' +
       '</div>' +
     '</div>';
   }
 
   /**
-   * WFM.25 worker-panel Projects card grouped by Project Role Category (current quarter).
+   * WFM.25 worker-panel Projects card — account + project name, role-category sub-label (current quarter).
    * @param {Object} detail api_getResourceDetailV2 result
    * @returns {string}
    */
   function renderWFM25WorkerProjectsSection_(detail) {
-    const rollup = detail.roleCategoryRollup || [];
     const curQk = fiscalQuarterKey_(new Date());
+    const weeks = detail.weeks || [];
+    const projects = (detail.projects || []).map(function (p) {
+      return {
+        project: p,
+        curHours: wfm25ProjectCurQuarterHours_(p, weeks, curQk),
+        roleCategory: p.roleCategory || 'Unclassified',
+        displayOnly: wfm25IsDisplayOnlyProject_(p)
+      };
+    }).filter(function (row) { return row.curHours > 0; })
+      .sort(function (a, b) { return b.curHours - a.curHours; });
+
     let html = '<div class="wfm25-chrome-card wfm25-worker-projects-card">' +
       '<div class="wfm25-worker-projects-head">' +
         '<span class="wfm25-worker-projects-title">Projects</span>' +
         '<span class="muted wfm25-worker-projects-qtr">' + escapeHtml_(curQk) + '</span>' +
       '</div>';
-    if (!rollup.length) {
+    if (!projects.length) {
       html += '<div class="muted wfm25-worker-projects-empty">No project hours this quarter.</div>';
     } else {
-      html += '<ul class="wfm25-worker-projects-list" aria-label="Projects by role category">';
-      rollup.forEach(function (r) {
-        html += '<li class="wfm25-worker-projects-row">' +
-          '<span class="wfm25-worker-projects-label">' + escapeHtml_(r.roleCategory) + '</span>' +
-          '<span class="wfm25-worker-projects-hours">' +
-            Math.round(r.currentQuarterHours).toLocaleString() + 'h</span>' +
-        '</li>';
+      html += '<ul class="wfm25-worker-projects-list" aria-label="Projects this quarter">';
+      projects.forEach(function (row) {
+        const p = row.project;
+        const primary = wfm25ProjectPrimaryLabel_(p);
+        const hrsLabel = Math.round(row.curHours).toLocaleString() + 'h';
+        const sub = row.displayOnly
+          ? hrsLabel
+          : escapeHtml_(row.roleCategory) + ' \u00b7 ' + hrsLabel;
+        const rowCls = 'wfm25-worker-projects-row' +
+          (row.displayOnly ? ' wfm25-worker-projects-row--display-only' : '');
+        const displayNote = row.displayOnly
+          ? '<span class="wfm25-worker-projects-display-note">display only</span>'
+          : '';
+        html += '<li class="' + rowCls + '">' +
+          '<div class="wfm25-worker-projects-label-col">' +
+            '<span class="wfm25-worker-projects-primary">' + escapeHtml_(primary) + '</span>' +
+            '<span class="wfm25-worker-projects-sub muted">' + sub + displayNote + '</span>' +
+          '</div></li>';
       });
       html += '</ul>';
     }

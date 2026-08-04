@@ -1512,6 +1512,7 @@ function _buildProjectedForecastDelta_(baselineForecast, assignments) {
       clone.productiveWeekly[wk] = (clone.productiveWeekly[wk] || 0) + hrs;
       clone.workerWeekly[wk] = (clone.workerWeekly[wk] || 0) + hrs;
     });
+    _syncBlendedWeeklyForecastCells_(clone);
     return clone;
   });
 

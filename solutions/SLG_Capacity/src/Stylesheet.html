@@ -3722,10 +3722,12 @@ td.cell-with-bar {
   flex-shrink: 0;
 }
 .wfm25-weekly-legend-swatch--actual {
-  background: var(--laptop);
+  background: var(--ballpoint);
+  border-color: var(--ballpoint);
 }
 .wfm25-weekly-legend-swatch--forecast {
-  background: var(--laptop);
+  background: var(--blue-sky);
+  border-color: rgba(11, 30, 63, .18);
   position: relative;
   overflow: hidden;
 }
@@ -3803,10 +3805,13 @@ td.cell-with-bar {
   margin: 0 auto;
 }
 .wfm25-weekly-bar-committed {
-  background: var(--laptop);
+  background: var(--ballpoint);
   border-radius: 2px 2px 0 0;
   min-height: 2px;
   position: relative;
+}
+.wfm25-weekly-bar-committed--forecast {
+  background: var(--blue-sky);
 }
 .wfm25-weekly-bar-committed--forecast::after {
   content: '';

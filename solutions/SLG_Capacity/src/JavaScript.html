@@ -7810,8 +7810,25 @@ async function _qaRefreshPsaHours_() {
     if (!projection) return null;
     const bucket = projected ? projection.projected : projection.baseline;
     if (!bucket) return null;
-    const row = (bucket.worker || []).find(function (w) { return w.resourceName === workerName; });
+    const key = String(workerName || '').trim();
+    const row = (bucket.worker || []).find(function (w) {
+      return String(w.resourceName || '').trim() === key;
+    });
     return row && row.weeks ? row.weeks : null;
+  }
+
+  /**
+   * Index projection weekly cells by weekKey (no index-alignment assumptions).
+   * @param {Array|null} weeks
+   * @returns {Object<string, Object>}
+   */
+  function wfm25WeekMapByKey_(weeks) {
+    const map = {};
+    (weeks || []).forEach(function (w) {
+      if (!w || !w.weekKey) return;
+      map[String(w.weekKey)] = w;
+    });
+    return map;
   }
 
   /**
@@ -7974,23 +7991,19 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * Baseline/projected hours for a week from api_projectSoftBookings (no client recompute).
-   * @param {Object} cell detail week cell
-   * @param {Array|null} baseWeeks
-   * @param {Array|null} projWeeks
+   * @param {Object} cell detail week cell (or projection week cell for weekKey/label)
+   * @param {Object|null} baseWeekMap weekKey → baseline projection cell
+   * @param {Object|null} projWeekMap weekKey → projected projection cell
    * @returns {{base:number, projected:number}}
    */
-  function wfm25WeekDraftHours_(cell, baseWeeks, projWeeks) {
+  function wfm25WeekDraftHours_(cell, baseWeekMap, projWeekMap) {
     const fallback = Number(cell.hours) || 0;
-    const bw = baseWeeks
-      ? (baseWeeks.find(function (w) { return w.weekKey === cell.weekKey; }) || null)
-      : null;
-    const pw = projWeeks
-      ? (projWeeks.find(function (w) { return w.weekKey === cell.weekKey; }) || null)
-      : null;
-    return {
-      base: bw ? (Number(bw.hours) || 0) : fallback,
-      projected: pw ? (Number(pw.hours) || 0) : fallback
-    };
+    const wk = String(cell.weekKey || '');
+    const bw = baseWeekMap ? baseWeekMap[wk] : null;
+    const pw = projWeekMap ? projWeekMap[wk] : null;
+    const baseH = bw != null ? (Number(bw.hours) || 0) : fallback;
+    const projectedH = pw != null ? (Number(pw.hours) || 0) : baseH;
+    return { base: baseH, projected: projectedH };
   }
 
   /**
@@ -8188,7 +8201,43 @@ async function _qaRefreshPsaHours_() {
    */
   function renderWFM25WeeklyBarChart_(weeks, projection, workerName, detail) {
     const curQk = fiscalQuarterKey_(new Date());
-    const chartWeeks = (weeks || []).filter(function (w) { return w.fiscalQuarterKey === curQk; });
+    const detailWeeks = weeks || [];
+    const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
+    const projWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, true) : null;
+    const baseWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, false) : null;
+    const baseWeekMap = wfm25WeekMapByKey_(baseWeeks);
+    const projWeekMap = wfm25WeekMapByKey_(projWeeks);
+    const showDraft = !!(hasDraft && projWeeks && projWeeks.length);
+
+    const detailByKey = {};
+    detailWeeks.forEach(function (w) {
+      if (!w || !w.weekKey) return;
+      detailByKey[String(w.weekKey)] = w;
+    });
+
+    let chartWeeks = detailWeeks.filter(function (w) { return w.fiscalQuarterKey === curQk; });
+    if (showDraft) {
+      const seen = {};
+      chartWeeks.forEach(function (w) { seen[String(w.weekKey)] = true; });
+      (projWeeks || []).forEach(function (pw) {
+        const wk = String(pw.weekKey || '');
+        if (!wk || seen[wk]) return;
+        const hrs = wfm25WeekDraftHours_(pw, baseWeekMap, projWeekMap);
+        if (Math.abs(hrs.projected - hrs.base) <= 0.05) return;
+        const meta = detailByKey[wk] || pw;
+        if (meta.fiscalQuarterKey && meta.fiscalQuarterKey !== curQk) return;
+        chartWeeks.push(meta);
+        seen[wk] = true;
+      });
+      chartWeeks.sort(function (a, b) {
+        const ak = String(a.weekKey || '');
+        const bk = String(b.weekKey || '');
+        if (ak < bk) return -1;
+        if (ak > bk) return 1;
+        return 0;
+      });
+    }
+
     if (!chartWeeks.length) {
       return '<div class="wfm25-chrome-card wfm25-weekly-card">' +
         '<div class="wfm25-weekly-head">' +
@@ -8197,14 +8246,9 @@ async function _qaRefreshPsaHours_() {
         '<div class="muted wfm25-weekly-empty">No weeks in current quarter.</div></div>';
     }
 
-    const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
-    const projWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, true) : null;
-    const baseWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, false) : null;
-    const showDraft = !!(hasDraft && projWeeks && baseWeeks);
-
     let yMax = 0;
     chartWeeks.forEach(function (cell) {
-      const hrs = wfm25WeekDraftHours_(cell, baseWeeks, projWeeks);
+      const hrs = wfm25WeekDraftHours_(cell, baseWeekMap, projWeekMap);
       let top = hrs.base;
       if (showDraft) {
         if (hrs.projected > hrs.base) top = hrs.projected;
@@ -8217,7 +8261,7 @@ async function _qaRefreshPsaHours_() {
 
     let barsHtml = '';
     chartWeeks.forEach(function (cell) {
-      const hrs = wfm25WeekDraftHours_(cell, baseWeeks, projWeeks);
+      const hrs = wfm25WeekDraftHours_(cell, baseWeekMap, projWeekMap);
       const baseH = hrs.base;
       const projH = hrs.projected;
       const allowReduce = wfm25WeekAllowsReduceDraft_(cell, curQk);
@@ -8280,7 +8324,7 @@ async function _qaRefreshPsaHours_() {
       ? chartWeeks.find(function (w) { return w.weekKey === WFM25State.expandedWeekKey; })
       : null;
     const breakdownHtml = expandedWeek
-      ? renderWFM25WeeklyBreakdown_(expandedWeek, detail, baseWeeks, projWeeks, showDraft, curQk)
+      ? renderWFM25WeeklyBreakdown_(expandedWeek, detail, baseWeekMap, projWeekMap, showDraft, curQk)
       : '';
 
     return '<div class="wfm25-chrome-card wfm25-weekly-card" id="wfm25WeeklyChart">' +
@@ -8310,15 +8354,15 @@ async function _qaRefreshPsaHours_() {
    * Per-week project breakdown panel (Pass 2).
    * @param {Object} weekMeta
    * @param {Object} detail
-   * @param {Array|null} baseWeeks
-   * @param {Array|null} projWeeks
+   * @param {Object|null} baseWeekMap
+   * @param {Object|null} projWeekMap
    * @param {boolean} showDraft
    * @param {string} curQk
    * @returns {string}
    */
-  function renderWFM25WeeklyBreakdown_(weekMeta, detail, baseWeeks, projWeeks, showDraft, curQk) {
+  function renderWFM25WeeklyBreakdown_(weekMeta, detail, baseWeekMap, projWeekMap, showDraft, curQk) {
     const weekKey = weekMeta.weekKey;
-    const hrs = wfm25WeekDraftHours_(weekMeta, baseWeeks, projWeeks);
+    const hrs = wfm25WeekDraftHours_(weekMeta, baseWeekMap, projWeekMap);
     const allowReduce = wfm25WeekAllowsReduceDraft_(weekMeta, curQk);
     let draftAdd = 0;
     let draftReduce = 0;
@@ -8955,7 +8999,11 @@ async function _qaRefreshPsaHours_() {
     }
     const reqId = ++State.explorerProjectionReqId;
     try {
-      const result = await call('api_projectSoftBookings', buildServerParams_(), State.softBookings);
+      const result = await call(
+        'api_projectSoftBookings',
+        buildServerParams_({ workerScope: 'SLG' }),
+        State.softBookings
+      );
       if (reqId !== State.explorerProjectionReqId) return;
       State.explorerProjection = result;
       showReductionClampWarnings_(result.clampWarnings);

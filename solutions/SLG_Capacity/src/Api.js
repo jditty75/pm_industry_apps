@@ -2136,6 +2136,204 @@ function api_getForecastTable(params) {
 }
 
 /**
+ * Map specialty/practice values to leadership team labels from Config_Resource_Type.
+ * Uses the practice and team_label columns; unmapped values resolve at lookup time.
+ * @return {Object<string,string>} specialtyPractice -> team_label
+ */
+function buildSpecialtyTeamMap_() {
+  var map = {};
+  var rich = null;
+  try {
+    if (typeof readConfigResourceTypeRich_ === 'function') {
+      rich = readConfigResourceTypeRich_();
+    }
+  } catch (e) {
+    Logger.log('buildSpecialtyTeamMap_: readConfigResourceTypeRich_ failed — ' + e);
+  }
+
+  if (rich) {
+    Object.keys(rich).forEach(function (k) {
+      var entry = rich[k];
+      var practice = String((entry && entry.practice) || '').trim();
+      var team = String((entry && entry.team_label) || '').trim();
+      if (practice && team) {
+        map[practice] = team;
+      }
+    });
+  }
+
+  if (!Object.keys(map).length) {
+    var ss = SpreadsheetApp.getActive();
+    var sh = ss.getSheetByName('Config_Resource_Type');
+    if (sh) {
+      var values = sh.getDataRange().getValues();
+      if (values && values.length >= 2) {
+        var header = values[0].map(function (h) {
+          return String(h || '').trim().toLowerCase();
+        });
+        var iPract = header.indexOf('practice');
+        var iTeam = header.indexOf('team_label');
+        if (iTeam < 0) iTeam = header.indexOf('team');
+        if (iPract >= 0 && iTeam >= 0) {
+          for (var r = 1; r < values.length; r++) {
+            var row = values[r];
+            var practice = String(row[iPract] || '').trim();
+            var team = String(row[iTeam] || '').trim();
+            if (practice && team) map[practice] = team;
+          }
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Resolve a specialty practice to a leadership team label for demand grouping.
+ * @param {string} specialtyPractice
+ * @param {Object<string,string>} teamMap
+ * @return {string}
+ */
+function resolveSpecialtyTeamLabel_(specialtyPractice, teamMap) {
+  var sp = String(specialtyPractice || '').trim();
+  if (!sp || sp === 'Unclassified' || sp === 'Student') return 'Other / Unmapped';
+  if (!teamMap) return 'Other / Unmapped';
+
+  var team = teamMap[sp];
+  if (!team) {
+    var lower = sp.toLowerCase();
+    Object.keys(teamMap).forEach(function (k) {
+      if (!team && k.toLowerCase() === lower) team = teamMap[k];
+    });
+  }
+  if (!team || team === 'Unclassified') return 'Other / Unmapped';
+  return team;
+}
+
+/**
+ * Sort specialty demand rows: totalHours desc; Unclassified last.
+ * @param {Array} rows
+ * @return {Array}
+ */
+function sortSpecialtyDemandRows_(rows) {
+  rows.sort(function (a, b) {
+    if (a.specialtyPractice === 'Unclassified' && b.specialtyPractice !== 'Unclassified') return 1;
+    if (b.specialtyPractice === 'Unclassified' && a.specialtyPractice !== 'Unclassified') return -1;
+    return (Number(b.totalHours) || 0) - (Number(a.totalHours) || 0);
+  });
+  return rows;
+}
+
+/**
+ * Sort sub-specialty rows: totalHours desc; Unclassified last.
+ * @param {Array} rows
+ * @return {Array}
+ */
+function sortSpecialtySubRows_(rows) {
+  rows.sort(function (a, b) {
+    if (a.subSpecialtyPractice === 'Unclassified' && b.subSpecialtyPractice !== 'Unclassified') return 1;
+    if (b.subSpecialtyPractice === 'Unclassified' && a.subSpecialtyPractice !== 'Unclassified') return -1;
+    return (Number(b.totalHours) || 0) - (Number(a.totalHours) || 0);
+  });
+  return rows;
+}
+
+/**
+ * WFM.25 Pass 3C: historical worked hours by specialty practice × fiscal quarter.
+ * Read-only aggregation over Actuals_History; no reconciliation changes.
+ * @param {Object} [params] reserved for future filter params
+ * @return {{
+ *   quarters: string[],
+ *   rows: Array<{specialtyPractice:string, hoursByQuarter:Object<string,number>, totalHours:number,
+ *     subRows:Array<{subSpecialtyPractice:string, hoursByQuarter:Object<string,number>, totalHours:number}>}>,
+ *   grandTotalByQuarter: Object<string,number>,
+ *   grandTotal: number,
+ *   specialtyTeamMap: Object<string,string>
+ * }}
+ */
+function api_getSpecialtyActuals(params) {
+  _requireAuthorized_();
+  params = params || {};
+
+  var histRows = readTable_(ACTUALS_HISTORY) || [];
+  var quarterSet = {};
+  var spBucket = {};
+  var grandTotalByQuarter = {};
+  var grandTotal = 0;
+
+  histRows.forEach(function (r) {
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq) return;
+    var hrs = Number(r.worked_hours) || 0;
+    if (!hrs) return;
+
+    var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
+    var subSp = String(r.sub_specialty_practice || '').trim() || 'Unclassified';
+
+    quarterSet[fq] = true;
+    grandTotalByQuarter[fq] = (grandTotalByQuarter[fq] || 0) + hrs;
+    grandTotal += hrs;
+
+    if (!spBucket[sp]) {
+      spBucket[sp] = { hoursByQuarter: {}, sub: {} };
+    }
+    spBucket[sp].hoursByQuarter[fq] = (spBucket[sp].hoursByQuarter[fq] || 0) + hrs;
+
+    if (!spBucket[sp].sub[subSp]) {
+      spBucket[sp].sub[subSp] = {};
+    }
+    spBucket[sp].sub[subSp][fq] = (spBucket[sp].sub[subSp][fq] || 0) + hrs;
+  });
+
+  var quarters = Object.keys(quarterSet).sort(compareFiscalQuarterKeys_);
+
+  var rows = Object.keys(spBucket).map(function (sp) {
+    var entry = spBucket[sp];
+    var hoursByQuarter = {};
+    var totalHours = 0;
+    quarters.forEach(function (qk) {
+      var h = Number(entry.hoursByQuarter[qk]) || 0;
+      hoursByQuarter[qk] = h;
+      totalHours += h;
+    });
+
+    var subRows = Object.keys(entry.sub || {}).map(function (subSp) {
+      var subEntry = entry.sub[subSp];
+      var subHoursByQuarter = {};
+      var subTotal = 0;
+      quarters.forEach(function (qk) {
+        var sh = Number(subEntry[qk]) || 0;
+        subHoursByQuarter[qk] = sh;
+        subTotal += sh;
+      });
+      return {
+        subSpecialtyPractice: subSp,
+        hoursByQuarter: subHoursByQuarter,
+        totalHours: subTotal
+      };
+    });
+    sortSpecialtySubRows_(subRows);
+
+    return {
+      specialtyPractice: sp,
+      hoursByQuarter: hoursByQuarter,
+      totalHours: totalHours,
+      subRows: subRows
+    };
+  });
+  sortSpecialtyDemandRows_(rows);
+
+  return {
+    quarters: quarters,
+    rows: rows,
+    grandTotalByQuarter: grandTotalByQuarter,
+    grandTotal: grandTotal,
+    specialtyTeamMap: buildSpecialtyTeamMap_()
+  };
+}
+
+/**
  * WFM.25 Pass 3B: org-level forecast demand hours by specialty practice × fiscal quarter.
  * Read-only aggregation over computeWeeklyForecast_ productive hours; no reconciliation changes.
  * @param {Object} params same filter shape as api_getForecastTable
@@ -2144,7 +2342,8 @@ function api_getForecastTable(params) {
  *   currentQuarterKey: string,
  *   rows: Array<{specialtyPractice:string, hoursByQuarter:Object<string,number>, totalHours:number}>,
  *   grandTotalByQuarter: Object<string,number>,
- *   grandTotal: number
+ *   grandTotal: number,
+ *   specialtyTeamMap: Object<string,string>
  * }}
  */
 function api_getSpecialtyDemand(params) {
@@ -2218,7 +2417,8 @@ function api_getSpecialtyDemand(params) {
     currentQuarterKey: curQ,
     rows: rows,
     grandTotalByQuarter: grandTotalByQuarter,
-    grandTotal: grandTotal
+    grandTotal: grandTotal,
+    specialtyTeamMap: buildSpecialtyTeamMap_()
   };
 }
 

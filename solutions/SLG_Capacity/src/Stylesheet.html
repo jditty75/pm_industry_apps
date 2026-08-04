@@ -5117,6 +5117,20 @@ td.cell-with-bar {
 .wfm25-specialty-demand-card {
   padding: var(--wfm25-chrome-card-pad);
 }
+.wfm25-specialty-demand-section {
+  margin-bottom: 0;
+}
+.wfm25-specialty-demand-section-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--after-hours);
+}
+.wfm25-specialty-demand-divider {
+  margin: 20px 0;
+  border: none;
+  border-top: 1px solid var(--business-card);
+}
 .wfm25-specialty-demand-caption {
   margin: 0 0 12px;
   font-size: 11px;
@@ -5209,6 +5223,92 @@ td.cell-with-bar {
 }
 .wfm25-specialty-demand-row--unclassified .wfm25-specialty-demand-bar {
   background: var(--business-card);
+}
+.wfm25-specialty-demand-team-row td {
+  background: var(--paper);
+  border-bottom: 1px solid var(--business-card);
+}
+.wfm25-specialty-demand-team-row--other td {
+  opacity: 0.88;
+}
+.wfm25-specialty-demand-team-label {
+  padding: 0 !important;
+}
+.wfm25-specialty-demand-team-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--after-hours);
+  text-align: left;
+  cursor: pointer;
+}
+.wfm25-specialty-demand-team-btn:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+.wfm25-specialty-demand-team-btn:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: -2px;
+}
+.wfm25-specialty-demand-team-chev {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 10px;
+  color: var(--staple);
+}
+.wfm25-specialty-demand-team-name {
+  flex: 1;
+}
+.wfm25-specialty-demand-team-row .wfm25-team-swatch {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.wfm25-specialty-demand-spec-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.wfm25-specialty-demand-spec-btn:hover {
+  color: var(--ballpoint);
+}
+.wfm25-specialty-demand-spec-btn:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: 2px;
+}
+.wfm25-specialty-demand-spec-chev {
+  flex-shrink: 0;
+  width: 10px;
+  font-size: 9px;
+  color: var(--staple);
+}
+.wfm25-specialty-demand-sub-row td {
+  background: rgba(0, 0, 0, 0.015);
+}
+.wfm25-specialty-demand-sub-label {
+  padding-left: 28px !important;
+  font-weight: 500 !important;
+  font-size: 12px !important;
+  color: var(--staple) !important;
+}
+.wfm25-specialty-demand-team-row--other .wfm25-specialty-demand-team-name,
+.wfm25-specialty-demand-team-row--other .wfm25-specialty-demand-hours {
+  color: var(--staple);
 }
 .wfm25-tab[data-wfm25-tab="specialty-demand"]:focus-visible {
   outline: 2px solid var(--ballpoint);

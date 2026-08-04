@@ -2136,57 +2136,12 @@ function api_getForecastTable(params) {
 }
 
 /**
- * Map specialty/practice values to leadership team labels from Config_Resource_Type.
- * Uses the practice and team_label columns; unmapped values resolve at lookup time.
- * @return {Object<string,string>} specialtyPractice -> team_label
+ * Map specialty values to leadership team labels from Config_Resource_Type.
+ * Keys on resource_type (full WoW specialty strings); unmapped values resolve at lookup time.
+ * @return {Object<string,string>} resource_type -> team_label
  */
 function buildSpecialtyTeamMap_() {
-  var map = {};
-  var rich = null;
-  try {
-    if (typeof readConfigResourceTypeRich_ === 'function') {
-      rich = readConfigResourceTypeRich_();
-    }
-  } catch (e) {
-    Logger.log('buildSpecialtyTeamMap_: readConfigResourceTypeRich_ failed — ' + e);
-  }
-
-  if (rich) {
-    Object.keys(rich).forEach(function (k) {
-      var entry = rich[k];
-      var practice = String((entry && entry.practice) || '').trim();
-      var team = String((entry && entry.team_label) || '').trim();
-      if (practice && team) {
-        map[practice] = team;
-      }
-    });
-  }
-
-  if (!Object.keys(map).length) {
-    var ss = SpreadsheetApp.getActive();
-    var sh = ss.getSheetByName('Config_Resource_Type');
-    if (sh) {
-      var values = sh.getDataRange().getValues();
-      if (values && values.length >= 2) {
-        var header = values[0].map(function (h) {
-          return String(h || '').trim().toLowerCase();
-        });
-        var iPract = header.indexOf('practice');
-        var iTeam = header.indexOf('team_label');
-        if (iTeam < 0) iTeam = header.indexOf('team');
-        if (iPract >= 0 && iTeam >= 0) {
-          for (var r = 1; r < values.length; r++) {
-            var row = values[r];
-            var practice = String(row[iPract] || '').trim();
-            var team = String(row[iTeam] || '').trim();
-            if (practice && team) map[practice] = team;
-          }
-        }
-      }
-    }
-  }
-
-  return map;
+  return readConfigResourceType_();
 }
 
 /**

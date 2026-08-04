@@ -2804,6 +2804,52 @@ function _readUtilBandSettings_() {
   }
 }
 
+/**
+ * Validate a Config_Settings util band color (#RGB or #RRGGBB).
+ * @param {string} value
+ * @returns {boolean}
+ */
+function _isValidUtilHexColor_(value) {
+  return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(String(value || '').trim());
+}
+
+/**
+ * Read WFM.25 unified utilization band colors from Config_Settings.
+ * Falls back to UTIL_COLOR_DEFAULTS when a key is blank or malformed.
+ * @returns {{coldBg:string, coldFg:string, coolBg:string, coolFg:string, approachingBg:string, approachingFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
+ */
+function _readUtilColorSettings_() {
+  const defaults = UTIL_COLOR_DEFAULTS;
+  const keys = UTIL_COLOR_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      if (_isValidUtilHexColor_(raw)) return raw;
+      if (raw) {
+        Logger.log('_readUtilColorSettings_: malformed ' + settingKey + '="' + raw + '" — using fallback');
+      }
+      return fallback;
+    };
+    return {
+      coldBg: read(keys.coldBg, defaults.coldBg),
+      coldFg: read(keys.coldFg, defaults.coldFg),
+      coolBg: read(keys.coolBg, defaults.coolBg),
+      coolFg: read(keys.coolFg, defaults.coolFg),
+      approachingBg: read(keys.approachingBg, defaults.approachingBg),
+      approachingFg: read(keys.approachingFg, defaults.approachingFg),
+      ontargetBg: read(keys.ontargetBg, defaults.ontargetBg),
+      ontargetFg: read(keys.ontargetFg, defaults.ontargetFg),
+      warmBg: read(keys.warmBg, defaults.warmBg),
+      warmFg: read(keys.warmFg, defaults.warmFg),
+      hotBg: read(keys.hotBg, defaults.hotBg),
+      hotFg: read(keys.hotFg, defaults.hotFg)
+    };
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
 function api_getReference() {
   _requireAuthorized_();
   // Per-user 60-second cache wrapper. api_getReference is hit on every
@@ -2923,6 +2969,7 @@ function api_getReference() {
   const resourceTypeOptions = _readResourceTypeOptions_();
 
   const utilBands = _readUtilBandSettings_();
+  const utilColors = _readUtilColorSettings_();
 
   const response = {
     user: userResolution.email,
@@ -2966,6 +3013,18 @@ function api_getReference() {
     utilBandApproachingMax: utilBands.approachingMax,
     utilBandOntargetMax: utilBands.ontargetMax,
     utilBandWarmMax: utilBands.warmMax,
+    utilColorColdBg: utilColors.coldBg,
+    utilColorColdFg: utilColors.coldFg,
+    utilColorCoolBg: utilColors.coolBg,
+    utilColorCoolFg: utilColors.coolFg,
+    utilColorApproachingBg: utilColors.approachingBg,
+    utilColorApproachingFg: utilColors.approachingFg,
+    utilColorOntargetBg: utilColors.ontargetBg,
+    utilColorOntargetFg: utilColors.ontargetFg,
+    utilColorWarmBg: utilColors.warmBg,
+    utilColorWarmFg: utilColors.warmFg,
+    utilColorHotBg: utilColors.hotBg,
+    utilColorHotFg: utilColors.hotFg,
     // WFM-FIX.1: no longer used to drive boot behavior (see
     // applyAutoManagerDefaults_, JavaScript.html, which now personalizes
     // the boot default off matchedManager/userIsAdmin instead). Left in

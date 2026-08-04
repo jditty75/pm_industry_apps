@@ -41,6 +41,18 @@ const CFG_SETTINGS = 'Config_Settings';         // key/value settings
 //   util_band_approaching_max  -- (default 0.90)
 //   util_band_ontarget_max     -- (default 1.03)
 //   util_band_warm_max         -- (default 1.15)
+//   util_color_cold_bg         -- WFM.25 unified util band palette (hex)
+//   util_color_cold_fg         -- (default #0a3d7c / #ffffff)
+//   util_color_cool_bg         -- (default #D6EBF9 / #0a3d7c)
+//   util_color_cool_fg
+//   util_color_approaching_bg  -- (default #FFF1B8 / #6b4e00)
+//   util_color_approaching_fg
+//   util_color_ontarget_bg     -- (default #c8e6c9 / #1b5e20)
+//   util_color_ontarget_fg
+//   util_color_warm_bg         -- (default #E76F1C / #ffffff)
+//   util_color_warm_fg
+//   util_color_hot_bg          -- (default #D6371E / #ffffff)
+//   util_color_hot_fg
 // Existing keys (planning_window_months, etc.) are unchanged.
 
 /** Config_Settings keys + fallbacks for WFM.25 unified utilization color bands. */
@@ -57,6 +69,36 @@ const UTIL_BAND_DEFAULTS = {
   approachingMax: 0.90,
   ontargetMax: 1.03,
   warmMax: 1.15
+};
+
+/** Config_Settings keys + hex fallbacks for WFM.25 unified utilization band colors. */
+const UTIL_COLOR_SETTING_KEYS = {
+  coldBg: 'util_color_cold_bg',
+  coldFg: 'util_color_cold_fg',
+  coolBg: 'util_color_cool_bg',
+  coolFg: 'util_color_cool_fg',
+  approachingBg: 'util_color_approaching_bg',
+  approachingFg: 'util_color_approaching_fg',
+  ontargetBg: 'util_color_ontarget_bg',
+  ontargetFg: 'util_color_ontarget_fg',
+  warmBg: 'util_color_warm_bg',
+  warmFg: 'util_color_warm_fg',
+  hotBg: 'util_color_hot_bg',
+  hotFg: 'util_color_hot_fg'
+};
+const UTIL_COLOR_DEFAULTS = {
+  coldBg: '#0a3d7c',
+  coldFg: '#ffffff',
+  coolBg: '#D6EBF9',
+  coolFg: '#0a3d7c',
+  approachingBg: '#FFF1B8',
+  approachingFg: '#6b4e00',
+  ontargetBg: '#c8e6c9',
+  ontargetFg: '#1b5e20',
+  warmBg: '#E76F1C',
+  warmFg: '#ffffff',
+  hotBg: '#D6371E',
+  hotFg: '#ffffff'
 };
 const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
 const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership

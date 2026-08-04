@@ -390,6 +390,21 @@
     warmMax: 1.15
   };
 
+  const UTIL_COLOR_DEFAULTS_ = {
+    coldBg: '#0a3d7c',
+    coldFg: '#ffffff',
+    coolBg: '#D6EBF9',
+    coolFg: '#0a3d7c',
+    approachingBg: '#FFF1B8',
+    approachingFg: '#6b4e00',
+    ontargetBg: '#c8e6c9',
+    ontargetFg: '#1b5e20',
+    warmBg: '#E76F1C',
+    warmFg: '#ffffff',
+    hotBg: '#D6371E',
+    hotFg: '#ffffff'
+  };
+
   /**
    * Utilization color band edges from api_getReference (Config_Settings fallbacks).
    * @returns {{coldMax:number, coolMax:number, approachingMax:number, ontargetMax:number, warmMax:number}}
@@ -421,31 +436,86 @@
   }
 
   /**
-   * Unified ratio-to-target color scale (config-driven breakpoints).
-   * @param {number} ratio utilization / icpTarget (or any ratio-to-target)
+   * Utilization band palette from api_getReference (Config_Settings hex fallbacks).
+   * @returns {{coldBg:string, coldFg:string, coolBg:string, coolFg:string, approachingBg:string, approachingFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
+   */
+  function wfm25UtilColors_() {
+    const ref = State.ref || {};
+    const readHex = function (key, fallback) {
+      const raw = ref[key];
+      const s = raw == null ? '' : String(raw).trim();
+      if (/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(s)) return s;
+      if (s) console.warn('wfm25UtilColors_: malformed ' + key + '="' + s + '" — using fallback');
+      return fallback;
+    };
+    return {
+      coldBg: readHex('utilColorColdBg', UTIL_COLOR_DEFAULTS_.coldBg),
+      coldFg: readHex('utilColorColdFg', UTIL_COLOR_DEFAULTS_.coldFg),
+      coolBg: readHex('utilColorCoolBg', UTIL_COLOR_DEFAULTS_.coolBg),
+      coolFg: readHex('utilColorCoolFg', UTIL_COLOR_DEFAULTS_.coolFg),
+      approachingBg: readHex('utilColorApproachingBg', UTIL_COLOR_DEFAULTS_.approachingBg),
+      approachingFg: readHex('utilColorApproachingFg', UTIL_COLOR_DEFAULTS_.approachingFg),
+      ontargetBg: readHex('utilColorOntargetBg', UTIL_COLOR_DEFAULTS_.ontargetBg),
+      ontargetFg: readHex('utilColorOntargetFg', UTIL_COLOR_DEFAULTS_.ontargetFg),
+      warmBg: readHex('utilColorWarmBg', UTIL_COLOR_DEFAULTS_.warmBg),
+      warmFg: readHex('utilColorWarmFg', UTIL_COLOR_DEFAULTS_.warmFg),
+      hotBg: readHex('utilColorHotBg', UTIL_COLOR_DEFAULTS_.hotBg),
+      hotFg: readHex('utilColorHotFg', UTIL_COLOR_DEFAULTS_.hotFg)
+    };
+  }
+
+  /**
+   * Unified ratio-to-target color scale (config-driven breakpoints + palette).
+   * @param {number} ratio already-normalized ratio-to-target (no internal division)
    * @param {Object} [bands] optional band edges from wfm25UtilBands_()
+   * @param {Object} [colors] optional palette from wfm25UtilColors_()
    * @returns {{bg:string, fg:string}}
    */
-  function utilBandColor_(ratio, bands) {
+  function utilBandColor_(ratio, bands, colors) {
     const r = Number(ratio);
     if (!r && r !== 0) {
       return { bg: 'var(--business-card)', fg: 'var(--staple)' };
     }
     const b = bands || wfm25UtilBands_();
-    if (r < b.coldMax) return { bg: '#0a3d7c', fg: '#fff' };
-    if (r < b.coolMax) return { bg: '#D6EBF9', fg: '#0a3d7c' };
-    if (r < b.approachingMax) return { bg: '#FFF1B8', fg: '#6b4e00' };
-    if (r < b.ontargetMax) return { bg: '#c8e6c9', fg: '#1b5e20' };
-    if (r < b.warmMax) return { bg: 'var(--happy-hour)', fg: '#fff' };
-    return { bg: 'var(--thumbtack)', fg: '#fff' };
+    const c = colors || wfm25UtilColors_();
+    if (r < b.coldMax) return { bg: c.coldBg, fg: c.coldFg };
+    if (r < b.coolMax) return { bg: c.coolBg, fg: c.coolFg };
+    if (r < b.approachingMax) return { bg: c.approachingBg, fg: c.approachingFg };
+    if (r < b.ontargetMax) return { bg: c.ontargetBg, fg: c.ontargetFg };
+    if (r < b.warmMax) return { bg: c.warmBg, fg: c.warmFg };
+    return { bg: c.hotBg, fg: c.hotFg };
   }
 
+  /**
+   * Color a utilization cell: normalize once (utilization ÷ icpTarget), then band lookup.
+   * @param {number} utilization raw utilization (e.g. productive ÷ icpAvailable)
+   * @param {number} icpTarget
+   * @returns {{bg:string, fg:string}}
+   */
   function cellColor(utilization, icpTarget) {
     if (!utilization && utilization !== 0) {
       return { bg: 'var(--business-card)', fg: 'var(--staple)' };
     }
     const ratio = icpTarget > 0 ? utilization / icpTarget : 1;
     return utilBandColor_(ratio);
+  }
+
+  /**
+   * Ratio-to-target for quarterly ICP cells (single normalization at caller).
+   * Current-quarter actuals: icpUtil is already productive÷target — use as-is.
+   * Forward/forecast quarters: icpUtil is productive÷icpAvailable — divide by icpTarget.
+   * @param {Object|null} q
+   * @param {number} icpTarget
+   * @returns {number}
+   */
+  function wfm25QuarterIcpColorRatio_(q, icpTarget) {
+    if (!q) return 0;
+    if (q.isCurrentQuarter && q.source === 'actuals_plus_forecast') {
+      return Number(q.bonusAttainment) || Number(q.icpUtil) || 0;
+    }
+    const target = Number(icpTarget) || 0;
+    const util = Number(q.icpUtil) || 0;
+    return target > 0 ? util / target : util;
   }
 
   const GROUP_LABELS = {
@@ -1414,7 +1484,7 @@
           return '<td class="qs-cell" style="background:' + color.bg + ';color:' + color.fg + '" title="' +
             escapeHtml_(tip) + '">' + fmtPct(q.bonusAttainment) + '</td>';
         }
-        const color = cellColor(q.icpUtil, w.icpTarget);
+        const color = utilBandColor_(wfm25QuarterIcpColorRatio_(q, w.icpTarget));
         const tip = [
           'Productive: ' + q.productiveHours.toFixed(1) + 'h',
           'ICP available: ' + q.icpAvailableHours.toFixed(1) + 'h',
@@ -4109,7 +4179,7 @@
         if (projBase != null) baseUtil = projBase;
       }
       if (!hasDraft || projUtil == null) {
-        const color = cellColor(q.icpUtil, icpTarget);
+        const color = utilBandColor_(wfm25QuarterIcpColorRatio_(q, icpTarget));
         const tip = [
           'Productive: ' + q.productiveHours.toFixed(1) + 'h',
           'ICP available: ' + q.icpAvailableHours.toFixed(1) + 'h',
@@ -7854,37 +7924,22 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Canonical ratio-to-target for utilization coloring (icpUtil ÷ icpTarget).
-   * @param {Object|null} curQ
-   * @param {number} icpTarget
-   * @returns {number}
-   */
-  function wfm25CanonicalUtilRatio_(curQ, icpTarget) {
-    if (!curQ) return 0;
-    const util = Number(curQ.icpUtil) || 0;
-    const target = icpTarget > 0 ? Number(icpTarget) : (Number(curQ.icpTarget) || 0);
-    return target > 0 ? util / target : 1;
-  }
-
-  /**
    * Heat color for Current Qtr Attainment tile (unified util band scale).
    * @param {Object|null} curQ
-   * @param {number} icpTarget
    * @returns {{bg:string, fg:string}}
    */
-  function wfm25WorkerPanelAttainmentTileColor_(curQ, icpTarget) {
-    return utilBandColor_(wfm25CanonicalUtilRatio_(curQ, icpTarget));
+  function wfm25WorkerPanelAttainmentTileColor_(curQ) {
+    return utilBandColor_(wfm25WorkerPanelCurQAttainment_(curQ));
   }
 
   /**
    * Heat color for signed tracking-hours KPI — follows unified ratio band, not hour sign.
    * @param {number} trackingHours
    * @param {Object|null} curQuarter
-   * @param {number} icpTarget
    * @returns {{bg:string, fg:string}}
    */
-  function wfm25TrackingKpiColor_(trackingHours, curQuarter, icpTarget) {
-    return utilBandColor_(wfm25CanonicalUtilRatio_(curQuarter, icpTarget));
+  function wfm25TrackingKpiColor_(trackingHours, curQuarter) {
+    return utilBandColor_(wfm25WorkerPanelCurQAttainment_(curQuarter));
   }
 
   /**
@@ -7930,15 +7985,15 @@ async function _qaRefreshPsaHours_() {
     const curQ = quarters.find(function (q) { return q.isCurrentQuarter; }) || null;
 
     const attainment = curQ ? curQ.bonusAttainment : 0;
-    const attainColor = wfm25WorkerPanelAttainmentTileColor_(curQ, icpTarget);
+    const attainColor = wfm25WorkerPanelAttainmentTileColor_(curQ);
     const tracking = curQ ? curQ.trackingHours : 0;
-    const trackColor = wfm25TrackingKpiColor_(tracking, curQ, icpTarget);
+    const trackColor = wfm25TrackingKpiColor_(tracking, curQ);
     const trackSign = tracking >= 0 ? '+' : '';
     const forecastRemaining = wfm25ForwardForecastRemaining_(quarters);
 
     const status = wfm25WorkerPanelStatus_(curQ);
     const statusLabel = status.label;
-    const statusColor = utilBandColor_(wfm25CanonicalUtilRatio_(curQ, icpTarget));
+    const statusColor = utilBandColor_(wfm25WorkerPanelCurQAttainment_(curQ));
 
     const curQk = fiscalQuarterKey_(new Date());
     const curWeeks = (detail.weeks || []).filter(function (w) {
@@ -8055,7 +8110,7 @@ async function _qaRefreshPsaHours_() {
         if (projBase != null) baseUtil = projBase;
       }
       if (!hasDraft || projUtil == null) {
-        const color = cellColor(baseUtil, icpTarget);
+        const color = utilBandColor_(wfm25QuarterIcpColorRatio_(q, icpTarget));
         return '<td class="wfm25-worker-qstrip-cell" style="background:' + color.bg +
           ';color:' + color.fg + '">' + fmtPct(baseUtil) + '</td>';
       }

@@ -7500,6 +7500,10 @@ async function _qaRefreshPsaHours_() {
     return 'var(--staple)';
   }
 
+  // WFM.25 worker-panel Status tile — over-allocated ceiling (current-quarter attainment ratio).
+  // Under/approaching floor thresholds are intentionally deferred (leadership review).
+  const WFM25_OVER_ALLOCATED_CEILING = 1.10;
+
   // ── WFM.25 client state ───────────────────────────────────────
   const WFM25State = {
     scorecardData:    null,          // last api_getQuarterlyScorecard result
@@ -7826,6 +7830,22 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Worker-panel Status label/class from current-quarter attainment (same ratio as Current Qtr Attainment tile).
+   * @param {Object|null} curQ quarters[isCurrentQuarter] from api_getResourceDetailV2
+   * @returns {{label: string, className: string}}
+   */
+  function wfm25WorkerPanelStatus_(curQ) {
+    const ratio = curQ ? (Number(curQ.bonusAttainment) || 0) : 0;
+    if (ratio > WFM25_OVER_ALLOCATED_CEILING) {
+      return { label: 'Over-allocated', className: 'explorer-status-over' };
+    }
+    if (ratio < 0.75) {
+      return { label: 'Under target', className: 'explorer-status-under' };
+    }
+    return { label: 'On track', className: 'explorer-status-ok' };
+  }
+
+  /**
    * WFM.25 worker-panel KPI tiles (current-quarter metrics + trend sparkline).
    * @param {Object} detail api_getResourceDetailV2 result
    * @param {number} icpTarget
@@ -7833,7 +7853,6 @@ async function _qaRefreshPsaHours_() {
    */
   function renderWFM25WorkerKpiTiles_(detail, icpTarget) {
     const quarters = detail.quarters || [];
-    const bs = detail.blendedSummary || {};
     const curQ = quarters.find(function (q) { return q.isCurrentQuarter; }) || null;
 
     const attainment = curQ ? curQ.bonusAttainment : 0;
@@ -7843,15 +7862,9 @@ async function _qaRefreshPsaHours_() {
     const trackSign = tracking >= 0 ? '+' : '';
     const forecastRemaining = wfm25ForwardForecastRemaining_(quarters);
 
-    let statusLabel = 'On track';
-    let statusClass = 'explorer-status-ok';
-    if (bs.isOverUtilized) {
-      statusLabel = 'Over target';
-      statusClass = 'explorer-status-over';
-    } else if (bs.isUnderUtilized) {
-      statusLabel = 'Under target';
-      statusClass = 'explorer-status-under';
-    }
+    const status = wfm25WorkerPanelStatus_(curQ);
+    const statusLabel = status.label;
+    const statusClass = status.className;
 
     const curQk = fiscalQuarterKey_(new Date());
     const curWeeks = (detail.weeks || []).filter(function (w) {

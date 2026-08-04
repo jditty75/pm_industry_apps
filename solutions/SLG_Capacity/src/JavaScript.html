@@ -381,18 +381,71 @@
     return true;
   }
 
-  // Heatmap color (diverging relative to ICP)
+  // Heatmap color (unified ratio-to-target scale; config via api_getReference)
+  const UTIL_BAND_DEFAULTS_ = {
+    coldMax: 0.60,
+    coolMax: 0.80,
+    approachingMax: 0.90,
+    ontargetMax: 1.03,
+    warmMax: 1.15
+  };
+
+  /**
+   * Utilization color band edges from api_getReference (Config_Settings fallbacks).
+   * @returns {{coldMax:number, coolMax:number, approachingMax:number, ontargetMax:number, warmMax:number}}
+   */
+  function wfm25UtilBands_() {
+    const ref = State.ref || {};
+    const read = function (key, fallback) {
+      const raw = ref[key];
+      if (raw == null || raw === '') return fallback;
+      const v = Number(raw);
+      return v > 0 ? v : fallback;
+    };
+    const bands = {
+      coldMax: read('utilBandColdMax', UTIL_BAND_DEFAULTS_.coldMax),
+      coolMax: read('utilBandCoolMax', UTIL_BAND_DEFAULTS_.coolMax),
+      approachingMax: read('utilBandApproachingMax', UTIL_BAND_DEFAULTS_.approachingMax),
+      ontargetMax: read('utilBandOntargetMax', UTIL_BAND_DEFAULTS_.ontargetMax),
+      warmMax: read('utilBandWarmMax', UTIL_BAND_DEFAULTS_.warmMax)
+    };
+    const mono = bands.coldMax < bands.coolMax &&
+      bands.coolMax < bands.approachingMax &&
+      bands.approachingMax < bands.ontargetMax &&
+      bands.ontargetMax < bands.warmMax;
+    if (!mono) {
+      console.warn('wfm25UtilBands_: malformed config — using defaults');
+      return Object.assign({}, UTIL_BAND_DEFAULTS_);
+    }
+    return bands;
+  }
+
+  /**
+   * Unified ratio-to-target color scale (config-driven breakpoints).
+   * @param {number} ratio utilization / icpTarget (or any ratio-to-target)
+   * @param {Object} [bands] optional band edges from wfm25UtilBands_()
+   * @returns {{bg:string, fg:string}}
+   */
+  function utilBandColor_(ratio, bands) {
+    const r = Number(ratio);
+    if (!r && r !== 0) {
+      return { bg: 'var(--business-card)', fg: 'var(--staple)' };
+    }
+    const b = bands || wfm25UtilBands_();
+    if (r < b.coldMax) return { bg: '#0a3d7c', fg: '#fff' };
+    if (r < b.coolMax) return { bg: '#D6EBF9', fg: '#0a3d7c' };
+    if (r < b.approachingMax) return { bg: '#FFF1B8', fg: '#6b4e00' };
+    if (r < b.ontargetMax) return { bg: '#c8e6c9', fg: '#1b5e20' };
+    if (r < b.warmMax) return { bg: 'var(--happy-hour)', fg: '#fff' };
+    return { bg: 'var(--thumbtack)', fg: '#fff' };
+  }
+
   function cellColor(utilization, icpTarget) {
     if (!utilization && utilization !== 0) {
       return { bg: 'var(--business-card)', fg: 'var(--staple)' };
     }
     const ratio = icpTarget > 0 ? utilization / icpTarget : 1;
-    if (ratio < 0.60) return { bg: '#D6EBF9', fg: '#0a3d7c' };
-    if (ratio < 0.85) return { bg: 'var(--blue-sky)', fg: '#0a3d7c' };
-    if (ratio < 1.00) return { bg: '#FFF1B8', fg: '#6b4e00' };
-    if (ratio < 1.10) return { bg: 'var(--pencil)', fg: '#3d2e00' };
-    if (ratio < 1.25) return { bg: 'var(--happy-hour)', fg: '#fff' };
-    return { bg: 'var(--thumbtack)', fg: '#fff' };
+    return utilBandColor_(ratio);
   }
 
   const GROUP_LABELS = {
@@ -1299,15 +1352,6 @@
     data: null
   };
 
-  function bonusCellColor_(attainment) {
-    if (!attainment && attainment !== 0) {
-      return { bg: 'var(--business-card)', fg: 'var(--staple)' };
-    }
-    if (attainment >= 1.0) return { bg: '#c8e6c9', fg: '#1b5e20' };
-    if (attainment >= 0.85) return { bg: '#fff3e0', fg: '#e65100' };
-    return { bg: '#ffcdd2', fg: '#b71c1c' };
-  }
-
   function renderQuarterlySummaryStrip_(data) {
     const strip = $('#qsSummaryStrip');
     if (!strip) return;
@@ -1360,7 +1404,7 @@
           if (!q.targetHours) {
             return '<td class="qs-cell qs-cell-neutral" title="No target">—</td>';
           }
-          const color = bonusCellColor_(q.bonusAttainment);
+          const color = utilBandColor_(q.bonusAttainment);
           const tip = [
             'Projected/productive: ' + q.productiveHours.toFixed(1) + 'h',
             'Quarter target: ' + q.targetHours.toFixed(1) + 'h',
@@ -4045,7 +4089,7 @@
         if (!q.targetHours) {
           return '<td class="qs-cell qs-cell-neutral" title="No target">—</td>';
         }
-        const color = bonusCellColor_(q.bonusAttainment);
+        const color = utilBandColor_(q.bonusAttainment);
         const tip = [
           'Projected/productive: ' + q.productiveHours.toFixed(1) + 'h',
           'Quarter target: ' + q.targetHours.toFixed(1) + 'h',
@@ -7810,42 +7854,37 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Warm/red heat for over-allocated worker-panel tiles (reuses cellColor over bands).
-   * @param {number} attainmentRatio curQ.bonusAttainment
-   * @returns {{bg:string, fg:string}}
-   */
-  function wfm25WorkerPanelOverAllocatedTileColor_(attainmentRatio) {
-    return cellColor(Number(attainmentRatio) || 0, 1);
-  }
-
-  /**
-   * Heat color for Current Qtr Attainment tile.
+   * Canonical ratio-to-target for utilization coloring (icpUtil ÷ icpTarget).
    * @param {Object|null} curQ
-   * @returns {{bg:string, fg:string}}
+   * @param {number} icpTarget
+   * @returns {number}
    */
-  function wfm25WorkerPanelAttainmentTileColor_(curQ) {
-    const ratio = wfm25WorkerPanelCurQAttainment_(curQ);
-    if (ratio > WFM25_OVER_ALLOCATED_CEILING) {
-      return wfm25WorkerPanelOverAllocatedTileColor_(ratio);
-    }
-    return bonusCellColor_(ratio);
+  function wfm25CanonicalUtilRatio_(curQ, icpTarget) {
+    if (!curQ) return 0;
+    const util = Number(curQ.icpUtil) || 0;
+    const target = icpTarget > 0 ? Number(icpTarget) : (Number(curQ.icpTarget) || 0);
+    return target > 0 ? util / target : 1;
   }
 
   /**
-   * Heat color for signed tracking-hours KPI — follows current-quarter verdict, not hour sign.
+   * Heat color for Current Qtr Attainment tile (unified util band scale).
+   * @param {Object|null} curQ
+   * @param {number} icpTarget
+   * @returns {{bg:string, fg:string}}
+   */
+  function wfm25WorkerPanelAttainmentTileColor_(curQ, icpTarget) {
+    return utilBandColor_(wfm25CanonicalUtilRatio_(curQ, icpTarget));
+  }
+
+  /**
+   * Heat color for signed tracking-hours KPI — follows unified ratio band, not hour sign.
    * @param {number} trackingHours
    * @param {Object|null} curQuarter
+   * @param {number} icpTarget
    * @returns {{bg:string, fg:string}}
    */
-  function wfm25TrackingKpiColor_(trackingHours, curQuarter) {
-    const ratio = wfm25WorkerPanelCurQAttainment_(curQuarter);
-    if (ratio > WFM25_OVER_ALLOCATED_CEILING) {
-      return wfm25WorkerPanelOverAllocatedTileColor_(ratio);
-    }
-    if (Number(trackingHours) >= 0) {
-      return { bg: '#c8e6c9', fg: '#1b5e20' };
-    }
-    return bonusCellColor_(ratio);
+  function wfm25TrackingKpiColor_(trackingHours, curQuarter, icpTarget) {
+    return utilBandColor_(wfm25CanonicalUtilRatio_(curQuarter, icpTarget));
   }
 
   /**
@@ -7891,15 +7930,15 @@ async function _qaRefreshPsaHours_() {
     const curQ = quarters.find(function (q) { return q.isCurrentQuarter; }) || null;
 
     const attainment = curQ ? curQ.bonusAttainment : 0;
-    const attainColor = wfm25WorkerPanelAttainmentTileColor_(curQ);
+    const attainColor = wfm25WorkerPanelAttainmentTileColor_(curQ, icpTarget);
     const tracking = curQ ? curQ.trackingHours : 0;
-    const trackColor = wfm25TrackingKpiColor_(tracking, curQ);
+    const trackColor = wfm25TrackingKpiColor_(tracking, curQ, icpTarget);
     const trackSign = tracking >= 0 ? '+' : '';
     const forecastRemaining = wfm25ForwardForecastRemaining_(quarters);
 
     const status = wfm25WorkerPanelStatus_(curQ);
     const statusLabel = status.label;
-    const statusClass = status.className;
+    const statusColor = utilBandColor_(wfm25CanonicalUtilRatio_(curQ, icpTarget));
 
     const curQk = fiscalQuarterKey_(new Date());
     const curWeeks = (detail.weeks || []).filter(function (w) {
@@ -7923,9 +7962,9 @@ async function _qaRefreshPsaHours_() {
         '<div class="wfm25-worker-kpi-label">Forecast Remaining</div>' +
         '<div class="wfm25-worker-kpi-value">' + Math.round(forecastRemaining).toLocaleString() + 'h</div>' +
       '</div>' +
-      '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--neutral">' +
+      '<div class="wfm25-worker-kpi-tile" style="background:' + statusColor.bg + ';color:' + statusColor.fg + '">' +
         '<div class="wfm25-worker-kpi-label">Status</div>' +
-        '<div class="wfm25-worker-kpi-value ' + statusClass + '">' + escapeHtml_(statusLabel) + '</div>' +
+        '<div class="wfm25-worker-kpi-value">' + escapeHtml_(statusLabel) + '</div>' +
       '</div>' +
       '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--trend">' +
         '<div class="wfm25-worker-kpi-label">Current Qtr Trend</div>' +

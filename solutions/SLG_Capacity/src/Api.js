@@ -2768,6 +2768,42 @@ function api_getReportingSummary(params) {
 //                     Drives the topbar Team dropdown.
 // ------------------------------------------------------------
 
+/**
+ * Read WFM.25 unified utilization color band edges from Config_Settings.
+ * Falls back to UTIL_BAND_DEFAULTS when a key is blank or bands are malformed.
+ * @returns {{coldMax:number, coolMax:number, approachingMax:number, ontargetMax:number, warmMax:number}}
+ */
+function _readUtilBandSettings_() {
+  const defaults = UTIL_BAND_DEFAULTS;
+  const keys = UTIL_BAND_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      const v = raw ? Number(raw) : NaN;
+      return (v > 0) ? v : fallback;
+    };
+    const bands = {
+      coldMax: read(keys.coldMax, defaults.coldMax),
+      coolMax: read(keys.coolMax, defaults.coolMax),
+      approachingMax: read(keys.approachingMax, defaults.approachingMax),
+      ontargetMax: read(keys.ontargetMax, defaults.ontargetMax),
+      warmMax: read(keys.warmMax, defaults.warmMax)
+    };
+    const mono = bands.coldMax < bands.coolMax &&
+      bands.coolMax < bands.approachingMax &&
+      bands.approachingMax < bands.ontargetMax &&
+      bands.ontargetMax < bands.warmMax;
+    if (!mono) {
+      Logger.log('_readUtilBandSettings_: malformed util_band config — using defaults');
+      return Object.assign({}, defaults);
+    }
+    return bands;
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
 function api_getReference() {
   _requireAuthorized_();
   // Per-user 60-second cache wrapper. api_getReference is hit on every
@@ -2886,6 +2922,8 @@ function api_getReference() {
   // Priority 4: resource_type options for the Assign drawer's Role dropdown.
   const resourceTypeOptions = _readResourceTypeOptions_();
 
+  const utilBands = _readUtilBandSettings_();
+
   const response = {
     user: userResolution.email,
     matchedManager: userResolution.matchedManager,
@@ -2923,6 +2961,11 @@ function api_getReference() {
         return 0.85;
       }
     })(),
+    utilBandColdMax: utilBands.coldMax,
+    utilBandCoolMax: utilBands.coolMax,
+    utilBandApproachingMax: utilBands.approachingMax,
+    utilBandOntargetMax: utilBands.ontargetMax,
+    utilBandWarmMax: utilBands.warmMax,
     // WFM-FIX.1: no longer used to drive boot behavior (see
     // applyAutoManagerDefaults_, JavaScript.html, which now personalizes
     // the boot default off matchedManager/userIsAdmin instead). Left in

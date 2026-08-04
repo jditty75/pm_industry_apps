@@ -36,7 +36,28 @@ const CFG_SETTINGS = 'Config_Settings';         // key/value settings
 //   alloc_under_ratio       -- ratio-to-target below which a worker is
 //                               under-allocated in the Utilization banner
 //                               (default 0.85)
+//   util_band_cold_max         -- WFM.25 unified util color scale (default 0.60)
+//   util_band_cool_max         -- (default 0.80)
+//   util_band_approaching_max  -- (default 0.90)
+//   util_band_ontarget_max     -- (default 1.03)
+//   util_band_warm_max         -- (default 1.15)
 // Existing keys (planning_window_months, etc.) are unchanged.
+
+/** Config_Settings keys + fallbacks for WFM.25 unified utilization color bands. */
+const UTIL_BAND_SETTING_KEYS = {
+  coldMax: 'util_band_cold_max',
+  coolMax: 'util_band_cool_max',
+  approachingMax: 'util_band_approaching_max',
+  ontargetMax: 'util_band_ontarget_max',
+  warmMax: 'util_band_warm_max'
+};
+const UTIL_BAND_DEFAULTS = {
+  coldMax: 0.60,
+  coolMax: 0.80,
+  approachingMax: 0.90,
+  ontargetMax: 1.03,
+  warmMax: 1.15
+};
 const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
 const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership
 const CFG_WORKER_ROLE_OVERRIDES = 'Config_Worker_Role_Overrides'; // per-worker ICP role override (applied at ingest time)

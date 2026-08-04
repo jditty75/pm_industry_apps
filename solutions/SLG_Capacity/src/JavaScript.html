@@ -7635,7 +7635,8 @@ async function _qaRefreshPsaHours_() {
     selectedWorkerTeam: null,       // team label for breadcrumb + live aggregate shift
     selectedWorkerDetail: null,     // last api_getResourceDetailV2 result
     workerReqId:      0,             // race-guard for worker detail fetch
-    utilAllocFilter:  null           // null | 'over' | 'under' — tile filter within scope
+    utilAllocFilter:  null,          // null | 'over' | 'under' — tile filter within scope
+    expandedWeekKey:  null           // weekKey for open weekly bar breakdown, or null
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -7901,17 +7902,95 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Primary display label for a worker-panel project row.
+   * Primary display label for a worker-panel project row (full account + project).
    * @param {Object} project
    * @returns {string}
    */
-  function wfm25ProjectPrimaryLabel_(project) {
+  function wfm25ProjectFullLabel_(project) {
     if (wfm25IsDisplayOnlyProject_(project)) {
       return wfm25DisplayOnlyProjectLabel_(project);
     }
     const acct = String(project.account_name || '').trim();
     const proj = String(project.project_name || project.project || '').trim() || 'Unclassified';
     return acct ? (acct + ' \u2014 ' + proj) : proj;
+  }
+
+  /** @deprecated use wfm25ProjectFullLabel_ — kept for Explorer paths */
+  function wfm25ProjectPrimaryLabel_(project) {
+    return wfm25ProjectFullLabel_(project);
+  }
+
+  /**
+   * Extract SOW number from project name when present.
+   * @param {Object} project
+   * @returns {string}
+   */
+  function wfm25ExtractSowNum_(project) {
+    const name = String(project.project_name || project.project || '');
+    const m = name.match(/\bSOW\s*#?\s*(\d[\d.-]*)/i);
+    if (m) return m[1];
+    const m2 = name.match(/#\s*(\d{4,})/);
+    return m2 ? m2[1] : '';
+  }
+
+  /**
+   * Compact single-line identity: Account — SOW #n (Pass 2).
+   * @param {Object} project
+   * @returns {string}
+   */
+  function wfm25ProjectCompactIdentity_(project) {
+    if (wfm25IsDisplayOnlyProject_(project)) {
+      return wfm25DisplayOnlyProjectLabel_(project);
+    }
+    const acct = String(project.account_name || '').trim() || 'Unclassified';
+    const sow = wfm25ExtractSowNum_(project);
+    if (sow) return acct + ' \u2014 SOW #' + sow;
+    const proj = String(project.project_name || project.project || '').trim();
+    return proj ? (acct + ' \u2014 ' + proj) : acct;
+  }
+
+  /**
+   * Hours for one project in a single week.
+   * @param {Object} project
+   * @param {string} weekKey
+   * @returns {number}
+   */
+  function wfm25ProjectWeekHours_(project, weekKey) {
+    const wk = (project.weekly || []).find(function (w) { return w.weekKey === weekKey; });
+    return wk ? (Number(wk.hours) || 0) : 0;
+  }
+
+  /**
+   * Whether a week may show reduction draft overlay (forward forecast weeks only).
+   * @param {Object} week detail.weeks cell
+   * @param {string} curQk
+   * @returns {boolean}
+   */
+  function wfm25WeekAllowsReduceDraft_(week, curQk) {
+    if (!week || week.isActual) return false;
+    if (week.fiscalQuarterKey === curQk) return false;
+    return compareFiscalQuarterKeys_(week.fiscalQuarterKey, curQk) > 0;
+  }
+
+  /**
+   * Baseline/projected hours for a week from api_projectSoftBookings (no client recompute).
+   * @param {Object} cell detail week cell
+   * @param {Array|null} baseWeeks
+   * @param {Array|null} projWeeks
+   * @returns {{base:number, projected:number}}
+   */
+  function wfm25WeekDraftHours_(cell, baseWeeks, projWeeks) {
+    const fallback = Number(cell.hours) || 0;
+    const bw = baseWeeks
+      ? (baseWeeks.find(function (w) { return w.weekKey === cell.weekKey; }) || null)
+      : null;
+    const pw = projWeeks
+      ? (projWeeks.find(function (w) { return w.weekKey === cell.weekKey; }) || null)
+      : null;
+    return {
+      base: bw ? (Number(bw.hours) || 0) : fallback,
+      projected: pw ? (Number(pw.hours) || 0) : fallback
+    };
   }
 
   /**
@@ -8029,21 +8108,25 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * WFM.25 worker-panel Projects card — account + project name, role-category sub-label (current quarter).
+   * WFM.25 worker-panel Projects card — compact single-line rows (Pass 2).
    * @param {Object} detail api_getResourceDetailV2 result
    * @returns {string}
    */
   function renderWFM25WorkerProjectsSection_(detail) {
     const curQk = fiscalQuarterKey_(new Date());
     const weeks = detail.weeks || [];
-    const projects = (detail.projects || []).map(function (p) {
+    const rows = (detail.projects || []).map(function (p) {
       return {
         project: p,
         curHours: wfm25ProjectCurQuarterHours_(p, weeks, curQk),
         roleCategory: p.roleCategory || 'Unclassified',
         displayOnly: wfm25IsDisplayOnlyProject_(p)
       };
-    }).filter(function (row) { return row.curHours > 0; })
+    }).filter(function (row) { return row.curHours > 0; });
+
+    const productive = rows.filter(function (r) { return !r.displayOnly; })
+      .sort(function (a, b) { return b.curHours - a.curHours; });
+    const displayOnly = rows.filter(function (r) { return r.displayOnly; })
       .sort(function (a, b) { return b.curHours - a.curHours; });
 
     let html = '<div class="wfm25-chrome-card wfm25-worker-projects-card">' +
@@ -8051,32 +8134,294 @@ async function _qaRefreshPsaHours_() {
         '<span class="wfm25-worker-projects-title">Projects</span>' +
         '<span class="muted wfm25-worker-projects-qtr">' + escapeHtml_(curQk) + '</span>' +
       '</div>';
-    if (!projects.length) {
+    if (!productive.length && !displayOnly.length) {
       html += '<div class="muted wfm25-worker-projects-empty">No project hours this quarter.</div>';
     } else {
       html += '<ul class="wfm25-worker-projects-list" aria-label="Projects this quarter">';
-      projects.forEach(function (row) {
-        const p = row.project;
-        const primary = wfm25ProjectPrimaryLabel_(p);
-        const hrsLabel = Math.round(row.curHours).toLocaleString() + 'h';
-        const sub = row.displayOnly
-          ? hrsLabel
-          : escapeHtml_(row.roleCategory) + ' \u00b7 ' + hrsLabel;
-        const rowCls = 'wfm25-worker-projects-row' +
-          (row.displayOnly ? ' wfm25-worker-projects-row--display-only' : '');
-        const displayNote = row.displayOnly
-          ? '<span class="wfm25-worker-projects-display-note">display only</span>'
-          : '';
-        html += '<li class="' + rowCls + '">' +
-          '<div class="wfm25-worker-projects-label-col">' +
-            '<span class="wfm25-worker-projects-primary">' + escapeHtml_(primary) + '</span>' +
-            '<span class="wfm25-worker-projects-sub muted">' + sub + displayNote + '</span>' +
-          '</div></li>';
+      productive.forEach(function (row) {
+        html += wfm25WorkerProjectRowHtml_(row);
       });
+      if (displayOnly.length) {
+        html += '<li class="wfm25-worker-projects-divider" aria-hidden="true"></li>';
+        displayOnly.forEach(function (row) {
+          html += wfm25WorkerProjectRowHtml_(row, true);
+        });
+      }
       html += '</ul>';
     }
     html += '</div>';
     return html;
+  }
+
+  /**
+   * One compact project row for the worker panel.
+   * @param {Object} row mapped project row
+   * @param {boolean} [muted]
+   * @returns {string}
+   */
+  function wfm25WorkerProjectRowHtml_(row, muted) {
+    const p = row.project;
+    const identity = wfm25ProjectCompactIdentity_(p);
+    const fullLabel = wfm25ProjectFullLabel_(p);
+    const hrsLabel = Math.round(row.curHours).toLocaleString() + 'h';
+    const rowCls = 'wfm25-worker-projects-row' +
+      (muted || row.displayOnly ? ' wfm25-worker-projects-row--display-only' : '');
+    const displayNote = row.displayOnly
+      ? '<span class="wfm25-worker-projects-display-note">display only</span>'
+      : '';
+    return '<li class="' + rowCls + '">' +
+      '<span class="wfm25-projects-col wfm25-projects-col--identity" title="' +
+        escapeHtml_(fullLabel) + '">' + escapeHtml_(identity) + '</span>' +
+      '<span class="wfm25-projects-col wfm25-projects-col--role" title="' +
+        escapeHtml_(row.roleCategory) + '">' + escapeHtml_(row.roleCategory) + displayNote + '</span>' +
+      '<span class="wfm25-projects-col wfm25-projects-col--hours">' + hrsLabel + '</span>' +
+    '</li>';
+  }
+
+  /**
+   * WFM.25 worker-panel weekly capacity bar chart with draft overlay (Pass 2).
+   * @param {Array} weeks detail.weeks
+   * @param {Object|null} projection api_projectSoftBookings result
+   * @param {string} workerName
+   * @param {Object} detail full api_getResourceDetailV2 result
+   * @returns {string}
+   */
+  function renderWFM25WeeklyBarChart_(weeks, projection, workerName, detail) {
+    const curQk = fiscalQuarterKey_(new Date());
+    const chartWeeks = (weeks || []).filter(function (w) { return w.fiscalQuarterKey === curQk; });
+    if (!chartWeeks.length) {
+      return '<div class="wfm25-chrome-card wfm25-weekly-card">' +
+        '<div class="wfm25-weekly-head">' +
+          '<span class="wfm25-weekly-title">Weekly Capacity (all dates are week ending)</span>' +
+        '</div>' +
+        '<div class="muted wfm25-weekly-empty">No weeks in current quarter.</div></div>';
+    }
+
+    const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
+    const projWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, true) : null;
+    const baseWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, false) : null;
+    const showDraft = !!(hasDraft && projWeeks && baseWeeks);
+
+    let yMax = 0;
+    chartWeeks.forEach(function (cell) {
+      const hrs = wfm25WeekDraftHours_(cell, baseWeeks, projWeeks);
+      let top = hrs.base;
+      if (showDraft) {
+        if (hrs.projected > hrs.base) top = hrs.projected;
+        else if (hrs.projected < hrs.base && wfm25WeekAllowsReduceDraft_(cell, curQk)) top = hrs.base;
+      }
+      yMax = Math.max(yMax, top);
+    });
+    yMax = Math.max(yMax, 1);
+    const plotH = 140;
+
+    let barsHtml = '';
+    chartWeeks.forEach(function (cell) {
+      const hrs = wfm25WeekDraftHours_(cell, baseWeeks, projWeeks);
+      const baseH = hrs.base;
+      const projH = hrs.projected;
+      const allowReduce = wfm25WeekAllowsReduceDraft_(cell, curQk);
+      let draftDelta = 0;
+      let draftKind = '';
+      if (showDraft) {
+        if (projH > baseH + 0.05) {
+          draftDelta = projH - baseH;
+          draftKind = 'add';
+        } else if (projH < baseH - 0.05 && allowReduce) {
+          draftDelta = baseH - projH;
+          draftKind = 'reduce';
+        }
+      }
+      const committedH = draftKind === 'reduce' ? projH : baseH;
+      const committedPct = (committedH / yMax) * 100;
+      const addPct = draftKind === 'add' ? (draftDelta / yMax) * 100 : 0;
+      const ghostPct = draftKind === 'reduce' ? (draftDelta / yMax) * 100 : 0;
+      const forecastCls = cell.isActual ? '' : ' wfm25-weekly-bar-committed--forecast';
+      const isOpen = WFM25State.expandedWeekKey === cell.weekKey;
+      const tip = [
+        workerName + ' \u00b7 ' + cell.label,
+        cell.isActual ? 'Actual' : 'Forecast',
+        'Committed: ' + Math.round(baseH) + 'h'
+      ];
+      if (draftKind) tip.push('Draft: ' + (draftKind === 'add' ? '+' : '\u2212') +
+        Math.round(draftDelta) + 'h \u2192 ' + Math.round(projH) + 'h');
+      let draftLabel = '';
+      if (draftKind === 'add') {
+        draftLabel = '<span class="wfm25-weekly-draft-label wfm25-weekly-draft-label--add">+' +
+          Math.round(draftDelta) + 'h</span>';
+      } else if (draftKind === 'reduce') {
+        draftLabel = '<span class="wfm25-weekly-draft-label wfm25-weekly-draft-label--reduce">\u2212' +
+          Math.round(draftDelta) + 'h</span>';
+      }
+      barsHtml += '<div class="wfm25-weekly-bar-slot' + (isOpen ? ' is-expanded' : '') + '">' +
+        '<button type="button" class="wfm25-weekly-bar-btn" data-week-key="' + escapeHtml_(cell.weekKey) + '"' +
+          ' aria-expanded="' + (isOpen ? 'true' : 'false') + '"' +
+          ' aria-label="Week ending ' + escapeHtml_(cell.label) + ', ' + Math.round(committedH) + ' hours"' +
+          ' title="' + escapeHtml_(tip.join('\n')) + '">' +
+          '<div class="wfm25-weekly-bar-stack" style="height:' + plotH + 'px">' +
+            (ghostPct > 0
+              ? '<div class="wfm25-weekly-bar-ghost" style="height:' + ghostPct.toFixed(2) + '%"' +
+                  ' aria-hidden="true"></div>'
+              : '') +
+            (addPct > 0
+              ? '<div class="wfm25-weekly-bar-draft-add" style="height:' + addPct.toFixed(2) + '%"' +
+                  ' aria-hidden="true"></div>'
+              : '') +
+            '<div class="wfm25-weekly-bar-committed' + forecastCls + '" style="height:' +
+              committedPct.toFixed(2) + '%" aria-hidden="true"></div>' +
+          '</div>' +
+          draftLabel +
+        '</button>' +
+        '<span class="wfm25-weekly-bar-label">' + escapeHtml_(cell.label) + '</span>' +
+      '</div>';
+    });
+
+    const expandedWeek = WFM25State.expandedWeekKey
+      ? chartWeeks.find(function (w) { return w.weekKey === WFM25State.expandedWeekKey; })
+      : null;
+    const breakdownHtml = expandedWeek
+      ? renderWFM25WeeklyBreakdown_(expandedWeek, detail, baseWeeks, projWeeks, showDraft, curQk)
+      : '';
+
+    return '<div class="wfm25-chrome-card wfm25-weekly-card" id="wfm25WeeklyChart">' +
+      '<div class="wfm25-weekly-head">' +
+        '<span class="wfm25-weekly-title">Weekly Capacity (all dates are week ending)</span>' +
+      '</div>' +
+      '<div class="wfm25-weekly-legend" aria-hidden="true">' +
+        '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--actual"></span>Actual</span>' +
+        '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--forecast"></span>Forecast</span>' +
+        '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--draft-add"></span>Draft add</span>' +
+        '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--draft-reduce"></span>Draft reduce</span>' +
+      '</div>' +
+      '<div class="wfm25-weekly-scroll">' +
+        '<div class="wfm25-weekly-bars" role="group" aria-label="Weekly capacity bars">' + barsHtml + '</div>' +
+      '</div>' +
+      '<div class="wfm25-collapse-host wfm25-weekly-breakdown' +
+        (expandedWeek ? '' : ' wfm25-collapse-hidden') + '" id="wfm25WeeklyBreakdown"' +
+        ' aria-hidden="' + (expandedWeek ? 'false' : 'true') + '">' +
+        '<div class="wfm25-collapse-inner">' +
+          '<div class="wfm25-weekly-breakdown-content">' + breakdownHtml + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /**
+   * Per-week project breakdown panel (Pass 2).
+   * @param {Object} weekMeta
+   * @param {Object} detail
+   * @param {Array|null} baseWeeks
+   * @param {Array|null} projWeeks
+   * @param {boolean} showDraft
+   * @param {string} curQk
+   * @returns {string}
+   */
+  function renderWFM25WeeklyBreakdown_(weekMeta, detail, baseWeeks, projWeeks, showDraft, curQk) {
+    const weekKey = weekMeta.weekKey;
+    const hrs = wfm25WeekDraftHours_(weekMeta, baseWeeks, projWeeks);
+    const allowReduce = wfm25WeekAllowsReduceDraft_(weekMeta, curQk);
+    let draftAdd = 0;
+    let draftReduce = 0;
+    if (showDraft) {
+      if (hrs.projected > hrs.base + 0.05) draftAdd = hrs.projected - hrs.base;
+      else if (hrs.projected < hrs.base - 0.05 && allowReduce) draftReduce = hrs.base - hrs.projected;
+    }
+
+    const projRows = (detail.projects || []).map(function (p) {
+      return {
+        project: p,
+        hours: wfm25ProjectWeekHours_(p, weekKey),
+        displayOnly: wfm25IsDisplayOnlyProject_(p)
+      };
+    }).filter(function (r) { return r.hours > 0; });
+
+    const productive = projRows.filter(function (r) { return !r.displayOnly; })
+      .sort(function (a, b) { return b.hours - a.hours; });
+    const displayOnly = projRows.filter(function (r) { return r.displayOnly; })
+      .sort(function (a, b) { return b.hours - a.hours; });
+
+    let html = '<div class="wfm25-weekly-breakdown-head">' +
+      '<span class="wfm25-weekly-breakdown-title">Week ending ' + escapeHtml_(weekMeta.label) + '</span>' +
+      '<span class="wfm25-weekly-breakdown-total muted">' + Math.round(hrs.base) + 'h committed</span>' +
+    '</div>';
+    if (!productive.length && !displayOnly.length && !draftAdd && !draftReduce) {
+      html += '<div class="muted">No project hours this week.</div>';
+    } else {
+      html += '<ul class="wfm25-weekly-breakdown-list">';
+      productive.forEach(function (row) {
+        html += wfm25WeeklyBreakdownRowHtml_(row);
+      });
+      displayOnly.forEach(function (row) {
+        html += wfm25WeeklyBreakdownRowHtml_(row, true);
+      });
+      if (draftAdd > 0.05) {
+        html += '<li class="wfm25-weekly-breakdown-row wfm25-weekly-breakdown-row--draft">' +
+          '<span class="wfm25-weekly-breakdown-identity">Draft adjustment</span>' +
+          '<span class="wfm25-weekly-breakdown-hours wfm25-weekly-draft-label--add">+' +
+            Math.round(draftAdd) + 'h</span></li>';
+      } else if (draftReduce > 0.05) {
+        html += '<li class="wfm25-weekly-breakdown-row wfm25-weekly-breakdown-row--draft">' +
+          '<span class="wfm25-weekly-breakdown-identity">Draft adjustment</span>' +
+          '<span class="wfm25-weekly-breakdown-hours wfm25-weekly-draft-label--reduce">\u2212' +
+            Math.round(draftReduce) + 'h</span></li>';
+      }
+      html += '</ul>';
+    }
+    return html;
+  }
+
+  /**
+   * One row in the per-week project breakdown.
+   * @param {Object} row
+   * @param {boolean} [muted]
+   * @returns {string}
+   */
+  function wfm25WeeklyBreakdownRowHtml_(row, muted) {
+    const p = row.project;
+    const identity = wfm25ProjectCompactIdentity_(p);
+    const fullLabel = wfm25ProjectFullLabel_(p);
+    const note = row.displayOnly
+      ? ' <span class="wfm25-worker-projects-display-note">display only</span>'
+      : '';
+    const cls = 'wfm25-weekly-breakdown-row' +
+      (muted || row.displayOnly ? ' wfm25-weekly-breakdown-row--display-only' : '');
+    return '<li class="' + cls + '">' +
+      '<span class="wfm25-weekly-breakdown-identity" title="' + escapeHtml_(fullLabel) + '">' +
+        escapeHtml_(identity) + note + '</span>' +
+      '<span class="wfm25-weekly-breakdown-hours">' + Math.round(row.hours) + 'h</span>' +
+    '</li>';
+  }
+
+  /**
+   * Wire worker-panel bar chart interactions (click, keyboard, outside close).
+   * @param {Object} detail
+   */
+  function wfm25BindWorkerPanelInteractions_(detail) {
+    const body = document.getElementById('wfm25WorkerPanelBody');
+    if (!body) return;
+    body.querySelectorAll('.wfm25-weekly-bar-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const wk = btn.dataset.weekKey || '';
+        WFM25State.expandedWeekKey = (WFM25State.expandedWeekKey === wk) ? null : wk;
+        paintWFM25WorkerPanel_(State.explorerProjection);
+        if (WFM25State.expandedWeekKey) {
+          const breakdown = document.getElementById('wfm25WeeklyBreakdown');
+          if (breakdown) {
+            breakdown.scrollIntoView({
+              block: 'nearest',
+              behavior: wfm25MotionReduced_() ? 'auto' : 'smooth'
+            });
+          }
+        }
+      });
+      btn.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          btn.click();
+        }
+      });
+    });
   }
 
   /**
@@ -8142,19 +8487,8 @@ async function _qaRefreshPsaHours_() {
     body.innerHTML =
       renderWFM25WorkerKpiTiles_(detail, icpTarget) +
       renderWFM25WorkerProjectsSection_(detail) +
-      renderExplorerWeeklyStrip_(detail.weeks || [], projection, workerName) +
-      renderExplorerQuarterSection_(detail.quarters || [], icpTarget, projection, workerName,
-        { lockIcpView: true }) +
-      renderExplorerProjectsSection_(detail.projects || [], detail.weeks || []);
-    const projToggle = body.querySelector('.explorer-projects-toggle');
-    if (projToggle) {
-      projToggle.addEventListener('click', function () {
-        const w = WFM25State.selectedWorker || '';
-        if (ExplorerProjectState.expanded.has(w)) ExplorerProjectState.expanded.delete(w);
-        else ExplorerProjectState.expanded.add(w);
-        paintWFM25WorkerPanel_(State.explorerProjection);
-      });
-    }
+      renderWFM25WeeklyBarChart_(detail.weeks || [], projection, workerName, detail);
+    wfm25BindWorkerPanelInteractions_(detail);
   }
 
   /**
@@ -8404,6 +8738,7 @@ async function _qaRefreshPsaHours_() {
     WFM25State.selectedWorker = workerName;
     WFM25State.selectedWorkerTeam = teamLabel || null;
     WFM25State.selectedWorkerDetail = null;
+    WFM25State.expandedWeekKey = null;
     State.selectedResource = workerName;
 
     const panel = document.getElementById('wfm25WorkerPanel');
@@ -8469,6 +8804,7 @@ async function _qaRefreshPsaHours_() {
     WFM25State.selectedWorker = null;
     WFM25State.selectedWorkerTeam = null;
     WFM25State.selectedWorkerDetail = null;
+    WFM25State.expandedWeekKey = null;
     State.selectedResource = null;
 
     const panel = document.getElementById('wfm25WorkerPanel');
@@ -10597,6 +10933,30 @@ async function _qaRefreshPsaHours_() {
     });
   }
 
+  /**
+   * Close weekly breakdown on outside click (worker panel).
+   * @param {MouseEvent} e
+   */
+  function wfm25WorkerPanelOutsideClick_(e) {
+    if (!WFM25State.expandedWeekKey || !WFM25State.selectedWorker) return;
+    const panel = document.getElementById('wfm25WorkerPanel');
+    if (!panel || panel.hidden) return;
+    if (e.target.closest('.wfm25-weekly-bar-btn')) return;
+    if (e.target.closest('.wfm25-weekly-breakdown')) return;
+    WFM25State.expandedWeekKey = null;
+    paintWFM25WorkerPanel_(State.explorerProjection);
+  }
+
+  /**
+   * Close weekly breakdown on Escape (worker panel).
+   * @param {KeyboardEvent} e
+   */
+  function wfm25WorkerPanelKeydown_(e) {
+    if (e.key !== 'Escape' || !WFM25State.expandedWeekKey) return;
+    WFM25State.expandedWeekKey = null;
+    paintWFM25WorkerPanel_(State.explorerProjection);
+  }
+
   // ── WFM.25 main init ──────────────────────────────────────────
 
   /**
@@ -10694,6 +11054,9 @@ async function _qaRefreshPsaHours_() {
     }
 
     initWFM25DraftTray_();
+
+    document.addEventListener('click', wfm25WorkerPanelOutsideClick_);
+    document.addEventListener('keydown', wfm25WorkerPanelKeydown_);
 
     // ── Load baseline projection for employee_id lookup ──
     loadExplorerBaselineProjection_();

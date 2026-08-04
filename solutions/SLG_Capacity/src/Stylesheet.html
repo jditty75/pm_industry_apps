@@ -5113,6 +5113,108 @@ td.cell-with-bar {
   color: var(--happy-hour);
 }
 
+/* ── WFM.25 Pass 3B: Specialty Demand tab ─────────────────── */
+.wfm25-specialty-demand-card {
+  padding: var(--wfm25-chrome-card-pad);
+}
+.wfm25-specialty-demand-caption {
+  margin: 0 0 12px;
+  font-size: 11px;
+}
+.wfm25-specialty-demand-loading {
+  padding: 24px 0;
+  text-align: center;
+}
+.wfm25-specialty-demand-empty {
+  padding: 20px 0;
+  font-size: 13px;
+}
+.wfm25-specialty-demand-coverage {
+  margin: 0 0 10px;
+  font-size: 11px;
+}
+.wfm25-specialty-demand-wrap {
+  overflow-x: auto;
+}
+.wfm25-specialty-demand-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.wfm25-specialty-demand-table th,
+.wfm25-specialty-demand-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--business-card);
+  vertical-align: middle;
+}
+.wfm25-specialty-demand-col-label,
+.wfm25-specialty-demand-label {
+  min-width: 140px;
+  font-weight: 600;
+  color: var(--after-hours);
+}
+.wfm25-specialty-demand-qth {
+  text-align: right;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--staple);
+  white-space: nowrap;
+}
+.wfm25-specialty-demand-cell {
+  text-align: right;
+  min-width: 88px;
+}
+.wfm25-specialty-demand-cell-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.wfm25-specialty-demand-bar-wrap {
+  width: 100%;
+  max-width: 72px;
+  height: 3px;
+  background: var(--paper);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wfm25-specialty-demand-bar {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--blue-sky);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wfm25-specialty-demand-bar {
+    transition: width 0.2s ease;
+  }
+}
+.wfm25-specialty-demand-hours {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--after-hours);
+  white-space: nowrap;
+}
+.wfm25-specialty-demand-total-row td {
+  font-weight: 600;
+  border-bottom: 2px solid var(--business-card) !important;
+  background: var(--paper);
+}
+.wfm25-specialty-demand-row--unclassified .wfm25-specialty-demand-label,
+.wfm25-specialty-demand-row--unclassified .wfm25-specialty-demand-hours {
+  color: var(--staple);
+  font-weight: 500;
+  opacity: 0.72;
+}
+.wfm25-specialty-demand-row--unclassified .wfm25-specialty-demand-bar {
+  background: var(--business-card);
+}
+.wfm25-tab[data-wfm25-tab="specialty-demand"]:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: 2px;
+}
+
 /* ── WFM.25 Utilization allocation banner ───────────────── */
 .wfm25-util-banner {
   padding: var(--wfm25-chrome-card-pad);

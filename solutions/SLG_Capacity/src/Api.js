@@ -702,6 +702,32 @@ function buildResourceSpecialtyPracticeRollup_(resourceName, curQ, visibleWeeks)
 }
 
 /**
+ * Vote worker specialty_practice from Allocations_Normalized hours (verbatim passthrough).
+ * @param {Array<Object>} allocRows
+ * @return {Object<string,string>} resourceName → specialtyPractice
+ */
+function buildWorkerSpecialtyPracticeMap_(allocRows) {
+  var votes = {};
+  (allocRows || []).forEach(function (a) {
+    var res = String(a.resource_name || '');
+    if (!res) return;
+    var hrs = Number(a.hours) || 0;
+    if (!hrs) return;
+    var sp = String(a.specialty_practice || '').trim() || 'Unclassified';
+    if (!votes[res]) votes[res] = {};
+    votes[res][sp] = (votes[res][sp] || 0) + hrs;
+  });
+  var out = {};
+  Object.keys(votes).forEach(function (res) {
+    var counts = votes[res];
+    var keys = Object.keys(counts);
+    keys.sort(function (a, b) { return (counts[b] || 0) - (counts[a] || 0); });
+    out[res] = keys[0] || 'Unclassified';
+  });
+  return out;
+}
+
+/**
  * ADD-ONLY: passthrough account_name + project_name for api_getResourceDetailV2 projects[].
  * Votes from Allocations_Normalized rows; does not alter hours or existing fields.
  * @param {string} resourceName
@@ -2106,6 +2132,93 @@ function api_getForecastTable(params) {
     rows:                rowsOut,
     planningWindowWeeks: visibleWeeks.length,
     seamWeekKey:         seamWeekKey
+  };
+}
+
+/**
+ * WFM.25 Pass 3B: org-level forecast demand hours by specialty practice × fiscal quarter.
+ * Read-only aggregation over computeWeeklyForecast_ productive hours; no reconciliation changes.
+ * @param {Object} params same filter shape as api_getForecastTable
+ * @return {{
+ *   quarters: string[],
+ *   currentQuarterKey: string,
+ *   rows: Array<{specialtyPractice:string, hoursByQuarter:Object<string,number>, totalHours:number}>,
+ *   grandTotalByQuarter: Object<string,number>,
+ *   grandTotal: number
+ * }}
+ */
+function api_getSpecialtyDemand(params) {
+  _requireAuthorized_();
+  params = params || {};
+
+  var forecast = computeWeeklyForecast_({
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  });
+
+  var quarterKeys = scorecardWindowKeys_();
+  var curQ = fiscalQuarterKey_(new Date());
+  var weeks = forecast.weeks || [];
+
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  var workerSpMap = buildWorkerSpecialtyPracticeMap_(allocRows);
+
+  var bucket = {};
+  var grandTotalByQuarter = {};
+  quarterKeys.forEach(function (qk) { grandTotalByQuarter[qk] = 0; });
+  var grandTotal = 0;
+
+  (forecast.workers || []).forEach(function (worker) {
+    var sp = workerSpMap[worker.resource] || 'Unclassified';
+    if (!bucket[sp]) {
+      bucket[sp] = {};
+      quarterKeys.forEach(function (qk) { bucket[sp][qk] = 0; });
+    }
+    quarterKeys.forEach(function (qk) {
+      var hrs = sumForecastProductiveForQuarter_(worker, qk, weeks);
+      bucket[sp][qk] += hrs;
+      grandTotalByQuarter[qk] += hrs;
+      grandTotal += hrs;
+    });
+  });
+
+  var rows = Object.keys(bucket).map(function (sp) {
+    var hoursByQuarter = {};
+    var totalHours = 0;
+    quarterKeys.forEach(function (qk) {
+      var h = Number(bucket[sp][qk]) || 0;
+      hoursByQuarter[qk] = h;
+      totalHours += h;
+    });
+    return {
+      specialtyPractice: sp,
+      hoursByQuarter: hoursByQuarter,
+      totalHours: totalHours
+    };
+  });
+
+  rows.sort(function (a, b) {
+    if (a.specialtyPractice === 'Unclassified' && b.specialtyPractice !== 'Unclassified') return 1;
+    if (b.specialtyPractice === 'Unclassified' && a.specialtyPractice !== 'Unclassified') return -1;
+    return b.totalHours - a.totalHours;
+  });
+
+  return {
+    quarters: quarterKeys,
+    currentQuarterKey: curQ,
+    rows: rows,
+    grandTotalByQuarter: grandTotalByQuarter,
+    grandTotal: grandTotal
   };
 }
 

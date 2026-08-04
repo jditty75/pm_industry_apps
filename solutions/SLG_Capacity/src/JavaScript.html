@@ -3629,6 +3629,7 @@
         renderExplorerSoftBookBasket_();
         State.explorerProjection = null;
         WFM25State.scorecardData = null;
+        WFM25State.specialtyDemandData = null;
         await wfm25AfterSoftBookCommitRefresh_();
       } else {
         onSoftBookingsChanged_();
@@ -6877,6 +6878,7 @@ async function _qaRefreshPsaHours_() {
           State.ref = await call('api_getReference');
           if (WFM25_SHELL) {
             WFM25State.scorecardData = null;
+            WFM25State.specialtyDemandData = null;
             await loadWFM25Utilization_();
           } else if (State.currentView === 'dashboard') {
             loadDashboard();
@@ -7626,8 +7628,10 @@ async function _qaRefreshPsaHours_() {
     mixTrendReqId:    0,             // race-guard for mix-trend render
     mixTrendSelected: null,          // selected bar descriptor or null
     mixTrendSelectedCategory: null,  // 'SLG' | 'Workday Regions' | 'Contractor' | null
+    specialtyDemandData:  null,      // last api_getSpecialtyDemand result
+    specialtyDemandReqId: 0,         // race-guard for specialty-demand fetch
     expandedTeam:     null,          // teamLabel string currently expanded, or null
-    activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend'
+    activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend' | 'specialty-demand'
     groupBy:          'team',        // 'team' | 'role'
     landingBreadcrumb: 'SLG Org',
     activeView:       'capacity',     // 'capacity' | 'admin'
@@ -7678,7 +7682,7 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * Activate a capacity tab by key.
-   * @param {string} tabKey  'utilization' | 'hours-budget' | 'mix-trend'
+   * @param {string} tabKey  'utilization' | 'hours-budget' | 'mix-trend' | 'specialty-demand'
    */
   function wfm25ActivateTab_(tabKey) {
     if (WFM25State.selectedWorker) {
@@ -7707,6 +7711,8 @@ async function _qaRefreshPsaHours_() {
         }
       } else if (tabKey === 'mix-trend') {
         loadWFM25MixTrend_();
+      } else if (tabKey === 'specialty-demand') {
+        loadWFM25SpecialtyDemand_();
       }
     }
 
@@ -10005,6 +10011,168 @@ async function _qaRefreshPsaHours_() {
           'Failed to load hours &amp; capacity: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
       }
       console.error('[WFM.25] loadWFM25HoursCapacity_ failed:', err);
+    }
+  }
+
+  // ── Specialty Demand (Pass 3B) ───────────────────────────────
+
+  /**
+   * Format demand hours for specialty matrix (tabular numerals, rounded).
+   * @param {number} hrs
+   * @returns {string}
+   */
+  function wfm25FormatDemandHours_(hrs) {
+    return Math.round(Number(hrs) || 0).toLocaleString();
+  }
+
+  /**
+   * Render one specialty-demand cell: calm blue proportional bar + hours.
+   * @param {number} hrs cell hours
+   * @param {number} maxHrs max hours in column for bar scale
+   * @returns {string}
+   */
+  function wfm25SpecialtyDemandCellHtml_(hrs, maxHrs) {
+    const h = Number(hrs) || 0;
+    const max = Number(maxHrs) || 0;
+    const share = max > 0 ? Math.min(1, h / max) : 0;
+    return '<td class="wfm25-specialty-demand-cell">' +
+      '<div class="wfm25-specialty-demand-cell-inner">' +
+        '<span class="wfm25-specialty-demand-bar-wrap" aria-hidden="true">' +
+          '<span class="wfm25-specialty-demand-bar" style="width:' +
+            (share * 100).toFixed(1) + '%"></span>' +
+        '</span>' +
+        '<span class="wfm25-specialty-demand-hours">' + wfm25FormatDemandHours_(h) + '</span>' +
+      '</div></td>';
+  }
+
+  /**
+   * Render Specialty Demand matrix from api_getSpecialtyDemand payload.
+   * @param {Object} data api_getSpecialtyDemand result
+   */
+  function renderWFM25SpecialtyDemand_(data) {
+    const loading = document.getElementById('wfm25SpecialtyDemandLoading');
+    const empty = document.getElementById('wfm25SpecialtyDemandEmpty');
+    const content = document.getElementById('wfm25SpecialtyDemandContent');
+    const headerRow = document.getElementById('wfm25SpecialtyDemandHeaderRow');
+    const body = document.getElementById('wfm25SpecialtyDemandBody');
+    const coverage = document.getElementById('wfm25SpecialtyDemandCoverage');
+    if (!headerRow || !body) return;
+
+    if (loading) loading.hidden = true;
+
+    const qKeys = data && data.quarters ? data.quarters : [];
+    const curQk = (data && data.currentQuarterKey)
+      ? data.currentQuarterKey
+      : fiscalQuarterKey_(new Date());
+    const rows = (data && data.rows) ? data.rows : [];
+    const grandTotal = Number(data && data.grandTotal) || 0;
+    const grandByQ = (data && data.grandTotalByQuarter) ? data.grandTotalByQuarter : {};
+
+    if (!grandTotal || !rows.length) {
+      if (empty) empty.hidden = false;
+      if (content) content.hidden = true;
+      return;
+    }
+
+    if (empty) empty.hidden = true;
+    if (content) content.hidden = false;
+
+    const maxByQuarter = {};
+    qKeys.forEach(function (qk) {
+      let max = Number(grandByQ[qk]) || 0;
+      rows.forEach(function (row) {
+        const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
+        if (h > max) max = h;
+      });
+      maxByQuarter[qk] = max;
+    });
+
+    $$('.wfm25-specialty-demand-qth', headerRow).forEach(function (el) { el.remove(); });
+    qKeys.forEach(function (qk) {
+      const th = document.createElement('th');
+      th.className = 'wfm25-specialty-demand-qth' + (qk === curQk ? ' wfm25-cur-qth' : '');
+      th.textContent = qk + (qk === curQk ? ' \u25c6' : '');
+      headerRow.appendChild(th);
+    });
+
+    const totalRowCells = qKeys.map(function (qk) {
+      return wfm25SpecialtyDemandCellHtml_(grandByQ[qk], maxByQuarter[qk]);
+    }).join('');
+    const html = [
+      '<tr class="wfm25-specialty-demand-total-row">' +
+        '<td><strong>Total demand</strong></td>' + totalRowCells + '</tr>'
+    ];
+
+    rows.forEach(function (row) {
+      const sp = String(row.specialtyPractice || 'Unclassified');
+      const isUnclassified = sp === 'Unclassified';
+      const rowCls = 'wfm25-specialty-demand-row' +
+        (isUnclassified ? ' wfm25-specialty-demand-row--unclassified' : '');
+      const cells = qKeys.map(function (qk) {
+        const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
+        return wfm25SpecialtyDemandCellHtml_(h, maxByQuarter[qk]);
+      }).join('');
+      html.push(
+        '<tr class="' + rowCls + '">' +
+          '<td class="wfm25-specialty-demand-label">' + escapeHtml_(sp) + '</td>' +
+          cells +
+        '</tr>'
+      );
+    });
+
+    body.innerHTML = html.join('');
+
+    if (coverage) {
+      const unclassifiedHrs = rows.reduce(function (sum, row) {
+        if (String(row.specialtyPractice || '') !== 'Unclassified') return sum;
+        return sum + (Number(row.totalHours) || 0);
+      }, 0);
+      const pct = grandTotal > 0 ? (unclassifiedHrs / grandTotal) * 100 : 0;
+      if (pct >= 20) {
+        coverage.hidden = false;
+        coverage.textContent = 'Specialty unavailable for ' +
+          Math.round(pct) + '% of forecast demand';
+      } else {
+        coverage.hidden = true;
+        coverage.textContent = '';
+      }
+    }
+  }
+
+  /**
+   * Lazy-load api_getSpecialtyDemand and render matrix (cached).
+   */
+  async function loadWFM25SpecialtyDemand_() {
+    const loading = document.getElementById('wfm25SpecialtyDemandLoading');
+    const empty = document.getElementById('wfm25SpecialtyDemandEmpty');
+    const content = document.getElementById('wfm25SpecialtyDemandContent');
+    const reqId = ++WFM25State.specialtyDemandReqId;
+
+    if (empty) empty.hidden = true;
+    if (content) content.hidden = true;
+    if (loading) loading.hidden = false;
+
+    if (WFM25State.specialtyDemandData) {
+      if (reqId !== WFM25State.specialtyDemandReqId) return;
+      renderWFM25SpecialtyDemand_(WFM25State.specialtyDemandData);
+      return;
+    }
+
+    try {
+      const params = buildServerParams_({ workerScope: 'SLG' });
+      const data = await call('api_getSpecialtyDemand', params);
+      if (reqId !== WFM25State.specialtyDemandReqId) return;
+      WFM25State.specialtyDemandData = data;
+      renderWFM25SpecialtyDemand_(data);
+    } catch (err) {
+      if (reqId !== WFM25State.specialtyDemandReqId) return;
+      if (loading) loading.hidden = true;
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = 'Failed to load specialty demand: ' + (err.message || String(err));
+        empty.style.color = 'var(--thumbtack)';
+      }
+      console.error('[WFM.25] loadWFM25SpecialtyDemand_ failed:', err);
     }
   }
 

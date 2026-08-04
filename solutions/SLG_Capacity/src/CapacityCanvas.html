@@ -14,6 +14,9 @@
               role="tab" aria-selected="false" id="wfm25TabHoursCapacity">Hours &amp; Capacity</button>
       <button class="wfm25-tab" data-wfm25-tab="mix-trend"
               role="tab" aria-selected="false" id="wfm25TabMixTrend">Mix &amp; Trend</button>
+      <button class="wfm25-tab" data-wfm25-tab="specialty-demand"
+              role="tab" aria-selected="false" id="wfm25TabSpecialtyDemand"
+              aria-controls="wfm25PanelSpecialtyDemand">Specialty Demand</button>
     </div>
     <div class="wfm25-groupby" aria-label="Group by">
       <span class="wfm25-groupby-label">Group by:</span>
@@ -111,6 +114,38 @@
                 <div class="wfm25-mix-trend-detail-left" id="wfm25MixTrendDetailLeft"></div>
                 <div class="wfm25-mix-trend-detail-right" id="wfm25MixTrendDetailRight" hidden></div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─ Specialty Demand panel ─ -->
+      <div class="wfm25-tab-panel" id="wfm25PanelSpecialtyDemand"
+           data-wfm25-panel="specialty-demand" hidden>
+        <div class="wfm25-chrome-card wfm25-specialty-demand-card">
+          <p class="wfm25-specialty-demand-caption muted">Whole org · forecast demand hours by specialty practice</p>
+          <div class="wfm25-specialty-demand-loading" id="wfm25SpecialtyDemandLoading"
+               role="status" aria-live="polite" hidden>
+            <div class="wfm25-panel-loading">
+              <div class="explorer-loading-spinner" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="wfm25-specialty-demand-empty muted" id="wfm25SpecialtyDemandEmpty" hidden>
+            No forecast demand data available for specialty practices yet.
+          </div>
+          <div class="wfm25-specialty-demand-content" id="wfm25SpecialtyDemandContent" hidden>
+            <p class="wfm25-specialty-demand-coverage muted" id="wfm25SpecialtyDemandCoverage" hidden></p>
+            <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyDemandWrap">
+              <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyDemandTable"
+                     aria-label="Forecast demand hours by specialty practice">
+                <thead>
+                  <tr id="wfm25SpecialtyDemandHeaderRow">
+                    <th class="wfm25-specialty-demand-col-label">Specialty Practice</th>
+                    <!-- quarter header cells injected by renderWFM25SpecialtyDemand_() -->
+                  </tr>
+                </thead>
+                <tbody id="wfm25SpecialtyDemandBody"></tbody>
+              </table>
             </div>
           </div>
         </div>

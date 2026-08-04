@@ -146,9 +146,11 @@ const ALLOC_HEADERS = [
   'week_key',               // string -- 'YYYY-MM-DD' of week_start; canonical, sortable
   'hours',                  // number -- forecast hours for that week
   'source_row',
-  'on_leave'                // WFM-FIX.3: 'Yes' | '' -- PSA "(On Leave)" name-tag stamp,
+  'on_leave',               // WFM-FIX.3: 'Yes' | '' -- PSA "(On Leave)" name-tag stamp,
                              // written for every row regardless of exclusion. See
                              // _deriveOnLeave_ (Ingest.gs) and reconcileWorkerExclusions_.
+  'specialty_practice'      // WFM.25 Pass 3A: raw PSA Specialty Practice (verbatim passthrough;
+                             // separate from resolved `team` column)
 ];
 
 const ACTUALS_NORM = 'Actuals_Normalized';
@@ -183,7 +185,9 @@ const ACTUALS_HISTORY_HEADERS = [
   'fiscal_quarter',
   'project',
   'project_role_category',
-  'worked_hours'
+  'worked_hours',
+  'specialty_practice',       // WFM.25 Pass 3A: from History_Normalized
+  'sub_specialty_practice'    // WFM.25 Pass 3A: from History_Normalized
 ];
 const CONSOLIDATED_REQUIRED_SHEETS = ['Forecast_Staged','Actuals_Current_Normalized',
     'Utilization_Normalized','History_Normalized','_manifest'];

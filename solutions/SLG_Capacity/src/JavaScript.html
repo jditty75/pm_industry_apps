@@ -8192,6 +8192,65 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * WFM.25 worker-panel Specialty Practice card — current-quarter hours by specialty (Pass 3A).
+   * @param {Object} detail api_getResourceDetailV2 result
+   * @returns {string}
+   */
+  function renderWFM25WorkerSpecialtySection_(detail) {
+    const curQk = fiscalQuarterKey_(new Date());
+    const rollup = (detail.specialtyPracticeRollup || []).filter(function (row) {
+      return Number(row.currentQuarterHours) > 0;
+    });
+    const total = rollup.reduce(function (sum, row) {
+      return sum + (Number(row.currentQuarterHours) || 0);
+    }, 0);
+
+    let html = '<div class="wfm25-chrome-card wfm25-worker-specialty-card">' +
+      '<div class="wfm25-worker-specialty-head">' +
+        '<span class="wfm25-worker-specialty-title">SPECIALTY PRACTICE \u00b7 ' +
+          escapeHtml_(curQk) + '</span>' +
+      '</div>';
+    if (!rollup.length) {
+      html += '<div class="muted wfm25-worker-specialty-empty">No specialty hours this quarter.</div>';
+    } else {
+      html += '<ul class="wfm25-worker-specialty-list" aria-label="Specialty practice hours this quarter">';
+      rollup.forEach(function (row) {
+        html += wfm25WorkerSpecialtyRowHtml_(row, total);
+      });
+      html += '</ul>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /**
+   * One compact specialty-practice row for the worker panel.
+   * @param {Object} row { specialtyPractice, currentQuarterHours }
+   * @param {number} total total hours for share-bar scaling
+   * @returns {string}
+   */
+  function wfm25WorkerSpecialtyRowHtml_(row, total) {
+    const sp = String(row.specialtyPractice || 'Unclassified');
+    const hrs = Number(row.currentQuarterHours) || 0;
+    const isUnclassified = sp === 'Unclassified';
+    const share = total > 0 ? hrs / total : 0;
+    const hrsLabel = Math.round(hrs).toLocaleString() + 'h';
+    const rowCls = 'wfm25-worker-specialty-row' +
+      (isUnclassified ? ' wfm25-worker-specialty-row--unclassified' : '');
+    return '<li class="' + rowCls + '">' +
+      '<span class="wfm25-specialty-col wfm25-specialty-col--label" title="' +
+        escapeHtml_(sp) + '">' + escapeHtml_(sp) + '</span>' +
+      '<span class="wfm25-specialty-col wfm25-specialty-col--bar" aria-hidden="true">' +
+        '<span class="wfm25-worker-specialty-bar-wrap">' +
+          '<span class="wfm25-worker-specialty-bar" style="width:' +
+            (share * 100).toFixed(1) + '%"></span>' +
+        '</span>' +
+      '</span>' +
+      '<span class="wfm25-specialty-col wfm25-specialty-col--hours">' + hrsLabel + '</span>' +
+    '</li>';
+  }
+
+  /**
    * WFM.25 worker-panel weekly capacity bar chart with draft overlay (Pass 2).
    * @param {Array} weeks detail.weeks
    * @param {Object|null} projection api_projectSoftBookings result
@@ -8531,6 +8590,7 @@ async function _qaRefreshPsaHours_() {
     body.innerHTML =
       renderWFM25WorkerKpiTiles_(detail, icpTarget) +
       renderWFM25WorkerProjectsSection_(detail) +
+      renderWFM25WorkerSpecialtySection_(detail) +
       renderWFM25WeeklyBarChart_(detail.weeks || [], projection, workerName, detail);
     wfm25BindWorkerPanelInteractions_(detail);
   }

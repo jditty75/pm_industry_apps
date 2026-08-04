@@ -3681,6 +3681,86 @@ td.cell-with-bar {
   color: var(--after-hours);
 }
 
+/* WFM.25 Pass 3A — worker-panel Specialty Practice card */
+.wfm25-worker-specialty-card {
+  margin-bottom: 14px;
+  padding: var(--wfm25-chrome-card-pad);
+}
+.wfm25-worker-specialty-head {
+  margin-bottom: 10px;
+}
+.wfm25-worker-specialty-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--after-hours);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.wfm25-worker-specialty-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wfm25-worker-specialty-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--business-card);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.wfm25-worker-specialty-row:last-child {
+  border-bottom: none;
+}
+.wfm25-worker-specialty-row--unclassified {
+  opacity: 0.72;
+}
+.wfm25-specialty-col {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.wfm25-specialty-col--label {
+  font-weight: 600;
+  color: var(--after-hours);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wfm25-specialty-col--bar {
+  display: flex;
+  align-items: center;
+}
+.wfm25-worker-specialty-bar-wrap {
+  flex: 1;
+  height: 4px;
+  background: var(--paper);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wfm25-worker-specialty-bar {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--ballpoint);
+}
+.wfm25-specialty-col--hours {
+  font-weight: 600;
+  color: var(--after-hours);
+  text-align: right;
+  white-space: nowrap;
+}
+.wfm25-worker-specialty-row--unclassified .wfm25-specialty-col--label,
+.wfm25-worker-specialty-row--unclassified .wfm25-specialty-col--hours {
+  color: var(--staple);
+  font-weight: 500;
+}
+.wfm25-worker-specialty-row--unclassified .wfm25-worker-specialty-bar {
+  background: var(--staple);
+}
+
 /* WFM.25 Pass 2 — weekly capacity bar chart */
 .wfm25-weekly-card {
   margin-bottom: 0;

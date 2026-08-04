@@ -1156,6 +1156,10 @@ function writeConsolidatedHistory_(values) {
       if (h === 'workday_region_as_of_date_worked') {
         return iRegion !== undefined ? String(row[iRegion] || '').trim() : '';
       }
+      if (h === 'specialty_practice' || h === 'sub_specialty_practice') {
+        var spVal = idx[h] !== undefined ? String(row[idx[h]] || '').trim() : '';
+        return spVal || 'Unclassified';
+      }
       return String(row[idx[h]] || '').trim();
     }));
   }
@@ -1901,6 +1905,8 @@ function normalizeStaff() {
     // WFM-FIX.3: stamp every row regardless of exclusion -- retained as the
     // hook for a future requirement even for workers who end up excluded.
     const onLeave = _deriveOnLeave_(workerName);
+    const rawSpecialty = iTeam >= 0 ? String(row[iTeam] || '').trim() : '';
+    const specialtyPractice = rawSpecialty || 'Unclassified';
 
     const base = [
       iEmpId >= 0 ? String(row[iEmpId] || '').trim() : '',  // employee_id (Phase 0) — trimmed string for cross-source join
@@ -1926,8 +1932,8 @@ function normalizeStaff() {
       if (!hrs) continue;
 
       out.push(
-        // week_start, week_key, hours, source_row, on_leave
-        base.concat([wc.weekStart, weekKey_(wc.weekStart), hrs, entry.rowIndex + 2, onLeave])
+        // week_start, week_key, hours, source_row, on_leave, specialty_practice
+        base.concat([wc.weekStart, weekKey_(wc.weekStart), hrs, entry.rowIndex + 2, onLeave, specialtyPractice])
       );
     }
   }

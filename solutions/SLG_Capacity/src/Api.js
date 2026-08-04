@@ -443,6 +443,7 @@ function api_getResourceDetailV2(params) {
     quarters: [],
     projects: [],
     roleCategoryRollup: [],
+    specialtyPracticeRollup: [],
     blendedSummary: null
   };
   if (!resourceName) return emptyPayload;
@@ -528,6 +529,9 @@ function api_getResourceDetailV2(params) {
     resourceName, projectsOut, curQ, visibleWeeks
   );
   const roleCategoryRollup = roleCategoryPayload.rollup;
+  const specialtyPracticeRollup = buildResourceSpecialtyPracticeRollup_(
+    resourceName, curQ, visibleWeeks
+  );
   const projectNameEnrichment = enrichResourceProjectNames_(resourceName, projectsOut);
   projectsOut.forEach(function (p, i) {
     p.roleCategory = roleCategoryPayload.roleCategories[i] || 'Unclassified';
@@ -568,6 +572,7 @@ function api_getResourceDetailV2(params) {
     quarters: quartersOut,
     projects: projectsOut,
     roleCategoryRollup: roleCategoryRollup,
+    specialtyPracticeRollup: specialtyPracticeRollup,
     blendedSummary: {
       avgIcpProductiveUtilization: Number(avgIcpProductiveUtilization) || 0,
       avgFinancialUtilization: Number(avgFinancialUtilization) || 0,
@@ -651,6 +656,49 @@ function buildResourceRoleCategoryRollup_(resourceName, projectsOut, curQ, visib
   });
 
   return { rollup: rollup, roleCategories: roleCategories };
+}
+
+/**
+ * ADD-ONLY: passthrough Specialty Practice rollup for api_getResourceDetailV2.
+ * Sums allocation-row hours by raw specialty_practice for the current quarter.
+ * @param {string} resourceName
+ * @param {string} curQ current fiscal quarter key
+ * @param {Array<{week_key:string, week_start:Date}>} visibleWeeks
+ * @return {Array<{specialtyPractice:string, currentQuarterHours:number}>}
+ */
+function buildResourceSpecialtyPracticeRollup_(resourceName, curQ, visibleWeeks) {
+  var curWeekKeys = {};
+  (visibleWeeks || []).forEach(function (vw) {
+    if (fiscalQuarterKey_(vw.week_start) === curQ) {
+      curWeekKeys[String(vw.week_key)] = true;
+    }
+  });
+
+  var specialtyHours = {};
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  allocRows.forEach(function (a) {
+    if (String(a.resource_name || '') !== resourceName) return;
+    var wk = String(a.week_key || '');
+    if (!curWeekKeys[wk]) return;
+    var hrs = Number(a.hours) || 0;
+    if (!hrs) return;
+    var sp = String(a.specialty_practice || '').trim() || 'Unclassified';
+    specialtyHours[sp] = (specialtyHours[sp] || 0) + hrs;
+  });
+
+  return Object.keys(specialtyHours).map(function (sp) {
+    return {
+      specialtyPractice: sp,
+      currentQuarterHours: Number(specialtyHours[sp]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
 }
 
 /**

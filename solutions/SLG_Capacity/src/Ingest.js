@@ -635,16 +635,30 @@ function validateConsolidatedManifestTotals_(data, manifestMap, recordCheck, war
       totalOk,
       'expected ' + expected.primary_total + ', actual ' + actualTotal
     );
-    recordCheck(
-      'manifest:min_period:' + sheetName,
-      !!expected.min_period && expected.min_period === actualMin,
-      'expected ' + expected.min_period + ', actual ' + actualMin
-    );
-    recordCheck(
-      'manifest:max_period:' + sheetName,
-      !!expected.max_period && expected.max_period === actualMax,
-      'expected ' + expected.max_period + ', actual ' + actualMax
-    );
+    // Empty sheets have no period range (e.g. start-of-quarter Actuals_Current).
+    if (dataRows === 0) {
+      recordCheck(
+        'manifest:min_period:' + sheetName,
+        true,
+        'skipped — empty sheet'
+      );
+      recordCheck(
+        'manifest:max_period:' + sheetName,
+        true,
+        'skipped — empty sheet'
+      );
+    } else {
+      recordCheck(
+        'manifest:min_period:' + sheetName,
+        !!expected.min_period && expected.min_period === actualMin,
+        'expected ' + expected.min_period + ', actual ' + actualMin
+      );
+      recordCheck(
+        'manifest:max_period:' + sheetName,
+        !!expected.max_period && expected.max_period === actualMax,
+        'expected ' + expected.max_period + ', actual ' + actualMax
+      );
+    }
   });
 }
 

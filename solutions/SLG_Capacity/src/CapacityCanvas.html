@@ -142,44 +142,34 @@
                    aria-label="Specialty demand summary metrics"></div>
             </div>
 
-            <!-- Cards B + C: matrix + detail -->
-            <div class="wfm25-specialty-demand-split">
-              <div class="wfm25-chrome-card wfm25-specialty-demand-matrix-card">
-                <div class="wfm25-specialty-demand-matrix-head">
-                  <h3 class="wfm25-specialty-demand-matrix-title">Demand by Practice</h3>
-                  <div class="wfm25-specialty-demand-unit-toggle seg seg-sm" role="group"
-                       aria-label="Display unit" id="wfm25SpecialtyDemandUnitToggle">
-                    <button type="button" data-wfm25-sd-unit="hours"
-                            aria-pressed="true">Hours</button>
-                    <button type="button" data-wfm25-sd-unit="share"
-                            aria-pressed="false">Share %</button>
-                    <button type="button" data-wfm25-sd-unit="qoq"
-                            aria-pressed="false">QoQ %</button>
-                  </div>
-                </div>
-                <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyDemandWrap">
-                  <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyDemandTable"
-                         aria-label="Team-grouped specialty demand matrix">
-                    <thead id="wfm25SpecialtyDemandThead">
-                      <tr id="wfm25SpecialtyDemandZoneRow" class="wfm25-specialty-demand-zone-row" hidden>
-                        <th class="wfm25-specialty-demand-col-label" scope="col"></th>
-                        <!-- zone label cells injected by renderWFM25SpecialtyDemand_() -->
-                      </tr>
-                      <tr id="wfm25SpecialtyDemandHeaderRow">
-                        <th class="wfm25-specialty-demand-col-label" scope="col">Practice / Team</th>
-                        <!-- quarter header cells injected by renderWFM25SpecialtyDemand_() -->
-                      </tr>
-                    </thead>
-                    <tbody id="wfm25SpecialtyDemandBody"></tbody>
-                  </table>
+            <!-- Card B: 3-column matrix (Historical Avg | Previous | Current) -->
+            <div class="wfm25-chrome-card wfm25-specialty-demand-matrix-card">
+              <div class="wfm25-specialty-demand-matrix-head">
+                <h3 class="wfm25-specialty-demand-matrix-title">Demand by Practice</h3>
+                <div class="wfm25-specialty-demand-unit-toggle seg seg-sm" role="group"
+                     aria-label="Display unit" id="wfm25SpecialtyDemandUnitToggle">
+                  <button type="button" data-wfm25-sd-unit="hours"
+                          aria-pressed="true">Hours</button>
+                  <button type="button" data-wfm25-sd-unit="share"
+                          aria-pressed="false">Share %</button>
+                  <button type="button" data-wfm25-sd-unit="qoq"
+                          aria-pressed="false">QoQ %</button>
                 </div>
               </div>
-
-              <div class="wfm25-chrome-card wfm25-specialty-demand-detail-card"
-                   id="wfm25SpecialtyDemandDetailCard">
-                <div class="wfm25-specialty-demand-detail" id="wfm25SpecialtyDemandDetail"
-                     aria-live="polite" aria-label="Practice detail panel"></div>
+              <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyDemandWrap">
+                <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyDemandTable"
+                       aria-label="Team-grouped specialty demand matrix">
+                  <thead id="wfm25SpecialtyDemandThead">
+                    <tr id="wfm25SpecialtyDemandHeaderRow">
+                      <th class="wfm25-specialty-demand-col-label" scope="col">Practice / Team</th>
+                      <!-- column header cells injected by renderWFM25SpecialtyDemand_() -->
+                    </tr>
+                  </thead>
+                  <tbody id="wfm25SpecialtyDemandBody"></tbody>
+                </table>
               </div>
+              <p class="wfm25-specialty-demand-matrix-caption muted" id="wfm25SpecialtyDemandCaption"
+                 hidden>Current quarter fills in as it progresses</p>
             </div>
           </div>
         </div>

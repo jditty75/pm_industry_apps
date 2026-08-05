@@ -5430,23 +5430,15 @@ td.cell-with-bar {
   text-align: center;
 }
 
-/* Cards B + C: split layout */
-.wfm25-specialty-demand-split {
-  display: grid;
-  grid-template-columns: minmax(0, 55fr) minmax(0, 45fr);
-  gap: 16px;
-  align-items: start;
-  min-height: 0;
-}
-@media (max-width: 1100px) {
-  .wfm25-specialty-demand-split {
-    grid-template-columns: 1fr;
-  }
-}
-.wfm25-specialty-demand-matrix-card,
-.wfm25-specialty-demand-detail-card {
+/* Card B: full-width matrix */
+.wfm25-specialty-demand-matrix-card {
   padding: var(--wfm25-chrome-card-pad);
   min-width: 0;
+}
+.wfm25-specialty-demand-matrix-caption {
+  margin: 10px 0 0;
+  font-size: 11px;
+  text-align: right;
 }
 .wfm25-specialty-demand-matrix-head {
   display: flex;
@@ -5472,12 +5464,13 @@ td.cell-with-bar {
 
 /* Matrix table */
 .wfm25-specialty-demand-wrap {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 .wfm25-specialty-demand-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
 }
 .wfm25-specialty-demand-table th,
 .wfm25-specialty-demand-table td {
@@ -5485,24 +5478,9 @@ td.cell-with-bar {
   border-bottom: 1px solid var(--business-card);
   vertical-align: middle;
 }
-.wfm25-specialty-demand-zone-row th {
-  padding: 4px 10px 2px;
-  border-bottom: none;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--staple);
-  text-align: center;
-}
-.wfm25-specialty-demand-zone-th--actuals {
-  border-right: 2px solid var(--business-card);
-}
-.wfm25-specialty-demand-zone-th--forecast {
-  border-left: 2px solid var(--business-card);
-}
 .wfm25-specialty-demand-col-label,
 .wfm25-specialty-demand-label {
+  width: 34%;
   min-width: 160px;
   font-weight: 600;
   color: var(--after-hours);
@@ -5514,17 +5492,12 @@ td.cell-with-bar {
   color: var(--staple);
   white-space: nowrap;
 }
-.wfm25-specialty-demand-qth--actuals-end,
-.wfm25-specialty-demand-cell--actuals-end {
-  border-right: 2px solid var(--business-card) !important;
-}
-.wfm25-specialty-demand-qth--forecast-start,
-.wfm25-specialty-demand-cell--forecast-start {
-  border-left: 2px solid var(--business-card) !important;
+.wfm25-specialty-demand-qth--benchmark {
+  color: var(--staple);
+  opacity: 0.85;
 }
 .wfm25-specialty-demand-cell {
   text-align: right;
-  min-width: 80px;
 }
 .wfm25-specialty-demand-cell-inner {
   display: flex;
@@ -5543,6 +5516,15 @@ td.cell-with-bar {
 .wfm25-specialty-demand-bar-wrap--team {
   max-width: 88px;
   height: 6px;
+}
+.wfm25-specialty-demand-bar-wrap--specialty-current {
+  max-width: 64px;
+  height: 4px;
+}
+.wfm25-specialty-demand-bar-wrap--benchmark {
+  max-width: 56px;
+  height: 2px;
+  background: transparent;
 }
 .wfm25-specialty-demand-bar-wrap--qoq {
   position: relative;
@@ -5568,7 +5550,19 @@ td.cell-with-bar {
 }
 .wfm25-specialty-demand-bar--team {
   background: var(--ballpoint);
+  opacity: 0.85;
+}
+.wfm25-specialty-demand-bar--team-current {
+  background: var(--ballpoint);
   opacity: 1;
+}
+.wfm25-specialty-demand-bar--specialty-current {
+  background: var(--ballpoint);
+  opacity: 0.55;
+}
+.wfm25-specialty-demand-bar--benchmark {
+  background: var(--staple);
+  opacity: 0.35;
 }
 .wfm25-specialty-demand-bar--qoq {
   position: absolute;
@@ -5613,7 +5607,7 @@ td.cell-with-bar {
   border-bottom: 2px solid var(--business-card) !important;
   background: var(--paper);
 }
-.wfm25-specialty-demand-row--unclassified .wfm25-specialty-demand-select-btn,
+.wfm25-specialty-demand-row--unclassified .wfm25-specialty-demand-label,
 .wfm25-specialty-demand-row--unclassified .wfm25-specialty-demand-hours {
   color: var(--staple);
   font-weight: 500;
@@ -5622,10 +5616,6 @@ td.cell-with-bar {
 .wfm25-specialty-demand-team-row td {
   background: var(--paper);
   border-bottom: 1px solid var(--business-card);
-}
-.wfm25-specialty-demand-team-row.is-selected td,
-.wfm25-specialty-demand-row.is-selected td {
-  background: rgba(8, 117, 193, 0.06);
 }
 .wfm25-specialty-demand-team-row--other td {
   opacity: 0.92;
@@ -5636,19 +5626,23 @@ td.cell-with-bar {
 .wfm25-specialty-demand-team-label-inner {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 4px;
   min-width: 0;
 }
 .wfm25-specialty-demand-team-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   padding: 8px 4px 8px 10px;
   border: none;
   background: transparent;
   font: inherit;
+  font-weight: 700;
+  font-size: 12px;
   color: var(--after-hours);
+  text-align: left;
   cursor: pointer;
 }
 .wfm25-specialty-demand-team-btn:hover {
@@ -5663,36 +5657,6 @@ td.cell-with-bar {
   width: 12px;
   font-size: 10px;
   color: var(--staple);
-}
-.wfm25-specialty-demand-select-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  padding: 8px 10px 8px 0;
-  border: none;
-  background: transparent;
-  font: inherit;
-  font-weight: 700;
-  font-size: 12px;
-  color: var(--after-hours);
-  text-align: left;
-  cursor: pointer;
-}
-.wfm25-specialty-demand-select-btn:hover {
-  color: var(--ballpoint);
-}
-.wfm25-specialty-demand-select-btn:focus-visible {
-  outline: 2px solid var(--ballpoint);
-  outline-offset: 2px;
-}
-.wfm25-specialty-demand-select-btn.is-selected {
-  color: var(--ballpoint);
-}
-.wfm25-specialty-demand-row .wfm25-specialty-demand-select-btn {
-  font-weight: 600;
-  padding: 0;
 }
 .wfm25-specialty-demand-team-name {
   flex: 1;
@@ -5730,155 +5694,6 @@ td.cell-with-bar {
   color: var(--staple);
 }
 
-/* Card C: detail panel */
-.wfm25-specialty-demand-detail {
-  min-height: 200px;
-}
-.wfm25-specialty-demand-detail-header {
-  margin-bottom: 14px;
-}
-.wfm25-specialty-demand-detail-title {
-  margin: 0 0 8px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--after-hours);
-}
-.wfm25-specialty-demand-detail-cur {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-variant-numeric: tabular-nums;
-}
-.wfm25-specialty-demand-detail-cur-val {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--ballpoint);
-}
-.wfm25-specialty-demand-detail-cur-q {
-  font-size: 12px;
-  color: var(--staple);
-  font-weight: 600;
-}
-.wfm25-specialty-demand-detail-qoq {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--staple);
-}
-.wfm25-specialty-demand-trend {
-  margin-bottom: 16px;
-  overflow-x: auto;
-}
-.wfm25-specialty-demand-trend-plot {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  height: 96px;
-  padding: 4px 0;
-}
-.wfm25-specialty-demand-trend-slot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  min-width: 32px;
-  flex: 1;
-}
-.wfm25-specialty-demand-trend-col {
-  display: flex;
-  align-items: flex-end;
-  height: 72px;
-  width: 100%;
-  justify-content: center;
-}
-.wfm25-specialty-demand-trend-bar {
-  width: 20px;
-  min-height: 2px;
-  border-radius: 3px 3px 0 0;
-  background: var(--ballpoint);
-}
-.wfm25-specialty-demand-trend-slot--actuals .wfm25-specialty-demand-trend-bar {
-  opacity: 0.65;
-}
-.wfm25-specialty-demand-trend-slot--forecast .wfm25-specialty-demand-trend-bar {
-  opacity: 1;
-}
-.wfm25-specialty-demand-trend-label {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--staple);
-  text-align: center;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.wfm25-specialty-demand-detail-section {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--business-card);
-}
-.wfm25-specialty-demand-detail-subtitle {
-  margin: 0 0 10px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  color: var(--staple);
-}
-.wfm25-specialty-demand-detail-spec-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.wfm25-specialty-demand-detail-spec-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
-  gap: 2px 10px;
-  align-items: center;
-}
-.wfm25-specialty-demand-detail-spec-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--after-hours);
-  min-width: 0;
-}
-.wfm25-specialty-demand-detail-spec-hours {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--staple);
-  font-variant-numeric: tabular-nums;
-}
-.wfm25-specialty-demand-detail-spec-bar-wrap {
-  grid-column: 1 / -1;
-  height: 3px;
-  background: var(--paper);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.wfm25-specialty-demand-detail-spec-bar {
-  height: 100%;
-  background: var(--ballpoint);
-  opacity: 0.55;
-  border-radius: 2px;
-}
-.wfm25-specialty-demand-sub-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.wfm25-specialty-demand-sub-table th,
-.wfm25-specialty-demand-sub-table td {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--business-card);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.wfm25-specialty-demand-sub-table th:first-child,
-.wfm25-specialty-demand-sub-name {
-  text-align: left;
-  font-weight: 600;
-  color: var(--after-hours);
-}
 .wfm25-tab[data-wfm25-tab="specialty-demand"]:focus-visible {
   outline: 2px solid var(--ballpoint);
   outline-offset: 2px;

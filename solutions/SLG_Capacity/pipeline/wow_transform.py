@@ -4,13 +4,13 @@ WoW Consolidated Workbook Transform
 ===================================
 
 Input: the true WoW export (locally renamed to WoW_Export.xlsx), sheets:
-    UTIL_Previous, UTIL_Current, UTIL_Next, UTIL_Next+1, Forecast, Actuals_Historical
+    UTIL_Previous, UTIL_Current, UTIL_Next, Forecast, Actuals_Historical
 
 Output: a consolidated, app-ready workbook:
     Forecast_Staged              wide PSA-compatible staffed forecast (has Employee ID)
     Unstaffed_Demand             forecast rows with NO Employee ID (unstaffed/contingency roles) — retained for review
     Actuals_Current_Normalized   current-quarter weekly actuals (UTIL_Current)
-    Utilization_Normalized       worker x fiscal quarter target/rate/QTD (4 UTIL sheets)
+    Utilization_Normalized       worker x fiscal quarter target/rate/QTD (3 UTIL sheets)
     History_Normalized           worker x project x fiscal quarter worked hours
     _manifest                    control totals + daily diff
 
@@ -46,7 +46,6 @@ REQUIRED_INPUT_SHEETS = [
     "UTIL_Previous",
     "UTIL_Current",
     "UTIL_Next",
-    "UTIL_Next+1",
 ]
 
 OUT_FORECAST = "Forecast_Staged"
@@ -273,7 +272,7 @@ def target_hours_column(df, sheet, log):
 
 def build_utilization(xl, log):
     frames = []
-    for sheet in ["UTIL_Previous", "UTIL_Current", "UTIL_Next", "UTIL_Next+1"]:
+    for sheet in ["UTIL_Previous", "UTIL_Current", "UTIL_Next"]:
         df, qk = load_util_sheet(xl, sheet, log)
         emp = find_exact_column(df, "Employee ID")
         wkr = find_exact_column(df, "Worker")
@@ -403,7 +402,7 @@ def validate(staffed, unstaffed, retained_weeks, actuals, util, hist, hist_total
     chk("Utilization: no blank employee_id", (util["employee_id"] == "").sum() == 0)
     chk("Utilization: no null target_hours", util["target_hours"].isna().sum() == 0)
     chk("Utilization: no null util_rate_wkly", util["util_rate_wkly"].isna().sum() == 0)
-    chk("Utilization: exactly 4 fiscal quarters", util["fiscal_quarter"].nunique() == 4)
+    chk("Utilization: exactly 3 fiscal quarters", util["fiscal_quarter"].nunique() == 3)
 
     # History
     chk("History: no blank employee_id", (hist["employee_id"] == "").sum() == 0)

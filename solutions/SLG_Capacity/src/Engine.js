@@ -2005,7 +2005,7 @@ function _wowQuarterTargetIndex_() {
  * Same column, two roles by quarter position in the WoW snapshot:
  *   UTIL_Current target_hours — bonus-scale current-quarter target (D8 ICP-util
  *     denominator; pairs with qtd_icp_plus_forecast on the same scale).
- *   UTIL_Previous / UTIL_Next / UTIL_Next+1 target_hours — ICP-scale forward
+ *   UTIL_Previous / UTIL_Next target_hours — ICP-scale forward
  *     (and prior) quarter targets for scorecard targetHours / tracking.
  *
  * WoW coverage is FY27-Q1..Q4 in the current workbook; outside that window
@@ -2065,7 +2065,8 @@ function rollingQuarterKeys_(count) {
 }
 
 /**
- * Shared four-quarter window for Scorecard and Explorer detail: previous, current, +1, +2.
+ * Shared three-quarter planning window for Scorecard and Explorer detail:
+ * previous, current, next.
  * @return {string[]}
  */
 function scorecardWindowKeys_() {
@@ -2073,7 +2074,7 @@ function scorecardWindowKeys_() {
   const curBounds = fiscalQuarterBounds_(curQ);
   const prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
   const prevQ = fiscalQuarterKey_(prevDay);
-  return [prevQ].concat(rollingQuarterKeys_(3));
+  return [prevQ].concat(rollingQuarterKeys_(2));
 }
 
 /**
@@ -2443,7 +2444,7 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
 }
 
 /**
- * Team quarterly scorecard: rolling four fiscal quarters per worker plus
+ * Team quarterly scorecard: three-quarter planning window per worker plus
  * hours-weighted team summaries.
  * @param {Object} params same shape as computeUtilization
  * @return {Object}

@@ -4145,7 +4145,7 @@
   }
 
   /**
-   * Rolling four-quarter scorecard (Explorer + WFM.25 worker panel).
+   * Three-quarter planning scorecard (Explorer + WFM.25 worker panel).
    * @param {Array} quarters
    * @param {number} icpTarget
    * @param {Object|null} [projection] api_projectSoftBookings result (WFM.25 draft overlay)
@@ -4230,7 +4230,7 @@
 
     return '<div class="explorer-section explorer-quarter-section">' +
       '<div class="explorer-section-head">' +
-        '<div class="explorer-section-title">Rolling four-quarter scorecard</div>' +
+        '<div class="explorer-section-title">Three-quarter planning scorecard</div>' +
         metricControl + '</div>' +
       '<div class="explorer-quarter-scroll"><table class="data-table quarterly-scorecard-table explorer-quarter-table">' +
         '<thead><tr>' + headerCells + '</tr></thead>' +
@@ -10147,14 +10147,15 @@ async function _qaRefreshPsaHours_() {
   function wfm25BuildSpecialtyDemandMerged_(forecastData, actualsData) {
     const forecast = forecastData || {};
     const actuals = actualsData || {};
-    const curQk = forecast.currentQuarterKey || fiscalQuarterKey_(new Date());
+    const windowKeys = forecast.quarters || [];
+    if (windowKeys.length < 2) return null;
 
+    const prevQk = windowKeys[0];
+    const curQk = windowKeys[1];
     const histQKeys = (actuals.quarters || []).filter(function (qk) {
       return compareFiscalQuarterKeys_(qk, curQk) < 0;
     });
     if (!histQKeys.length) return null;
-
-    const prevQk = histQKeys[histQKeys.length - 1];
     const histCount = histQKeys.length;
     const colKeys = [WFM25_SD_HIST_AVG_KEY_, prevQk, curQk];
     const colKinds = ['benchmark', 'previous', 'current'];

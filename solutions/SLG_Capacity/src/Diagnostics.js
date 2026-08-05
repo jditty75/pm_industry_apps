@@ -2287,6 +2287,31 @@ function _dbg_reconcileWFM17() {
     }
   })();
 
+  // ---- Utilization quarterly window (3 UTIL sheets) ----
+  (function utilQuarterWindow() {
+    Logger.log('=== WFM.17 Utilization quarterly window ===');
+    var utilRows = [];
+    try {
+      utilRows = cachedRead_(CFG_UTIL_QUARTERLY);
+    } catch (e) {
+      utilRows = [];
+    }
+    var quarterSet = {};
+    utilRows.forEach(function (r) {
+      var fq = String(r.fiscal_quarter || '').trim();
+      if (fq) quarterSet[fq] = true;
+    });
+    var quartersSorted = Object.keys(quarterSet).sort();
+    var count = quartersSorted.length;
+    Logger.log('  distinct fiscal_quarter values (' + count + '): ' + quartersSorted.join(', '));
+    if (count !== 3) {
+      failures.push('Utilization: exactly 3 fiscal quarters expected, found ' + count +
+        (quartersSorted.length ? ' (' + quartersSorted.join(', ') + ')' : ''));
+    } else {
+      Logger.log('  exactly 3 UTIL quarters — OK');
+    }
+  })();
+
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM17: ALL CHECKS OK'
     : '_dbg_reconcileWFM17: ' + failures.length + ' CHECK(S) FAILED â€” DO NOT SHIP');
@@ -4414,7 +4439,7 @@ function _dbg_reconcileWFM24() {
   var curBounds = fiscalQuarterBounds_(curQ);
   var prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
   var prevQ = fiscalQuarterKey_(prevDay);
-  var expectedWindowKeys = [prevQ].concat(rollingQuarterKeys_(3));
+  var expectedWindowKeys = [prevQ].concat(rollingQuarterKeys_(2));
   var forwardKeys = expectedWindowKeys.slice(2);
 
   if (typeof api_flushCaches === 'function') api_flushCaches();
@@ -4440,7 +4465,7 @@ function _dbg_reconcileWFM24() {
     return true;
   }
 
-  // ---- Check 0: scorecard window = previous / current / +1 / +2 ----
+  // ---- Check 0: scorecard window = previous / current / next ----
   (function scorecardWindow() {
     Logger.log('=== WFM.24 Check 0: scorecard window ===');
     var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });

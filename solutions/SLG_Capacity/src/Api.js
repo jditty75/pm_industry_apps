@@ -1169,13 +1169,13 @@ function _getCachedBaselineForecast_(forecastParams) {
 
 /**
  * Fiscal quarter keys touched by soft-booking date ranges (dynamic, cap 8).
- * Empty bookings ⇒ rolling four quarters (Explorer default window).
+ * Empty bookings ⇒ scorecard planning window (previous / current / next).
  * @param {Array<{start_date:*, end_date:*}>} softBookings
  * @return {string[]}
  */
 function _quarterKeysForSoftBookings_(softBookings) {
   if (!softBookings || !softBookings.length) {
-    return rollingQuarterKeys_(4);
+    return scorecardWindowKeys_();
   }
   var minDate = null;
   var maxDate = null;
@@ -1185,7 +1185,7 @@ function _quarterKeysForSoftBookings_(softBookings) {
     if (s && !isNaN(s.getTime()) && (!minDate || s < minDate)) minDate = s;
     if (e && !isNaN(e.getTime()) && (!maxDate || e > maxDate)) maxDate = e;
   });
-  if (!minDate || !maxDate) return rollingQuarterKeys_(4);
+  if (!minDate || !maxDate) return scorecardWindowKeys_();
 
   var keys = [];
   var qk = fiscalQuarterKey_(minDate);

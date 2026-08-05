@@ -946,8 +946,8 @@ function validateUtilizationQuarterCount_(values, recordCheck) {
   var count = Object.keys(quarters).length;
   recordCheck(
     'utilization_quarters',
-    count === 4,
-    'Expected 4 distinct fiscal_quarter values, found ' + count +
+    count === 3,
+    'Expected 3 distinct fiscal_quarter values, found ' + count +
       ' (' + Object.keys(quarters).join(', ') + ')'
   );
 }

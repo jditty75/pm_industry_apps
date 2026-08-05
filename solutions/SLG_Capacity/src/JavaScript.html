@@ -10035,6 +10035,10 @@ async function _qaRefreshPsaHours_() {
     'Student-segment work or specialty values not in the mapping config. ' +
     'Excludes PTO / Holiday and internal time, which are not demand.';
 
+  const WFM25_SD_SCOPE_CAPTION_ =
+    'SLG delivery only \u2014 Corporate & cross-org (Workday Regions) resources are ' +
+    'excluded. See Mix & Trend for those.';
+
   /**
    * Resolve a specialty practice to a leadership team label using config map.
    * @param {string} specialtyPractice
@@ -10472,6 +10476,7 @@ async function _qaRefreshPsaHours_() {
       th.scope = 'col';
       th.innerHTML =
         '<div class="wfm25-specialty-demand-th-inner">' +
+          '<span class="wfm25-specialty-demand-th-bar-spacer" aria-hidden="true"></span>' +
           '<span class="wfm25-specialty-demand-th-label">' + escapeHtml_(label) + '</span>' +
         '</div>';
       headerRow.appendChild(th);
@@ -10754,6 +10759,26 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Ensure visible SLG-only scope caption near the specialty demand matrix header.
+   */
+  function wfm25EnsureSpecialtyDemandScopeCaption_() {
+    const matrixCard = document.querySelector('.wfm25-specialty-demand-matrix-card');
+    if (!matrixCard) return;
+    let scopeEl = document.getElementById('wfm25SpecialtyDemandScopeCaption');
+    if (!scopeEl) {
+      scopeEl = document.createElement('p');
+      scopeEl.id = 'wfm25SpecialtyDemandScopeCaption';
+      scopeEl.className = 'wfm25-specialty-demand-scope-caption muted';
+      const head = matrixCard.querySelector('.wfm25-specialty-demand-matrix-head');
+      if (head) {
+        matrixCard.insertBefore(scopeEl, head.nextSibling);
+      }
+    }
+    scopeEl.textContent = WFM25_SD_SCOPE_CAPTION_;
+    scopeEl.hidden = false;
+  }
+
+  /**
    * Sync unit-toggle aria-pressed states.
    */
   function wfm25SyncSpecialtyDemandUnitToggle_() {
@@ -10791,6 +10816,7 @@ async function _qaRefreshPsaHours_() {
     if (empty) empty.hidden = true;
     if (layout) layout.hidden = false;
 
+    wfm25EnsureSpecialtyDemandScopeCaption_();
     wfm25SyncSpecialtyDemandUnitToggle_();
     renderWFM25SpecialtyDemandBanner_(merged);
 

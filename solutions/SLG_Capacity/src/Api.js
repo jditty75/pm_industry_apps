@@ -2195,8 +2195,25 @@ function sortSpecialtySubRows_(rows) {
 }
 
 /**
+ * Whether an Actuals_History row counts toward SLG-scoped specialty demand.
+ * Reuses _workerClassInScope_ when worker_class is present; otherwise excludes
+ * Corporate region (cross-org marker equivalent to Workday Regions population).
+ * @param {Object} row Actuals_History row
+ * @return {boolean}
+ */
+function specialtyActualsRowInSlgScope_(row) {
+  var wc = String((row && row.worker_class) || '').trim();
+  if (wc) {
+    return _workerClassInScope_(wc, 'SLG');
+  }
+  var region = String((row && row.workday_region_as_of_date_worked) || '').trim();
+  return region !== 'Corporate';
+}
+
+/**
  * WFM.25 Pass 3C: historical worked hours by specialty practice × fiscal quarter.
  * Read-only aggregation over Actuals_History; no reconciliation changes.
+ * SLG delivery scope only (reuses worker-scope classification).
  * @param {Object} [params] reserved for future filter params
  * @return {{
  *   quarters: string[],
@@ -2218,6 +2235,8 @@ function api_getSpecialtyActuals(params) {
   var grandTotal = 0;
 
   histRows.forEach(function (r) {
+    if (!specialtyActualsRowInSlgScope_(r)) return;
+
     var fq = String(r.fiscal_quarter || '').trim();
     if (!fq) return;
     var hrs = Number(r.worked_hours) || 0;
@@ -2291,6 +2310,7 @@ function api_getSpecialtyActuals(params) {
 /**
  * WFM.25 Pass 3B: org-level forecast demand hours by specialty practice × fiscal quarter.
  * Read-only aggregation over computeWeeklyForecast_ productive hours; no reconciliation changes.
+ * SLG delivery scope only (reuses worker-scope classification).
  * @param {Object} params same filter shape as api_getForecastTable
  * @return {{
  *   quarters: string[],
@@ -2310,7 +2330,7 @@ function api_getSpecialtyDemand(params) {
     scenarioId: params.scenarioId,
     teams: params.teams,
     teamLabel: params.teamLabel,
-    workerScope: params.workerScope,
+    workerScope: 'SLG',
     includeMyManagers: params.includeMyManagers,
     includeTimeOff: params.includeTimeOff
   });

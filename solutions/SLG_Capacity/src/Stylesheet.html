@@ -5440,6 +5440,16 @@ td.cell-with-bar {
   font-size: 11px;
   text-align: right;
 }
+.wfm25-specialty-demand-scope-caption {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--staple);
+  background: rgba(0, 0, 0, 0.03);
+  border-left: 3px solid var(--staple);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
 .wfm25-specialty-demand-matrix-head {
   display: flex;
   align-items: center;
@@ -5471,6 +5481,8 @@ td.cell-with-bar {
   border-collapse: collapse;
   font-size: 13px;
   table-layout: fixed;
+  --wfm25-sd-bar-slot: 72px;
+  --wfm25-sd-value-slot: 5.5em;
 }
 .wfm25-specialty-demand-table th,
 .wfm25-specialty-demand-table td {
@@ -5503,7 +5515,12 @@ td.cell-with-bar {
   justify-content: flex-end;
   gap: 6px;
 }
+.wfm25-specialty-demand-th-bar-spacer {
+  width: var(--wfm25-sd-bar-slot);
+  flex-shrink: 0;
+}
 .wfm25-specialty-demand-th-label {
+  min-width: var(--wfm25-sd-value-slot);
   text-align: right;
   white-space: nowrap;
 }
@@ -5518,23 +5535,21 @@ td.cell-with-bar {
   gap: 6px;
 }
 .wfm25-specialty-demand-bar-wrap {
-  width: 100%;
-  max-width: 72px;
+  width: var(--wfm25-sd-bar-slot);
+  max-width: var(--wfm25-sd-bar-slot);
+  flex-shrink: 0;
   height: 3px;
   background: var(--paper);
   border-radius: 2px;
   overflow: hidden;
 }
 .wfm25-specialty-demand-bar-wrap--team {
-  max-width: 88px;
   height: 6px;
 }
 .wfm25-specialty-demand-bar-wrap--specialty-current {
-  max-width: 64px;
   height: 4px;
 }
 .wfm25-specialty-demand-bar-wrap--benchmark {
-  max-width: 56px;
   height: 2px;
   background: transparent;
 }
@@ -5598,6 +5613,8 @@ td.cell-with-bar {
   }
 }
 .wfm25-specialty-demand-hours {
+  min-width: var(--wfm25-sd-value-slot);
+  text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   color: var(--after-hours);

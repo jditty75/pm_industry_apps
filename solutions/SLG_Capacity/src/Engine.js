@@ -1967,6 +1967,7 @@ function quarterWorkdaySummary_(quarterKey, holidays) {
 var _committedAsgIdxMemo_ = null;
 var _committedReductionIdxMemo_ = null;
 var _wowTargetIdxMemo_ = null;
+var _wowActualIcpIdxMemo_ = null;
 
 /**
  * Clear per-execution projection indexes (committed assignments, reductions, WoW targets).
@@ -1975,6 +1976,7 @@ function _resetProjectionMemos_() {
   _committedAsgIdxMemo_ = null;
   _committedReductionIdxMemo_ = null;
   _wowTargetIdxMemo_ = null;
+  _wowActualIcpIdxMemo_ = null;
 }
 
 /**
@@ -1985,15 +1987,37 @@ function _resetProjectionMemos_() {
 function _wowQuarterTargetIndex_() {
   if (_wowTargetIdxMemo_) return _wowTargetIdxMemo_;
   var idx = {};
+  var actuals = {};
   cachedRead_(CFG_UTIL_QUARTERLY).forEach(function (r) {
     var eid = String(r.employee_id || '').trim();
     var qk = String(r.fiscal_quarter || '').trim();
     if (!eid || !qk) return;
     if (!idx[eid]) idx[eid] = {};
+    if (!actuals[eid]) actuals[eid] = {};
     idx[eid][qk] = Number(r.target_hours) || 0;
+    actuals[eid][qk] = Number(r.qtd_actual_icp) || 0;
   });
   _wowTargetIdxMemo_ = idx;
+  _wowActualIcpIdxMemo_ = actuals;
   return idx;
+}
+
+/**
+ * Completed-quarter actual ICP hours from Utilization_Quarterly (UTIL_Previous
+ * rows). Returns the stored qtd_actual_icp verbatim — no re-derivation.
+ *
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter e.g. 'FY27-Q2'
+ * @return {number|null}
+ */
+function quarterActualIcpFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return null;
+  _wowQuarterTargetIndex_();
+  var byQ = _wowActualIcpIdxMemo_[employeeId];
+  return (byQ && Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter))
+    ? byQ[fiscalQuarter] : null;
 }
 
 /**
@@ -2408,6 +2432,16 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       // describe a different/earlier quarter than qk).
       const wowCurTarget = quarterTargetFromWoW_(worker.employeeId, qk);
       stale = !(wowCurTarget != null && wowCurTarget > 0);
+    } else if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+      // WFM.25: completed quarters are outside the forecast horizon; source
+      // productive hours from Utilization_Quarterly qtd_actual_icp (UTIL_Previous).
+      const wowActual = quarterActualIcpFromWoW_(worker.employeeId, qk);
+      productiveHours = wowActual != null ? wowActual : 0;
+      const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
+      targetHours = wowTarget != null ? wowTarget : appTarget;
+      bonusAttainment = targetHours > 0 ? productiveHours / targetHours : 0;
+      source = 'actuals';
+      icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
     } else {
       productiveHours = sumForecastProductiveForQuarter_(worker, qk, weeks);
       const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);

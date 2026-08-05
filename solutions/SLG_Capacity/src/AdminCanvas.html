@@ -1,4 +1,4 @@
-<!-- AdminCanvas.html — WFM.25 minimal Admin surface (Operations upload only).
+<!-- AdminCanvas.html — WFM.25 Admin surface (data sources, upload, overrides).
      Included via <?!= include('AdminCanvas'); ?> in Index.html.
      Consolidated upload behavior is wired in JavaScript.html (existing WFM.21 handlers). -->
 
@@ -9,6 +9,16 @@
       ← Back to Capacity
     </button>
     <h1 class="wfm25-admin-title">Admin</h1>
+  </div>
+
+  <!-- Data Sources (freshness detail behind header badge) -->
+  <div id="wfm25AdminDataSourcesSection" class="card wfm25-admin-card wfm25-chrome-card wfm25-admin-data-sources-card">
+    <div class="card-header">
+      <div class="card-title">Data Sources</div>
+    </div>
+    <div id="wfm25AdminDataSourcesBody" class="wfm25-admin-data-sources-body muted">
+      Loading data freshness…
+    </div>
   </div>
 
   <div class="card wfm25-admin-card wfm25-chrome-card">
@@ -33,6 +43,49 @@
     </div>
     <div id="consolidatedUploadStatus" class="status" hidden></div>
     <div id="consolidatedUploadResult" class="consolidated-upload-result" hidden></div>
+  </div>
+
+  <div class="wfm25-admin-refresh-log" id="wfm25AdminRefreshLogWrap">
+    <button type="button" class="wfm25-admin-refresh-log-toggle btn-ghost"
+            id="wfm25AdminRefreshLogToggle" aria-expanded="false">
+      Recent uploads <span class="wfm25-admin-refresh-chev" aria-hidden="true">▾</span>
+    </button>
+    <ul id="wfm25AdminRefreshLogBody" class="wfm25-admin-refresh-log-list" hidden></ul>
+  </div>
+
+  <!-- Overrides — Deployments & Pipeline (view + delete + CSV) -->
+  <div class="card wfm25-admin-card wfm25-chrome-card wfm25-admin-overrides-card">
+    <div class="card-header">
+      <div class="card-title">Overrides — Deployments &amp; Pipeline</div>
+    </div>
+    <div class="wfm25-admin-ov-hygiene" id="wfm25AdminOvHygiene" aria-live="polite">
+      <span id="wfm25AdminOvHygieneText" class="muted">Loading overrides…</span>
+      <button type="button" class="wfm25-admin-ov-review-btn btn-ghost" id="wfm25AdminOvReviewBtn" hidden>
+        Review stale
+      </button>
+    </div>
+    <div class="wfm25-admin-ov-actions">
+      <button type="button" class="btn-ghost" id="wfm25AdminOvExportBtn">Export CSV</button>
+      <button type="button" class="btn-ghost" id="wfm25AdminOvImportBtn">Import CSV</button>
+      <input type="file" id="wfm25AdminOvImportFile" accept=".csv,text/csv" hidden>
+    </div>
+    <div class="wfm25-admin-ov-table-wrap">
+      <table class="wfm25-admin-ov-table" aria-label="Active overrides for Deployments and Pipeline">
+        <thead>
+          <tr>
+            <th>source</th>
+            <th>record_id</th>
+            <th>field</th>
+            <th>override_value</th>
+            <th>expires_at</th>
+            <th><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="wfm25AdminOvTableBody">
+          <tr><td colspan="6" class="muted wfm25-admin-ov-empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
 </div><!-- /#adminCanvas -->

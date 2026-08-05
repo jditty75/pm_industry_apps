@@ -4536,7 +4536,7 @@ td.cell-with-bar {
 /* ── WFM.25 Admin surface (minimal Operations upload) ─────── */
 .wfm25-admin-canvas {
   padding: 16px 20px 32px;
-  max-width: 760px;
+  max-width: 920px;
 }
 .wfm25-admin-card {
   border: 0;
@@ -4568,6 +4568,223 @@ td.cell-with-bar {
 .wfm25-admin-card .status,
 .wfm25-admin-card .consolidated-upload-result {
   margin: 0 16px 16px;
+}
+
+/* ── WFM.25 header data-freshness badge ───────────────────── */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.wfm25-freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--wfm25-chrome-pill-radius);
+  border: 1px solid var(--desk);
+  background: var(--wfm25-chrome-surface);
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--laptop);
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  flex-shrink: 0;
+}
+.wfm25-freshness-badge:hover {
+  border-color: var(--staple);
+  background: var(--business-card);
+}
+.wfm25-freshness-badge:focus-visible {
+  outline: none;
+  border-color: var(--wfm25-chrome-accent);
+  box-shadow: var(--wfm25-chrome-focus-glow);
+}
+.wfm25-freshness-badge--current {
+  border-color: rgba(30, 122, 60, .35);
+  background: rgba(30, 122, 60, .08);
+}
+.wfm25-freshness-badge--stale {
+  border-color: rgba(138, 92, 0, .35);
+  background: rgba(201, 148, 0, .10);
+}
+.wfm25-freshness-badge--error {
+  border-color: rgba(180, 50, 30, .35);
+  background: rgba(180, 50, 30, .08);
+}
+.wfm25-freshness-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--staple);
+}
+.wfm25-freshness-dot--current { background: #1e7a3c; }
+.wfm25-freshness-dot--stale { background: #c99400; }
+.wfm25-freshness-dot--error { background: #b4321e; }
+.wfm25-freshness-label {
+  white-space: nowrap;
+}
+
+/* ── WFM.25 Admin: Data Sources card ──────────────────────── */
+.wfm25-admin-data-sources-card {
+  scroll-margin-top: 12px;
+}
+.wfm25-admin-data-sources-body {
+  padding: 8px 16px 16px;
+  display: grid;
+  gap: 10px;
+}
+.wfm25-admin-source-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--desk);
+  border-radius: 8px;
+  background: var(--paper);
+  align-items: start;
+}
+.wfm25-admin-source-main {
+  min-width: 0;
+}
+.wfm25-admin-source-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.wfm25-admin-source-meta {
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.wfm25-admin-source-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--laptop);
+  white-space: nowrap;
+}
+.wfm25-admin-source-warning {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* ── WFM.25 Admin: minimal refresh log ──────────────────────── */
+.wfm25-admin-refresh-log {
+  margin: 0 0 16px;
+  padding: 0 4px;
+}
+.wfm25-admin-refresh-log-toggle {
+  font-size: 12px;
+  padding: 4px 8px;
+  color: var(--staple);
+}
+.wfm25-admin-refresh-log-toggle.is-open .wfm25-admin-refresh-chev {
+  transform: rotate(180deg);
+}
+.wfm25-admin-refresh-chev {
+  display: inline-block;
+  transition: transform .15s ease;
+  font-size: 11px;
+}
+.wfm25-admin-refresh-log-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wfm25-admin-refresh-log-list li {
+  padding: 2px 0;
+}
+.wfm25-admin-refresh-ts {
+  margin-right: 6px;
+}
+.wfm25-admin-refresh-src {
+  margin-right: 6px;
+}
+
+/* ── WFM.25 Admin: Overrides card ─────────────────────────── */
+.wfm25-admin-ov-hygiene {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 16px 0;
+  font-size: 13px;
+}
+.wfm25-admin-ov-review-btn {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.wfm25-admin-ov-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px 12px;
+}
+.wfm25-admin-ov-table-wrap {
+  overflow-x: auto;
+  padding: 0 16px 16px;
+}
+.wfm25-admin-ov-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.wfm25-admin-ov-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--staple);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--desk);
+  white-space: nowrap;
+}
+.wfm25-admin-ov-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--business-card);
+  vertical-align: top;
+  max-width: 200px;
+}
+.wfm25-admin-ov-record,
+.wfm25-admin-ov-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.wfm25-admin-ov-empty {
+  padding: 12px 8px;
+}
+.wfm25-admin-ov-delete {
+  font-size: 12px;
+  padding: 2px 8px;
+  color: var(--thumbtack);
+}
+.wfm25-admin-ov-delete:focus-visible {
+  outline: 2px solid var(--wfm25-chrome-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wfm25-admin-refresh-chev {
+    transition: none;
+  }
+  .wfm25-freshness-badge {
+    transition: none;
+  }
 }
 
 .wfm25-role-stub strong {

@@ -6886,6 +6886,8 @@ async function _qaRefreshPsaHours_() {
             loadDashboard();
           }
           toast('Consolidated workbook ingested', 'ok');
+          loadWFM25Freshness_();
+          loadWFM25AdminRefreshLog_();
         } else {
           status.className = 'status err';
           status.textContent = 'Preflight failed — no destination data was written.';
@@ -11813,6 +11815,7 @@ async function _qaRefreshPsaHours_() {
       clearWFM25SoftBookings_('admin');
       wfm25CloseWorkerPanel_();
       wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Admin']);
+      loadWFM25Admin_();
       return;
     }
 
@@ -12164,6 +12167,443 @@ async function _qaRefreshPsaHours_() {
     paintWFM25WorkerPanel_(State.explorerProjection);
   }
 
+  // ── WFM.25 Admin + data-freshness badge ───────────────────────
+
+  const WFM25_FRESHNESS_SOURCES = [
+    { key: 'wowIngest', label: 'WoW Workbook', thresholdKey: 'wowIngestDays' },
+    { key: 'pipeline', label: 'Pipeline feed', thresholdKey: 'pipelineDays' },
+    { key: 'deployments', label: 'Deployments feed', thresholdKey: 'deploymentsDays' }
+  ];
+
+  let _wfm25FreshnessThresholds = null;
+  let _wfm25AdminOvRows = [];
+
+  /**
+   * Parse row count from api_getDataFreshness lastSuccess.detail (e.g. "123 rows").
+   * @param {string} detail
+   * @returns {string}
+   */
+  function parseWFM25FreshnessRowCount_(detail) {
+    const m = String(detail || '').match(/(\d[\d,]*)\s*rows?/i);
+    return m ? m[1] : (detail ? String(detail) : '—');
+  }
+
+  /**
+   * Evaluate one feed's freshness against a day threshold.
+   * @param {{lastSuccess?:Object, lastFailure?:Object}} feed
+   * @param {number} thresholdDays
+   * @returns {{status:'current'|'stale'|'error', warning:string, lastWhen:string, rowCount:string}}
+   */
+  function evalWFM25FreshnessSource_(feed, thresholdDays) {
+    feed = feed || {};
+    const success = feed.lastSuccess;
+    const failure = feed.lastFailure;
+    if (!success || !success.when) {
+      const warn = failure && failure.when
+        ? String(failure.detail || 'Last run failed')
+        : 'No successful update found';
+      return {
+        status: 'error',
+        warning: warn,
+        lastWhen: failure && failure.when ? fmtDateTime(failure.when) : '—',
+        rowCount: '—'
+      };
+    }
+    const when = new Date(success.when);
+    const ageMs = Date.now() - when.getTime();
+    const thresholdMs = thresholdDays * 24 * 60 * 60 * 1000;
+    const rowCount = parseWFM25FreshnessRowCount_(success.detail);
+    if (isNaN(when.getTime()) || ageMs > thresholdMs) {
+      const warn = failure && failure.when
+        ? String(failure.detail || '')
+        : 'Data older than ' + thresholdDays + ' days';
+      return {
+        status: 'stale',
+        warning: warn,
+        lastWhen: fmtDateTime(success.when),
+        rowCount: rowCount
+      };
+    }
+    const warn = failure && failure.when ? String(failure.detail || '') : '';
+    return {
+      status: 'current',
+      warning: warn,
+      lastWhen: fmtDateTime(success.when),
+      rowCount: rowCount
+    };
+  }
+
+  /**
+   * Worst-of status for overall badge.
+   * @param {('current'|'stale'|'error')[]} statuses
+   * @returns {'current'|'stale'|'error'}
+   */
+  function worstWFM25FreshnessStatus_(statuses) {
+    if (statuses.some(function (s) { return s === 'error'; })) return 'error';
+    if (statuses.some(function (s) { return s === 'stale'; })) return 'stale';
+    return 'current';
+  }
+
+  /**
+   * Load staleness thresholds (cached per session).
+   * @returns {Promise<{wowIngestDays:number, pipelineDays:number, deploymentsDays:number}>}
+   */
+  async function getWFM25FreshnessThresholds_() {
+    if (_wfm25FreshnessThresholds) return _wfm25FreshnessThresholds;
+    try {
+      _wfm25FreshnessThresholds = await call('api_getDataFreshnessThresholds');
+    } catch (e) {
+      _wfm25FreshnessThresholds = { wowIngestDays: 7, pipelineDays: 2, deploymentsDays: 2 };
+    }
+    return _wfm25FreshnessThresholds;
+  }
+
+  /**
+   * Paint header freshness badge from overall status.
+   * @param {'current'|'stale'|'error'} status
+   */
+  function renderWFM25FreshnessBadge_(status) {
+    const badge = document.getElementById('wfm25FreshnessBadge');
+    const dot = document.getElementById('wfm25FreshnessDot');
+    const label = document.getElementById('wfm25FreshnessLabel');
+    if (!badge || !dot || !label) return;
+
+    const labels = {
+      current: 'Data current',
+      stale: 'Data stale',
+      error: 'Data issue'
+    };
+    const ariaLabels = {
+      current: 'Data freshness: current — open Admin',
+      stale: 'Data freshness: stale — open Admin',
+      error: 'Data freshness: issue detected — open Admin'
+    };
+    const s = labels[status] ? status : 'error';
+    badge.className = 'wfm25-freshness-badge wfm25-freshness-badge--' + s;
+    dot.className = 'wfm25-freshness-dot wfm25-freshness-dot--' + s;
+    label.textContent = labels[s];
+    badge.setAttribute('aria-label', ariaLabels[s]);
+    badge.hidden = false;
+  }
+
+  /**
+   * Render Admin Data Sources card rows.
+   * @param {Object} freshness
+   * @param {Object} thresholds
+   */
+  function renderWFM25AdminDataSources_(freshness, thresholds) {
+    const body = document.getElementById('wfm25AdminDataSourcesBody');
+    if (!body) return;
+    thresholds = thresholds || { wowIngestDays: 7, pipelineDays: 2, deploymentsDays: 2 };
+
+    const statuses = [];
+    const rowsHtml = WFM25_FRESHNESS_SOURCES.map(function (src) {
+      const feed = (freshness && freshness[src.key]) || {};
+      const days = Number(thresholds[src.thresholdKey]) || 2;
+      const ev = evalWFM25FreshnessSource_(feed, days);
+      statuses.push(ev.status);
+      const statusLabel = ev.status === 'current' ? 'Current' : (ev.status === 'stale' ? 'Stale' : 'Issue');
+      const warnHtml = ev.warning
+        ? '<div class="wfm25-admin-source-warning muted">' + escapeHtml_(ev.warning) + '</div>'
+        : '';
+      return '<div class="wfm25-admin-source-row">' +
+        '<div class="wfm25-admin-source-main">' +
+          '<div class="wfm25-admin-source-name">' + escapeHtml_(src.label) + '</div>' +
+          '<div class="wfm25-admin-source-meta muted">' +
+            '<span class="wfm25-admin-source-ts">' + escapeHtml_(ev.lastWhen) + '</span>' +
+            (ev.rowCount !== '—'
+              ? '<span class="wfm25-admin-source-rows tabular-nums">' + escapeHtml_(ev.rowCount) + ' rows</span>'
+              : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="wfm25-admin-source-status">' +
+          '<span class="wfm25-freshness-dot wfm25-freshness-dot--' + ev.status + '" aria-hidden="true"></span>' +
+          '<span class="wfm25-admin-source-status-label">' + escapeHtml_(statusLabel) + '</span>' +
+        '</div>' +
+        warnHtml +
+        '</div>';
+    }).join('');
+
+    body.className = 'wfm25-admin-data-sources-body';
+    body.innerHTML = rowsHtml;
+    renderWFM25FreshnessBadge_(worstWFM25FreshnessStatus_(statuses));
+  }
+
+  /**
+   * Fetch freshness + update badge and Admin Data Sources (if mounted).
+   */
+  async function loadWFM25Freshness_() {
+    try {
+      const thresholds = await getWFM25FreshnessThresholds_();
+      const freshness = await call('api_getDataFreshness');
+      renderWFM25FreshnessBadge_(worstWFM25FreshnessStatus_(
+        WFM25_FRESHNESS_SOURCES.map(function (src) {
+          const days = Number(thresholds[src.thresholdKey]) || 2;
+          return evalWFM25FreshnessSource_((freshness && freshness[src.key]) || {}, days).status;
+        })
+      ));
+      if (document.getElementById('wfm25AdminDataSourcesBody')) {
+        renderWFM25AdminDataSources_(freshness, thresholds);
+      }
+    } catch (err) {
+      renderWFM25FreshnessBadge_('error');
+      const body = document.getElementById('wfm25AdminDataSourcesBody');
+      if (body) {
+        body.innerHTML = '<div class="muted">Failed to load data freshness: ' +
+          escapeHtml_(err.message) + '</div>';
+      }
+    }
+  }
+
+  /**
+   * Minimal recent-uploads log (latest ~3 entries).
+   */
+  async function loadWFM25AdminRefreshLog_() {
+    const list = document.getElementById('wfm25AdminRefreshLogBody');
+    if (!list) return;
+    try {
+      const rows = await call('api_getRefreshLog');
+      const recent = (rows || []).slice(0, 3);
+      if (!recent.length) {
+        list.innerHTML = '<li class="muted">No recent uploads logged</li>';
+        return;
+      }
+      list.innerHTML = recent.map(function (r) {
+        const ts = r.timestamp ? fmtDateTime(r.timestamp) : '—';
+        const src = String(r.source || '—');
+        const inOut = Number(r.rows_in || 0).toLocaleString() + ' → ' +
+          Number(r.rows_out || 0).toLocaleString();
+        return '<li><span class="wfm25-admin-refresh-ts tabular-nums">' + escapeHtml_(ts) + '</span> ' +
+          '<span class="wfm25-admin-refresh-src">' + escapeHtml_(src) + '</span> ' +
+          '<span class="wfm25-admin-refresh-rows tabular-nums muted">' + escapeHtml_(inOut) + '</span></li>';
+      }).join('');
+    } catch (err) {
+      list.innerHTML = '<li class="muted">Refresh log unavailable</li>';
+    }
+  }
+
+  /**
+   * Filter overrides to Deployments + Pipeline active rows.
+   * @param {Object[]} rows
+   * @returns {Object[]}
+   */
+  function filterWFM25AdminOverrides_(rows) {
+    return (rows || []).filter(function (r) {
+      const src = String(r.source || '');
+      return src === 'Deployments' || src === 'Pipeline';
+    });
+  }
+
+  /**
+   * Paint overrides hygiene callout.
+   * @param {Object} h
+   */
+  function renderWFM25AdminOvHygiene_(h) {
+    const textEl = document.getElementById('wfm25AdminOvHygieneText');
+    const reviewBtn = document.getElementById('wfm25AdminOvReviewBtn');
+    if (!textEl) return;
+    const total = Number(h.activeTotal) || 0;
+    const stale = Number(h.stale) || 0;
+    textEl.textContent = total + ' override' + (total === 1 ? '' : 's') +
+      (stale > 0 ? ' · ' + stale + ' may be stale' : '');
+    if (reviewBtn) {
+      reviewBtn.hidden = stale <= 0;
+      reviewBtn.dataset.staleCount = String(stale);
+    }
+  }
+
+  /**
+   * Render compact overrides table for WFM.25 Admin.
+   * @param {Object[]} rows
+   */
+  function renderWFM25AdminOvTable_(rows) {
+    const body = document.getElementById('wfm25AdminOvTableBody');
+    if (!body) return;
+    _wfm25AdminOvRows = filterWFM25AdminOverrides_(rows);
+
+    if (!_wfm25AdminOvRows.length) {
+      body.innerHTML = '<tr><td colspan="6" class="muted wfm25-admin-ov-empty">No active overrides for Deployments or Pipeline.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = _wfm25AdminOvRows.map(function (r) {
+      const expires = r.expires_at ? String(r.expires_at).slice(0, 10) : '—';
+      const recId = String(r.record_id || '');
+      const ovVal = String(r.override_value || '');
+      return '<tr data-ov-id="' + escapeHtml_(String(r.override_id || '')) + '">' +
+        '<td>' + escapeHtml_(r.source || '') + '</td>' +
+        '<td class="wfm25-admin-ov-record" title="' + escapeHtml_(recId) + '">' + escapeHtml_(recId) + '</td>' +
+        '<td>' + escapeHtml_(r.field || '') + '</td>' +
+        '<td class="wfm25-admin-ov-value" title="' + escapeHtml_(ovVal) + '">' + escapeHtml_(ovVal) + '</td>' +
+        '<td class="tabular-nums">' + escapeHtml_(expires) + '</td>' +
+        '<td><button type="button" class="wfm25-admin-ov-delete btn-ghost" data-ov-delete="' +
+          escapeHtml_(String(r.override_id || '')) + '" aria-label="Delete override">Delete</button></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  async function loadWFM25AdminOverrides_() {
+    const body = document.getElementById('wfm25AdminOvTableBody');
+    if (body) {
+      body.innerHTML = '<tr><td colspan="6" class="muted wfm25-admin-ov-empty">Loading…</td></tr>';
+    }
+    try {
+      const h = await call('api_getOverrideHygieneSummary');
+      renderWFM25AdminOvHygiene_(h);
+      const rows = await call('api_listOverrides', { status: 'Active' });
+      renderWFM25AdminOvTable_(rows);
+    } catch (err) {
+      if (body) {
+        body.innerHTML = '<tr><td colspan="6" class="muted wfm25-admin-ov-empty">Load failed: ' +
+          escapeHtml_(err.message) + '</td></tr>';
+      }
+      const textEl = document.getElementById('wfm25AdminOvHygieneText');
+      if (textEl) textEl.textContent = 'Overrides unavailable';
+    }
+  }
+
+  /**
+   * Load all WFM.25 Admin panels (data sources, refresh log, overrides).
+   */
+  async function loadWFM25Admin_() {
+    await Promise.all([
+      loadWFM25Freshness_(),
+      loadWFM25AdminRefreshLog_(),
+      loadWFM25AdminOverrides_()
+    ]);
+  }
+
+  /**
+   * Navigate to Admin and scroll to Data Sources section.
+   */
+  function wfm25OpenAdminDataSources_() {
+    const adminBtn = document.querySelector('.wfm25-strip-btn[data-wfm25-nav="admin"]');
+    if (adminBtn && WFM25State.activeView !== 'admin') adminBtn.click();
+    window.setTimeout(function () {
+      const el = document.getElementById('wfm25AdminDataSourcesSection');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.focus({ preventScroll: true });
+      }
+    }, 80);
+  }
+
+  /**
+   * Wire WFM.25 Admin handlers (refresh log toggle, overrides CSV, delete).
+   */
+  function initWFM25AdminHandlers_() {
+    const freshnessBadge = document.getElementById('wfm25FreshnessBadge');
+    if (freshnessBadge) {
+      freshnessBadge.addEventListener('click', wfm25OpenAdminDataSources_);
+    }
+
+    const refreshToggle = document.getElementById('wfm25AdminRefreshLogToggle');
+    const refreshBody = document.getElementById('wfm25AdminRefreshLogBody');
+    if (refreshToggle && refreshBody) {
+      refreshToggle.addEventListener('click', function () {
+        const open = refreshBody.hidden;
+        refreshBody.hidden = !open;
+        refreshToggle.setAttribute('aria-expanded', String(open));
+        refreshToggle.classList.toggle('is-open', open);
+      });
+    }
+
+    const ovTableBody = document.getElementById('wfm25AdminOvTableBody');
+    if (ovTableBody) {
+      ovTableBody.addEventListener('click', async function (e) {
+        const btn = e.target.closest('[data-ov-delete]');
+        if (!btn) return;
+        const id = btn.getAttribute('data-ov-delete');
+        if (!id) return;
+        const reason = prompt('Reason for deleting this override:');
+        if (!reason || !reason.trim()) return;
+        btn.disabled = true;
+        try {
+          await call('api_deleteOverride', id, reason.trim());
+          toast('Override deleted', 'ok');
+          await loadWFM25AdminOverrides_();
+        } catch (err) {
+          toast('Delete failed: ' + err.message, 'err');
+          btn.disabled = false;
+        }
+      });
+    }
+
+    const reviewBtn = document.getElementById('wfm25AdminOvReviewBtn');
+    if (reviewBtn) {
+      reviewBtn.addEventListener('click', function () {
+        const wrap = document.querySelector('.wfm25-admin-overrides-card');
+        if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        toast('Review overrides that may no longer match source data', 'info');
+      });
+    }
+
+    const exportBtn = document.getElementById('wfm25AdminOvExportBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', async function () {
+        try {
+          const rows = await call('api_listOverrides', { status: 'Active' });
+          const filtered = filterWFM25AdminOverrides_(rows);
+          const headers = ['override_id', 'source', 'record_id', 'field', 'original_value',
+            'override_value', 'reason', 'expires_at', 'status',
+            'created_by', 'created_at', 'modified_by', 'modified_at'];
+          const matrix = [headers];
+          filtered.forEach(function (r) {
+            matrix.push(headers.map(function (h) { return r[h] != null ? r[h] : ''; }));
+          });
+          const csvText = matrix.map(function (row) {
+            return row.map(_csvCell_).join(',');
+          }).join('\n');
+          const blob = new Blob([csvText], { type: 'text/csv' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const ts = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+          a.href = url;
+          a.download = 'overrides_deployments_pipeline_' + ts + '.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        } catch (err) {
+          toast('Export failed: ' + err.message, 'err');
+        }
+      });
+    }
+
+    const importBtn = document.getElementById('wfm25AdminOvImportBtn');
+    const importFile = document.getElementById('wfm25AdminOvImportFile');
+    if (importBtn && importFile) {
+      importBtn.addEventListener('click', function () { importFile.click(); });
+      importFile.addEventListener('change', async function (e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const matrix = _parseCsv_(text);
+          if (matrix.length < 2) { toast('CSV has no data rows', 'err'); return; }
+          const dataRows = matrix.length - 1;
+          const importOk = await confirmAction_({
+            title: 'Import overrides?',
+            body: 'Import ' + dataRows + ' row(s) as new overrides?',
+            confirmLabel: 'Import',
+            confirmStyle: 'primary'
+          });
+          if (!importOk) return;
+          const result = await call('api_importOverridesCsv', matrix);
+          if (result.skipped && result.skipped.length > 0) {
+            toast('Imported ' + result.created + ', skipped ' + result.skipped.length, 'err');
+          } else {
+            toast('Imported ' + result.created + ' override(s)', 'ok');
+          }
+          e.target.value = '';
+          await loadWFM25AdminOverrides_();
+        } catch (err) {
+          toast('Import failed: ' + err.message, 'err');
+        }
+      });
+    }
+  }
+
   // ── WFM.25 main init ──────────────────────────────────────────
 
   /**
@@ -12226,6 +12666,7 @@ async function _qaRefreshPsaHours_() {
 
     // ── Global search overlay ──
     initWFM25GlobalSearch_();
+    initWFM25AdminHandlers_();
 
     // ── Worker panel close + soft-booking overlay ──
     const panelClose = document.getElementById('wfm25WorkerPanelClose');
@@ -12270,5 +12711,6 @@ async function _qaRefreshPsaHours_() {
 
     // ── Load Utilization tab (active on boot) ──
     await loadWFM25Utilization_();
+    loadWFM25Freshness_();
   }
 </script>

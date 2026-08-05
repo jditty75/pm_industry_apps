@@ -4678,6 +4678,26 @@ function api_getDataFreshness() {
   };
 }
 
+/**
+ * WFM.25: Config_Settings tunable staleness thresholds (days) for data-freshness UI.
+ * Keys: data_freshness_wow_days (default 7), data_freshness_pipeline_days (2),
+ * data_freshness_deployments_days (2).
+ * @return {{wowIngestDays:number, pipelineDays:number, deploymentsDays:number}}
+ */
+function api_getDataFreshnessThresholds() {
+  _requireAuthorized_();
+  var settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+  function days_(key, fallback) {
+    var v = Number(String(settings[key] || '').trim());
+    return (v > 0) ? v : fallback;
+  }
+  return {
+    wowIngestDays: days_('data_freshness_wow_days', 7),
+    pipelineDays: days_('data_freshness_pipeline_days', 2),
+    deploymentsDays: days_('data_freshness_deployments_days', 2)
+  };
+}
+
 function api_getRefreshLog() {
   _requireAuthorized_();
   try {

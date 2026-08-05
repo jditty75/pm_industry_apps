@@ -110,8 +110,8 @@ var BAR_CONFIG = {
 // ============================================================================
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('📊 Healthcare Deployment Health Tools')
+  var ui = SpreadsheetApp.getUi();
+  var menu = ui.createMenu('📊 Healthcare Deployment Health Tools')
     .addItem('🌐 Open Web App', 'openWebApp')
     .addSeparator()
     .addItem('▶ Preview HTML report', 'previewHtml')
@@ -119,7 +119,76 @@ function onOpen() {
     .addSeparator()
     .addItem('🔍 Debug: Show detected table ranges', 'debugShowTableRanges')
     .addItem('🔍 Debug: Show all cell values', 'debugShowCellValues')
-    .addToUi();
+    .addSeparator()
+    .addItem('📋 Init Notification Config', 'initNotificationConfigSheet')
+    .addItem('✅ Validate Notification Config', 'validateNotificationConfig');
+
+  var testSub = ui.createMenu('Send Test Notification');
+  getNotificationMenuKeys_().forEach(function (key) {
+    var handler = getTestNotificationHandler_(key);
+    if (handler) testSub.addItem(key, handler);
+  });
+  menu.addSubMenu(testSub);
+  menu.addToUi();
+}
+
+/**
+ * Returns notification keys for the test-send submenu.
+ * @return {Array<string>}
+ * @private
+ */
+function getNotificationMenuKeys_() {
+  try {
+    return CoreLib.CoreData.getNotificationKeysForMenu(APP_CONFIG);
+  } catch (e) {
+    return ['em_reminder_first', 'em_reminder_final', 'dd_digest'];
+  }
+}
+
+/**
+ * Maps notificationKey to a container-bound handler function name.
+ * @param {string} key
+ * @return {string|null}
+ * @private
+ */
+function getTestNotificationHandler_(key) {
+  var handlers = {
+    em_reminder_first: 'sendTestNotification_em_reminder_first',
+    em_reminder_final: 'sendTestNotification_em_reminder_final',
+    dd_digest: 'sendTestNotification_dd_digest'
+  };
+  return handlers[key] || null;
+}
+
+/**
+ * Prompts for recipient and sends a [TEST] notification.
+ * @param {string} notificationKey
+ */
+function sendTestNotificationPrompt(notificationKey) {
+  var ui = SpreadsheetApp.getUi();
+  var result = ui.prompt(
+    'Send Test Notification',
+    'Recipient email (default: jeffrey.ditty@workday.com):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (result.getSelectedButton() !== ui.Button.OK) return;
+  var recipient = result.getResponseText().trim() || 'jeffrey.ditty@workday.com';
+  var ok = sendTestNotification(notificationKey, recipient);
+  ui.alert(ok ?
+    'Test notification sent to ' + recipient :
+    'Test send failed — check execution log.');
+}
+
+function sendTestNotification_em_reminder_first() {
+  sendTestNotificationPrompt('em_reminder_first');
+}
+
+function sendTestNotification_em_reminder_final() {
+  sendTestNotificationPrompt('em_reminder_final');
+}
+
+function sendTestNotification_dd_digest() {
+  sendTestNotificationPrompt('dd_digest');
 }
 
 /**

@@ -10057,6 +10057,18 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Whether a specialty row is unmapped (excluded from KPI hero / biggest mover).
+   * @param {string} specialtyPractice
+   * @param {Object<string,string>} teamMap
+   * @returns {boolean}
+   */
+  function wfm25IsSpecialtyDemandUnmappedForKpi_(specialtyPractice, teamMap) {
+    const sp = String(specialtyPractice || '').trim();
+    if (!sp || sp === 'Unclassified' || sp === 'Student') return true;
+    return wfm25ResolveSpecialtyTeam_(sp, teamMap) === 'Other / Unmapped';
+  }
+
+  /**
    * Group specialty demand rows under leadership teams with per-column subtotals.
    * @param {Array} rows
    * @param {string[]} colKeys
@@ -10458,7 +10470,10 @@ async function _qaRefreshPsaHours_() {
       if (colKinds[i] === 'current') cls += ' wfm25-cur-qth';
       th.className = cls;
       th.scope = 'col';
-      th.textContent = label;
+      th.innerHTML =
+        '<div class="wfm25-specialty-demand-th-inner">' +
+          '<span class="wfm25-specialty-demand-th-label">' + escapeHtml_(label) + '</span>' +
+        '</div>';
       headerRow.appendChild(th);
     });
   }
@@ -10610,12 +10625,14 @@ async function _qaRefreshPsaHours_() {
   function wfm25BuildSpecialtyDemandBanner_(merged) {
     const prevQk = merged.prevQk;
     const histAvgKey = merged.histAvgKey;
+    const teamMap = merged.teamMap || {};
     const grandPrev = Number(merged.grandByCol[prevQk]) || 0;
     const grandHistAvg = Number(merged.grandByCol[histAvgKey]) || 0;
 
     let topSp = '';
     let topH = 0;
     (merged.rows || []).forEach(function (row) {
+      if (wfm25IsSpecialtyDemandUnmappedForKpi_(row.specialtyPractice, teamMap)) return;
       const h = Number(row.hoursByCol[prevQk]) || 0;
       if (h > topH) {
         topH = h;
@@ -10626,6 +10643,7 @@ async function _qaRefreshPsaHours_() {
     let biggestMoverSp = '';
     let biggestMoverPct = 0;
     (merged.rows || []).forEach(function (row) {
+      if (wfm25IsSpecialtyDemandUnmappedForKpi_(row.specialtyPractice, teamMap)) return;
       const h = Number(row.hoursByCol[prevQk]) || 0;
       const hist = Number(row.hoursByCol[histAvgKey]) || 0;
       const pct = wfm25SpecialtyDemandQoqPct_(h, hist);

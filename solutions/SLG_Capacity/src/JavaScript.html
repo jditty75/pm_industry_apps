@@ -7633,9 +7633,9 @@ async function _qaRefreshPsaHours_() {
     specialtyDemandData:  null,      // last api_getSpecialtyDemand result
     specialtyActualsData: null,      // last api_getSpecialtyActuals result
     specialtyDemandReqId: 0,         // race-guard for specialty-demand fetch
-    specialtyDemandCollapsedTeams: new Set(),   // team labels collapsed in forecast section
-    specialtyActualsCollapsedTeams: new Set(),  // team labels collapsed in actuals section
-    specialtyActualsExpandedSpecs: new Set(), // specialty practices with sub-rows expanded
+    specialtyDemandUnit: 'hours',    // 'hours' | 'share' | 'qoq'
+    specialtyDemandSelection: null,  // { kind:'team'|'specialty', label:string } | null
+    specialtyDemandCollapsedTeams: new Set(),
     expandedTeam:     null,          // teamLabel string currently expanded, or null
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend' | 'specialty-demand'
     groupBy:          'team',        // 'team' | 'role'
@@ -10020,7 +10020,7 @@ async function _qaRefreshPsaHours_() {
     }
   }
 
-  // ── Specialty Demand (Pass 3B + 3C) ──────────────────────────
+  // ── Specialty Demand (WFM.25 redesign) ───────────────────────
 
   const WFM25_SPECIALTY_TEAM_ORDER_ = [
     'Functional Consulting',
@@ -10028,6 +10028,11 @@ async function _qaRefreshPsaHours_() {
     'Delivery',
     'Other / Unmapped'
   ];
+
+  const WFM25_SD_OTHER_UNMAPPED_TIP_ =
+    'Productive demand hours whose specialty didn\u2019t map to a team \u2014 e.g. ' +
+    'Student-segment work or specialty values not in the mapping config. ' +
+    'Excludes PTO / Holiday and internal time, which are not demand.';
 
   /**
    * Resolve a specialty practice to a leadership team label using config map.
@@ -10087,6 +10092,96 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Merge forecast + actuals specialty payloads into one continuous timeline.
+   * @param {Object|null} forecastData api_getSpecialtyDemand result
+   * @param {Object|null} actualsData api_getSpecialtyActuals result
+   * @returns {Object|null}
+   */
+  function wfm25BuildSpecialtyDemandMerged_(forecastData, actualsData) {
+    const forecast = forecastData || {};
+    const actuals = actualsData || {};
+    const curQk = forecast.currentQuarterKey || fiscalQuarterKey_(new Date());
+    const forecastQKeys = forecast.quarters || [];
+    const actualsQKeys = (actuals.quarters || []).filter(function (qk) {
+      return compareFiscalQuarterKeys_(qk, curQk) < 0;
+    });
+    const forwardQKeys = forecastQKeys.filter(function (qk) {
+      return compareFiscalQuarterKeys_(qk, curQk) >= 0;
+    });
+    const qKeys = actualsQKeys.concat(forwardQKeys);
+    if (!qKeys.length) return null;
+
+    const rowMap = {};
+    function ensureRow_(sp) {
+      if (!rowMap[sp]) {
+        rowMap[sp] = {
+          specialtyPractice: sp,
+          hoursByQuarter: {},
+          subRows: [],
+          totalHours: 0
+        };
+        qKeys.forEach(function (qk) { rowMap[sp].hoursByQuarter[qk] = 0; });
+      }
+      return rowMap[sp];
+    }
+
+    (actuals.rows || []).forEach(function (row) {
+      const sp = String(row.specialtyPractice || 'Unclassified');
+      const entry = ensureRow_(sp);
+      actualsQKeys.forEach(function (qk) {
+        const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
+        entry.hoursByQuarter[qk] = h;
+      });
+      if (row.subRows && row.subRows.length) entry.subRows = row.subRows;
+    });
+
+    (forecast.rows || []).forEach(function (row) {
+      const sp = String(row.specialtyPractice || 'Unclassified');
+      const entry = ensureRow_(sp);
+      forwardQKeys.forEach(function (qk) {
+        const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
+        entry.hoursByQuarter[qk] = h;
+      });
+    });
+
+    const rows = Object.keys(rowMap).map(function (sp) {
+      const entry = rowMap[sp];
+      let totalHours = 0;
+      qKeys.forEach(function (qk) {
+        totalHours += Number(entry.hoursByQuarter[qk]) || 0;
+      });
+      entry.totalHours = totalHours;
+      return entry;
+    });
+    rows.sort(function (a, b) {
+      if (a.specialtyPractice === 'Unclassified' && b.specialtyPractice !== 'Unclassified') return 1;
+      if (b.specialtyPractice === 'Unclassified' && a.specialtyPractice !== 'Unclassified') return -1;
+      return b.totalHours - a.totalHours;
+    });
+
+    const grandByQ = {};
+    qKeys.forEach(function (qk) { grandByQ[qk] = 0; });
+    rows.forEach(function (row) {
+      qKeys.forEach(function (qk) {
+        grandByQ[qk] += Number(row.hoursByQuarter[qk]) || 0;
+      });
+    });
+    const grandTotal = rows.reduce(function (sum, row) {
+      return sum + (Number(row.totalHours) || 0);
+    }, 0);
+
+    return {
+      qKeys: qKeys,
+      actualsCount: actualsQKeys.length,
+      curQk: curQk,
+      rows: rows,
+      grandByQ: grandByQ,
+      grandTotal: grandTotal,
+      teamMap: forecast.specialtyTeamMap || actuals.specialtyTeamMap || {}
+    };
+  }
+
+  /**
    * Format demand hours for specialty matrix (tabular numerals, rounded).
    * @param {number} hrs
    * @returns {string}
@@ -10096,60 +10191,244 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Render one specialty-demand cell: calm blue proportional bar + hours.
-   * @param {number} hrs cell hours
-   * @param {number} maxHrs max hours in column for bar scale
+   * QoQ % between two hour values.
+   * @param {number} curr
+   * @param {number} prev
+   * @returns {number|null}
+   */
+  function wfm25SpecialtyDemandQoqPct_(curr, prev) {
+    const c = Number(curr) || 0;
+    const p = Number(prev) || 0;
+    if (!p) return null;
+    return ((c - p) / p) * 100;
+  }
+
+  /**
+   * Format a matrix cell value for the active unit.
+   * @param {number} hrs raw hours
+   * @param {number} grandH quarter grand total hours
+   * @param {number|null} qoqPct quarter-over-quarter %
+   * @param {string} unit 'hours' | 'share' | 'qoq'
    * @returns {string}
    */
-  function wfm25SpecialtyDemandCellHtml_(hrs, maxHrs) {
-    const h = Number(hrs) || 0;
-    const max = Number(maxHrs) || 0;
-    const share = max > 0 ? Math.min(1, h / max) : 0;
-    return '<td class="wfm25-specialty-demand-cell">' +
+  function wfm25SpecialtyDemandFormatValue_(hrs, grandH, qoqPct, unit) {
+    if (unit === 'share') {
+      const share = grandH > 0 ? (Number(hrs) || 0) / grandH : 0;
+      return fmtPct1(share);
+    }
+    if (unit === 'qoq') {
+      if (qoqPct == null) return '\u2014';
+      const sign = qoqPct > 0 ? '+' : '';
+      return sign + qoqPct.toFixed(1) + '%';
+    }
+    return wfm25FormatDemandHours_(hrs);
+  }
+
+  /**
+   * QoQ directional arrow HTML (calm colors).
+   * @param {number|null} qoqPct
+   * @returns {string}
+   */
+  function wfm25SpecialtyDemandQoqArrow_(qoqPct) {
+    if (qoqPct == null) return '';
+    const eps = 0.05;
+    const cls = qoqPct > eps ? 'up' : (qoqPct < -eps ? 'down' : 'flat');
+    const arrow = cls === 'up' ? '\u2191' : (cls === 'down' ? '\u2193' : '\u2192');
+    return '<span class="wfm25-specialty-demand-qoq-arrow wfm25-specialty-demand-qoq-arrow--' +
+      cls + '" aria-hidden="true">' + arrow + '</span>';
+  }
+
+  /**
+   * Render one specialty-demand matrix cell with proportional bar.
+   * @param {Object} opts
+   * @returns {string}
+   */
+  function wfm25SpecialtyDemandCellHtml_(opts) {
+    const hrs = Number(opts.hrs) || 0;
+    const maxHrs = Number(opts.maxHrs) || 0;
+    const grandH = Number(opts.grandH) || 0;
+    const qoqPct = opts.qoqPct;
+    const unit = opts.unit || 'hours';
+    const barKind = opts.barKind || 'specialty';
+    const seamCls = opts.seamCls || '';
+
+    let barHtml = '';
+    if (unit === 'qoq') {
+      if (qoqPct != null) {
+        const cap = 50;
+        const pct = Math.max(-cap, Math.min(cap, qoqPct));
+        const width = (Math.abs(pct) / cap) * 50;
+        const pos = pct >= 0 ? 'right' : 'left';
+        barHtml =
+          '<span class="wfm25-specialty-demand-bar-wrap wfm25-specialty-demand-bar-wrap--qoq' +
+            (barKind === 'team' ? ' wfm25-specialty-demand-bar-wrap--team' : '') +
+            '" aria-hidden="true">' +
+            '<span class="wfm25-specialty-demand-bar-center"></span>' +
+            '<span class="wfm25-specialty-demand-bar wfm25-specialty-demand-bar--qoq' +
+              ' wfm25-specialty-demand-bar--qoq-' + pos +
+              (barKind === 'team' ? ' wfm25-specialty-demand-bar--team' : '') +
+              '" style="width:' + width.toFixed(1) + '%"></span>' +
+          '</span>';
+      } else {
+        barHtml = '<span class="wfm25-specialty-demand-bar-wrap wfm25-specialty-demand-bar-wrap--qoq" aria-hidden="true"></span>';
+      }
+    } else {
+      let share = 0;
+      if (unit === 'share') {
+        share = grandH > 0 ? Math.min(1, hrs / grandH) : 0;
+      } else {
+        share = maxHrs > 0 ? Math.min(1, hrs / maxHrs) : 0;
+      }
+      barHtml =
+        '<span class="wfm25-specialty-demand-bar-wrap' +
+          (barKind === 'team' ? ' wfm25-specialty-demand-bar-wrap--team' : '') +
+          '" aria-hidden="true">' +
+          '<span class="wfm25-specialty-demand-bar' +
+            (barKind === 'team' ? ' wfm25-specialty-demand-bar--team' : '') +
+            '" style="width:' + (share * 100).toFixed(1) + '%"></span>' +
+        '</span>';
+    }
+
+    const displayVal = wfm25SpecialtyDemandFormatValue_(hrs, grandH, qoqPct, unit);
+    const qoqArrow = unit === 'qoq' ? wfm25SpecialtyDemandQoqArrow_(qoqPct) : '';
+    const qoqCls = (unit === 'qoq' && qoqPct != null)
+      ? ' wfm25-specialty-demand-hours--qoq-' +
+        (qoqPct > 0.05 ? 'up' : (qoqPct < -0.05 ? 'down' : 'flat'))
+      : '';
+
+    return '<td class="wfm25-specialty-demand-cell' + seamCls + '">' +
       '<div class="wfm25-specialty-demand-cell-inner">' +
-        '<span class="wfm25-specialty-demand-bar-wrap" aria-hidden="true">' +
-          '<span class="wfm25-specialty-demand-bar" style="width:' +
-            (share * 100).toFixed(1) + '%"></span>' +
+        barHtml +
+        '<span class="wfm25-specialty-demand-hours' + qoqCls + '">' +
+          qoqArrow + displayVal +
         '</span>' +
-        '<span class="wfm25-specialty-demand-hours">' + wfm25FormatDemandHours_(h) + '</span>' +
       '</div></td>';
   }
 
   /**
-   * Build quarter header cells for a specialty demand table.
+   * Compute per-quarter max display magnitude for bar scaling.
+   * @param {string[]} qKeys
+   * @param {Object} grandByQ
+   * @param {Array} rows
+   * @param {string} unit
+   * @returns {Object<string,number>}
+   */
+  function wfm25SpecialtyDemandMaxByQuarter_(qKeys, grandByQ, rows, unit) {
+    const maxByQuarter = {};
+    qKeys.forEach(function (qk, qi) {
+      let max = 0;
+      if (unit === 'share') {
+        max = 1;
+      } else if (unit === 'qoq') {
+        const prevQk = qi > 0 ? qKeys[qi - 1] : null;
+        let maxAbs = 0;
+        (rows || []).forEach(function (row) {
+          const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
+          const prevH = prevQk ? (Number(row.hoursByQuarter && row.hoursByQuarter[prevQk]) || 0) : 0;
+          const pct = wfm25SpecialtyDemandQoqPct_(h, prevH);
+          if (pct != null && Math.abs(pct) > maxAbs) maxAbs = Math.abs(pct);
+        });
+        max = maxAbs || 50;
+      } else {
+        max = Number(grandByQ[qk]) || 0;
+        (rows || []).forEach(function (row) {
+          const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
+          if (h > max) max = h;
+        });
+      }
+      maxByQuarter[qk] = max;
+    });
+    return maxByQuarter;
+  }
+
+  /**
+   * Seam CSS class for actuals/forecast boundary columns.
+   * @param {number} colIdx
+   * @param {number} actualsCount
+   * @param {number} totalCols
+   * @returns {string}
+   */
+  function wfm25SpecialtyDemandSeamCls_(colIdx, actualsCount, totalCols) {
+    if (actualsCount > 0 && actualsCount < totalCols && colIdx === actualsCount - 1) {
+      return ' wfm25-specialty-demand-cell--actuals-end';
+    }
+    if (actualsCount > 0 && actualsCount < totalCols && colIdx === actualsCount) {
+      return ' wfm25-specialty-demand-cell--forecast-start';
+    }
+    return '';
+  }
+
+  /**
+   * Build zone + quarter header cells for the unified matrix.
+   * @param {HTMLElement} zoneRow
    * @param {HTMLElement} headerRow
    * @param {string[]} qKeys
-   * @param {string} [curQk] highlight current quarter (forecast only)
+   * @param {string} curQk
+   * @param {number} actualsCount
    */
-  function wfm25SpecialtyDemandHeaderCells_(headerRow, qKeys, curQk) {
+  function wfm25SpecialtyDemandHeaderCells_(zoneRow, headerRow, qKeys, curQk, actualsCount) {
     if (!headerRow) return;
+    if (zoneRow) {
+      $$('.wfm25-specialty-demand-zone-th', zoneRow).forEach(function (el) { el.remove(); });
+    }
     $$('.wfm25-specialty-demand-qth', headerRow).forEach(function (el) { el.remove(); });
-    qKeys.forEach(function (qk) {
+
+    const forecastCount = qKeys.length - actualsCount;
+    if (zoneRow && actualsCount > 0 && forecastCount > 0) {
+      zoneRow.hidden = false;
+      if (actualsCount > 0) {
+        const thA = document.createElement('th');
+        thA.className = 'wfm25-specialty-demand-zone-th wfm25-specialty-demand-zone-th--actuals';
+        thA.colSpan = actualsCount;
+        thA.scope = 'colgroup';
+        thA.textContent = 'ACTUALS';
+        zoneRow.appendChild(thA);
+      }
+      if (forecastCount > 0) {
+        const thF = document.createElement('th');
+        thF.className = 'wfm25-specialty-demand-zone-th wfm25-specialty-demand-zone-th--forecast';
+        thF.colSpan = forecastCount;
+        thF.scope = 'colgroup';
+        thF.textContent = 'FORECAST';
+        zoneRow.appendChild(thF);
+      }
+    } else if (zoneRow) {
+      zoneRow.hidden = true;
+    }
+
+    qKeys.forEach(function (qk, i) {
       const th = document.createElement('th');
-      th.className = 'wfm25-specialty-demand-qth' + (curQk && qk === curQk ? ' wfm25-cur-qth' : '');
+      let cls = 'wfm25-specialty-demand-qth';
+      if (curQk && qk === curQk) cls += ' wfm25-cur-qth';
+      cls += wfm25SpecialtyDemandSeamCls_(i, actualsCount, qKeys.length)
+        .replace(/wfm25-specialty-demand-cell/g, 'wfm25-specialty-demand-qth');
+      th.className = cls;
+      th.scope = 'col';
       th.textContent = qk + (curQk && qk === curQk ? ' \u25c6' : '');
       headerRow.appendChild(th);
     });
   }
 
   /**
-   * Compute per-quarter max hours for bar scaling.
-   * @param {string[]} qKeys
-   * @param {Object} grandByQ
-   * @param {Array} rows
-   * @returns {Object<string,number>}
+   * Info tooltip button for Other / Unmapped group.
+   * @returns {string}
    */
-  function wfm25SpecialtyDemandMaxByQuarter_(qKeys, grandByQ, rows) {
-    const maxByQuarter = {};
-    qKeys.forEach(function (qk) {
-      let max = Number(grandByQ[qk]) || 0;
-      (rows || []).forEach(function (row) {
-        const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
-        if (h > max) max = h;
-      });
-      maxByQuarter[qk] = max;
-    });
-    return maxByQuarter;
+  function wfm25SpecialtyDemandOtherInfoBtn_() {
+    return '<button type="button" class="wfm25-specialty-demand-info-btn"' +
+      ' aria-label="About Other / Unmapped"' +
+      ' title="' + escapeHtml_(WFM25_SD_OTHER_UNMAPPED_TIP_) + '">' +
+      '<span aria-hidden="true">i</span></button>';
+  }
+
+  /**
+   * Whether a specialty-demand selection matches a row.
+   * @param {Object|null} sel
+   * @param {string} kind 'team' | 'specialty'
+   * @param {string} label
+   * @returns {boolean}
+   */
+  function wfm25SpecialtyDemandIsSelected_(sel, kind, label) {
+    return !!(sel && sel.kind === kind && sel.label === label);
   }
 
   /**
@@ -10163,15 +10442,26 @@ async function _qaRefreshPsaHours_() {
     const grandByQ = opts.grandByQ || {};
     const teamMap = opts.teamMap || {};
     const collapsedTeams = opts.collapsedTeams || new Set();
-    const sectionKey = opts.sectionKey || 'forecast';
-    const enableSubSpecialty = !!opts.enableSubSpecialty;
-    const expandedSpecs = opts.expandedSpecs || new Set();
-    const maxByQuarter = wfm25SpecialtyDemandMaxByQuarter_(qKeys, grandByQ, rows);
+    const actualsCount = opts.actualsCount || 0;
+    const unit = opts.unit || 'hours';
+    const selection = opts.selection || null;
+    const maxByQuarter = wfm25SpecialtyDemandMaxByQuarter_(qKeys, grandByQ, rows, unit);
     const teamGroups = wfm25GroupSpecialtyRowsByTeam_(rows, qKeys, teamMap);
     const html = [];
 
-    const totalRowCells = qKeys.map(function (qk) {
-      return wfm25SpecialtyDemandCellHtml_(grandByQ[qk], maxByQuarter[qk]);
+    const totalRowCells = qKeys.map(function (qk, qi) {
+      const h = Number(grandByQ[qk]) || 0;
+      const prevQk = qi > 0 ? qKeys[qi - 1] : null;
+      const prevH = prevQk ? (Number(grandByQ[prevQk]) || 0) : 0;
+      return wfm25SpecialtyDemandCellHtml_({
+        hrs: h,
+        maxHrs: maxByQuarter[qk],
+        grandH: h,
+        qoqPct: wfm25SpecialtyDemandQoqPct_(h, prevH),
+        unit: unit,
+        barKind: 'team',
+        seamCls: wfm25SpecialtyDemandSeamCls_(qi, actualsCount, qKeys.length)
+      });
     }).join('');
     html.push(
       '<tr class="wfm25-specialty-demand-total-row">' +
@@ -10181,26 +10471,50 @@ async function _qaRefreshPsaHours_() {
     teamGroups.forEach(function (group) {
       const isCollapsed = collapsedTeams.has(group.label);
       const isOther = group.label === 'Other / Unmapped';
+      const teamSelected = wfm25SpecialtyDemandIsSelected_(selection, 'team', group.label);
       const teamCls = 'wfm25-specialty-demand-team-row' +
-        (isOther ? ' wfm25-specialty-demand-team-row--other' : '');
+        (isOther ? ' wfm25-specialty-demand-team-row--other' : '') +
+        (teamSelected ? ' is-selected' : '');
       const teamColor = wfm25TeamColor_(group.label);
-      const teamCells = qKeys.map(function (qk) {
-        return wfm25SpecialtyDemandCellHtml_(
-          group.hoursByQuarter[qk], maxByQuarter[qk]
-        );
+      const teamCells = qKeys.map(function (qk, qi) {
+        const h = Number(group.hoursByQuarter[qk]) || 0;
+        const prevQk = qi > 0 ? qKeys[qi - 1] : null;
+        const prevH = prevQk ? (Number(group.hoursByQuarter[prevQk]) || 0) : 0;
+        return wfm25SpecialtyDemandCellHtml_({
+          hrs: h,
+          maxHrs: maxByQuarter[qk],
+          grandH: Number(grandByQ[qk]) || 0,
+          qoqPct: wfm25SpecialtyDemandQoqPct_(h, prevH),
+          unit: unit,
+          barKind: 'team',
+          seamCls: wfm25SpecialtyDemandSeamCls_(qi, actualsCount, qKeys.length)
+        });
       }).join('');
+
+      const infoBtn = isOther ? wfm25SpecialtyDemandOtherInfoBtn_() : '';
       html.push(
-        '<tr class="' + teamCls + '">' +
+        '<tr class="' + teamCls + '" data-wfm25-sd-select-kind="team"' +
+          ' data-wfm25-sd-select-label="' + escapeHtml_(group.label) + '">' +
           '<td class="wfm25-specialty-demand-team-label">' +
-            '<button type="button" class="wfm25-specialty-demand-team-btn"' +
-              ' data-wfm25-sd-section="' + escapeHtml_(sectionKey) + '"' +
-              ' data-wfm25-sd-team="' + escapeHtml_(group.label) + '"' +
-              ' aria-expanded="' + (!isCollapsed) + '">' +
-              '<span class="wfm25-team-swatch" style="background:' + teamColor + '"></span>' +
-              '<span class="wfm25-specialty-demand-team-chev" aria-hidden="true">' +
-                (isCollapsed ? '\u25b6' : '\u25bc') + '</span>' +
-              '<span class="wfm25-specialty-demand-team-name">' + escapeHtml_(group.label) + '</span>' +
-            '</button>' +
+            '<div class="wfm25-specialty-demand-team-label-inner">' +
+              '<button type="button" class="wfm25-specialty-demand-team-btn"' +
+                ' data-wfm25-sd-team="' + escapeHtml_(group.label) + '"' +
+                ' aria-expanded="' + (!isCollapsed) + '"' +
+                ' aria-label="Toggle ' + escapeHtml_(group.label) + ' specialties">' +
+                '<span class="wfm25-team-swatch" style="background:' + teamColor + '"></span>' +
+                '<span class="wfm25-specialty-demand-team-chev" aria-hidden="true">' +
+                  (isCollapsed ? '\u25b6' : '\u25bc') + '</span>' +
+              '</button>' +
+              '<button type="button" class="wfm25-specialty-demand-select-btn' +
+                (teamSelected ? ' is-selected' : '') + '"' +
+                ' data-wfm25-sd-select-kind="team"' +
+                ' data-wfm25-sd-select-label="' + escapeHtml_(group.label) + '"' +
+                ' aria-pressed="' + (teamSelected ? 'true' : 'false') + '">' +
+                '<span class="wfm25-specialty-demand-team-name">' +
+                  escapeHtml_(group.label) + '</span>' +
+                infoBtn +
+              '</button>' +
+            '</div>' +
           '</td>' +
           teamCells +
         '</tr>'
@@ -10210,56 +10524,39 @@ async function _qaRefreshPsaHours_() {
         group.rows.forEach(function (row) {
           const sp = String(row.specialtyPractice || 'Unclassified');
           const isUnclassified = sp === 'Unclassified' || sp === 'Student';
+          const specSelected = wfm25SpecialtyDemandIsSelected_(selection, 'specialty', sp);
           const rowCls = 'wfm25-specialty-demand-row' +
-            (isUnclassified ? ' wfm25-specialty-demand-row--unclassified' : '');
-          const cells = qKeys.map(function (qk) {
+            (isUnclassified ? ' wfm25-specialty-demand-row--unclassified' : '') +
+            (specSelected ? ' is-selected' : '');
+          const cells = qKeys.map(function (qk, qi) {
             const h = Number(row.hoursByQuarter && row.hoursByQuarter[qk]) || 0;
-            return wfm25SpecialtyDemandCellHtml_(h, maxByQuarter[qk]);
+            const prevQk = qi > 0 ? qKeys[qi - 1] : null;
+            const prevH = prevQk ? (Number(row.hoursByQuarter && row.hoursByQuarter[prevQk]) || 0) : 0;
+            return wfm25SpecialtyDemandCellHtml_({
+              hrs: h,
+              maxHrs: maxByQuarter[qk],
+              grandH: Number(grandByQ[qk]) || 0,
+              qoqPct: wfm25SpecialtyDemandQoqPct_(h, prevH),
+              unit: unit,
+              barKind: 'specialty',
+              seamCls: wfm25SpecialtyDemandSeamCls_(qi, actualsCount, qKeys.length)
+            });
           }).join('');
-          const subRows = enableSubSpecialty ? (row.subRows || []) : [];
-          const hasSub = subRows.length > 0;
-          const isSpecExpanded = expandedSpecs.has(sp);
-
-          let labelHtml;
-          if (hasSub) {
-            labelHtml =
-              '<button type="button" class="wfm25-specialty-demand-spec-btn"' +
-                ' data-wfm25-sd-spec="' + escapeHtml_(sp) + '"' +
-                ' aria-expanded="' + isSpecExpanded + '">' +
-                '<span class="wfm25-specialty-demand-spec-chev" aria-hidden="true">' +
-                  (isSpecExpanded ? '\u25bc' : '\u25b6') + '</span>' +
-                '<span>' + escapeHtml_(sp) + '</span>' +
-              '</button>';
-          } else {
-            labelHtml = escapeHtml_(sp);
-          }
 
           html.push(
             '<tr class="' + rowCls + '">' +
-              '<td class="wfm25-specialty-demand-label">' + labelHtml + '</td>' +
+              '<td class="wfm25-specialty-demand-label">' +
+                '<button type="button" class="wfm25-specialty-demand-select-btn' +
+                  (specSelected ? ' is-selected' : '') + '"' +
+                  ' data-wfm25-sd-select-kind="specialty"' +
+                  ' data-wfm25-sd-select-label="' + escapeHtml_(sp) + '"' +
+                  ' aria-pressed="' + (specSelected ? 'true' : 'false') + '">' +
+                  escapeHtml_(sp) +
+                '</button>' +
+              '</td>' +
               cells +
             '</tr>'
           );
-
-          if (hasSub && isSpecExpanded) {
-            subRows.forEach(function (subRow) {
-              const subSp = String(subRow.subSpecialtyPractice || 'Unclassified');
-              const isSubUnclassified = subSp === 'Unclassified';
-              const subCls = 'wfm25-specialty-demand-sub-row' +
-                (isSubUnclassified ? ' wfm25-specialty-demand-row--unclassified' : '');
-              const subCells = qKeys.map(function (qk) {
-                const sh = Number(subRow.hoursByQuarter && subRow.hoursByQuarter[qk]) || 0;
-                return wfm25SpecialtyDemandCellHtml_(sh, maxByQuarter[qk]);
-              }).join('');
-              html.push(
-                '<tr class="' + subCls + '">' +
-                  '<td class="wfm25-specialty-demand-label wfm25-specialty-demand-sub-label">' +
-                    escapeHtml_(subSp) + '</td>' +
-                  subCells +
-                '</tr>'
-              );
-            });
-          }
         });
       }
     });
@@ -10268,149 +10565,499 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Wire collapse/expand controls for a specialty demand table body.
-   * @param {HTMLElement} body
-   * @param {string} sectionKey 'forecast' | 'actuals'
+   * Resolve hours-by-quarter for a selection (team subtotal or specialty row).
+   * @param {Object} merged
+   * @param {Object} sel { kind, label }
+   * @returns {Object<string,number>}
    */
-  function wfm25WireSpecialtyDemandEvents_(body, sectionKey) {
+  function wfm25SpecialtyDemandHoursForSelection_(merged, sel) {
+    const out = {};
+    (merged.qKeys || []).forEach(function (qk) { out[qk] = 0; });
+    if (!sel || !merged) return out;
+
+    if (sel.kind === 'specialty') {
+      const row = (merged.rows || []).find(function (r) {
+        return r.specialtyPractice === sel.label;
+      });
+      if (row) {
+        merged.qKeys.forEach(function (qk) {
+          out[qk] = Number(row.hoursByQuarter[qk]) || 0;
+        });
+      }
+      return out;
+    }
+
+    const groups = wfm25GroupSpecialtyRowsByTeam_(merged.rows, merged.qKeys, merged.teamMap);
+    const group = groups.find(function (g) { return g.label === sel.label; });
+    if (group) {
+      merged.qKeys.forEach(function (qk) {
+        out[qk] = Number(group.hoursByQuarter[qk]) || 0;
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Default selection: top specialty by current-quarter demand hours.
+   * @param {Object} merged
+   * @returns {{kind:string, label:string}}
+   */
+  function wfm25SpecialtyDemandDefaultSelection_(merged) {
+    const curQk = merged.curQk;
+    let topSp = '';
+    let topH = -1;
+    (merged.rows || []).forEach(function (row) {
+      const h = Number(row.hoursByQuarter && row.hoursByQuarter[curQk]) || 0;
+      if (h > topH) {
+        topH = h;
+        topSp = row.specialtyPractice;
+      }
+    });
+    if (!topSp && merged.rows.length) topSp = merged.rows[0].specialtyPractice;
+    return { kind: 'specialty', label: topSp || 'Unclassified' };
+  }
+
+  /**
+   * Build banner summary metrics (static, whole-org).
+   * @param {Object} merged
+   * @param {string} unit
+   * @returns {Object}
+   */
+  function wfm25BuildSpecialtyDemandBanner_(merged, unit) {
+    const curQk = merged.curQk;
+    const qKeys = merged.qKeys || [];
+    const curIdx = qKeys.indexOf(curQk);
+    const prevQk = curIdx > 0 ? qKeys[curIdx - 1] : null;
+    const lastActualQk = merged.actualsCount > 0 ? qKeys[merged.actualsCount - 1] : null;
+
+    let topSp = '';
+    let topVal = 0;
+    (merged.rows || []).forEach(function (row) {
+      const h = Number(row.hoursByQuarter[curQk]) || 0;
+      let val = h;
+      if (unit === 'share') {
+        const grand = Number(merged.grandByQ[curQk]) || 0;
+        val = grand > 0 ? h / grand : 0;
+      } else if (unit === 'qoq') {
+        const prevH = prevQk ? (Number(row.hoursByQuarter[prevQk]) || 0) : 0;
+        val = Math.abs(wfm25SpecialtyDemandQoqPct_(h, prevH) || 0);
+        if (val > topVal) {
+          topVal = val;
+          topSp = row.specialtyPractice;
+        }
+        return;
+      }
+      if (val > topVal) {
+        topVal = val;
+        topSp = row.specialtyPractice;
+      }
+    });
+
+    let biggestMoverSp = '';
+    let biggestMoverPct = 0;
+    (merged.rows || []).forEach(function (row) {
+      const h = Number(row.hoursByQuarter[curQk]) || 0;
+      const prevH = prevQk ? (Number(row.hoursByQuarter[prevQk]) || 0) : 0;
+      const pct = wfm25SpecialtyDemandQoqPct_(h, prevH);
+      if (pct != null && Math.abs(pct) > Math.abs(biggestMoverPct)) {
+        biggestMoverPct = pct;
+        biggestMoverSp = row.specialtyPractice;
+      }
+    });
+
+    let totalForecast = 0;
+    qKeys.forEach(function (qk, i) {
+      if (i >= merged.actualsCount) {
+        totalForecast += Number(merged.grandByQ[qk]) || 0;
+      }
+    });
+
+    let forecastVsActualsPct = null;
+    if (lastActualQk) {
+      const forecastH = Number(merged.grandByQ[curQk]) || 0;
+      const actualH = Number(merged.grandByQ[lastActualQk]) || 0;
+      if (actualH > 0) forecastVsActualsPct = ((forecastH - actualH) / actualH) * 100;
+    }
+
+    let heroDisplay = wfm25FormatDemandHours_(topVal);
+    if (unit === 'share') heroDisplay = fmtPct1(topVal);
+    if (unit === 'qoq' && topSp) {
+      const row = merged.rows.find(function (r) { return r.specialtyPractice === topSp; });
+      const h = row ? (Number(row.hoursByQuarter[curQk]) || 0) : 0;
+      const prevH = prevQk ? (Number(row.hoursByQuarter[prevQk]) || 0) : 0;
+      const pct = wfm25SpecialtyDemandQoqPct_(h, prevH);
+      heroDisplay = pct != null ? ((pct >= 0 ? '+' : '') + pct.toFixed(1) + '%') : '\u2014';
+    }
+
+    return {
+      topPractice: topSp,
+      heroDisplay: heroDisplay,
+      totalForecast: totalForecast,
+      biggestMoverSp: biggestMoverSp,
+      biggestMoverPct: biggestMoverPct,
+      forecastVsActualsPct: forecastVsActualsPct
+    };
+  }
+
+  /**
+   * Render static metrics banner card.
+   * @param {Object} merged
+   */
+  function renderWFM25SpecialtyDemandBanner_(merged) {
+    const banner = document.getElementById('wfm25SpecialtyDemandBanner');
+    if (!banner || !merged) return;
+
+    const unit = WFM25State.specialtyDemandUnit || 'hours';
+    const bs = wfm25BuildSpecialtyDemandBanner_(merged, unit);
+    const moverArrow = wfm25SpecialtyDemandQoqArrow_(bs.biggestMoverPct);
+    const moverSign = bs.biggestMoverPct >= 0 ? '+' : '';
+    const moverText = bs.biggestMoverSp
+      ? escapeHtml_(bs.biggestMoverSp) + ' ' + moverArrow +
+        '<span class="wfm25-specialty-demand-banner-mover-pct">' +
+          moverSign + bs.biggestMoverPct.toFixed(1) + '%</span>'
+      : '\u2014';
+
+    let fvaText = '\u2014';
+    if (bs.forecastVsActualsPct != null) {
+      const sign = bs.forecastVsActualsPct >= 0 ? '+' : '';
+      fvaText = sign + bs.forecastVsActualsPct.toFixed(1) + '%';
+    }
+
+    banner.innerHTML =
+      '<div class="wfm25-specialty-demand-banner-grid">' +
+        '<div class="wfm25-specialty-demand-banner-tile wfm25-specialty-demand-banner-tile--hero">' +
+          '<div class="wfm25-specialty-demand-banner-label">Top Demand Practice</div>' +
+          '<div class="wfm25-specialty-demand-banner-value">' + escapeHtml_(bs.topPractice || '\u2014') + '</div>' +
+          '<div class="wfm25-specialty-demand-banner-meta">' +
+            '<span class="wfm25-specialty-demand-banner-hero-val">' + bs.heroDisplay + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="wfm25-specialty-demand-banner-tile">' +
+          '<div class="wfm25-specialty-demand-banner-label">Total Forecast Demand</div>' +
+          '<div class="wfm25-specialty-demand-banner-value">' +
+            wfm25FormatDemandHours_(bs.totalForecast) + 'h</div>' +
+        '</div>' +
+        '<div class="wfm25-specialty-demand-banner-tile">' +
+          '<div class="wfm25-specialty-demand-banner-label">Biggest Mover</div>' +
+          '<div class="wfm25-specialty-demand-banner-value wfm25-specialty-demand-banner-value--sm">' +
+            moverText + '</div>' +
+        '</div>' +
+        '<div class="wfm25-specialty-demand-banner-tile">' +
+          '<div class="wfm25-specialty-demand-banner-label">Forecast vs Recent Actuals</div>' +
+          '<div class="wfm25-specialty-demand-banner-value">' + fvaText + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<p class="wfm25-specialty-demand-banner-caption muted">Whole org \u00b7 forward-looking</p>';
+  }
+
+  /**
+   * Mini bar-trend chart for the detail panel (no charting library).
+   * @param {string[]} qKeys
+   * @param {Object} hoursByQuarter
+   * @param {string} curQk
+   * @param {number} actualsCount
+   * @returns {string}
+   */
+  function wfm25SpecialtyDemandTrendChartHtml_(qKeys, hoursByQuarter, curQk, actualsCount) {
+    const plotH = 72;
+    const values = qKeys.map(function (qk) {
+      return Number(hoursByQuarter[qk]) || 0;
+    });
+    const maxH = Math.max.apply(null, values.concat([1]));
+    const barsMinW = qKeys.length * 36;
+
+    const barsHtml = qKeys.map(function (qk, i) {
+      const h = Number(hoursByQuarter[qk]) || 0;
+      const barPx = Math.max(2, (h / maxH) * plotH);
+      const isCur = qk === curQk;
+      const kindCls = i < actualsCount ? 'actuals' : 'forecast';
+      return '<div class="wfm25-specialty-demand-trend-slot wfm25-specialty-demand-trend-slot--' + kindCls + '">' +
+        '<div class="wfm25-specialty-demand-trend-col">' +
+          '<div class="wfm25-specialty-demand-trend-bar" style="height:' + barPx.toFixed(1) + 'px"></div>' +
+        '</div>' +
+        '<div class="wfm25-specialty-demand-trend-label">' +
+          escapeHtml_(qk) + (isCur ? ' \u25c6' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="wfm25-specialty-demand-trend" role="img" aria-label="Demand trend across quarters">' +
+      '<div class="wfm25-specialty-demand-trend-plot" style="min-width:' + barsMinW + 'px">' +
+        barsHtml +
+      '</div>' +
+    '</div>';
+  }
+
+  /**
+   * Sub-specialty breakdown rows for actuals quarters (detail panel only).
+   * @param {Object} merged
+   * @param {Object} sel
+   * @returns {string}
+   */
+  function wfm25SpecialtyDemandSubBreakdownHtml_(merged, sel) {
+    const actualsKeys = (merged.qKeys || []).slice(0, merged.actualsCount);
+    if (!actualsKeys.length) return '';
+
+    const subMap = {};
+    function addSubRows_(subRows) {
+      (subRows || []).forEach(function (sub) {
+        const name = String(sub.subSpecialtyPractice || 'Unclassified');
+        if (!subMap[name]) {
+          subMap[name] = {};
+          actualsKeys.forEach(function (qk) { subMap[name][qk] = 0; });
+        }
+        actualsKeys.forEach(function (qk) {
+          subMap[name][qk] += Number(sub.hoursByQuarter && sub.hoursByQuarter[qk]) || 0;
+        });
+      });
+    }
+
+    if (sel.kind === 'specialty') {
+      const row = (merged.rows || []).find(function (r) {
+        return r.specialtyPractice === sel.label;
+      });
+      if (row && row.subRows) addSubRows_(row.subRows);
+    } else {
+      const groups = wfm25GroupSpecialtyRowsByTeam_(merged.rows, merged.qKeys, merged.teamMap);
+      const group = groups.find(function (g) { return g.label === sel.label; });
+      if (group) {
+        group.rows.forEach(function (row) {
+          if (row.subRows) addSubRows_(row.subRows);
+        });
+      }
+    }
+
+    const names = Object.keys(subMap).sort(function (a, b) {
+      const totA = actualsKeys.reduce(function (s, qk) { return s + subMap[a][qk]; }, 0);
+      const totB = actualsKeys.reduce(function (s, qk) { return s + subMap[b][qk]; }, 0);
+      return totB - totA;
+    });
+    if (!names.length) return '';
+
+    const rowsHtml = names.map(function (name) {
+      const cells = actualsKeys.map(function (qk) {
+        return '<td class="wfm25-specialty-demand-sub-cell">' +
+          wfm25FormatDemandHours_(subMap[name][qk]) + '</td>';
+      }).join('');
+      return '<tr><td class="wfm25-specialty-demand-sub-name">' + escapeHtml_(name) + '</td>' + cells + '</tr>';
+    }).join('');
+
+    const headCells = actualsKeys.map(function (qk) {
+      return '<th scope="col">' + escapeHtml_(qk) + '</th>';
+    }).join('');
+
+    return '<div class="wfm25-specialty-demand-detail-section">' +
+      '<h4 class="wfm25-specialty-demand-detail-subtitle">Sub-specialty breakdown \u00b7 Actuals</h4>' +
+      '<div class="table-wrap">' +
+        '<table class="wfm25-specialty-demand-sub-table">' +
+          '<thead><tr><th scope="col">Sub-specialty</th>' + headCells + '</tr></thead>' +
+          '<tbody>' + rowsHtml + '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /**
+   * Top specialties within a team for the detail panel.
+   * @param {Object} merged
+   * @param {string} teamLabel
+   * @returns {string}
+   */
+  function wfm25SpecialtyDemandTopSpecsHtml_(merged, teamLabel) {
+    const groups = wfm25GroupSpecialtyRowsByTeam_(merged.rows, merged.qKeys, merged.teamMap);
+    const group = groups.find(function (g) { return g.label === teamLabel; });
+    if (!group || !group.rows.length) return '';
+
+    const curQk = merged.curQk;
+    const sorted = group.rows.slice().sort(function (a, b) {
+      const ha = Number(a.hoursByQuarter[curQk]) || 0;
+      const hb = Number(b.hoursByQuarter[curQk]) || 0;
+      return hb - ha;
+    }).slice(0, 5);
+
+    const maxH = Math.max.apply(null, sorted.map(function (r) {
+      return Number(r.hoursByQuarter[curQk]) || 0;
+    }).concat([1]));
+
+    const rowsHtml = sorted.map(function (row) {
+      const h = Number(row.hoursByQuarter[curQk]) || 0;
+      const share = maxH > 0 ? h / maxH : 0;
+      return '<div class="wfm25-specialty-demand-detail-spec-row">' +
+        '<span class="wfm25-specialty-demand-detail-spec-name">' +
+          escapeHtml_(row.specialtyPractice) + '</span>' +
+        '<span class="wfm25-specialty-demand-detail-spec-hours">' +
+          wfm25FormatDemandHours_(h) + 'h</span>' +
+        '<div class="wfm25-specialty-demand-detail-spec-bar-wrap" aria-hidden="true">' +
+          '<div class="wfm25-specialty-demand-detail-spec-bar" style="width:' +
+            (share * 100).toFixed(1) + '%"></div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="wfm25-specialty-demand-detail-section">' +
+      '<h4 class="wfm25-specialty-demand-detail-subtitle">Top specialties \u00b7 ' +
+        escapeHtml_(curQk) + '</h4>' +
+      '<div class="wfm25-specialty-demand-detail-spec-list">' + rowsHtml + '</div>' +
+    '</div>';
+  }
+
+  /**
+   * Render Practice Detail panel for the current selection.
+   * @param {Object} merged
+   */
+  function renderWFM25SpecialtyDemandDetail_(merged) {
+    const detail = document.getElementById('wfm25SpecialtyDemandDetail');
+    if (!detail || !merged) return;
+
+    let sel = WFM25State.specialtyDemandSelection;
+    if (!sel) {
+      sel = wfm25SpecialtyDemandDefaultSelection_(merged);
+      WFM25State.specialtyDemandSelection = sel;
+    }
+
+    const hoursByQ = wfm25SpecialtyDemandHoursForSelection_(merged, sel);
+    const curQk = merged.curQk;
+    const curH = Number(hoursByQ[curQk]) || 0;
+    const qKeys = merged.qKeys || [];
+    const curIdx = qKeys.indexOf(curQk);
+    const prevQk = curIdx > 0 ? qKeys[curIdx - 1] : null;
+    const prevH = prevQk ? (Number(hoursByQ[prevQk]) || 0) : 0;
+    const qoqPct = wfm25SpecialtyDemandQoqPct_(curH, prevH);
+    const qoqHtml = qoqPct != null
+      ? wfm25SpecialtyDemandQoqArrow_(qoqPct) + ' ' +
+        (qoqPct >= 0 ? '+' : '') + qoqPct.toFixed(1) + '%'
+      : '\u2014';
+
+    const title = sel.kind === 'team' ? sel.label : sel.label;
+    const trendHtml = wfm25SpecialtyDemandTrendChartHtml_(
+      qKeys, hoursByQ, curQk, merged.actualsCount
+    );
+    const topSpecsHtml = sel.kind === 'team'
+      ? wfm25SpecialtyDemandTopSpecsHtml_(merged, sel.label)
+      : '';
+    const subHtml = wfm25SpecialtyDemandSubBreakdownHtml_(merged, sel);
+
+    detail.innerHTML =
+      '<div class="wfm25-specialty-demand-detail-header">' +
+        '<h3 class="wfm25-specialty-demand-detail-title">' + escapeHtml_(title) + '</h3>' +
+        '<div class="wfm25-specialty-demand-detail-cur">' +
+          '<span class="wfm25-specialty-demand-detail-cur-val">' +
+            wfm25FormatDemandHours_(curH) + 'h</span>' +
+          '<span class="wfm25-specialty-demand-detail-cur-q">' + escapeHtml_(curQk) + '</span>' +
+          '<span class="wfm25-specialty-demand-detail-qoq">' + qoqHtml + '</span>' +
+        '</div>' +
+      '</div>' +
+      trendHtml +
+      topSpecsHtml +
+      subHtml;
+  }
+
+  /**
+   * Wire matrix interactions: collapse, selection, unit toggle.
+   * @param {HTMLElement} body
+   */
+  function wfm25WireSpecialtyDemandEvents_(body) {
     if (!body) return;
+
     $$('.wfm25-specialty-demand-team-btn', body).forEach(function (btn) {
-      btn.addEventListener('click', function () {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
         const team = btn.getAttribute('data-wfm25-sd-team');
-        const collapsedSet = sectionKey === 'actuals'
-          ? WFM25State.specialtyActualsCollapsedTeams
-          : WFM25State.specialtyDemandCollapsedTeams;
+        const collapsedSet = WFM25State.specialtyDemandCollapsedTeams;
         if (collapsedSet.has(team)) {
           collapsedSet.delete(team);
         } else {
           collapsedSet.add(team);
         }
-        if (sectionKey === 'actuals') {
-          renderWFM25SpecialtyActuals_(WFM25State.specialtyActualsData);
-        } else {
-          renderWFM25SpecialtyDemand_(WFM25State.specialtyDemandData);
-        }
+        renderWFM25SpecialtyDemand_();
       });
     });
-    if (sectionKey === 'actuals') {
-      $$('.wfm25-specialty-demand-spec-btn', body).forEach(function (btn) {
+
+    $$('.wfm25-specialty-demand-select-btn', body).forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        WFM25State.specialtyDemandSelection = {
+          kind: btn.getAttribute('data-wfm25-sd-select-kind'),
+          label: btn.getAttribute('data-wfm25-sd-select-label')
+        };
+        renderWFM25SpecialtyDemand_();
+      });
+    });
+
+    const toggle = document.getElementById('wfm25SpecialtyDemandUnitToggle');
+    if (toggle && !toggle.dataset.wfm25SdWired) {
+      toggle.dataset.wfm25SdWired = '1';
+      $$('button[data-wfm25-sd-unit]', toggle).forEach(function (btn) {
         btn.addEventListener('click', function () {
-          const sp = btn.getAttribute('data-wfm25-sd-spec');
-          if (WFM25State.specialtyActualsExpandedSpecs.has(sp)) {
-            WFM25State.specialtyActualsExpandedSpecs.delete(sp);
-          } else {
-            WFM25State.specialtyActualsExpandedSpecs.add(sp);
-          }
-          renderWFM25SpecialtyActuals_(WFM25State.specialtyActualsData);
+          WFM25State.specialtyDemandUnit = btn.getAttribute('data-wfm25-sd-unit');
+          renderWFM25SpecialtyDemand_();
         });
       });
     }
   }
 
   /**
-   * Render Forecast Specialty Demand matrix from api_getSpecialtyDemand payload.
-   * @param {Object} data api_getSpecialtyDemand result
+   * Sync unit-toggle aria-pressed states.
    */
-  function renderWFM25SpecialtyDemand_(data) {
-    const empty = document.getElementById('wfm25SpecialtyDemandEmpty');
-    const content = document.getElementById('wfm25SpecialtyDemandContent');
-    const headerRow = document.getElementById('wfm25SpecialtyDemandHeaderRow');
-    const body = document.getElementById('wfm25SpecialtyDemandBody');
-    const coverage = document.getElementById('wfm25SpecialtyDemandCoverage');
-    const divider = document.getElementById('wfm25SpecialtyDemandDivider');
-    if (!headerRow || !body) return;
-
-    const qKeys = data && data.quarters ? data.quarters : [];
-    const curQk = (data && data.currentQuarterKey)
-      ? data.currentQuarterKey
-      : fiscalQuarterKey_(new Date());
-    const rows = (data && data.rows) ? data.rows : [];
-    const grandTotal = Number(data && data.grandTotal) || 0;
-    const grandByQ = (data && data.grandTotalByQuarter) ? data.grandTotalByQuarter : {};
-    const teamMap = (data && data.specialtyTeamMap) ? data.specialtyTeamMap : {};
-
-    if (!grandTotal || !rows.length) {
-      if (empty) empty.hidden = false;
-      if (content) content.hidden = true;
-      if (divider) divider.hidden = true;
-      return;
-    }
-
-    if (empty) empty.hidden = true;
-    if (content) content.hidden = false;
-    if (divider) divider.hidden = false;
-
-    wfm25SpecialtyDemandHeaderCells_(headerRow, qKeys, curQk);
-    body.innerHTML = wfm25SpecialtyDemandBodyHtml_({
-      qKeys: qKeys,
-      rows: rows,
-      grandByQ: grandByQ,
-      teamMap: teamMap,
-      collapsedTeams: WFM25State.specialtyDemandCollapsedTeams,
-      sectionKey: 'forecast',
-      enableSubSpecialty: false
+  function wfm25SyncSpecialtyDemandUnitToggle_() {
+    const unit = WFM25State.specialtyDemandUnit || 'hours';
+    const toggle = document.getElementById('wfm25SpecialtyDemandUnitToggle');
+    if (!toggle) return;
+    $$('button[data-wfm25-sd-unit]', toggle).forEach(function (btn) {
+      const on = btn.getAttribute('data-wfm25-sd-unit') === unit;
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
-    wfm25WireSpecialtyDemandEvents_(body, 'forecast');
-
-    if (coverage) {
-      const unclassifiedHrs = rows.reduce(function (sum, row) {
-        if (String(row.specialtyPractice || '') !== 'Unclassified') return sum;
-        return sum + (Number(row.totalHours) || 0);
-      }, 0);
-      const pct = grandTotal > 0 ? (unclassifiedHrs / grandTotal) * 100 : 0;
-      if (pct >= 20) {
-        coverage.hidden = false;
-        coverage.textContent = 'Specialty unavailable for ' +
-          Math.round(pct) + '% of forecast demand';
-      } else {
-        coverage.hidden = true;
-        coverage.textContent = '';
-      }
-    }
   }
 
   /**
-   * Render Actuals by Specialty matrix from api_getSpecialtyActuals payload.
-   * @param {Object} data api_getSpecialtyActuals result
+   * Render unified Specialty Demand tab (banner + matrix + detail).
+   * @param {Object|null} forecastData api_getSpecialtyDemand result
+   * @param {Object|null} actualsData api_getSpecialtyActuals result
    */
-  function renderWFM25SpecialtyActuals_(data) {
-    const section = document.getElementById('wfm25SpecialtyDemandActualsSection');
-    const empty = document.getElementById('wfm25SpecialtyActualsEmpty');
-    const content = document.getElementById('wfm25SpecialtyActualsContent');
-    const headerRow = document.getElementById('wfm25SpecialtyActualsHeaderRow');
-    const body = document.getElementById('wfm25SpecialtyActualsBody');
-    if (!headerRow || !body) return;
+  function renderWFM25SpecialtyDemand_(forecastData, actualsData) {
+    const empty = document.getElementById('wfm25SpecialtyDemandEmpty');
+    const layout = document.getElementById('wfm25SpecialtyDemandLayout');
+    const zoneRow = document.getElementById('wfm25SpecialtyDemandZoneRow');
+    const headerRow = document.getElementById('wfm25SpecialtyDemandHeaderRow');
+    const body = document.getElementById('wfm25SpecialtyDemandBody');
 
-    const qKeys = data && data.quarters ? data.quarters : [];
-    const rows = (data && data.rows) ? data.rows : [];
-    const grandTotal = Number(data && data.grandTotal) || 0;
-    const grandByQ = (data && data.grandTotalByQuarter) ? data.grandTotalByQuarter : {};
-    const teamMap = (data && data.specialtyTeamMap) ? data.specialtyTeamMap : {};
+    const forecast = forecastData || WFM25State.specialtyDemandData;
+    const actuals = actualsData || WFM25State.specialtyActualsData;
+    const merged = wfm25BuildSpecialtyDemandMerged_(forecast, actuals);
 
-    if (!section) return;
-    section.hidden = false;
-
-    if (!grandTotal || !rows.length) {
+    if (!merged || !merged.rows.length || !merged.grandTotal) {
       if (empty) empty.hidden = false;
-      if (content) content.hidden = true;
+      if (layout) layout.hidden = true;
       return;
     }
 
     if (empty) empty.hidden = true;
-    if (content) content.hidden = false;
+    if (layout) layout.hidden = false;
 
-    wfm25SpecialtyDemandHeaderCells_(headerRow, qKeys, null);
-    body.innerHTML = wfm25SpecialtyDemandBodyHtml_({
-      qKeys: qKeys,
-      rows: rows,
-      grandByQ: grandByQ,
-      teamMap: teamMap,
-      collapsedTeams: WFM25State.specialtyActualsCollapsedTeams,
-      sectionKey: 'actuals',
-      enableSubSpecialty: true,
-      expandedSpecs: WFM25State.specialtyActualsExpandedSpecs
-    });
-    wfm25WireSpecialtyDemandEvents_(body, 'actuals');
+    if (!WFM25State.specialtyDemandSelection) {
+      WFM25State.specialtyDemandSelection = wfm25SpecialtyDemandDefaultSelection_(merged);
+    }
+
+    wfm25SyncSpecialtyDemandUnitToggle_();
+    renderWFM25SpecialtyDemandBanner_(merged);
+
+    if (headerRow && body) {
+      wfm25SpecialtyDemandHeaderCells_(
+        zoneRow, headerRow, merged.qKeys, merged.curQk, merged.actualsCount
+      );
+      body.innerHTML = wfm25SpecialtyDemandBodyHtml_({
+        qKeys: merged.qKeys,
+        rows: merged.rows,
+        grandByQ: merged.grandByQ,
+        teamMap: merged.teamMap,
+        collapsedTeams: WFM25State.specialtyDemandCollapsedTeams,
+        actualsCount: merged.actualsCount,
+        unit: WFM25State.specialtyDemandUnit || 'hours',
+        selection: WFM25State.specialtyDemandSelection
+      });
+      wfm25WireSpecialtyDemandEvents_(body);
+    }
+
+    renderWFM25SpecialtyDemandDetail_(merged);
   }
 
   /**
@@ -10419,20 +11066,17 @@ async function _qaRefreshPsaHours_() {
   async function loadWFM25SpecialtyDemand_() {
     const loading = document.getElementById('wfm25SpecialtyDemandLoading');
     const empty = document.getElementById('wfm25SpecialtyDemandEmpty');
-    const content = document.getElementById('wfm25SpecialtyDemandContent');
-    const actualsSection = document.getElementById('wfm25SpecialtyDemandActualsSection');
+    const layout = document.getElementById('wfm25SpecialtyDemandLayout');
     const reqId = ++WFM25State.specialtyDemandReqId;
 
     if (empty) empty.hidden = true;
-    if (content) content.hidden = true;
-    if (actualsSection) actualsSection.hidden = true;
+    if (layout) layout.hidden = true;
     if (loading) loading.hidden = false;
 
     if (WFM25State.specialtyDemandData && WFM25State.specialtyActualsData) {
       if (reqId !== WFM25State.specialtyDemandReqId) return;
       if (loading) loading.hidden = true;
-      renderWFM25SpecialtyDemand_(WFM25State.specialtyDemandData);
-      renderWFM25SpecialtyActuals_(WFM25State.specialtyActualsData);
+      renderWFM25SpecialtyDemand_();
       return;
     }
 
@@ -10450,8 +11094,7 @@ async function _qaRefreshPsaHours_() {
       WFM25State.specialtyDemandData = results[0];
       WFM25State.specialtyActualsData = results[1];
       if (loading) loading.hidden = true;
-      renderWFM25SpecialtyDemand_(results[0]);
-      renderWFM25SpecialtyActuals_(results[1]);
+      renderWFM25SpecialtyDemand_();
     } catch (err) {
       if (reqId !== WFM25State.specialtyDemandReqId) return;
       if (loading) loading.hidden = true;

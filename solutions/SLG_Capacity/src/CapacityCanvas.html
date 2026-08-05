@@ -122,7 +122,7 @@
       <!-- ─ Specialty Demand panel ─ -->
       <div class="wfm25-tab-panel" id="wfm25PanelSpecialtyDemand"
            data-wfm25-panel="specialty-demand" hidden>
-        <div class="wfm25-chrome-card wfm25-specialty-demand-card">
+        <div class="wfm25-specialty-demand-root">
           <div class="wfm25-specialty-demand-loading" id="wfm25SpecialtyDemandLoading"
                role="status" aria-live="polite" hidden>
             <div class="wfm25-panel-loading">
@@ -130,60 +130,58 @@
             </div>
           </div>
 
-          <!-- Forecast Demand section -->
-          <section class="wfm25-specialty-demand-section" id="wfm25SpecialtyDemandForecastSection"
-                   aria-labelledby="wfm25SpecialtyDemandForecastTitle">
-            <h3 class="wfm25-specialty-demand-section-title" id="wfm25SpecialtyDemandForecastTitle">
-              Forecast Demand — Current + Forward
-            </h3>
-            <p class="wfm25-specialty-demand-caption muted">Whole org · forecast demand hours by specialty practice</p>
-            <div class="wfm25-specialty-demand-empty muted" id="wfm25SpecialtyDemandEmpty" hidden>
-              No forecast demand data available for specialty practices yet.
+          <div class="wfm25-specialty-demand-empty muted" id="wfm25SpecialtyDemandEmpty" hidden>
+            No specialty demand data available yet.
+          </div>
+
+          <div class="wfm25-specialty-demand-layout" id="wfm25SpecialtyDemandLayout" hidden>
+            <!-- Card A: metrics banner -->
+            <div class="wfm25-chrome-card wfm25-specialty-demand-banner-card"
+                 id="wfm25SpecialtyDemandBannerCard">
+              <div class="wfm25-specialty-demand-banner" id="wfm25SpecialtyDemandBanner"
+                   aria-label="Specialty demand summary metrics"></div>
             </div>
-            <div class="wfm25-specialty-demand-content" id="wfm25SpecialtyDemandContent" hidden>
-              <p class="wfm25-specialty-demand-coverage muted" id="wfm25SpecialtyDemandCoverage" hidden></p>
-              <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyDemandWrap">
-                <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyDemandTable"
-                       aria-label="Forecast demand hours by specialty practice">
-                  <thead>
-                    <tr id="wfm25SpecialtyDemandHeaderRow">
-                      <th class="wfm25-specialty-demand-col-label">Specialty Practice</th>
-                      <!-- quarter header cells injected by renderWFM25SpecialtyDemand_() -->
-                    </tr>
-                  </thead>
-                  <tbody id="wfm25SpecialtyDemandBody"></tbody>
-                </table>
+
+            <!-- Cards B + C: matrix + detail -->
+            <div class="wfm25-specialty-demand-split">
+              <div class="wfm25-chrome-card wfm25-specialty-demand-matrix-card">
+                <div class="wfm25-specialty-demand-matrix-head">
+                  <h3 class="wfm25-specialty-demand-matrix-title">Demand by Practice</h3>
+                  <div class="wfm25-specialty-demand-unit-toggle seg seg-sm" role="group"
+                       aria-label="Display unit" id="wfm25SpecialtyDemandUnitToggle">
+                    <button type="button" data-wfm25-sd-unit="hours"
+                            aria-pressed="true">Hours</button>
+                    <button type="button" data-wfm25-sd-unit="share"
+                            aria-pressed="false">Share %</button>
+                    <button type="button" data-wfm25-sd-unit="qoq"
+                            aria-pressed="false">QoQ %</button>
+                  </div>
+                </div>
+                <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyDemandWrap">
+                  <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyDemandTable"
+                         aria-label="Team-grouped specialty demand matrix">
+                    <thead id="wfm25SpecialtyDemandThead">
+                      <tr id="wfm25SpecialtyDemandZoneRow" class="wfm25-specialty-demand-zone-row" hidden>
+                        <th class="wfm25-specialty-demand-col-label" scope="col"></th>
+                        <!-- zone label cells injected by renderWFM25SpecialtyDemand_() -->
+                      </tr>
+                      <tr id="wfm25SpecialtyDemandHeaderRow">
+                        <th class="wfm25-specialty-demand-col-label" scope="col">Practice / Team</th>
+                        <!-- quarter header cells injected by renderWFM25SpecialtyDemand_() -->
+                      </tr>
+                    </thead>
+                    <tbody id="wfm25SpecialtyDemandBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="wfm25-chrome-card wfm25-specialty-demand-detail-card"
+                   id="wfm25SpecialtyDemandDetailCard">
+                <div class="wfm25-specialty-demand-detail" id="wfm25SpecialtyDemandDetail"
+                     aria-live="polite" aria-label="Practice detail panel"></div>
               </div>
             </div>
-          </section>
-
-          <hr class="wfm25-specialty-demand-divider" id="wfm25SpecialtyDemandDivider" hidden>
-
-          <!-- Actuals by Specialty section -->
-          <section class="wfm25-specialty-demand-section" id="wfm25SpecialtyDemandActualsSection"
-                   aria-labelledby="wfm25SpecialtyDemandActualsTitle" hidden>
-            <h3 class="wfm25-specialty-demand-section-title" id="wfm25SpecialtyDemandActualsTitle">
-              Actuals by Specialty — Historical
-            </h3>
-            <p class="wfm25-specialty-demand-caption muted">Whole org · worked hours by specialty practice (historical quarters)</p>
-            <div class="wfm25-specialty-demand-empty muted" id="wfm25SpecialtyActualsEmpty" hidden>
-              No historical actuals available for specialty practices yet.
-            </div>
-            <div class="wfm25-specialty-demand-content" id="wfm25SpecialtyActualsContent" hidden>
-              <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyActualsWrap">
-                <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyActualsTable"
-                       aria-label="Historical actuals hours by specialty practice">
-                  <thead>
-                    <tr id="wfm25SpecialtyActualsHeaderRow">
-                      <th class="wfm25-specialty-demand-col-label">Specialty Practice</th>
-                      <!-- quarter header cells injected by renderWFM25SpecialtyActuals_() -->
-                    </tr>
-                  </thead>
-                  <tbody id="wfm25SpecialtyActualsBody"></tbody>
-                </table>
-              </div>
-            </div>
-          </section>
+          </div>
         </div>
       </div>
 

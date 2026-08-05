@@ -176,6 +176,14 @@ const ACTUALS_SUMMARY_HEADERS = [
 const CFG_UTIL_QUARTERLY = 'Utilization_Quarterly';
 const UTIL_QUARTERLY_HEADERS = ['employee_id','resource_name','fiscal_quarter',
     'target_hours','util_rate_wkly','qtd_actual_icp','qtd_icp_plus_forecast','source_sheet'];
+const XORG_FORECAST_AGGREGATE = 'Xorg_Forecast_Aggregate';
+const XORG_FORECAST_AGGREGATE_HEADERS = [
+  'worker_group',
+  'region',
+  'fiscal_quarter',
+  'forecast_hours'
+];
+
 const ACTUALS_HISTORY = 'Actuals_History';
 const ACTUALS_HISTORY_HEADERS = [
   'employee_id',

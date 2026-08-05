@@ -4943,6 +4943,56 @@ function _dbg_reconcileWFM25Stage4() {
       ' quarters=' + (history.fiscalQuarters || []).length);
   })();
 
+  // ---- Check 6: Xorg forecast aggregate self-reconciliation ----
+  (function xorgForecastReconcile() {
+    Logger.log('=== WFM.25 Stage 4 Check 6: Xorg forecast aggregate ===');
+    var xorg = getXorgForecast_({});
+    var forwardKeys = xorg.forwardQuarterKeys || [];
+    var sheetRows = readTable_(XORG_FORECAST_AGGREGATE) || [];
+    var sheetSum = 0;
+    sheetRows.forEach(function (r) {
+      var fq = String(r.fiscal_quarter || '').trim();
+      if (forwardKeys.indexOf(fq) < 0) return;
+      sheetSum += Number(r.forecast_hours) || 0;
+    });
+    var apiSum = 0;
+    (xorg.rows || []).forEach(function (row) {
+      apiSum += Number(row.forecastHours) || 0;
+    });
+    if (!near_(sheetSum, apiSum, HIST_TOL)) {
+      failures.push('Xorg forecast: sheetSum=' + sheetSum + ' apiSum=' + apiSum);
+    }
+
+    forwardKeys.forEach(function (qk) {
+      var groupSum = 0;
+      var groups = xorg.byGroupQuarter || {};
+      Object.keys(groups).forEach(function (gk) {
+        groupSum += Number(groups[gk][qk]) || 0;
+      });
+      var rowSum = 0;
+      (xorg.rows || []).forEach(function (row) {
+        if (row.fiscalQuarter === qk) rowSum += Number(row.forecastHours) || 0;
+      });
+      if (!near_(groupSum, rowSum, HIST_TOL)) {
+        failures.push('Xorg forecast: ' + qk + ' groupSum=' + groupSum + ' rowSum=' + rowSum);
+      }
+
+      var wdHours = Number((groups['Workday Regions'] || {})[qk]) || 0;
+      var regionSum = 0;
+      var regions = (xorg.regionByQuarter || {})[qk] || {};
+      Object.keys(regions).forEach(function (rk) {
+        regionSum += Number(regions[rk]) || 0;
+      });
+      if (wdHours > 0 && !near_(wdHours, regionSum, HIST_TOL)) {
+        failures.push('Xorg forecast regions: ' + qk + ' wdHours=' + wdHours +
+          ' regionSum=' + regionSum);
+      }
+    });
+
+    Logger.log('  forwardQuarters=' + forwardKeys.join(',') +
+      ' rows=' + (xorg.rows || []).length + ' sheetSum=' + sheetSum);
+  })();
+
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM25Stage4: ALL CHECKS OK'
     : '_dbg_reconcileWFM25Stage4: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');

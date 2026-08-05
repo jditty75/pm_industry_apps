@@ -401,6 +401,20 @@ function runConsolidatedPreflight_(tempSs, warnings) {
       'Optional sheet present (' + Math.max(data[UNSTAFFED_DEMAND_SHEET].length - 1, 0) + ' data rows)');
   }
 
+  var xorgSh = tempSs.getSheetByName(XORG_FORECAST_AGGREGATE);
+  if (xorgSh) {
+    data[XORG_FORECAST_AGGREGATE] = xorgSh.getDataRange().getValues();
+    recordCheck('sheet_present:' + XORG_FORECAST_AGGREGATE, true,
+      Math.max(data[XORG_FORECAST_AGGREGATE].length - 1, 0) + ' data rows (empty is valid)');
+    validateSheetHeadersStrict_(
+      XORG_FORECAST_AGGREGATE, data[XORG_FORECAST_AGGREGATE],
+      XORG_FORECAST_AGGREGATE_HEADERS, recordCheck
+    );
+  } else {
+    recordCheck('sheet_present:' + XORG_FORECAST_AGGREGATE, true,
+      'Optional sheet absent — app tab will be cleared on write');
+  }
+
   validateForecastStagedHeaders_(data.Forecast_Staged, recordCheck, warnings);
   validateSheetHeadersStrict_(
     'Actuals_Current_Normalized', data.Actuals_Current_Normalized,
@@ -1011,7 +1025,10 @@ function writeConsolidatedWorkbook_(data, warnings) {
   t0 = _logConsolidatedPhase_('write_actuals_history', t0, historyRows + ' rows');
 
   var unstaffedRowsOut = writeConsolidatedUnstaffedDemand_(data[UNSTAFFED_DEMAND_SHEET]);
-  _logConsolidatedPhase_('write_unstaffed_demand', t0, unstaffedRowsOut + ' rows');
+  t0 = _logConsolidatedPhase_('write_unstaffed_demand', t0, unstaffedRowsOut + ' rows');
+
+  var xorgRowsOut = writeConsolidatedXorgForecast_(data[XORG_FORECAST_AGGREGATE]);
+  _logConsolidatedPhase_('write_xorg_forecast_aggregate', t0, xorgRowsOut + ' rows');
 
   return {
     forecastRowsOut: normResult.rowsOut || 0,
@@ -1019,8 +1036,41 @@ function writeConsolidatedWorkbook_(data, warnings) {
     summaryRowsOut: summaryRowsOut,
     utilQuarterlyRows: utilQuarterlyRows,
     historyRows: historyRows,
-    unstaffedDemandRowsOut: unstaffedRowsOut
+    unstaffedDemandRowsOut: unstaffedRowsOut,
+    xorgForecastRowsOut: xorgRowsOut
   };
+}
+
+/**
+ * Copy Xorg_Forecast_Aggregate into the app tab (aggregate-only; not routed to Allocations_Normalized).
+ * Empty sheet or absent upload clears the tab.
+ * @param {Array[]|undefined} values sheet values including header
+ * @return {number} data rows written (0 if empty/absent)
+ * @private
+ */
+function writeConsolidatedXorgForecast_(values) {
+  if (!values || values.length < 2) {
+    writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, []);
+    invalidateCache_(XORG_FORECAST_AGGREGATE);
+    return 0;
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var out = [];
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    out.push([
+      String(row[idx.worker_group] || '').trim(),
+      String(row[idx.region] || '').trim(),
+      String(row[idx.fiscal_quarter] || '').trim(),
+      Number(row[idx.forecast_hours]) || 0
+    ]);
+  }
+  writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, out);
+  invalidateCache_(XORG_FORECAST_AGGREGATE);
+  return out.length;
 }
 
 /**

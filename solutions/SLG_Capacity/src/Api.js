@@ -791,6 +791,70 @@ function api_getWorkerTypeHistory(params) {
 }
 
 /**
+ * WFM.25: Cross-org + contractor quarterly forecast aggregate (read-only).
+ * Scoped to the scorecard forward window (current + next fiscal quarters).
+ * @param {Object} [params] reserved for future filter params
+ * @return {Object}
+ */
+function api_getXorgForecast(params) {
+  _requireAuthorized_();
+  return getXorgForecast_(params || {});
+}
+
+/**
+ * Read Xorg_Forecast_Aggregate and shape for Hours & Capacity + Mix & Trend forward views.
+ * @param {Object} [params]
+ * @return {Object}
+ */
+function getXorgForecast_(params) {
+  var windowKeys = scorecardWindowKeys_();
+  var forwardKeys = windowKeys.length >= 3
+    ? [windowKeys[1], windowKeys[2]]
+    : windowKeys.slice(1);
+  var forwardSet = {};
+  forwardKeys.forEach(function (qk) { forwardSet[qk] = true; });
+
+  var rows = readTable_(XORG_FORECAST_AGGREGATE) || [];
+  var out = [];
+  var byGroupQuarter = {};
+  var regionByQuarter = {};
+
+  rows.forEach(function (r) {
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq || !forwardSet[fq]) return;
+    var workerGroup = String(r.worker_group || '').trim();
+    if (!workerGroup) return;
+    var region = String(r.region || '').trim();
+    var hrs = Number(r.forecast_hours) || 0;
+    if (!hrs) return;
+
+    out.push({
+      workerGroup: workerGroup,
+      region: region,
+      fiscalQuarter: fq,
+      forecastHours: hrs
+    });
+
+    if (!byGroupQuarter[workerGroup]) byGroupQuarter[workerGroup] = {};
+    byGroupQuarter[workerGroup][fq] = (byGroupQuarter[workerGroup][fq] || 0) + hrs;
+
+    if (workerGroup === 'Workday Regions') {
+      if (!regionByQuarter[fq]) regionByQuarter[fq] = {};
+      var rk = region || 'Unclassified';
+      regionByQuarter[fq][rk] = (regionByQuarter[fq][rk] || 0) + hrs;
+    }
+  });
+
+  return {
+    rows: out,
+    quarterKeys: windowKeys,
+    forwardQuarterKeys: forwardKeys,
+    byGroupQuarter: byGroupQuarter,
+    regionByQuarter: regionByQuarter
+  };
+}
+
+/**
  * Aggregate Actuals_History into Mix & Trend wire payload.
  * Storage worker_class → display class: SLG, Workday Regions, Contractor.
  * @param {Object} [params]

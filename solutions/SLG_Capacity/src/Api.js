@@ -2196,15 +2196,16 @@ function sortSpecialtySubRows_(rows) {
 
 /**
  * Whether an Actuals_History row counts toward SLG-scoped specialty demand.
- * Reuses _workerClassInScope_ when worker_class is present; otherwise excludes
- * Corporate region (cross-org marker equivalent to Workday Regions population).
+ * Actuals_History uses flat worker_class ('SLG' / 'Non-SLG' / 'Contractor'), not
+ * roster vocabulary (SLG_Real / SLG_Generic). Aligns with historyDisplayClass_.
+ * When worker_class is absent, excludes Corporate region (cross-org marker).
  * @param {Object} row Actuals_History row
  * @return {boolean}
  */
 function specialtyActualsRowInSlgScope_(row) {
   var wc = String((row && row.worker_class) || '').trim();
   if (wc) {
-    return _workerClassInScope_(wc, 'SLG');
+    return historyDisplayClass_(wc) === 'SLG';
   }
   var region = String((row && row.workday_region_as_of_date_worked) || '').trim();
   return region !== 'Corporate';

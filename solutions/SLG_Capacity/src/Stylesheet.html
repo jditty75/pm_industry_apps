@@ -5319,10 +5319,14 @@ td.cell-with-bar {
   border-bottom: 1px solid var(--business-card);
   padding: 10px 8px;
 }
-.wfm25-hc-qth {
+#wfm25HoursCapacityTable .wfm25-hc-qth {
   text-align: center;
   min-width: 0;
   vertical-align: bottom;
+}
+#wfm25HoursCapacityTable .wfm25-team-col,
+#wfm25HoursCapacityTable tbody td:first-child {
+  text-align: left;
 }
 .wfm25-hc-qth .wfm25-hc-qth-key {
   display: block;
@@ -5342,7 +5346,7 @@ td.cell-with-bar {
   color: var(--ballpoint);
 }
 .wfm25-hours-capacity-cell {
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
   padding: 10px 10px !important;
   vertical-align: middle;
@@ -5355,18 +5359,17 @@ td.cell-with-bar {
 .wfm25-hc-cell-inner {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
   gap: 4px;
 }
 .wfm25-hc-cell-inner--compact {
   gap: 3px;
 }
 .wfm25-hc-compact-top {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  justify-content: flex-end;
+  justify-content: center;
 }
 .wfm25-hc-util-swatch {
   display: inline-block;
@@ -5379,7 +5382,8 @@ td.cell-with-bar {
   background: var(--business-card);
 }
 .wfm25-hc-compact-top .wfm25-hc-util-bar-wrap {
-  flex: 1;
+  flex: 0 0 auto;
+  width: 40px;
   min-width: 28px;
   max-width: 56px;
   height: 4px;
@@ -5426,6 +5430,7 @@ td.cell-with-bar {
   font-size: 10px;
   color: var(--staple);
   font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 .wfm25-hc-line1 {
   font-weight: 600;
@@ -5503,9 +5508,10 @@ td.cell-with-bar {
 .wfm25-hours-capacity-cell.has-draft .wfm25-hc-committed {
   opacity: .75;
 }
-.wfm25-hc-draft {
+.wfm25-hours-capacity-cell .wfm25-hc-draft {
   margin-top: 4px;
   line-height: 1.25;
+  text-align: center;
 }
 .wfm25-hc-draft-rem {
   display: block;

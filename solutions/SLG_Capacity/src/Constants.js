@@ -106,8 +106,10 @@ const CFG_WORKER_ROLE_OVERRIDES = 'Config_Worker_Role_Overrides'; // per-worker 
 const CFG_WORKER_EXCLUSIONS = 'Config_Worker_Exclusions'; // SLG worker/manager exclusion list -- WFM-FIX.3: code-maintained
 // source: 'manual' | 'rule:manager' | 'rule:on_leave'  (comma-join if multiple, e.g. 'rule:manager,rule:on_leave')
 // override: '' | 'include' | 'exclude'   (human-owned; always wins over rules and active)
+// return_date / modified_by / modified_at — WFM.25 app-owned return-date field (human-owned; preserved on re-ingest)
 const WORKER_EXCLUSION_HEADERS = [
-  'worker_name', 'manager_org', 'reason', 'active', 'source', 'override'
+  'worker_name', 'manager_org', 'reason', 'active', 'source', 'override',
+  'return_date', 'modified_by', 'modified_at'
 ];
 const CFG_HOLIDAYS = 'Config_Holidays'; // WFM.15: company holiday calendar; reduces ICP available hours
 

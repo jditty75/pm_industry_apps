@@ -2095,7 +2095,10 @@ function reconcileWorkerExclusions_(allocRows) {
         reason: '',
         active: 'Yes',
         source: '',
-        override: String(prev.override || '').trim()  // preserve human override
+        override: String(prev.override || '').trim(),  // preserve human override
+        return_date: prev.return_date || '',
+        modified_by: prev.modified_by || '',
+        modified_at: prev.modified_at || ''
       };
     }
     return out[k];
@@ -2112,7 +2115,10 @@ function reconcileWorkerExclusions_(allocRows) {
         worker_name: r.worker_name, manager_org: r.manager_org || '',
         reason: r.reason || '', active: r.active || 'Yes',
         source: isManual ? 'manual' : (r.source || 'manual'),
-        override: ovr
+        override: ovr,
+        return_date: r.return_date || '',
+        modified_by: r.modified_by || '',
+        modified_at: r.modified_at || ''
       };
     }
   });

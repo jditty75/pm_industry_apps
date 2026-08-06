@@ -1588,13 +1588,19 @@ function _dbg_migrateWorkerExclusions() {
       reason: String(r.reason || '').trim(),
       active: 'Yes',
       source: '',   // re-derived below, discarding whatever was stored before
-      override: ovr
+      override: ovr,
+      return_date: r.return_date || '',
+      modified_by: r.modified_by || '',
+      modified_at: r.modified_at || ''
     };
   });
 
   function ensureRow(k, name) {
     if (!out[k]) {
-      out[k] = { worker_name: name, manager_org: '', reason: '', active: 'Yes', source: '', override: '' };
+      out[k] = {
+        worker_name: name, manager_org: '', reason: '', active: 'Yes', source: '', override: '',
+        return_date: '', modified_by: '', modified_at: ''
+      };
     }
     return out[k];
   }

@@ -4499,7 +4499,10 @@ function api_saveExclusions(payload) {
       reason: r.reason || '',
       active: r.active || '',
       source: (r.source !== undefined ? r.source : prev.source) || '',
-      override: (r.override !== undefined ? r.override : prev.override) || ''
+      override: (r.override !== undefined ? r.override : prev.override) || '',
+      return_date: (r.return_date !== undefined ? r.return_date : prev.return_date) || '',
+      modified_by: (r.modified_by !== undefined ? r.modified_by : prev.modified_by) || '',
+      modified_at: (r.modified_at !== undefined ? r.modified_at : prev.modified_at) || ''
     };
   });
 
@@ -5268,4 +5271,67 @@ function api_listCapacityAdjustmentAudit(filter) {
       notes:         String(r.notes         || '')
     };
   });
+}
+
+// ------------------------------------------------------------
+// WFM.25 — On Leave roster + return-date API (display-only math)
+// ------------------------------------------------------------
+
+/**
+ * @param {*} v
+ * @return {string} YYYY-MM-DD or ''
+ */
+function _toDateWire_(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * @param {Object} r
+ * @return {Object}
+ */
+function _sanitizeOnLeaveForWire_(r) {
+  return {
+    worker_key:   String(r.worker_key   || ''),
+    worker_name:  String(r.worker_name  || ''),
+    team_label:   String(r.team_label   || ''),
+    manager_org:  String(r.manager_org  || ''),
+    source:       String(r.source       || ''),
+    return_date:  _toDateWire_(r.return_date),
+    modified_by:  String(r.modified_by  || ''),
+    modified_at:  _toIso_(r.modified_at)
+  };
+}
+
+/**
+ * Admin on-leave list with return dates from Config_Worker_Exclusions.
+ * @return {Object[]}
+ */
+function api_getOnLeaveList() {
+  _requireAuthorized_();
+  return listOnLeave_().map(_sanitizeOnLeaveForWire_);
+}
+
+/**
+ * Save return date for an on-leave worker (authorized).
+ * @param {string} worker_key
+ * @param {*} return_date valid date or blank to clear
+ * @param {*} [modified_at] optimistic-lock stamp from prior read
+ * @return {Object}
+ */
+function api_saveOnLeaveReturnDate(worker_key, return_date, modified_at) {
+  _requireAuthorized_();
+  const saved = saveOnLeaveReturnDate_(worker_key, return_date, modified_at);
+  return _sanitizeOnLeaveForWire_(saved);
+}
+
+/**
+ * Per-team on-leave names sidecar for Utilization display (no hours math).
+ * @return {Object<string, {name:string}[]>}
+ */
+function api_getOnLeaveRoster() {
+  _requireAuthorized_();
+  return getOnLeaveByTeam_();
 }

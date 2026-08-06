@@ -5459,17 +5459,17 @@ function api_getCommitmentsScenarioRollups() {
  * Modify forecast-remaining hours on a committed booking.
  * @param {string} object_type 'assignment' | 'adjustment'
  * @param {string} object_id
- * @param {number} newReducibleHours
+ * @param {number} newTotalHours total committed hours (unsigned)
  * @return {Object}
  */
-function api_modifyCommitment(object_type, object_id, newReducibleHours) {
+function api_modifyCommitment(object_type, object_id, newTotalHours) {
   _requireAuthorized_();
   if (object_type === 'assignment') {
-    var saved = modifyCommittedAssignmentHours_(object_id, newReducibleHours);
+    var saved = modifyCommittedAssignmentHours_(object_id, newTotalHours);
     return _sanitizeAssignmentForWire_(saved);
   }
   if (object_type === 'adjustment') {
-    var adj = modifyCommittedAdjustmentHours_(object_id, newReducibleHours);
+    var adj = modifyCommittedAdjustmentHours_(object_id, newTotalHours);
     return _sanitizeAdjustmentForWire_(adj);
   }
   throw new Error('object_type must be assignment or adjustment');

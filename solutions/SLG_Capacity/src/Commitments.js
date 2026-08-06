@@ -296,12 +296,12 @@ function listCommitmentsScenarioRollups_() {
 }
 
 /**
- * Modify committed assignment hours (locked portion preserved).
+ * Modify committed assignment hours (full booking — no time-lock clamp).
  * @param {string} assignment_id
- * @param {number} newReducibleHours forecast-remaining hours target
+ * @param {number} newTotalHours total committed hours
  * @return {Object} updated assignment
  */
-function modifyCommittedAssignmentHours_(assignment_id, newReducibleHours) {
+function modifyCommittedAssignmentHours_(assignment_id, newTotalHours) {
   var rows = listAssignments_({}).filter(function (a) {
     return String(a.assignment_id) === String(assignment_id);
   });
@@ -309,28 +309,20 @@ function modifyCommittedAssignmentHours_(assignment_id, newReducibleHours) {
   var a = rows[0];
   if (a.status !== 'Committed') throw new Error('Only committed assignments can be modified here');
 
-  var calendar = readCalendar_();
-  var workerByName = _commitmentsWorkerForecastIndex_();
-  var weekly = expandAssignmentToWeekly_(a, calendar) || [];
-  var split = _commitmentsLockedReducible_(workerByName[a.resource_name] || null, weekly.map(function (w) {
-    return { week_key: w.week_key, week_start: w.week_start, hours: w.hours };
-  }));
+  var total = Math.max(0, Number(newTotalHours) || 0);
+  if (total <= 0) throw new Error('Total hours must be greater than zero');
 
-  var reducible = Math.max(0, Number(newReducibleHours) || 0);
-  var newTotal = split.locked_hours + reducible;
-  if (newTotal <= 0) throw new Error('Total hours must be greater than zero');
-
-  a.estimated_hours = Math.round(newTotal * 100) / 100;
+  a.estimated_hours = Math.round(total * 100) / 100;
   return saveAssignment_(a);
 }
 
 /**
- * Modify committed adjustment magnitude on forecast-remaining weeks only.
+ * Modify committed adjustment magnitude (full booking — no time-lock clamp).
  * @param {string} adjustment_id
- * @param {number} newReducibleHours signed magnitude for reducible portion
+ * @param {number} newTotalHours total committed magnitude (unsigned)
  * @return {Object}
  */
-function modifyCommittedAdjustmentHours_(adjustment_id, newReducibleHours) {
+function modifyCommittedAdjustmentHours_(adjustment_id, newTotalHours) {
   var rows = listCapacityAdjustments_({}).filter(function (adj) {
     return String(adj.adjustment_id) === String(adjustment_id);
   });
@@ -338,17 +330,9 @@ function modifyCommittedAdjustmentHours_(adjustment_id, newReducibleHours) {
   var adj = rows[0];
   if (adj.status !== 'Committed') throw new Error('Only committed adjustments can be modified here');
 
-  var calendar = readCalendar_();
-  var workerByName = _commitmentsWorkerForecastIndex_();
-  var weekly = expandAdjustmentToWeekly_(adj, calendar) || [];
-  var split = _commitmentsLockedReducible_(workerByName[adj.resource_name] || null, weekly.map(function (w) {
-    return { week_key: w.week_key, week_start: w.week_start, hours: w.hours_reduction };
-  }));
+  var magnitude = Math.max(0, Number(newTotalHours) || 0);
+  if (magnitude <= 0) throw new Error('Total hours must be greater than zero');
 
-  var reducible = Math.max(0, Number(newReducibleHours) || 0);
-  var newMagnitude = split.locked_hours + reducible;
-  if (newMagnitude <= 0) throw new Error('Total hours must be greater than zero');
-
-  adj.hours_reduction = adj.direction === 'add' ? -newMagnitude : newMagnitude;
+  adj.hours_reduction = adj.direction === 'add' ? -magnitude : magnitude;
   return saveCapacityAdjustment_(adj);
 }

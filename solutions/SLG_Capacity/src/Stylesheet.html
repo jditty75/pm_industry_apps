@@ -3711,14 +3711,6 @@ td.cell-with-bar {
 .wfm25-cm-data-row:hover td {
   background: rgba(11, 30, 63, .02);
 }
-.wfm25-cm-expand-btn {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 2px 6px;
-  color: var(--staple);
-  font-size: 10px;
-}
 .wfm25-cm-type-pill {
   display: inline-block;
   padding: 2px 8px;
@@ -3730,28 +3722,33 @@ td.cell-with-bar {
 .wfm25-cm-type-add { background: #e6f7ee; color: #1a7f4b; }
 .wfm25-cm-type-reduce { background: #fdecea; color: #b42318; }
 .wfm25-cm-hours-total { font-weight: 600; }
-.wfm25-cm-hours-split { font-size: 10px; display: block; margin-top: 2px; }
 .wfm25-cm-status-committed { color: #1a7f4b; font-weight: 600; }
 .wfm25-cm-status-archived { color: var(--staple); font-style: italic; }
-.wfm25-cm-col-expand { width: 28px; }
-.wfm25-cm-col-hours { min-width: 110px; text-align: right; }
+.wfm25-cm-archived-row td {
+  color: var(--staple);
+  font-style: italic;
+}
+.wfm25-cm-archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  font-size: 12px;
+  color: var(--laptop);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.wfm25-cm-archived-toggle input {
+  margin: 0;
+  cursor: pointer;
+}
+.wfm25-cm-col-hours { min-width: 80px; text-align: right; }
 .wfm25-cm-col-actions { white-space: nowrap; }
 .wfm25-cm-modify-btn,
 .wfm25-cm-void-btn {
   font-size: 11px;
   padding: 3px 8px;
-}
-.wfm25-cm-weekly-table {
-  width: auto;
-  min-width: 280px;
-  margin: 4px 0 8px 28px;
-  font-size: 11px;
-  border-collapse: collapse;
-}
-.wfm25-cm-weekly-table th,
-.wfm25-cm-weekly-table td {
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--desk);
 }
 
 /* ── Worker right-side panel ─────────────────────────────── */

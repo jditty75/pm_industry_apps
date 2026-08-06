@@ -11177,60 +11177,45 @@ async function _qaRefreshPsaHours_() {
    */
   function wfm25BuildMixTrendBars_(history, scorecard) {
     const bars = [];
-    const seen = {};
     const qKeys = (scorecard && scorecard.quarterKeys) || [];
     const teamSummary = (scorecard && scorecard.teamSummary) || [];
-    const planningKeys = {};
-    if (qKeys.length >= 3) {
-      planningKeys[qKeys[1]] = 'current';
-      planningKeys[qKeys[2]] = 'forecast';
-    }
 
-    (history && history.fiscalQuarters || []).forEach(function (fq) {
-      if (planningKeys[fq]) return;
-      seen[fq] = true;
+    if (qKeys.length >= 3) {
+      const prevQ = qKeys[0];
+      const curQ = qKeys[1];
+      const nextQ = qKeys[2];
+
       bars.push({
-        quarterKey: fq,
-        totalHours: Number((history.quarterTotals || {})[fq]) || 0,
+        quarterKey: prevQ,
+        totalHours: Number((history && history.quarterTotals && history.quarterTotals[prevQ])) || 0,
         kind: 'actuals',
         label: 'Actuals',
         selectable: true
       });
-    });
 
-    if (qKeys.length >= 3) {
-      const curIdx = 1;
-      const nextIdx = 2;
-      const curQ = qKeys[curIdx];
-      const nextQ = qKeys[nextIdx];
-      if (!seen[curQ]) {
-        const curTeam = teamSummary[curIdx] || {};
-        const slgHours = Number(curTeam.productiveHours) || 0;
-        const xorgHours = wfm25XorgQuarterTotal_(WFM25State.xorgForecastData, curQ);
-        bars.push({
-          quarterKey: curQ,
-          totalHours: slgHours + xorgHours,
-          kind: 'current',
-          label: 'Actuals + Forecast',
-          selectable: true,
-          slgHours: slgHours
-        });
-        seen[curQ] = true;
-      }
-      if (!seen[nextQ]) {
-        const nextTeam = teamSummary[nextIdx] || {};
-        const slgHours = Number(nextTeam.productiveHours) || 0;
-        const xorgHours = wfm25XorgQuarterTotal_(WFM25State.xorgForecastData, nextQ);
-        bars.push({
-          quarterKey: nextQ,
-          totalHours: slgHours + xorgHours,
-          kind: 'forecast',
-          label: 'Forecast',
-          selectable: true,
-          slgHours: slgHours
-        });
-        seen[nextQ] = true;
-      }
+      const curTeam = teamSummary[1] || {};
+      const curSlgHours = Number(curTeam.productiveHours) || 0;
+      const curXorgHours = wfm25XorgQuarterTotal_(WFM25State.xorgForecastData, curQ);
+      bars.push({
+        quarterKey: curQ,
+        totalHours: curSlgHours + curXorgHours,
+        kind: 'current',
+        label: 'Actuals + Forecast',
+        selectable: true,
+        slgHours: curSlgHours
+      });
+
+      const nextTeam = teamSummary[2] || {};
+      const nextSlgHours = Number(nextTeam.productiveHours) || 0;
+      const nextXorgHours = wfm25XorgQuarterTotal_(WFM25State.xorgForecastData, nextQ);
+      bars.push({
+        quarterKey: nextQ,
+        totalHours: nextSlgHours + nextXorgHours,
+        kind: 'forecast',
+        label: 'Forecast',
+        selectable: true,
+        slgHours: nextSlgHours
+      });
     }
 
     bars.sort(function (a, b) {
@@ -11288,13 +11273,7 @@ async function _qaRefreshPsaHours_() {
    */
   function wfm25MixTrendCoverageNote_(timeline) {
     if (!timeline.length) return '';
-    const start = timeline[0].quarterKey;
-    const end = timeline[timeline.length - 1].quarterKey;
-    const gaps = timeline.filter(function (b) { return b.kind === 'nodata'; }).length;
-    let note = start + ' through ' + end + '.';
-    if (gaps === 1) note += ' 1 quarter has no historical source data.';
-    else if (gaps > 1) note += ' ' + gaps + ' quarters have no historical source data.';
-    return note;
+    return 'Previous, current, and next quarter. Historical averages shown in the summary cards above.';
   }
 
   /**
@@ -11547,6 +11526,16 @@ async function _qaRefreshPsaHours_() {
 
     detail.hidden = false;
 
+    if (!bar || bar.kind === 'nodata' || bar.selectable === false) {
+      left.innerHTML =
+        '<div class="wfm25-mix-trend-detail-empty muted">Select a quarter</div>';
+      if (right) {
+        right.hidden = true;
+        right.innerHTML = '';
+      }
+      return;
+    }
+
     const curTag = bar.kind === 'current' ? ' \u25c6' : '';
     const chip = wfm25MixTrendStateChip_(bar);
     const total = bar.totalHours || 0;
@@ -11652,11 +11641,7 @@ async function _qaRefreshPsaHours_() {
         WFM25State.historyData && WFM25State.historyData.bannerSummary
       );
       renderWFM25MixTrendChart_(timeline);
-      if (def) {
-        wfm25RenderMixTrendDetail_(def);
-      } else if (detail) {
-        detail.hidden = true;
-      }
+      wfm25RenderMixTrendDetail_(def);
     } catch (err) {
       if (reqId !== WFM25State.mixTrendReqId) return;
       if (loading) {

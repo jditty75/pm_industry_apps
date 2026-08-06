@@ -5885,11 +5885,20 @@ td.cell-with-bar {
   min-height: 0;
 }
 .wfm25-mix-trend-card {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 0;
   padding: 0;
   overflow: hidden;
+  align-items: start;
+}
+.wfm25-mix-trend-banner {
+  grid-column: 1 / -1;
+}
+@media (max-width: 900px) {
+  .wfm25-mix-trend-card {
+    grid-template-columns: 1fr;
+  }
 }
 .wfm25-mix-trend-banner {
   padding: 20px 20px 12px;
@@ -5987,8 +5996,14 @@ td.cell-with-bar {
 }
 .wfm25-mix-trend-chart-section {
   padding: 16px 20px;
-  border-bottom: 1px solid var(--business-card);
+  border-right: 1px solid var(--business-card);
   min-height: 0;
+}
+@media (max-width: 900px) {
+  .wfm25-mix-trend-chart-section {
+    border-right: none;
+    border-bottom: 1px solid var(--business-card);
+  }
 }
 .wfm25-mix-trend-chart-inner {
   display: flex;
@@ -6196,6 +6211,17 @@ td.cell-with-bar {
 }
 .wfm25-mix-trend-detail {
   padding: 16px 20px 20px;
+  min-height: 0;
+  align-self: stretch;
+}
+.wfm25-mix-trend-detail-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 24px 16px;
+  font-size: 14px;
+  text-align: center;
 }
 .wfm25-mix-trend-detail-panels {
   display: grid;

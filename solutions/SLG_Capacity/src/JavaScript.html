@@ -12148,6 +12148,7 @@ async function _qaRefreshPsaHours_() {
 
   let _wfm25FreshnessThresholds = null;
   let _wfm25AdminOvRows = [];
+  let _wfm25AdminOnLeaveRows = [];
 
   /**
    * Parse row count from api_getDataFreshness lastSuccess.detail (e.g. "123 rows").
@@ -12413,6 +12414,74 @@ async function _qaRefreshPsaHours_() {
     }).join('');
   }
 
+  /**
+   * Format return_date for <input type="date">.
+   * @param {string} isoOrDate
+   * @returns {string}
+   */
+  function wfm25DateInputValue_(isoOrDate) {
+    if (!isoOrDate) return '';
+    const d = new Date(isoOrDate);
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Render On Leave admin table with inline editable return dates.
+   * @param {Object[]} rows
+   */
+  function renderWFM25AdminOnLeaveTable_(rows) {
+    const body = document.getElementById('wfm25AdminOnLeaveTableBody');
+    const titleEl = document.getElementById('wfm25AdminOnLeaveTitle');
+    if (!body) return;
+
+    _wfm25AdminOnLeaveRows = Array.isArray(rows) ? rows.slice() : [];
+    if (titleEl) {
+      titleEl.textContent = 'On Leave (' + _wfm25AdminOnLeaveRows.length + ')';
+    }
+
+    if (!_wfm25AdminOnLeaveRows.length) {
+      body.innerHTML = '<tr><td colspan="5" class="muted wfm25-admin-onleave-empty">No workers currently on leave.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = _wfm25AdminOnLeaveRows.map(function (r) {
+      const dateVal = wfm25DateInputValue_(r.return_date);
+      const modAt = r.modified_at || '';
+      return '<tr data-onleave-key="' + escapeHtml_(String(r.worker_key || '')) + '">' +
+        '<td>' + escapeHtml_(r.worker_name || '') + '</td>' +
+        '<td>' + escapeHtml_(r.team_label || '') + '</td>' +
+        '<td>' + escapeHtml_(r.manager_org || '') + '</td>' +
+        '<td>' + escapeHtml_(r.source || '') + '</td>' +
+        '<td class="wfm25-admin-onleave-date-cell">' +
+          '<input type="date" class="wfm25-admin-onleave-date-input"' +
+          ' data-onleave-date="' + escapeHtml_(String(r.worker_key || '')) + '"' +
+          ' data-modified-at="' + escapeHtml_(modAt) + '"' +
+          ' value="' + escapeHtml_(dateVal) + '"' +
+          ' aria-label="Return date for ' + escapeHtml_(r.worker_name || '') + '">' +
+        '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  async function loadWFM25AdminOnLeave_() {
+    const body = document.getElementById('wfm25AdminOnLeaveTableBody');
+    if (body) {
+      body.innerHTML = '<tr><td colspan="5" class="muted wfm25-admin-onleave-empty">Loading…</td></tr>';
+    }
+    try {
+      const rows = await call('api_getOnLeaveList');
+      renderWFM25AdminOnLeaveTable_(rows);
+    } catch (err) {
+      if (body) {
+        body.innerHTML = '<tr><td colspan="5" class="muted wfm25-admin-onleave-empty">Load failed: ' +
+          escapeHtml_(err.message) + '</td></tr>';
+      }
+      const titleEl = document.getElementById('wfm25AdminOnLeaveTitle');
+      if (titleEl) titleEl.textContent = 'On Leave';
+    }
+  }
+
   async function loadWFM25AdminOverrides_() {
     const body = document.getElementById('wfm25AdminOvTableBody');
     if (body) {
@@ -12440,7 +12509,8 @@ async function _qaRefreshPsaHours_() {
     await Promise.all([
       loadWFM25Freshness_(),
       loadWFM25AdminRefreshLog_(),
-      loadWFM25AdminOverrides_()
+      loadWFM25AdminOverrides_(),
+      loadWFM25AdminOnLeave_()
     ]);
   }
 
@@ -12570,6 +12640,39 @@ async function _qaRefreshPsaHours_() {
           await loadWFM25AdminOverrides_();
         } catch (err) {
           toast('Import failed: ' + err.message, 'err');
+        }
+      });
+    }
+
+    const onLeaveBody = document.getElementById('wfm25AdminOnLeaveTableBody');
+    if (onLeaveBody) {
+      onLeaveBody.addEventListener('change', async function (e) {
+        const input = e.target.closest('.wfm25-admin-onleave-date-input');
+        if (!input) return;
+        const workerKey = input.getAttribute('data-onleave-date');
+        if (!workerKey) return;
+        const prevModifiedAt = input.getAttribute('data-modified-at') || '';
+        const returnDate = input.value || '';
+        input.disabled = true;
+        try {
+          const saved = await call('api_saveOnLeaveReturnDate', workerKey, returnDate, prevModifiedAt || null);
+          const idx = _wfm25AdminOnLeaveRows.findIndex(function (r) {
+            return String(r.worker_key) === String(workerKey);
+          });
+          if (idx >= 0) {
+            _wfm25AdminOnLeaveRows[idx] = Object.assign({}, _wfm25AdminOnLeaveRows[idx], saved);
+          }
+          input.setAttribute('data-modified-at', saved.modified_at || '');
+          input.value = wfm25DateInputValue_(saved.return_date);
+          toast('Return date saved', 'ok');
+        } catch (err) {
+          const msg = String(err.message || err);
+          toast('Save failed: ' + msg, 'err');
+          if (/refresh/i.test(msg)) {
+            await loadWFM25AdminOnLeave_();
+          }
+        } finally {
+          input.disabled = false;
         }
       });
     }

@@ -230,13 +230,13 @@ function listCommitmentsLedger_() {
   var entries = [];
   var statuses = { Committed: true, Archived: true };
 
-  listAssignments_({}).forEach(function (a) {
+  readTable_(ASSIGNMENTS).forEach(function (a) {
     if (!statuses[a.status]) return;
     entries.push(_ledgerEntryFromAssignment_(a, ctx));
   });
 
   try {
-    listCapacityAdjustments_({}).forEach(function (adj) {
+    readTable_(CAPACITY_ADJUSTMENTS_SHEET).forEach(function (adj) {
       if (!statuses[adj.status]) return;
       entries.push(_ledgerEntryFromAdjustment_(adj, ctx));
     });

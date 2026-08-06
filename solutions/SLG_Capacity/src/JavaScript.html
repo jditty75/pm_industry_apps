@@ -7885,18 +7885,22 @@ async function _qaRefreshPsaHours_() {
     const roster = WFM25State.onLeaveRoster || {};
     const onLeave = roster[teamLabel] || [];
     const names = onLeave.map(function (x) { return x.name; }).filter(Boolean);
-    let inner = String(activeCount);
-    if (names.length) {
-      const namesHtml = names.map(function (n) {
-        return '<span class="wfm25-onleave-popover-name">' + escapeHtml_(n) + '</span>';
-      }).join('');
-      inner += ' \u00b7 <span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
+    if (!names.length) {
+      return '<div class="wfm25-team-meta muted"><span class="wfm25-team-count">(' +
+        String(activeCount) + ')</span></div>';
+    }
+    const namesHtml = names.map(function (n) {
+      return '<span class="wfm25-onleave-popover-name">' + escapeHtml_(n) + '</span>';
+    }).join('');
+    return '<div class="wfm25-team-meta muted">' +
+      '<span class="wfm25-team-count">(' + String(activeCount) + ' \u00b7 </span>' +
+      '<span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
         ' aria-label="' + names.length + ' on leave: ' + escapeHtml_(names.join(', ')) + '">' +
         names.length + ' on leave' +
         '<span class="wfm25-onleave-popover" role="tooltip">' + namesHtml + '</span>' +
-        '</span>';
-    }
-    return '<div class="wfm25-team-meta muted"><span class="wfm25-team-count">(' + inner + ')</span></div>';
+      '</span>' +
+      '<span class="wfm25-team-count-suffix" aria-hidden="true">)</span>' +
+    '</div>';
   }
 
   /**
@@ -9514,6 +9518,12 @@ async function _qaRefreshPsaHours_() {
       });
 
       $$('.wfm25-onleave-breakout', body).forEach(function (el) {
+        el.addEventListener('mouseenter', function () {
+          el.classList.add('is-hover');
+        });
+        el.addEventListener('mouseleave', function () {
+          el.classList.remove('is-hover');
+        });
         el.addEventListener('click', function (e) {
           e.stopPropagation();
           const wasOpen = el.classList.contains('is-open');

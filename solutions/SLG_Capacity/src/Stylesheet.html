@@ -4057,6 +4057,7 @@ td.cell-with-bar {
   margin-top: 4px;
 }
 .wfm25-onleave-breakout:hover .wfm25-onleave-popover,
+.wfm25-onleave-breakout.is-hover .wfm25-onleave-popover,
 .wfm25-onleave-breakout:focus-visible .wfm25-onleave-popover,
 .wfm25-onleave-breakout.is-open .wfm25-onleave-popover {
   display: block;
@@ -4065,17 +4066,21 @@ td.cell-with-bar {
 #wfm25UtilTable,
 #wfm25UtilTable tbody,
 #wfm25UtilTable tbody td:first-child,
+#wfm25UtilTable .wfm25-team-col:has(.wfm25-onleave-breakout),
 #wfm25UtilTable .wfm25-team-name-cell,
+#wfm25UtilTable .wfm25-team-meta,
 #wfm25UtilTable .wfm25-team-count {
   overflow: visible;
 }
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:hover),
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout.is-hover),
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:focus-visible),
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout.is-open) {
   position: relative;
   z-index: 20;
 }
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:hover) > td,
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout.is-hover) > td,
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:focus-visible) > td,
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout.is-open) > td {
   overflow: visible;
@@ -4496,6 +4501,10 @@ td.cell-with-bar {
   white-space: nowrap;
 }
 .wfm25-team-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0;
   padding-left: 16px;
   font-size: 11px;
   line-height: 1.35;
@@ -4503,10 +4512,19 @@ td.cell-with-bar {
   overflow: hidden;
 }
 .wfm25-team-meta .wfm25-team-count {
-  display: block;
+  display: inline;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.wfm25-team-meta .wfm25-team-count-suffix {
+  flex: 0 0 auto;
+}
+.wfm25-team-meta .wfm25-onleave-breakout {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .wfm25-team-swatch {
   width: 8px;
@@ -4588,14 +4606,27 @@ td.cell-with-bar {
   align-items: center;
   flex-shrink: 0;
   line-height: 0;
+  opacity: 1;
+  margin-left: 5px;
 }
 .wfm25-util-glyph-svg {
   display: block;
+  width: 15px;
+  height: 15px;
 }
-.wfm25-util-glyph.wfm25-util-band--cold { color: #0a3d7c; }
-.wfm25-util-glyph.wfm25-util-band--fire { color: #D6371E; }
+/* Exception glyphs: high-contrast monochrome — inherit cell fg on band-washed util cells */
+.wfm25-util-cell[class*="wfm25-util-band--"] .wfm25-util-glyph {
+  color: inherit;
+  opacity: 1;
+}
+/* Hours & Capacity: dark glyph on neutral cell background */
+.wfm25-hours-capacity-cell .wfm25-util-glyph.wfm25-util-band--cold,
+.wfm25-hours-capacity-cell .wfm25-util-glyph.wfm25-util-band--fire {
+  color: #1a2332;
+  opacity: 1;
+}
 .wfm25-hc-util-pct .wfm25-util-glyph {
-  margin-left: 2px;
+  margin-left: 5px;
 }
 /* Team util cells slightly larger font */
 .wfm25-team-row .wfm25-util-cell {

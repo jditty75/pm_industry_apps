@@ -4549,6 +4549,26 @@ td.cell-with-bar {
   font-size: 13px;
   font-weight: 500;
 }
+.wfm25-util-cell-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.wfm25-util-glyph {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  line-height: 0;
+}
+.wfm25-util-glyph-svg {
+  display: block;
+}
+.wfm25-util-glyph.wfm25-util-band--cold { color: #0a3d7c; }
+.wfm25-util-glyph.wfm25-util-band--fire { color: #D6371E; }
+.wfm25-hc-util-pct .wfm25-util-glyph {
+  margin-left: 2px;
+}
 /* Team util cells slightly larger font */
 .wfm25-team-row .wfm25-util-cell {
   font-size: 14px;
@@ -5410,19 +5430,13 @@ td.cell-with-bar {
 .wfm25-hours-capacity-cell.wfm25-util-band--cold {
   box-shadow: inset 3px 0 0 #0a3d7c;
 }
-.wfm25-hours-capacity-cell.wfm25-util-band--cool {
-  box-shadow: inset 3px 0 0 #D6EBF9;
-}
-.wfm25-hours-capacity-cell.wfm25-util-band--approaching {
-  box-shadow: inset 3px 0 0 #FFF1B8;
-}
 .wfm25-hours-capacity-cell.wfm25-util-band--ontarget {
   box-shadow: inset 3px 0 0 #c8e6c9;
 }
 .wfm25-hours-capacity-cell.wfm25-util-band--warm {
   box-shadow: inset 3px 0 0 #E76F1C;
 }
-.wfm25-hours-capacity-cell.wfm25-util-band--hot {
+.wfm25-hours-capacity-cell.wfm25-util-band--fire {
   box-shadow: inset 3px 0 0 #D6371E;
 }
 .wfm25-hc-util-bar-wrap {

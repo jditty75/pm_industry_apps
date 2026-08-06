@@ -111,6 +111,19 @@ function bootstrap() {
       if (existingKeys[k]) return;
       appendRow_(CFG_SETTINGS, { key: k, value: newSettingsDefaults[k] }, ['key', 'value']);
     });
+
+    const wfm25UtilDefaults = {
+      util_band_cold_max: '0.85',
+      util_band_ontarget_max: '1.05',
+      util_band_warm_max: '1.15',
+      util_glyph_fire: 'fire',
+      util_glyph_cold: 'cold',
+      util_glyph_enabled: 'true'
+    };
+    Object.keys(wfm25UtilDefaults).forEach(function (k) {
+      if (existingKeys[k]) return;
+      appendRow_(CFG_SETTINGS, { key: k, value: wfm25UtilDefaults[k] }, ['key', 'value']);
+    });
   }
 
   // Reorder tabs for usability

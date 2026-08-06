@@ -7795,11 +7795,16 @@ async function _qaRefreshPsaHours_() {
       projUtil != null && baseUtil != null;
     if (!hasDraft) {
       const color = (baseUtil != null)
-        ? cellColor(baseUtil, icpTarget)
+        ? wfm25UtilBandColor_(baseUtil)
         : { bg: 'var(--business-card)', fg: 'var(--staple)' };
-      return '<td class="wfm25-util-cell' + (extraCls ? ' ' + extraCls : '') +
+      const bandCls = (baseUtil != null) ? wfm25UtilBandClass_(baseUtil) : '';
+      const glyph = (baseUtil != null) ? wfm25UtilGlyph_(baseUtil) : '';
+      return '<td class="wfm25-util-cell' + (bandCls ? ' ' + bandCls : '') +
+        (extraCls ? ' ' + extraCls : '') +
         '" style="background:' + color.bg + ';color:' + color.fg + '">' +
-        (baseUtil != null ? fmtPct(baseUtil) : '\u2014') + '</td>';
+        '<span class="wfm25-util-cell-value">' +
+        (baseUtil != null ? fmtPct(baseUtil) : '\u2014') + glyph +
+        '</span></td>';
     }
     const arrow = wfm25DraftArrow_(baseUtil, projUtil);
     return '<td class="wfm25-util-cell has-draft' + (extraCls ? ' ' + extraCls : '') + '">' +
@@ -7903,7 +7908,7 @@ async function _qaRefreshPsaHours_() {
       const namesHtml = names.map(function (n) {
         return '<span class="wfm25-onleave-popover-name">' + escapeHtml_(n) + '</span>';
       }).join('');
-      html += ' · <span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
+      html += ' \u00b7 <span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
         ' aria-label="' + names.length + ' on leave: ' + escapeHtml_(names.join(', ')) + '">' +
         names.length + ' on leave' +
         '<span class="wfm25-onleave-popover" role="tooltip">' + namesHtml + '</span>' +
@@ -8088,19 +8093,19 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Worker-panel Status label/class from current-quarter attainment (same ratio as Current Qtr Attainment tile).
+   * Worker-panel Status label/color from current-quarter icpUtil (same basis as matrix).
    * @param {Object|null} curQ quarters[isCurrentQuarter] from api_getResourceDetailV2
-   * @returns {{label: string, className: string}}
+   * @returns {{label: string, color: {bg:string, fg:string}}}
    */
   function wfm25WorkerPanelStatus_(curQ) {
-    const ratio = wfm25WorkerPanelCurQAttainment_(curQ);
-    if (ratio > WFM25_OVER_ALLOCATED_CEILING) {
-      return { label: 'Over-allocated', className: 'explorer-status-over' };
+    const util = curQ && curQ.icpUtil != null ? Number(curQ.icpUtil) : null;
+    if (util == null || isNaN(util)) {
+      return { label: '', color: { bg: 'var(--business-card)', fg: 'var(--staple)' } };
     }
-    if (ratio < 0.75) {
-      return { label: 'Under target', className: 'explorer-status-under' };
-    }
-    return { label: 'On track', className: 'explorer-status-ok' };
+    return {
+      label: wfm25UtilStatusWord_(util),
+      color: wfm25UtilBandColor_(util)
+    };
   }
 
   /**
@@ -8122,7 +8127,7 @@ async function _qaRefreshPsaHours_() {
 
     const status = wfm25WorkerPanelStatus_(curQ);
     const statusLabel = status.label;
-    const statusColor = utilBandColor_(wfm25WorkerPanelCurQAttainment_(curQ));
+    const statusColor = status.color;
 
     const curQk = fiscalQuarterKey_(new Date());
     const curWeeks = (detail.weeks || []).filter(function (w) {
@@ -9420,7 +9425,7 @@ async function _qaRefreshPsaHours_() {
       rows.push(
         '<tr class="wfm25-team-row' + (isExpanded ? ' expanded' : '') +
         '" data-wfm25-team="' + escapeHtml_(team.label) + '">' +
-        '<td><div class="wfm25-team-name-cell">' +
+        '<td class="wfm25-team-col"><div class="wfm25-team-name-cell">' +
           '<span class="wfm25-team-swatch" style="background:' + team.color + '"></span>' +
           escapeHtml_(team.label) +
           wfm25TeamCountBreakoutHtml_(team.label, teamCount) +
@@ -9719,11 +9724,11 @@ async function _qaRefreshPsaHours_() {
    * @param {number} icpTarget
    * @returns {string}
    */
-  function wfm25HcUtilBarHtml_(util, icpTarget) {
+  function wfm25HcUtilBarHtml_(util) {
     if (util == null) {
       return '<div class="wfm25-hc-util-bar-wrap"><div class="wfm25-hc-util-bar" style="width:0"></div></div>';
     }
-    const color = cellColor(util, icpTarget);
+    const color = wfm25UtilBandColor_(util);
     const widthPct = Math.min(Math.max(Number(util) || 0, 0), 1.25) / 1.25 * 100;
     return '<div class="wfm25-hc-util-bar-wrap">' +
       '<div class="wfm25-hc-util-bar" style="width:' + widthPct.toFixed(1) + '%;background:' +
@@ -9835,35 +9840,168 @@ async function _qaRefreshPsaHours_() {
     return { quarterKeys: quarterKeys, orgTotal: orgTotal, teams: teams };
   }
 
+  // WFM.25 unified utilization bands — util is already % of target (qtd ÷ target_hours).
+  const WFM25_TARGET_UTIL_BAND_DEFAULTS_ = {
+    coldMax: 0.85,
+    ontargetMax: 1.05,
+    warmMax: 1.15
+  };
+
+  const WFM25_UTIL_GLYPH_DEFAULTS_ = {
+    enabled: true,
+    cold: 'cold',
+    fire: 'fire'
+  };
+
   /**
-   * Utilization-band CSS class for Hours & Capacity cells (ratio-to-target bands).
-   * @param {number|null} util raw utilization (productive ÷ capacity)
-   * @param {number} icpTarget
+   * Config-driven utilization band edges (% of target). Locked fallbacks when missing.
+   * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
+   */
+  function wfm25UtilBandEdges_() {
+    const ref = State.ref || {};
+    const d = WFM25_TARGET_UTIL_BAND_DEFAULTS_;
+    const read = function (key, fallback) {
+      const raw = ref[key];
+      if (raw == null || raw === '') return fallback;
+      const v = Number(raw);
+      return v > 0 ? v : fallback;
+    };
+    const edges = {
+      coldMax: read('utilBandColdMax', d.coldMax),
+      ontargetMax: read('utilBandOntargetMax', d.ontargetMax),
+      warmMax: read('utilBandWarmMax', d.warmMax)
+    };
+    if (!(edges.coldMax < edges.ontargetMax && edges.ontargetMax < edges.warmMax)) {
+      console.warn('wfm25UtilBandEdges_: malformed config — using defaults');
+      return Object.assign({}, WFM25_TARGET_UTIL_BAND_DEFAULTS_);
+    }
+    return edges;
+  }
+
+  /**
+   * Exception-glyph config (util_glyph_* keys; client fallbacks when absent from ref).
+   * @returns {{enabled:boolean, cold:string, fire:string}}
+   */
+  function wfm25UtilGlyphConfig_() {
+    const ref = State.ref || {};
+    const enabledRaw = ref.utilGlyphEnabled;
+    const enabled = (enabledRaw == null || enabledRaw === '')
+      ? WFM25_UTIL_GLYPH_DEFAULTS_.enabled
+      : String(enabledRaw).toLowerCase() !== 'false';
+    return {
+      enabled: enabled,
+      cold: String(ref.utilGlyphCold || WFM25_UTIL_GLYPH_DEFAULTS_.cold).trim(),
+      fire: String(ref.utilGlyphFire || WFM25_UTIL_GLYPH_DEFAULTS_.fire).trim()
+    };
+  }
+
+  /**
+   * CSS band class for a target-relative utilization ratio.
+   * @param {number|null} util % of target (already normalized)
    * @returns {string}
    */
-  function wfm25UtilBandClass_(util, icpTarget) {
+  function wfm25UtilBandClass_(util) {
     if (util == null) return '';
-    const ratio = icpTarget > 0 ? util / icpTarget : 1;
-    const b = wfm25UtilBands_();
-    if (ratio < b.coldMax) return 'wfm25-util-band--cold';
-    if (ratio < b.coolMax) return 'wfm25-util-band--cool';
-    if (ratio < b.approachingMax) return 'wfm25-util-band--approaching';
-    if (ratio < b.ontargetMax) return 'wfm25-util-band--ontarget';
-    if (ratio < b.warmMax) return 'wfm25-util-band--warm';
-    return 'wfm25-util-band--hot';
+    const u = Number(util);
+    if (isNaN(u)) return '';
+    const e = wfm25UtilBandEdges_();
+    if (u < e.coldMax) return 'wfm25-util-band--cold';
+    if (u < e.ontargetMax) return 'wfm25-util-band--ontarget';
+    if (u < e.warmMax) return 'wfm25-util-band--warm';
+    return 'wfm25-util-band--fire';
+  }
+
+  /**
+   * Background/foreground colors for a target-relative utilization ratio.
+   * @param {number|null} util
+   * @returns {{bg:string, fg:string}}
+   */
+  function wfm25UtilBandColor_(util) {
+    if (util == null) {
+      return { bg: 'var(--business-card)', fg: 'var(--staple)' };
+    }
+    const u = Number(util);
+    if (isNaN(u)) {
+      return { bg: 'var(--business-card)', fg: 'var(--staple)' };
+    }
+    const e = wfm25UtilBandEdges_();
+    const c = wfm25UtilColors_();
+    if (u < e.coldMax) return { bg: c.coldBg, fg: c.coldFg };
+    if (u < e.ontargetMax) return { bg: c.ontargetBg, fg: c.ontargetFg };
+    if (u < e.warmMax) return { bg: c.warmBg, fg: c.warmFg };
+    return { bg: c.hotBg, fg: c.hotFg };
+  }
+
+  /**
+   * Unified status word from the same bands as color/glyph.
+   * @param {number|null} util
+   * @returns {string}
+   */
+  function wfm25UtilStatusWord_(util) {
+    if (util == null) return '';
+    const u = Number(util);
+    if (isNaN(u)) return '';
+    const e = wfm25UtilBandEdges_();
+    if (u < e.coldMax) return 'Under';
+    if (u < e.ontargetMax) return 'On target';
+    if (u < e.warmMax) return 'Over';
+    return 'On fire';
+  }
+
+  /**
+   * Monochrome SVG for exception glyphs (cold / fire).
+   * @param {string} kind
+   * @returns {string}
+   */
+  function wfm25UtilGlyphSvg_(kind) {
+    if (kind === 'cold' || kind === '\u2744\ufe0f' || kind === '\u2744') {
+      return '<svg class="wfm25-util-glyph-svg" viewBox="0 0 16 16" width="14" height="14" focusable="false" aria-hidden="true">' +
+        '<path fill="currentColor" d="M8 1v14M1 8h14M3.05 3.05l9.9 9.9M12.95 3.05l-9.9 9.9M8 3.5l.9 2.1 2.1.9-2.1.9L8 9.5l-.9-2.1-2.1-.9 2.1-.9z"/>' +
+        '</svg>';
+    }
+    return '<svg class="wfm25-util-glyph-svg" viewBox="0 0 16 16" width="14" height="14" focusable="false" aria-hidden="true">' +
+      '<path fill="currentColor" d="M8 2c-.8 2.2-2.8 3.2-2.8 5.8A2.8 2.8 0 008 10.6a2.8 2.8 0 002.8-2.8C10.8 5.2 8.8 4.2 8 2zm0 9.2a1.4 1.4 0 100 2.8 1.4 1.4 0 000-2.8z"/>' +
+      '</svg>';
+  }
+
+  /**
+   * Exception glyph HTML (cold below cold_max, fire above warm_max) or empty string.
+   * @param {number|null} util
+   * @returns {string}
+   */
+  function wfm25UtilGlyph_(util) {
+    if (util == null) return '';
+    const u = Number(util);
+    if (isNaN(u)) return '';
+    const cfg = wfm25UtilGlyphConfig_();
+    if (!cfg.enabled) return '';
+    const e = wfm25UtilBandEdges_();
+    let kind = null;
+    let label = '';
+    if (u < e.coldMax) {
+      kind = cfg.cold;
+      label = 'Under target \u2014 cold';
+    } else if (u > e.warmMax) {
+      kind = cfg.fire;
+      label = 'Well over target \u2014 on fire';
+    }
+    if (!kind) return '';
+    const bandCls = wfm25UtilBandClass_(util);
+    return '<span class="wfm25-util-glyph ' + bandCls + '" role="img" aria-label="' +
+      escapeHtml_(label) + '" title="' + escapeHtml_(label) + '">' +
+      wfm25UtilGlyphSvg_(kind) + '</span>';
   }
 
   /**
    * Small utilization swatch for compact Hours & Capacity cells.
    * @param {number|null} util
-   * @param {number} icpTarget
    * @returns {string}
    */
-  function wfm25HcUtilSwatchHtml_(util, icpTarget) {
+  function wfm25HcUtilSwatchHtml_(util) {
     if (util == null) {
       return '<span class="wfm25-hc-util-swatch wfm25-hc-util-swatch--empty" aria-hidden="true"></span>';
     }
-    const color = cellColor(util, icpTarget);
+    const color = wfm25UtilBandColor_(util);
     return '<span class="wfm25-hc-util-swatch" style="background:' + color.bg + '"' +
       ' aria-hidden="true"></span>';
   }
@@ -10032,13 +10170,14 @@ async function _qaRefreshPsaHours_() {
     const plannedStr = committed ? fmtHours(committed.planned) + 'h' : '\u2014';
     const capStr = committed ? fmtHours(committed.capacity) + 'h' : '\u2014';
     const utilStr = util != null ? fmtPct(util) : '\u2014';
-    const bandCls = committed ? wfm25UtilBandClass_(util, icpTarget) : '';
+    const bandCls = committed ? wfm25UtilBandClass_(util) : '';
+    const glyphHtml = committed && util != null ? wfm25UtilGlyph_(util) : '';
 
     const committedInner =
       '<div class="wfm25-hc-compact-top">' +
-        wfm25HcUtilSwatchHtml_(util, icpTarget) +
-        '<span class="wfm25-hc-util-pct">' + utilStr + '</span>' +
-        wfm25HcUtilBarHtml_(util, icpTarget) +
+        wfm25HcUtilSwatchHtml_(util) +
+        '<span class="wfm25-hc-util-pct">' + utilStr + glyphHtml + '</span>' +
+        wfm25HcUtilBarHtml_(util) +
       '</div>' +
       '<div class="wfm25-hc-detail">' + plannedStr + ' / ' + capStr + '</div>';
 

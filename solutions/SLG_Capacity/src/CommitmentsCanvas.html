@@ -1,0 +1,57 @@
+<!-- CommitmentsCanvas.html — WFM.25 Staffing surface (Commitments + Unfilled Demand tabs).
+     Included via <?!= include('CommitmentsCanvas'); ?> in Index.html.
+     Unfilled Demand behavior is wired in JavaScript.html (initWFM25_). -->
+
+<div id="staffingCanvas" class="wfm25-staffing-canvas" hidden>
+
+  <div class="wfm25-tab-bar wfm25-staffing-tab-bar">
+    <div class="wfm25-tabs" role="tablist" aria-label="Staffing views">
+      <button type="button" class="wfm25-tab" data-wfm25-staffing-tab="commitments"
+              role="tab" aria-selected="false" id="wfm25TabCommitments">Commitments</button>
+      <button type="button" class="wfm25-tab active" data-wfm25-staffing-tab="unfilled-demand"
+              role="tab" aria-selected="true" id="wfm25TabUnfilledDemand">Unfilled Demand</button>
+    </div>
+    <div class="wfm25-groupby" id="wfm25UnfilledDemandGroupBy" aria-label="Group by">
+      <span class="wfm25-groupby-label">Group by:</span>
+      <button type="button" class="wfm25-groupby-btn active" data-wfm25-ud-groupby="project"
+              aria-pressed="true">By Project</button>
+      <button type="button" class="wfm25-groupby-btn" data-wfm25-ud-groupby="practice"
+              aria-pressed="false">By Practice</button>
+    </div>
+  </div>
+
+  <div class="wfm25-staffing-inner">
+    <div class="wfm25-tab-panel" id="wfm25PanelCommitments"
+         data-wfm25-staffing-panel="commitments" hidden>
+      <div class="wfm25-staffing-placeholder muted">
+        Commitments workflow — coming soon
+      </div>
+    </div>
+
+    <div class="wfm25-tab-panel" id="wfm25PanelUnfilledDemand"
+         data-wfm25-staffing-panel="unfilled-demand">
+      <div class="table-wrap wfm25-unfilled-demand-wrap" id="wfm25UnfilledDemandWrap">
+        <table class="wfm25-unfilled-demand-table wfm25-table" id="wfm25UnfilledDemandTable"
+               aria-label="Unfilled demand lines">
+          <thead>
+            <tr>
+              <th class="wfm25-ud-col-skill">Skill / Practice</th>
+              <th class="wfm25-ud-col-project">Project / Account</th>
+              <th class="wfm25-ud-col-manager">Manager</th>
+              <th class="wfm25-ud-col-hours num">Total Hours</th>
+              <th class="wfm25-ud-col-shape">Weekly Shape</th>
+              <th class="wfm25-ud-col-memo">RPL Memo</th>
+              <th class="wfm25-ud-col-action">Action</th>
+            </tr>
+          </thead>
+          <tbody id="wfm25UnfilledDemandBody">
+            <tr>
+              <td colspan="7" class="muted wfm25-ud-loading">Loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#staffingCanvas -->

@@ -3449,6 +3449,118 @@ td.cell-with-bar {
   flex-direction: column;
 }
 
+/* ── Staffing canvas (Commitments + Unfilled Demand) ─────── */
+#staffingCanvas.wfm25-staffing-canvas {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--wfm25-chrome-canvas);
+}
+.wfm25-staffing-canvas[hidden] {
+  display: none !important;
+}
+.wfm25-staffing-tab-bar {
+  flex-shrink: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--wfm25-chrome-bdr);
+  background: var(--wfm25-chrome-surface);
+}
+.wfm25-staffing-inner {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+}
+.wfm25-staffing-placeholder {
+  padding: 48px 24px;
+  text-align: center;
+  font-size: 14px;
+  background: var(--wfm25-chrome-surface);
+  border-radius: var(--wfm25-chrome-card-radius);
+  box-shadow: var(--wfm25-chrome-card-shadow);
+}
+.wfm25-unfilled-demand-wrap {
+  background: #fff;
+  border-radius: var(--wfm25-chrome-card-radius);
+  box-shadow: var(--wfm25-chrome-card-shadow);
+  overflow-x: auto;
+}
+.wfm25-unfilled-demand-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.wfm25-unfilled-demand-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--business-card);
+  white-space: nowrap;
+}
+.wfm25-unfilled-demand-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--desk);
+  vertical-align: top;
+}
+.wfm25-ud-group-row td {
+  background: var(--business-card);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wfm25-chrome-bdr);
+}
+.wfm25-ud-group-label {
+  font-weight: 600;
+  color: var(--after-hours);
+  margin-right: 10px;
+}
+.wfm25-ud-group-meta {
+  font-size: 11px;
+}
+.wfm25-ud-data-row:hover td {
+  background: rgba(11, 30, 63, .02);
+}
+.wfm25-ud-primary {
+  font-weight: 500;
+  color: var(--after-hours);
+  line-height: 1.35;
+}
+.wfm25-ud-sub {
+  font-size: 11px;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.wfm25-ud-col-skill { min-width: 140px; }
+.wfm25-ud-col-project { min-width: 160px; }
+.wfm25-ud-col-manager { min-width: 120px; }
+.wfm25-ud-col-hours { width: 80px; text-align: right; }
+.wfm25-ud-col-shape { width: 84px; }
+.wfm25-ud-col-memo { min-width: 180px; max-width: 320px; }
+.wfm25-ud-col-action { width: 88px; white-space: nowrap; }
+.wfm25-ud-memo {
+  display: block;
+  font-style: italic;
+  color: var(--staple);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.wfm25-fill-this-btn {
+  font-size: 11px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+.wfm25-ud-loading,
+.wfm25-ud-empty,
+.wfm25-ud-error {
+  padding: 24px 16px !important;
+  text-align: center;
+}
+
 /* ── Worker right-side panel ─────────────────────────────── */
 .wfm25-worker-panel {
   background: var(--wfm25-chrome-surface);

@@ -6860,6 +6860,8 @@ async function _qaRefreshPsaHours_() {
             WFM25State.xorgForecastData = null;
             WFM25State.specialtyDemandData = null;
         WFM25State.specialtyActualsData = null;
+            WFM25State.unfilledDemandRaw = null;
+            WFM25State.unfilledDemandWeeklyKeys = [];
             await loadWFM25Utilization_();
           } else if (State.currentView === 'dashboard') {
             loadDashboard();
@@ -7621,14 +7623,18 @@ async function _qaRefreshPsaHours_() {
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend' | 'specialty-demand'
     groupBy:          'team',        // 'team' | 'role'
     landingBreadcrumb: 'SLG Org',
-    activeView:       'capacity',     // 'capacity' | 'admin'
+    activeView:       'capacity',     // 'capacity' | 'staffing' | 'admin'
     selectedWorker:   null,          // worker name when panel is open
     selectedWorkerTeam: null,       // team label for breadcrumb + live aggregate shift
     selectedWorkerDetail: null,     // last api_getResourceDetailV2 result
     workerReqId:      0,             // race-guard for worker detail fetch
     utilAllocFilter:  null,          // null | 'over' | 'under' — tile filter within scope
     expandedWeekKey:  null,          // weekKey for open weekly bar breakdown, or null
-    onLeaveRoster:    null           // api_getOnLeaveRoster sidecar (display-only; not in util math)
+    onLeaveRoster:    null,           // api_getOnLeaveRoster sidecar (display-only; not in util math)
+    unfilledDemandRaw: null,          // last api_getUnstaffedDemand result (full tab)
+    unfilledDemandWeeklyKeys: [],     // MM/DD/YYYY column keys in sort order
+    unfilledDemandGroupBy: 'project', // 'project' | 'practice'
+    staffingActiveTab: 'unfilled-demand' // 'commitments' | 'unfilled-demand'
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -11942,13 +11948,17 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Switch between Capacity and Admin surfaces in the WFM.25 shell.
-   * @param {'capacity'|'admin'} view
+   * Switch between Capacity, Staffing (Unfilled Demand), and Admin surfaces.
+   * @param {'capacity'|'staffing'|'admin'} view
    */
   function wfm25ShowView_(view) {
     const capacity = document.getElementById('capacityCanvas');
+    const capBody = document.getElementById('wfm25CapacityBody');
+    const staffing = document.getElementById('staffingCanvas');
     const admin = document.getElementById('adminCanvas');
     if (capacity) capacity.hidden = (view !== 'capacity');
+    if (capBody) capBody.hidden = (view !== 'capacity');
+    if (staffing) staffing.hidden = (view !== 'staffing');
     if (admin) admin.hidden = (view !== 'admin');
     WFM25State.activeView = view;
 
@@ -11960,10 +11970,309 @@ async function _qaRefreshPsaHours_() {
       return;
     }
 
+    if (view === 'staffing') {
+      clearWFM25SoftBookings_('staffing');
+      wfm25CloseWorkerPanel_();
+      wfm25ActivateStaffingTab_(WFM25State.staffingActiveTab || 'unfilled-demand');
+      return;
+    }
+
     if (WFM25State.expandedTeam) {
       wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, WFM25State.expandedTeam]);
     } else {
       wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+    }
+  }
+
+  // ── WFM.25 Unfilled Demand (read-only display) ───────────────
+
+  /**
+   * True when a header is a WoW weekly date column (MM/DD/YYYY).
+   * @param {string} header
+   * @returns {boolean}
+   */
+  function wfm25IsWeeklyDateCol_(header) {
+    return /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(header || '').trim());
+  }
+
+  /**
+   * Detect sorted weekly column keys from Unstaffed_Demand rows.
+   * @param {Object[]} rows
+   * @returns {string[]}
+   */
+  function wfm25DetectWeeklyKeys_(rows) {
+    if (!rows || !rows.length) return [];
+    const keySet = {};
+    rows.forEach(function (row) {
+      Object.keys(row || {}).forEach(function (k) {
+        if (wfm25IsWeeklyDateCol_(k)) keySet[k] = true;
+      });
+    });
+    return Object.keys(keySet).sort(function (a, b) {
+      return new Date(a) - new Date(b);
+    });
+  }
+
+  /**
+   * Coerce a weekly cell to a numeric hour value.
+   * @param {*} v
+   * @returns {number}
+   */
+  function wfm25WeeklyHour_(v) {
+    const n = Number(v);
+    return (v !== '' && v != null && !isNaN(n)) ? n : 0;
+  }
+
+  /**
+   * Display-time filters for Unstaffed_Demand rows (raw sheet untouched).
+   * (a) hide Worker containing "Do Not Staff" (case-insensitive);
+   * (b) hide rows where ALL weekly columns are zero/blank (Total Hours = 0),
+   *     but keep back-loaded rows with non-zero later weeks.
+   * @param {Object[]} rows
+   * @param {string[]} weeklyKeys
+   * @returns {Object[]}
+   */
+  function wfm25FilterUnstaffedDemandRows_(rows, weeklyKeys) {
+    return (rows || []).filter(function (row) {
+      const worker = String(row.Worker || '');
+      if (/do not staff/i.test(worker)) return false;
+
+      let anyWeeklyNonZero = false;
+      for (let i = 0; i < weeklyKeys.length; i++) {
+        if (wfm25WeeklyHour_(row[weeklyKeys[i]]) !== 0) {
+          anyWeeklyNonZero = true;
+          break;
+        }
+      }
+      const total = wfm25WeeklyHour_(row['Total Hours']);
+      if (!anyWeeklyNonZero && total === 0) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Skill/Practice cell labels from row fields.
+   * @param {Object} row
+   * @returns {{primary:string, sub:string}}
+   */
+  function wfm25UnfilledDemandSkillPractice_(row) {
+    const primary = String(row['Project Role Category'] || '').trim() || '—';
+    const subParts = [
+      String(row['Specialty Practice'] || '').trim(),
+      String(row['Sub-Specialty Practice'] || '').trim()
+    ].filter(Boolean);
+    return { primary: primary, sub: subParts.join(' · ') };
+  }
+
+  /**
+   * Project/Account cell labels from row fields.
+   * @param {Object} row
+   * @returns {{primary:string, sub:string}}
+   */
+  function wfm25UnfilledDemandProjectAccount_(row) {
+    const account = String(row.Account || '').trim();
+    const project = String(row.Project || '').trim();
+    const primary = project || account || '—';
+    const sub = (project && account && project !== account) ? account : '';
+    return { primary: primary, sub: sub };
+  }
+
+  /**
+   * Manager label: Worker's Manager, fallback Engagement Manager.
+   * @param {Object} row
+   * @returns {string}
+   */
+  function wfm25UnfilledDemandManager_(row) {
+    return String(row["Worker's Manager"] || row['Engagement Manager'] || '').trim() || '—';
+  }
+
+  /**
+   * Grouping key for By Project or By Practice modes.
+   * @param {Object} row
+   * @param {'project'|'practice'} mode
+   * @returns {string}
+   */
+  function wfm25UnfilledDemandGroupKey_(row, mode) {
+    if (mode === 'practice') {
+      const cat = String(row['Project Role Category'] || '').trim();
+      const spec = String(row['Specialty Practice'] || '').trim();
+      if (cat && spec) return cat + ' · ' + spec;
+      return cat || spec || 'Unclassified';
+    }
+    const project = String(row.Project || '').trim();
+    const account = String(row.Account || '').trim();
+    if (project && account && project !== account) return project + ' — ' + account;
+    return project || account || 'Unassigned';
+  }
+
+  /**
+   * Weekly hour series for sparkline rendering.
+   * @param {Object} row
+   * @param {string[]} weeklyKeys
+   * @returns {number[]}
+   */
+  function wfm25UnfilledDemandWeeklySeries_(row, weeklyKeys) {
+    return weeklyKeys.map(function (k) { return wfm25WeeklyHour_(row[k]); });
+  }
+
+  /**
+   * Activate a staffing canvas tab (Commitments | Unfilled Demand).
+   * @param {'commitments'|'unfilled-demand'} tabKey
+   */
+  function wfm25ActivateStaffingTab_(tabKey) {
+    WFM25State.staffingActiveTab = tabKey;
+    $$('[data-wfm25-staffing-tab]').forEach(function (btn) {
+      const on = btn.dataset.wfm25StaffingTab === tabKey;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $$('[data-wfm25-staffing-panel]').forEach(function (panel) {
+      panel.hidden = panel.dataset.wfm25StaffingPanel !== tabKey;
+    });
+    const groupByEl = document.getElementById('wfm25UnfilledDemandGroupBy');
+    if (groupByEl) groupByEl.hidden = (tabKey !== 'unfilled-demand');
+
+    if (tabKey === 'unfilled-demand') {
+      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Unfilled Demand']);
+      loadWFM25UnfilledDemand_();
+    } else {
+      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Commitments']);
+    }
+  }
+
+  /**
+   * Render the Unfilled Demand table from cached raw rows + display filters.
+   */
+  function renderWFM25UnfilledDemand_() {
+    const body = document.getElementById('wfm25UnfilledDemandBody');
+    if (!body) return;
+
+    const weeklyKeys = WFM25State.unfilledDemandWeeklyKeys || [];
+    const filtered = wfm25FilterUnstaffedDemandRows_(
+      WFM25State.unfilledDemandRaw || [],
+      weeklyKeys
+    );
+
+    if (!filtered.length) {
+      body.innerHTML = '<tr><td colspan="7" class="muted wfm25-ud-empty">No unfilled demand rows match the current filters.</td></tr>';
+      return;
+    }
+
+    const mode = WFM25State.unfilledDemandGroupBy || 'project';
+    const groups = {};
+    filtered.forEach(function (row) {
+      const key = wfm25UnfilledDemandGroupKey_(row, mode);
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(row);
+    });
+
+    const groupKeys = Object.keys(groups).sort(function (a, b) {
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+
+    let html = '';
+    groupKeys.forEach(function (gKey) {
+      const rows = groups[gKey].slice().sort(function (a, b) {
+        return wfm25WeeklyHour_(b['Total Hours']) - wfm25WeeklyHour_(a['Total Hours']);
+      });
+      let groupHours = 0;
+      rows.forEach(function (row) { groupHours += wfm25WeeklyHour_(row['Total Hours']); });
+
+      html += '<tr class="wfm25-ud-group-row">' +
+        '<td colspan="7">' +
+        '<span class="wfm25-ud-group-label">' + escapeHtml_(gKey) + '</span>' +
+        '<span class="wfm25-ud-group-meta muted">' +
+          rows.length + ' open · ' + fmtHours(groupHours) + 'h' +
+        '</span>' +
+        '</td></tr>';
+
+      rows.forEach(function (row) {
+        const skill = wfm25UnfilledDemandSkillPractice_(row);
+        const proj = wfm25UnfilledDemandProjectAccount_(row);
+        const manager = wfm25UnfilledDemandManager_(row);
+        const total = wfm25WeeklyHour_(row['Total Hours']);
+        const series = wfm25UnfilledDemandWeeklySeries_(row, weeklyKeys);
+        const spark = wfm25MixTrendSparklineSvg_(series, 'var(--wfm25-chrome-accent)', 72, 20);
+        const memo = String(row['RPL Memo'] || '');
+
+        html += '<tr class="wfm25-ud-data-row">' +
+          '<td class="wfm25-ud-col-skill">' +
+            '<div class="wfm25-ud-primary">' + escapeHtml_(skill.primary) + '</div>' +
+            (skill.sub ? '<div class="wfm25-ud-sub muted">' + escapeHtml_(skill.sub) + '</div>' : '') +
+          '</td>' +
+          '<td class="wfm25-ud-col-project">' +
+            '<div class="wfm25-ud-primary">' + escapeHtml_(proj.primary) + '</div>' +
+            (proj.sub ? '<div class="wfm25-ud-sub muted">' + escapeHtml_(proj.sub) + '</div>' : '') +
+          '</td>' +
+          '<td class="wfm25-ud-col-manager">' + escapeHtml_(manager) + '</td>' +
+          '<td class="wfm25-ud-col-hours num">' + fmtHours(total) + '</td>' +
+          '<td class="wfm25-ud-col-shape">' + spark + '</td>' +
+          '<td class="wfm25-ud-col-memo"><span class="wfm25-ud-memo">' + escapeHtml_(memo) + '</span></td>' +
+          '<td class="wfm25-ud-col-action">' +
+            '<button type="button" class="btn-primary wfm25-fill-this-btn" data-wfm25-fill-this>Fill this</button>' +
+          '</td>' +
+        '</tr>';
+      });
+    });
+
+    body.innerHTML = html;
+  }
+
+  /**
+   * Fetch Unstaffed_Demand (read-only) and render the Unfilled Demand table.
+   */
+  async function loadWFM25UnfilledDemand_() {
+    const body = document.getElementById('wfm25UnfilledDemandBody');
+    if (!body) return;
+
+    if (WFM25State.unfilledDemandRaw) {
+      renderWFM25UnfilledDemand_();
+      return;
+    }
+
+    body.innerHTML = '<tr><td colspan="7" class="muted wfm25-ud-loading">Loading…</td></tr>';
+    try {
+      const rows = await call('api_getUnstaffedDemand');
+      WFM25State.unfilledDemandRaw = Array.isArray(rows) ? rows : [];
+      WFM25State.unfilledDemandWeeklyKeys = wfm25DetectWeeklyKeys_(WFM25State.unfilledDemandRaw);
+      renderWFM25UnfilledDemand_();
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="7" class="muted wfm25-ud-error">Failed to load: ' +
+        escapeHtml_(err.message || String(err)) + '</td></tr>';
+      console.error('[WFM.25] loadWFM25UnfilledDemand_ failed:', err);
+    }
+  }
+
+  /**
+   * Wire staffing tab, group-by, and Fill-this stub handlers.
+   */
+  function initWFM25Staffing_() {
+    $$('[data-wfm25-staffing-tab]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25ActivateStaffingTab_(btn.dataset.wfm25StaffingTab);
+      });
+    });
+
+    $$('[data-wfm25-ud-groupby]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('[data-wfm25-ud-groupby]').forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+        WFM25State.unfilledDemandGroupBy = btn.dataset.wfm25UdGroupby || 'project';
+        if (WFM25State.unfilledDemandRaw) renderWFM25UnfilledDemand_();
+      });
+    });
+
+    const udBody = document.getElementById('wfm25UnfilledDemandBody');
+    if (udBody) {
+      udBody.addEventListener('click', function (e) {
+        const btn = e.target.closest('[data-wfm25-fill-this]');
+        if (!btn) return;
+        toast('Staffing from demand — coming soon');
+      });
     }
   }
 
@@ -12862,12 +13171,14 @@ async function _qaRefreshPsaHours_() {
     WFM25State.landingBreadcrumb = wfm25LandingBreadcrumb_(ref);
     wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
 
-    // ── Left icon strip: Capacity ↔ Admin ──
+    // ── Left icon strip: Capacity ↔ Staffing ↔ Admin ──
     $$('.wfm25-strip-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         $$('.wfm25-strip-btn').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
-        wfm25ShowView_(btn.dataset.wfm25Nav === 'admin' ? 'admin' : 'capacity');
+        const nav = btn.dataset.wfm25Nav;
+        const view = nav === 'admin' ? 'admin' : (nav === 'staffing' ? 'staffing' : 'capacity');
+        wfm25ShowView_(view);
       });
     });
 
@@ -12911,6 +13222,7 @@ async function _qaRefreshPsaHours_() {
     // ── Global search overlay ──
     initWFM25GlobalSearch_();
     initWFM25AdminHandlers_();
+    initWFM25Staffing_();
 
     // ── Worker panel close + soft-booking overlay ──
     const panelClose = document.getElementById('wfm25WorkerPanelClose');

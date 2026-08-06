@@ -44,6 +44,10 @@
         <span class="wfm25-strip-icon">◈</span>
         <span class="wfm25-strip-label">Capacity</span>
       </button>
+      <button class="wfm25-strip-btn" data-wfm25-nav="staffing" title="Unfilled Demand">
+        <span class="wfm25-strip-icon">◇</span>
+        <span class="wfm25-strip-label">Demand</span>
+      </button>
       <button class="wfm25-strip-btn" data-wfm25-nav="admin" title="Admin">
         <span class="wfm25-strip-icon">⚙</span>
         <span class="wfm25-strip-label">Admin</span>
@@ -56,6 +60,7 @@
         <?!= include('CapacityCanvas'); ?>
         <?!= include('WorkerPanel'); ?>
       </div>
+      <?!= include('CommitmentsCanvas'); ?>
       <?!= include('AdminCanvas'); ?>
     </main>
 

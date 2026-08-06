@@ -5352,3 +5352,18 @@ function api_getOnLeaveRoster() {
   _requireAuthorized_();
   return getOnLeaveByTeam_();
 }
+
+/**
+ * WFM.25: read-only passthrough of the Unstaffed_Demand tab (verbatim WoW rows).
+ * Display-layer only — no normalization, no capacity math.
+ * @return {Object[]}
+ */
+function api_getUnstaffedDemand() {
+  _requireAuthorized_();
+  try {
+    return readTable_(UNSTAFFED_DEMAND_SHEET) || [];
+  } catch (e) {
+    Logger.log('api_getUnstaffedDemand: ' + e);
+    return [];
+  }
+}

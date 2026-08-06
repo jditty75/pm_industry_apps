@@ -423,10 +423,27 @@ const CAPACITY_ADJUSTMENT_AUDIT_HEADERS = [
   'audit_id',
   'timestamp',
   'actor',
-  'action',              // 'create' | 'update' | 'commit' | 'archive' | 'delete'
+  'action',              // 'create' | 'update' | 'commit' | 'archive' | 'void' | 'delete'
   'adjustment_id',
   'resource_name',
   'deployment_id',
+  'before_json',
+  'after_json',
+  'notes'
+];
+
+// --- WFM.25: Opportunity_Assignments Audit schema ---
+
+const ASSIGNMENTS_AUDIT_SHEET = 'Opportunity_Assignments_Audit';
+const ASSIGNMENTS_AUDIT_ARCHIVE_SHEET = 'Opportunity_Assignments_Audit_Archive';
+
+const ASSIGNMENT_AUDIT_HEADERS = [
+  'audit_id',
+  'timestamp',
+  'actor',
+  'action',              // 'create' | 'update' | 'commit' | 'archive' | 'void'
+  'assignment_id',
+  'resource_name',
   'before_json',
   'after_json',
   'notes'

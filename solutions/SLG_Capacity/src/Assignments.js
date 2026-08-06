@@ -14,6 +14,30 @@ function listAssignments_(filter) {
 }
 
 /**
+ * Append one row to Opportunity_Assignments_Audit.
+ * before is null on 'create'; after is null on hard-delete (not used in v1).
+ * @param {string} action 'create' | 'update' | 'commit' | 'archive' | 'void'
+ * @param {Object|null} before
+ * @param {Object|null} after
+ * @param {string} notes
+ */
+function appendAssignmentAudit_(action, before, after, notes) {
+  const row = {
+    audit_id:      uuid_(),
+    timestamp:     new Date(),
+    actor:         getUserEmail_(),
+    action:        String(action || ''),
+    assignment_id: after ? String(after.assignment_id || '') : (before ? String(before.assignment_id || '') : ''),
+    resource_name: after ? String(after.resource_name || '') : (before ? String(before.resource_name || '') : ''),
+    before_json:   before ? JSON.stringify(before) : null,
+    after_json:    after  ? JSON.stringify(after)  : null,
+    notes:         String(notes || '')
+  };
+  getOrCreateSheet_(ASSIGNMENTS_AUDIT_SHEET, ASSIGNMENT_AUDIT_HEADERS);
+  appendRow_(ASSIGNMENTS_AUDIT_SHEET, row, ASSIGNMENT_AUDIT_HEADERS);
+}
+
+/**
  * Save (create or update) an Opportunity_Assignments row.
  *
  * Priority 4 derivation contract:
@@ -110,25 +134,60 @@ function saveAssignment_(a) {
     a.modified_by = user;
     a.modified_at = ts;
     appendRow_(ASSIGNMENTS, a, ASSIGN_HEADERS);
+    appendAssignmentAudit_('create', null, a, '');
   } else {
+    const _before = listAssignments_({}).find(function (r) {
+      return String(r.assignment_id) === String(a.assignment_id);
+    }) || null;
     a.modified_by = user;
     a.modified_at = ts;
     updateRow_(ASSIGNMENTS, 'assignment_id', a.assignment_id, a, ASSIGN_HEADERS);
+    appendAssignmentAudit_('update', _before, a, '');
   }
 
   invalidateCache_(ASSIGNMENTS);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') invalidateSoftBookingBaselineCache_();
   return a;
 }
 
-function setAssignmentStatus_(assignment_id, status) {
+/**
+ * Flip assignment status with audit trail.
+ * @param {string} assignment_id
+ * @param {string} status
+ * @param {string} [auditAction] override audit action (e.g. 'void')
+ * @param {string} [notes]
+ * @return {{ assignment_id: string, status: string }}
+ */
+function setAssignmentStatus_(assignment_id, status, auditAction, notes) {
   const user = getUserEmail_();
-  updateRow_(ASSIGNMENTS, 'assignment_id', assignment_id, {
-    status: status, modified_by: user, modified_at: now_()
-  }, ASSIGN_HEADERS);
+  const _before = listAssignments_({}).find(function (r) {
+    return String(r.assignment_id) === String(assignment_id);
+  }) || null;
+  const patch = { status: status, modified_by: user, modified_at: now_() };
+  updateRow_(ASSIGNMENTS, 'assignment_id', assignment_id, patch, ASSIGN_HEADERS);
+  const _after = _before ? Object.assign({}, _before, patch) : { assignment_id: assignment_id, status: status };
+  var action = auditAction;
+  if (!action) {
+    if (status === 'Committed') action = 'commit';
+    else if (status === 'Archived') action = 'archive';
+    else action = 'update';
+  }
+  appendAssignmentAudit_(action, _before, _after, notes || '');
   invalidateCache_(ASSIGNMENTS);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') invalidateSoftBookingBaselineCache_();
   return { assignment_id: assignment_id, status: status };
+}
+
+/**
+ * Soft-void a committed assignment (status → Archived, audit action 'void').
+ * @param {string} assignment_id
+ * @param {string} [notes]
+ * @return {{ assignment_id: string, status: string }}
+ */
+function voidAssignment_(assignment_id, notes) {
+  return setAssignmentStatus_(assignment_id, 'Archived', 'void', notes || '');
 }
 
 /**

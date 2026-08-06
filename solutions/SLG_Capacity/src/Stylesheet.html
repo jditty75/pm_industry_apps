@@ -3614,6 +3614,146 @@ td.cell-with-bar {
   text-align: center;
 }
 
+/* Shared loading overlay (Commitments + Unfilled Demand) */
+.wfm25-unfilled-demand-wrap,
+.wfm25-commitments-wrap {
+  position: relative;
+}
+.wfm25-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, .72);
+  z-index: 4;
+  border-radius: var(--wfm25-chrome-card-radius);
+}
+.wfm25-loading-overlay[hidden] {
+  display: none !important;
+}
+.wfm25-loading-active .wfm25-commitments-content,
+.wfm25-loading-active .wfm25-unfilled-demand-table {
+  pointer-events: none;
+}
+
+/* ── Commitments ledger ─────────────────────────────────── */
+.wfm25-commitments-wrap {
+  background: #fff;
+  border-radius: var(--wfm25-chrome-card-radius);
+  box-shadow: var(--wfm25-chrome-card-shadow);
+  min-height: 200px;
+}
+.wfm25-commitments-content {
+  padding: 0;
+}
+.wfm25-commitments-empty,
+.wfm25-commitments-error {
+  padding: 48px 24px;
+  text-align: center;
+}
+.wfm25-cm-group {
+  border-bottom: 1px solid var(--desk);
+}
+.wfm25-cm-group:last-child {
+  border-bottom: none;
+}
+.wfm25-cm-group-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  background: rgba(11, 30, 63, .04);
+  border-bottom: 1px solid var(--wfm25-chrome-bdr);
+}
+.wfm25-cm-group-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--after-hours);
+}
+.wfm25-cm-scenario-header {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.wfm25-cm-scenario-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wfm25-cm-scenario-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wfm25-commitments-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.wfm25-commitments-table thead th {
+  background: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--business-card);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.wfm25-commitments-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--desk);
+  vertical-align: top;
+}
+.wfm25-cm-data-row:hover td {
+  background: rgba(11, 30, 63, .02);
+}
+.wfm25-cm-expand-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 6px;
+  color: var(--staple);
+  font-size: 10px;
+}
+.wfm25-cm-type-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.wfm25-cm-type-booking { background: #e8f4fd; color: #0b5cab; }
+.wfm25-cm-type-add { background: #e6f7ee; color: #1a7f4b; }
+.wfm25-cm-type-reduce { background: #fdecea; color: #b42318; }
+.wfm25-cm-hours-total { font-weight: 600; }
+.wfm25-cm-hours-split { font-size: 10px; display: block; margin-top: 2px; }
+.wfm25-cm-status-committed { color: #1a7f4b; font-weight: 600; }
+.wfm25-cm-status-archived { color: var(--staple); font-style: italic; }
+.wfm25-cm-col-expand { width: 28px; }
+.wfm25-cm-col-hours { min-width: 110px; text-align: right; }
+.wfm25-cm-col-actions { white-space: nowrap; }
+.wfm25-cm-modify-btn,
+.wfm25-cm-void-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.wfm25-cm-weekly-table {
+  width: auto;
+  min-width: 280px;
+  margin: 4px 0 8px 28px;
+  font-size: 11px;
+  border-collapse: collapse;
+}
+.wfm25-cm-weekly-table th,
+.wfm25-cm-weekly-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--desk);
+}
+
 /* ── Worker right-side panel ─────────────────────────────── */
 .wfm25-worker-panel {
   background: var(--wfm25-chrome-surface);

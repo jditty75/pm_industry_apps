@@ -510,7 +510,8 @@ function invalidateAllCaches_() {
     'Config_Resource_Type', 'Config_ResourceType_Map',
     'Config_Ingest_Filters',
     CAPACITY_ADJUSTMENTS_AUDIT_SHEET,       // Doc B: adjustment audit log
-    CAPACITY_ADJUSTMENTS_AUDIT_ARCHIVE_SHEET
+    CAPACITY_ADJUSTMENTS_AUDIT_ARCHIVE_SHEET,
+    ASSIGNMENTS_AUDIT_SHEET                 // WFM.25: assignment audit log
   ];
   keys.forEach(function (k) { invalidateCache_(k); });
 

@@ -11,6 +11,13 @@
       <button type="button" class="wfm25-tab active" data-wfm25-staffing-tab="unfilled-demand"
               role="tab" aria-selected="true" id="wfm25TabUnfilledDemand">Unfilled Demand</button>
     </div>
+    <div class="wfm25-groupby" id="wfm25CommitmentsGroupBy" aria-label="Group commitments by" hidden>
+      <span class="wfm25-groupby-label">View:</span>
+      <button type="button" class="wfm25-groupby-btn active" data-wfm25-cm-groupby="worker"
+              aria-pressed="true">By Worker</button>
+      <button type="button" class="wfm25-groupby-btn" data-wfm25-cm-groupby="scenario"
+              aria-pressed="false">By Scenario</button>
+    </div>
     <div class="wfm25-groupby" id="wfm25UnfilledDemandGroupBy" aria-label="Group by">
       <span class="wfm25-groupby-label">Group by:</span>
       <button type="button" class="wfm25-groupby-btn active" data-wfm25-ud-groupby="project"
@@ -23,8 +30,10 @@
   <div class="wfm25-staffing-inner">
     <div class="wfm25-tab-panel" id="wfm25PanelCommitments"
          data-wfm25-staffing-panel="commitments" hidden>
-      <div class="wfm25-staffing-placeholder muted">
-        Commitments workflow — coming soon
+      <div class="wfm25-commitments-wrap" id="wfm25CommitmentsWrap">
+        <div class="wfm25-commitments-content" id="wfm25CommitmentsContent">
+          <div class="muted wfm25-commitments-empty">Loading…</div>
+        </div>
       </div>
     </div>
 

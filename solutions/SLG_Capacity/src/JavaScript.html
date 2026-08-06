@@ -6862,6 +6862,8 @@ async function _qaRefreshPsaHours_() {
         WFM25State.specialtyActualsData = null;
             WFM25State.unfilledDemandRaw = null;
             WFM25State.unfilledDemandWeeklyKeys = [];
+            WFM25State.commitmentsLedger = null;
+            WFM25State.commitmentsScenarios = null;
             await loadWFM25Utilization_();
           } else if (State.currentView === 'dashboard') {
             loadDashboard();
@@ -7635,7 +7637,11 @@ async function _qaRefreshPsaHours_() {
     unfilledDemandWeeklyKeys: [],     // weekly WoW column keys in date sort order
     unfilledDemandGroupBy: 'project', // 'project' | 'practice'
     unfilledDemandIncludeOpportunity: false, // OFF hides Project names ending in [O]
-    staffingActiveTab: 'unfilled-demand' // 'commitments' | 'unfilled-demand'
+    staffingActiveTab: 'unfilled-demand', // 'commitments' | 'unfilled-demand'
+    commitmentsLedger: null,           // last api_getCommitmentsLedger result
+    commitmentsScenarios: null,        // last api_getCommitmentsScenarioRollups result
+    commitmentsGroupBy: 'worker',        // 'worker' | 'scenario'
+    commitmentsExpanded: new Set()       // expanded ledger_key values
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -8655,6 +8661,34 @@ async function _qaRefreshPsaHours_() {
     return '<div class="wfm25-panel-loading" role="status" aria-live="polite">' +
       '<div class="explorer-loading-spinner" aria-hidden="true"></div>' +
       '<div class="explorer-loading-label">Loading\u2026</div></div>';
+  }
+
+  /**
+   * Show a loading overlay inside a container (Commitments, Unfilled Demand, etc.).
+   * @param {HTMLElement|null} container
+   */
+  function wfm25ShowLoading_(container) {
+    if (!container) return;
+    container.classList.add('wfm25-loading-active');
+    var overlay = container.querySelector('.wfm25-loading-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'wfm25-loading-overlay';
+      overlay.innerHTML = wfm25LoadingSpinnerHtml_();
+      container.appendChild(overlay);
+    }
+    overlay.hidden = false;
+  }
+
+  /**
+   * Hide the loading overlay inside a container.
+   * @param {HTMLElement|null} container
+   */
+  function wfm25HideLoading_(container) {
+    if (!container) return;
+    container.classList.remove('wfm25-loading-active');
+    var overlay = container.querySelector('.wfm25-loading-overlay');
+    if (overlay) overlay.hidden = true;
   }
 
   /**
@@ -12222,12 +12256,15 @@ async function _qaRefreshPsaHours_() {
     });
     const groupByEl = document.getElementById('wfm25UnfilledDemandGroupBy');
     if (groupByEl) groupByEl.hidden = (tabKey !== 'unfilled-demand');
+    const cmGroupByEl = document.getElementById('wfm25CommitmentsGroupBy');
+    if (cmGroupByEl) cmGroupByEl.hidden = (tabKey !== 'commitments');
 
     if (tabKey === 'unfilled-demand') {
       wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Unfilled Demand']);
       loadWFM25UnfilledDemand_();
     } else {
       wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Commitments']);
+      loadWFM25Commitments_();
     }
   }
 
@@ -12321,6 +12358,7 @@ async function _qaRefreshPsaHours_() {
    */
   async function loadWFM25UnfilledDemand_() {
     const body = document.getElementById('wfm25UnfilledDemandBody');
+    const wrap = document.getElementById('wfm25UnfilledDemandWrap');
     if (!body) return;
 
     if (WFM25State.unfilledDemandRaw) {
@@ -12328,7 +12366,7 @@ async function _qaRefreshPsaHours_() {
       return;
     }
 
-    body.innerHTML = '<tr><td colspan="7" class="muted wfm25-ud-loading">Loading…</td></tr>';
+    wfm25ShowLoading_(wrap);
     try {
       const rows = await call('api_getUnstaffedDemand');
       WFM25State.unfilledDemandRaw = Array.isArray(rows) ? rows : [];
@@ -12338,6 +12376,383 @@ async function _qaRefreshPsaHours_() {
       body.innerHTML = '<tr><td colspan="7" class="muted wfm25-ud-error">Failed to load: ' +
         escapeHtml_(err.message || String(err)) + '</td></tr>';
       console.error('[WFM.25] loadWFM25UnfilledDemand_ failed:', err);
+    } finally {
+      wfm25HideLoading_(wrap);
+    }
+  }
+
+  // ── WFM.25 Commitments ledger ────────────────────────────────
+
+  /**
+   * Hours display with locked/reducible split annotation.
+   * @param {Object} row ledger entry
+   * @returns {string}
+   */
+  function wfm25CommitmentHoursHtml_(row) {
+    const total = Number(row.committed_hours) || 0;
+    const locked = Number(row.locked_hours) || 0;
+    const reducible = Number(row.reducible_hours) || 0;
+    const sign = row.booking_type === 'Reduce' ? '−' : '';
+    let html = '<span class="wfm25-cm-hours-total">' + sign + fmtHours(total) + '</span>';
+    html += '<span class="wfm25-cm-hours-split muted">';
+    html += locked > 0 ? (' ' + fmtHours(locked) + ' locked') : '';
+    html += reducible > 0 ? (' · ' + fmtHours(reducible) + ' reducible') : '';
+    html += '</span>';
+    return html;
+  }
+
+  /**
+   * Status pill for a commitment row.
+   * @param {string} status
+   * @returns {string}
+   */
+  function wfm25CommitmentStatusHtml_(status) {
+    const s = String(status || '');
+    const label = s === 'Archived' ? 'Archived (void)' : s;
+    return '<span class="wfm25-cm-status wfm25-cm-status-' + escapeHtml_(s.toLowerCase()) + '">' +
+      escapeHtml_(label) + '</span>';
+  }
+
+  /**
+   * Render one commitment booking row (expandable).
+   * @param {Object} row
+   * @returns {string}
+   */
+  function wfm25CommitmentRowHtml_(row) {
+    const expanded = WFM25State.commitmentsExpanded.has(row.ledger_key);
+    const dates = (row.start_date && row.end_date)
+      ? (row.start_date + ' – ' + row.end_date) : '—';
+    const quarters = (row.quarters || []).join(', ') || '—';
+    const scenLabel = row.scenario_id
+      ? escapeHtml_(row.scenario_name || row.scenario_id)
+      : '<span class="muted">No scenario</span>';
+    const typeClass = 'wfm25-cm-type-' + String(row.booking_type || '').toLowerCase();
+    const canAct = row.status === 'Committed';
+    const weeklyHtml = expanded && (row.weekly_detail || []).length
+      ? '<tr class="wfm25-cm-weekly-row" data-cm-weekly="' + escapeHtml_(row.ledger_key) + '"><td colspan="11">' +
+        '<table class="wfm25-cm-weekly-table"><thead><tr>' +
+        '<th>Week</th><th class="num">Hours</th><th>Locked</th></tr></thead><tbody>' +
+        row.weekly_detail.map(function (w) {
+          return '<tr><td>' + escapeHtml_(w.week_key) + '</td>' +
+            '<td class="num">' + fmtHours(w.hours) + '</td>' +
+            '<td>' + (w.locked ? 'Yes' : 'No') + '</td></tr>';
+        }).join('') +
+        '</tbody></table></td></tr>'
+      : '';
+
+    return '<tr class="wfm25-cm-data-row' + (expanded ? ' expanded' : '') + '" data-cm-key="' +
+      escapeHtml_(row.ledger_key) + '">' +
+      '<td class="wfm25-cm-col-expand"><button type="button" class="wfm25-cm-expand-btn" data-cm-expand="' +
+        escapeHtml_(row.ledger_key) + '" aria-expanded="' + (expanded ? 'true' : 'false') + '">' +
+        (expanded ? '▼' : '▶') + '</button></td>' +
+      '<td class="wfm25-cm-col-worker">' + escapeHtml_(row.worker) + '</td>' +
+      '<td class="wfm25-cm-col-team">' + escapeHtml_(row.team || '—') + '</td>' +
+      '<td class="wfm25-cm-col-project">' + escapeHtml_(row.project_label) + '</td>' +
+      '<td class="wfm25-cm-col-type"><span class="wfm25-cm-type-pill ' + typeClass + '">' +
+        escapeHtml_(row.booking_type) + '</span></td>' +
+      '<td class="wfm25-cm-col-hours num">' + wfm25CommitmentHoursHtml_(row) + '</td>' +
+      '<td class="wfm25-cm-col-dates">' + escapeHtml_(dates) + '</td>' +
+      '<td class="wfm25-cm-col-quarters muted">' + escapeHtml_(quarters) + '</td>' +
+      '<td class="wfm25-cm-col-status">' + wfm25CommitmentStatusHtml_(row.status) + '</td>' +
+      '<td class="wfm25-cm-col-scenario">' + scenLabel + '</td>' +
+      '<td class="wfm25-cm-col-actions">' +
+        (canAct
+          ? '<button type="button" class="btn-ghost wfm25-cm-modify-btn" data-cm-modify="' +
+              escapeHtml_(row.ledger_key) + '">Modify</button>' +
+            '<button type="button" class="btn-ghost danger wfm25-cm-void-btn" data-cm-void="' +
+              escapeHtml_(row.ledger_key) + '">Void</button>'
+          : '<span class="muted">—</span>') +
+      '</td>' +
+      '</tr>' + weeklyHtml;
+  }
+
+  /**
+   * Render commitments grouped by worker.
+   * @param {Object[]} ledger
+   * @returns {string}
+   */
+  function wfm25RenderCommitmentsByWorker_(ledger) {
+    if (!ledger.length) {
+      return '<div class="muted wfm25-commitments-empty">No committed bookings found.</div>';
+    }
+    const byWorker = {};
+    ledger.forEach(function (row) {
+      const k = row.worker || 'Unknown';
+      if (!byWorker[k]) byWorker[k] = [];
+      byWorker[k].push(row);
+    });
+    const workers = Object.keys(byWorker).sort();
+    let html = '';
+    workers.forEach(function (worker) {
+      const rows = byWorker[worker];
+      html += '<div class="wfm25-cm-group">';
+      html += '<div class="wfm25-cm-group-header"><span class="wfm25-cm-group-title">' +
+        escapeHtml_(worker) + '</span><span class="wfm25-cm-group-meta muted">' +
+        rows.length + ' booking' + (rows.length === 1 ? '' : 's') + '</span></div>';
+      html += '<table class="wfm25-commitments-table wfm25-table" aria-label="Commitments for ' +
+        escapeHtml_(worker) + '"><thead><tr>' +
+        '<th></th><th>Worker</th><th>Team</th><th>Project / Account</th><th>Type</th>' +
+        '<th class="num">Hours</th><th>Dates</th><th>Quarters</th><th>Status</th>' +
+        '<th>Scenario</th><th>Actions</th></tr></thead><tbody>';
+      rows.forEach(function (r) { html += wfm25CommitmentRowHtml_(r); });
+      html += '</tbody></table></div>';
+    });
+    return html;
+  }
+
+  /**
+   * Render commitments grouped by scenario.
+   * @param {Object[]} ledger
+   * @param {Object[]} rollups
+   * @returns {string}
+   */
+  function wfm25RenderCommitmentsByScenario_(ledger, rollups) {
+    const byScen = {};
+    ledger.forEach(function (row) {
+      const sid = row.scenario_id || '__none__';
+      if (!byScen[sid]) byScen[sid] = [];
+      byScen[sid].push(row);
+    });
+    const rollupMap = {};
+    (rollups || []).forEach(function (r) {
+      rollupMap[r.scenario_id || '__none__'] = r;
+    });
+    const keys = Object.keys(byScen).sort(function (a, b) {
+      if (a === '__none__') return 1;
+      if (b === '__none__') return -1;
+      const na = (rollupMap[a] || {}).scenario_name || a;
+      const nb = (rollupMap[b] || {}).scenario_name || b;
+      return String(na).localeCompare(String(nb));
+    });
+    if (!keys.length) {
+      return '<div class="muted wfm25-commitments-empty">No committed bookings found.</div>';
+    }
+    let html = '';
+    keys.forEach(function (sid) {
+      const rows = byScen[sid];
+      const rollup = rollupMap[sid] || {
+        scenario_name: sid === '__none__' ? 'No scenario' : sid,
+        scenario_id: sid === '__none__' ? '' : sid,
+        status: sid === '__none__' ? 'Ad-hoc' : 'Active',
+        total_hours: 0,
+        worker_count: 0
+      };
+      html += '<div class="wfm25-cm-group" data-cm-scenario="' + escapeHtml_(rollup.scenario_id || '') + '">';
+      html += '<div class="wfm25-cm-group-header wfm25-cm-scenario-header">';
+      html += '<div class="wfm25-cm-scenario-title-row">';
+      html += '<span class="wfm25-cm-group-title">' + escapeHtml_(rollup.scenario_name) + '</span>';
+      html += '<span class="wfm25-cm-scenario-status muted">' + escapeHtml_(rollup.status) + '</span>';
+      html += '</div>';
+      html += '<div class="wfm25-cm-scenario-meta muted">' +
+        fmtHours(Math.abs(rollup.total_hours || 0)) + ' committed hrs · ' +
+        (rollup.worker_count || 0) + ' worker' + ((rollup.worker_count || 0) === 1 ? '' : 's') +
+        '</div>';
+      if (rollup.scenario_id) {
+        html += '<div class="wfm25-cm-scenario-actions">';
+        html += '<button type="button" class="btn-ghost wfm25-cm-scen-commit" data-cm-scen-commit="' +
+          escapeHtml_(rollup.scenario_id) + '">Commit scenario</button>';
+        html += '<button type="button" class="btn-ghost wfm25-cm-scen-archive" data-cm-scen-archive="' +
+          escapeHtml_(rollup.scenario_id) + '">Archive</button>';
+        html += '<button type="button" class="btn-ghost wfm25-cm-scen-restore" data-cm-scen-restore="' +
+          escapeHtml_(rollup.scenario_id) + '">Restore</button>';
+        html += '</div>';
+      }
+      html += '</div>';
+      html += '<table class="wfm25-commitments-table wfm25-table"><thead><tr>' +
+        '<th></th><th>Worker</th><th>Team</th><th>Project / Account</th><th>Type</th>' +
+        '<th class="num">Hours</th><th>Dates</th><th>Quarters</th><th>Status</th>' +
+        '<th>Scenario</th><th>Actions</th></tr></thead><tbody>';
+      rows.forEach(function (r) { html += wfm25CommitmentRowHtml_(r); });
+      html += '</tbody></table></div>';
+    });
+    return html;
+  }
+
+  /**
+   * Paint commitments ledger from cached state.
+   */
+  function renderWFM25Commitments_() {
+    const content = document.getElementById('wfm25CommitmentsContent');
+    if (!content) return;
+    const ledger = WFM25State.commitmentsLedger || [];
+    const mode = WFM25State.commitmentsGroupBy || 'worker';
+    content.innerHTML = mode === 'scenario'
+      ? wfm25RenderCommitmentsByScenario_(ledger, WFM25State.commitmentsScenarios || [])
+      : wfm25RenderCommitmentsByWorker_(ledger);
+    wfm25BindCommitmentsInteractions_(content);
+  }
+
+  /**
+   * Wire expand/modify/void/scenario handlers on commitments content.
+   * @param {HTMLElement} root
+   */
+  function wfm25BindCommitmentsInteractions_(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-cm-expand]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const key = btn.dataset.cmExpand;
+        if (WFM25State.commitmentsExpanded.has(key)) {
+          WFM25State.commitmentsExpanded.delete(key);
+        } else {
+          WFM25State.commitmentsExpanded.add(key);
+        }
+        renderWFM25Commitments_();
+      });
+    });
+    root.querySelectorAll('[data-cm-modify]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25ModifyCommitment_(btn.dataset.cmModify);
+      });
+    });
+    root.querySelectorAll('[data-cm-void]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25VoidCommitment_(btn.dataset.cmVoid);
+      });
+    });
+    root.querySelectorAll('[data-cm-scen-commit]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25CommitmentsScenarioAction_(btn.dataset.cmScenCommit, 'commit');
+      });
+    });
+    root.querySelectorAll('[data-cm-scen-archive]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25CommitmentsScenarioAction_(btn.dataset.cmScenArchive, 'archive');
+      });
+    });
+    root.querySelectorAll('[data-cm-scen-restore]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25CommitmentsScenarioAction_(btn.dataset.cmScenRestore, 'restore');
+      });
+    });
+  }
+
+  /**
+   * Find a ledger row by key.
+   * @param {string} ledgerKey
+   * @returns {Object|null}
+   */
+  function wfm25FindCommitmentRow_(ledgerKey) {
+    return (WFM25State.commitmentsLedger || []).find(function (r) {
+      return r.ledger_key === ledgerKey;
+    }) || null;
+  }
+
+  /**
+   * Modify forecast-remaining hours on a committed booking.
+   * @param {string} ledgerKey
+   */
+  async function wfm25ModifyCommitment_(ledgerKey) {
+    const row = wfm25FindCommitmentRow_(ledgerKey);
+    if (!row || row.status !== 'Committed') return;
+    const current = Number(row.reducible_hours) || 0;
+    const input = prompt(
+      'New forecast-remaining (reducible) hours for ' + row.worker + ' — ' + row.project_label +
+      '\n\nLocked hours (' + fmtHours(row.locked_hours) + ') are unchanged.\nCurrent reducible: ' +
+      fmtHours(current),
+      String(current)
+    );
+    if (input === null) return;
+    const newReducible = Number(input);
+    if (isNaN(newReducible) || newReducible < 0) {
+      toast('Enter a valid non-negative number', 'err');
+      return;
+    }
+    try {
+      await call('api_modifyCommitment', row.object_type, row.object_id, newReducible);
+      toast('Commitment updated', 'ok');
+      WFM25State.commitmentsLedger = null;
+      WFM25State.commitmentsScenarios = null;
+      await loadWFM25Commitments_(true);
+    } catch (err) {
+      toast('Modify failed: ' + (err.message || String(err)), 'err');
+    }
+  }
+
+  /**
+   * Soft-void a committed booking.
+   * @param {string} ledgerKey
+   */
+  async function wfm25VoidCommitment_(ledgerKey) {
+    const row = wfm25FindCommitmentRow_(ledgerKey);
+    if (!row || row.status !== 'Committed') return;
+    const ok = await confirmAction_({
+      title: 'Void commitment?',
+      body: 'Void this ' + row.booking_type.toLowerCase() + ' for ' + row.worker +
+        '? The overlay will stop counting it; history is retained.',
+      confirmLabel: 'Void',
+      confirmStyle: 'danger',
+      asyncHandler: async function () {
+        if (row.object_type === 'assignment') {
+          await call('api_voidAssignment', row.object_id, 'voided from commitments ledger');
+        } else {
+          await call('api_voidCapacityAdjustment', row.object_id, 'voided from commitments ledger');
+        }
+      }
+    });
+    if (!ok) return;
+    toast('Commitment voided', 'ok');
+    WFM25State.commitmentsLedger = null;
+    WFM25State.commitmentsScenarios = null;
+    await loadWFM25Commitments_(true);
+  }
+
+  /**
+   * Scenario-level commit / archive / restore from commitments view.
+   * @param {string} scenarioId
+   * @param {'commit'|'archive'|'restore'} action
+   */
+  async function wfm25CommitmentsScenarioAction_(scenarioId, action) {
+    if (!scenarioId) return;
+    const labels = {
+      commit: { title: 'Commit scenario?', body: 'Commit all Modeled items in this scenario?', api: 'api_commitScenario', label: 'Commit' },
+      archive: { title: 'Archive scenario?', body: 'Archive this scenario?', api: 'api_archiveScenario', label: 'Archive' },
+      restore: { title: 'Restore scenario?', body: 'Restore this scenario to Active?', api: 'api_restoreScenario', label: 'Restore' }
+    };
+    const cfg = labels[action];
+    if (!cfg) return;
+    const ok = await confirmAction_({
+      title: cfg.title,
+      body: cfg.body,
+      confirmLabel: cfg.label,
+      confirmStyle: action === 'archive' ? 'danger' : 'primary',
+      asyncHandler: async function () { await call(cfg.api, scenarioId); }
+    });
+    if (!ok) return;
+    toast(cfg.label + ' complete', 'ok');
+    WFM25State.commitmentsLedger = null;
+    WFM25State.commitmentsScenarios = null;
+    await loadWFM25Commitments_(true);
+  }
+
+  /**
+   * Fetch commitments ledger + scenario rollups.
+   * @param {boolean} [forceRefresh]
+   */
+  async function loadWFM25Commitments_(forceRefresh) {
+    const wrap = document.getElementById('wfm25CommitmentsWrap');
+    const content = document.getElementById('wfm25CommitmentsContent');
+    if (!content) return;
+
+    if (WFM25State.commitmentsLedger && !forceRefresh) {
+      renderWFM25Commitments_();
+      return;
+    }
+
+    wfm25ShowLoading_(wrap);
+    try {
+      const results = await Promise.all([
+        call('api_getCommitmentsLedger'),
+        call('api_getCommitmentsScenarioRollups')
+      ]);
+      WFM25State.commitmentsLedger = Array.isArray(results[0]) ? results[0] : [];
+      WFM25State.commitmentsScenarios = Array.isArray(results[1]) ? results[1] : [];
+      renderWFM25Commitments_();
+    } catch (err) {
+      content.innerHTML = '<div class="muted wfm25-commitments-error">Failed to load: ' +
+        escapeHtml_(err.message || String(err)) + '</div>';
+      console.error('[WFM.25] loadWFM25Commitments_ failed:', err);
+    } finally {
+      wfm25HideLoading_(wrap);
     }
   }
 
@@ -12402,6 +12817,19 @@ async function _qaRefreshPsaHours_() {
         btn.setAttribute('aria-pressed', 'true');
         WFM25State.unfilledDemandGroupBy = btn.dataset.wfm25UdGroupby || 'project';
         if (WFM25State.unfilledDemandRaw) renderWFM25UnfilledDemand_();
+      });
+    });
+
+    $$('[data-wfm25-cm-groupby]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('[data-wfm25-cm-groupby]').forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+        WFM25State.commitmentsGroupBy = btn.dataset.wfm25CmGroupby || 'worker';
+        renderWFM25Commitments_();
       });
     });
 

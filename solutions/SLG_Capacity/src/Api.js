@@ -5234,6 +5234,18 @@ function api_archiveAssignment(assignment_id) {
   return setAssignmentStatus_(assignment_id, 'Archived');
 }
 
+/** Soft-void a committed assignment (audit action 'void'). */
+function api_voidAssignment(assignment_id, notes) {
+  _requireAuthorized_();
+  return voidAssignment_(assignment_id, notes || '');
+}
+
+/** Soft-void a committed adjustment (audit action 'void'). */
+function api_voidCapacityAdjustment(adjustment_id, notes) {
+  _requireAuthorized_();
+  return voidCapacityAdjustment_(adjustment_id, notes || '');
+}
+
 /** Flip a Committed assignment back to Modeled. */
 function api_revertAssignmentToModeled(assignment_id) {
   _requireAuthorized_();
@@ -5366,4 +5378,90 @@ function api_getUnstaffedDemand() {
     Logger.log('api_getUnstaffedDemand: ' + e);
     return [];
   }
+}
+
+// ------------------------------------------------------------
+// WFM.25 — Commitments ledger (union assignments + adjustments)
+// ------------------------------------------------------------
+
+/**
+ * Sanitize a ledger entry for google.script.run transport.
+ * @param {Object} e
+ * @return {Object}
+ */
+function _sanitizeCommitmentLedgerForWire_(e) {
+  if (!e) return null;
+  return {
+    ledger_key: String(e.ledger_key || ''),
+    object_type: String(e.object_type || ''),
+    object_id: String(e.object_id || ''),
+    worker: String(e.worker || ''),
+    team: String(e.team || ''),
+    project_label: String(e.project_label || ''),
+    booking_type: String(e.booking_type || ''),
+    committed_hours: Number(e.committed_hours) || 0,
+    locked_hours: Number(e.locked_hours) || 0,
+    reducible_hours: Number(e.reducible_hours) || 0,
+    start_date: String(e.start_date || ''),
+    end_date: String(e.end_date || ''),
+    quarters: (e.quarters || []).map(String),
+    status: String(e.status || ''),
+    scenario_id: String(e.scenario_id || ''),
+    scenario_name: String(e.scenario_name || ''),
+    committed_by: String(e.committed_by || ''),
+    committed_at: String(e.committed_at || ''),
+    opportunity_id: String(e.opportunity_id || ''),
+    weekly_detail: (e.weekly_detail || []).map(function (w) {
+      return {
+        week_key: String(w.week_key || ''),
+        week_start: String(w.week_start || ''),
+        hours: Number(w.hours) || 0,
+        locked: !!w.locked
+      };
+    }),
+    resource_type: String(e.resource_type || ''),
+    distribution: String(e.distribution || 'Even'),
+    estimated_hours: Number(e.estimated_hours) || 0,
+    hours_reduction: Number(e.hours_reduction) || 0,
+    direction: String(e.direction || ''),
+    reason: String(e.reason || '')
+  };
+}
+
+/**
+ * Full commitments ledger (Committed + Archived-void rows).
+ * @return {Object[]}
+ */
+function api_getCommitmentsLedger() {
+  _requireAuthorized_();
+  return listCommitmentsLedger_().map(_sanitizeCommitmentLedgerForWire_);
+}
+
+/**
+ * Scenario rollups for the By Scenario pivot.
+ * @return {Object[]}
+ */
+function api_getCommitmentsScenarioRollups() {
+  _requireAuthorized_();
+  return listCommitmentsScenarioRollups_();
+}
+
+/**
+ * Modify forecast-remaining hours on a committed booking.
+ * @param {string} object_type 'assignment' | 'adjustment'
+ * @param {string} object_id
+ * @param {number} newReducibleHours
+ * @return {Object}
+ */
+function api_modifyCommitment(object_type, object_id, newReducibleHours) {
+  _requireAuthorized_();
+  if (object_type === 'assignment') {
+    var saved = modifyCommittedAssignmentHours_(object_id, newReducibleHours);
+    return _sanitizeAssignmentForWire_(saved);
+  }
+  if (object_type === 'adjustment') {
+    var adj = modifyCommittedAdjustmentHours_(object_id, newReducibleHours);
+    return _sanitizeAdjustmentForWire_(adj);
+  }
+  throw new Error('object_type must be assignment or adjustment');
 }

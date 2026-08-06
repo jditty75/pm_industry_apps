@@ -5357,12 +5357,21 @@ function api_saveOnLeaveReturnDate(worker_key, return_date, modified_at) {
 }
 
 /**
- * Per-team on-leave names sidecar for Utilization display (no hours math).
- * @return {Object<string, {name:string}[]>}
+ * Per-team on-leave roster sidecar for Utilization display (no hours math).
+ * @return {Object<string, {name:string, return_date:string}[]>}
  */
 function api_getOnLeaveRoster() {
   _requireAuthorized_();
-  return getOnLeaveByTeam_();
+  var roster = getOnLeaveByTeam_();
+  Object.keys(roster).forEach(function (tl) {
+    roster[tl] = roster[tl].map(function (entry) {
+      return {
+        name: String(entry.name || ''),
+        return_date: _toDateWire_(entry.return_date)
+      };
+    });
+  });
+  return roster;
 }
 
 /**

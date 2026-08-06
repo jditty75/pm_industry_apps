@@ -115,17 +115,23 @@ function listOnLeave_() {
 }
 
 /**
- * Lightweight per-team on-leave roster (names only). Never used in hours math.
- * @return {Object<string, {name:string}[]>}
+ * Lightweight per-team on-leave roster (names + optional return_date).
+ * Never used in hours math.
+ * @return {Object<string, {name:string, return_date:Date|string}[]>}
  */
 function getOnLeaveByTeam_() {
   var workers = _indexOnLeaveWorkers_();
+  var exclByKey = _onLeaveExclusionIndex_();
   var out = {};
   Object.keys(workers).forEach(function (k) {
     var w = workers[k];
+    var excl = exclByKey[k] || null;
     var tl = w.team_label || 'Unknown';
     if (!out[tl]) out[tl] = [];
-    out[tl].push({ name: w.worker_name });
+    out[tl].push({
+      name: w.worker_name,
+      return_date: excl ? (excl.return_date || '') : ''
+    });
   });
   Object.keys(out).forEach(function (tl) {
     out[tl].sort(function (a, b) {

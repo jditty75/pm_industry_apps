@@ -7889,6 +7889,18 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Format on-leave return_date for popover display, e.g. "returns Sep 15, 2026".
+   * @param {string} isoOrDate
+   * @returns {string}
+   */
+  function wfm25OnLeaveReturnDateLabel_(isoOrDate) {
+    if (!isoOrDate) return '';
+    const d = new Date(isoOrDate);
+    if (isNaN(d.getTime())) return '';
+    return 'returns ' + d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  /**
    * Team active count + optional on-leave breakout (display-only; not in util math).
    * @param {string} teamLabel
    * @param {number} activeCount
@@ -7897,19 +7909,25 @@ async function _qaRefreshPsaHours_() {
   function wfm25TeamCountBreakoutHtml_(teamLabel, activeCount) {
     const roster = WFM25State.onLeaveRoster || {};
     const onLeave = roster[teamLabel] || [];
-    const names = onLeave.map(function (x) { return x.name; }).filter(Boolean);
-    if (!names.length) {
+    const entries = onLeave.filter(function (x) { return x && x.name; });
+    if (!entries.length) {
       return '<div class="wfm25-team-meta muted"><span class="wfm25-team-count">(' +
         String(activeCount) + ')</span></div>';
     }
-    const namesHtml = names.map(function (n) {
-      return '<span class="wfm25-onleave-popover-name">' + escapeHtml_(n) + '</span>';
+    const namesHtml = entries.map(function (entry) {
+      const dateLabel = wfm25OnLeaveReturnDateLabel_(entry.return_date);
+      const text = dateLabel ? entry.name + ' \u2014 ' + dateLabel : entry.name;
+      return '<span class="wfm25-onleave-popover-name">' + escapeHtml_(text) + '</span>';
     }).join('');
+    const ariaLabels = entries.map(function (entry) {
+      const dateLabel = wfm25OnLeaveReturnDateLabel_(entry.return_date);
+      return dateLabel ? entry.name + ' \u2014 ' + dateLabel : entry.name;
+    });
     return '<div class="wfm25-team-meta muted">' +
       '<span class="wfm25-team-count">(' + String(activeCount) + ' \u00b7 </span>' +
       '<span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
-        ' aria-label="' + names.length + ' on leave: ' + escapeHtml_(names.join(', ')) + '">' +
-        names.length + ' on leave' +
+        ' aria-label="' + entries.length + ' on leave: ' + escapeHtml_(ariaLabels.join(', ')) + '">' +
+        entries.length + ' on leave' +
         '<span class="wfm25-onleave-popover" role="tooltip">' + namesHtml + '</span>' +
       '</span>' +
       '<span class="wfm25-team-count-suffix" aria-hidden="true">)</span>' +

@@ -36,38 +36,31 @@ const CFG_SETTINGS = 'Config_Settings';         // key/value settings
 //   alloc_under_ratio       -- ratio-to-target below which a worker is
 //                               under-allocated in the Utilization banner
 //                               (default 0.85)
-//   util_band_cold_max         -- WFM.25 unified util color scale (default 0.60)
-//   util_band_cool_max         -- (default 0.80)
-//   util_band_approaching_max  -- (default 0.90)
-//   util_band_ontarget_max     -- (default 1.03)
+//   util_band_cold_max         -- WFM.25 unified util color scale (default 0.85)
+//   util_band_ontarget_max     -- (default 1.05)
 //   util_band_warm_max         -- (default 1.15)
+//   util_glyph_fire            -- exception glyph key when util > warm_max (default fire)
+//   util_glyph_cold            -- exception glyph key when util < cold_max (default cold)
+//   util_glyph_enabled         -- master on/off for exception glyphs (default true)
 //   util_color_cold_bg         -- WFM.25 unified util band palette (hex)
 //   util_color_cold_fg         -- (default #0a3d7c / #ffffff)
-//   util_color_cool_bg         -- (default #D6EBF9 / #0a3d7c)
-//   util_color_cool_fg
-//   util_color_approaching_bg  -- (default #FFF1B8 / #6b4e00)
-//   util_color_approaching_fg
 //   util_color_ontarget_bg     -- (default #c8e6c9 / #1b5e20)
 //   util_color_ontarget_fg
 //   util_color_warm_bg         -- (default #E76F1C / #ffffff)
 //   util_color_warm_fg
-//   util_color_hot_bg          -- (default #D6371E / #ffffff)
+//   util_color_hot_bg          -- fire band palette (default #D6371E / #ffffff)
 //   util_color_hot_fg
 // Existing keys (planning_window_months, etc.) are unchanged.
 
 /** Config_Settings keys + fallbacks for WFM.25 unified utilization color bands. */
 const UTIL_BAND_SETTING_KEYS = {
   coldMax: 'util_band_cold_max',
-  coolMax: 'util_band_cool_max',
-  approachingMax: 'util_band_approaching_max',
   ontargetMax: 'util_band_ontarget_max',
   warmMax: 'util_band_warm_max'
 };
 const UTIL_BAND_DEFAULTS = {
-  coldMax: 0.60,
-  coolMax: 0.80,
-  approachingMax: 0.90,
-  ontargetMax: 1.03,
+  coldMax: 0.85,
+  ontargetMax: 1.05,
   warmMax: 1.15
 };
 
@@ -75,10 +68,6 @@ const UTIL_BAND_DEFAULTS = {
 const UTIL_COLOR_SETTING_KEYS = {
   coldBg: 'util_color_cold_bg',
   coldFg: 'util_color_cold_fg',
-  coolBg: 'util_color_cool_bg',
-  coolFg: 'util_color_cool_fg',
-  approachingBg: 'util_color_approaching_bg',
-  approachingFg: 'util_color_approaching_fg',
   ontargetBg: 'util_color_ontarget_bg',
   ontargetFg: 'util_color_ontarget_fg',
   warmBg: 'util_color_warm_bg',
@@ -89,16 +78,24 @@ const UTIL_COLOR_SETTING_KEYS = {
 const UTIL_COLOR_DEFAULTS = {
   coldBg: '#0a3d7c',
   coldFg: '#ffffff',
-  coolBg: '#D6EBF9',
-  coolFg: '#0a3d7c',
-  approachingBg: '#FFF1B8',
-  approachingFg: '#6b4e00',
   ontargetBg: '#c8e6c9',
   ontargetFg: '#1b5e20',
   warmBg: '#E76F1C',
   warmFg: '#ffffff',
   hotBg: '#D6371E',
   hotFg: '#ffffff'
+};
+
+/** Config_Settings keys + fallbacks for WFM.25 exception glyphs (read-only). */
+const UTIL_GLYPH_SETTING_KEYS = {
+  fire: 'util_glyph_fire',
+  cold: 'util_glyph_cold',
+  enabled: 'util_glyph_enabled'
+};
+const UTIL_GLYPH_DEFAULTS = {
+  fire: 'fire',
+  cold: 'cold',
+  enabled: 'true'
 };
 const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
 const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership

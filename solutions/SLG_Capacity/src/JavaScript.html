@@ -383,20 +383,14 @@
 
   // Heatmap color (unified ratio-to-target scale; config via api_getReference)
   const UTIL_BAND_DEFAULTS_ = {
-    coldMax: 0.60,
-    coolMax: 0.80,
-    approachingMax: 0.90,
-    ontargetMax: 1.03,
+    coldMax: 0.85,
+    ontargetMax: 1.05,
     warmMax: 1.15
   };
 
   const UTIL_COLOR_DEFAULTS_ = {
     coldBg: '#0a3d7c',
     coldFg: '#ffffff',
-    coolBg: '#D6EBF9',
-    coolFg: '#0a3d7c',
-    approachingBg: '#FFF1B8',
-    approachingFg: '#6b4e00',
     ontargetBg: '#c8e6c9',
     ontargetFg: '#1b5e20',
     warmBg: '#E76F1C',
@@ -407,7 +401,7 @@
 
   /**
    * Utilization color band edges from api_getReference (Config_Settings fallbacks).
-   * @returns {{coldMax:number, coolMax:number, approachingMax:number, ontargetMax:number, warmMax:number}}
+   * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
    */
   function wfm25UtilBands_() {
     const ref = State.ref || {};
@@ -419,16 +413,10 @@
     };
     const bands = {
       coldMax: read('utilBandColdMax', UTIL_BAND_DEFAULTS_.coldMax),
-      coolMax: read('utilBandCoolMax', UTIL_BAND_DEFAULTS_.coolMax),
-      approachingMax: read('utilBandApproachingMax', UTIL_BAND_DEFAULTS_.approachingMax),
       ontargetMax: read('utilBandOntargetMax', UTIL_BAND_DEFAULTS_.ontargetMax),
       warmMax: read('utilBandWarmMax', UTIL_BAND_DEFAULTS_.warmMax)
     };
-    const mono = bands.coldMax < bands.coolMax &&
-      bands.coolMax < bands.approachingMax &&
-      bands.approachingMax < bands.ontargetMax &&
-      bands.ontargetMax < bands.warmMax;
-    if (!mono) {
+    if (!(bands.coldMax < bands.ontargetMax && bands.ontargetMax < bands.warmMax)) {
       console.warn('wfm25UtilBands_: malformed config — using defaults');
       return Object.assign({}, UTIL_BAND_DEFAULTS_);
     }
@@ -437,7 +425,7 @@
 
   /**
    * Utilization band palette from api_getReference (Config_Settings hex fallbacks).
-   * @returns {{coldBg:string, coldFg:string, coolBg:string, coolFg:string, approachingBg:string, approachingFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
+   * @returns {{coldBg:string, coldFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
    */
   function wfm25UtilColors_() {
     const ref = State.ref || {};
@@ -451,10 +439,6 @@
     return {
       coldBg: readHex('utilColorColdBg', UTIL_COLOR_DEFAULTS_.coldBg),
       coldFg: readHex('utilColorColdFg', UTIL_COLOR_DEFAULTS_.coldFg),
-      coolBg: readHex('utilColorCoolBg', UTIL_COLOR_DEFAULTS_.coolBg),
-      coolFg: readHex('utilColorCoolFg', UTIL_COLOR_DEFAULTS_.coolFg),
-      approachingBg: readHex('utilColorApproachingBg', UTIL_COLOR_DEFAULTS_.approachingBg),
-      approachingFg: readHex('utilColorApproachingFg', UTIL_COLOR_DEFAULTS_.approachingFg),
       ontargetBg: readHex('utilColorOntargetBg', UTIL_COLOR_DEFAULTS_.ontargetBg),
       ontargetFg: readHex('utilColorOntargetFg', UTIL_COLOR_DEFAULTS_.ontargetFg),
       warmBg: readHex('utilColorWarmBg', UTIL_COLOR_DEFAULTS_.warmBg),
@@ -479,8 +463,6 @@
     const b = bands || wfm25UtilBands_();
     const c = colors || wfm25UtilColors_();
     if (r < b.coldMax) return { bg: c.coldBg, fg: c.coldFg };
-    if (r < b.coolMax) return { bg: c.coolBg, fg: c.coolFg };
-    if (r < b.approachingMax) return { bg: c.approachingBg, fg: c.approachingFg };
     if (r < b.ontargetMax) return { bg: c.ontargetBg, fg: c.ontargetFg };
     if (r < b.warmMax) return { bg: c.warmBg, fg: c.warmFg };
     return { bg: c.hotBg, fg: c.hotFg };
@@ -9852,13 +9834,6 @@ async function _qaRefreshPsaHours_() {
     return { quarterKeys: quarterKeys, orgTotal: orgTotal, teams: teams };
   }
 
-  // WFM.25 unified utilization bands — util is already % of target (qtd ÷ target_hours).
-  const WFM25_TARGET_UTIL_BAND_DEFAULTS_ = {
-    coldMax: 0.85,
-    ontargetMax: 1.05,
-    warmMax: 1.15
-  };
-
   const WFM25_UTIL_GLYPH_DEFAULTS_ = {
     enabled: true,
     cold: 'cold',
@@ -9866,28 +9841,11 @@ async function _qaRefreshPsaHours_() {
   };
 
   /**
-   * Config-driven utilization band edges (% of target). Locked fallbacks when missing.
+   * Config-driven utilization band edges (% of target). Delegates to shared wfm25UtilBands_().
    * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
    */
   function wfm25UtilBandEdges_() {
-    const ref = State.ref || {};
-    const d = WFM25_TARGET_UTIL_BAND_DEFAULTS_;
-    const read = function (key, fallback) {
-      const raw = ref[key];
-      if (raw == null || raw === '') return fallback;
-      const v = Number(raw);
-      return v > 0 ? v : fallback;
-    };
-    const edges = {
-      coldMax: read('utilBandColdMax', d.coldMax),
-      ontargetMax: read('utilBandOntargetMax', d.ontargetMax),
-      warmMax: read('utilBandWarmMax', d.warmMax)
-    };
-    if (!(edges.coldMax < edges.ontargetMax && edges.ontargetMax < edges.warmMax)) {
-      console.warn('wfm25UtilBandEdges_: malformed config — using defaults');
-      return Object.assign({}, WFM25_TARGET_UTIL_BAND_DEFAULTS_);
-    }
-    return edges;
+    return wfm25UtilBands_();
   }
 
   /**
@@ -9936,12 +9894,7 @@ async function _qaRefreshPsaHours_() {
     if (isNaN(u)) {
       return { bg: 'var(--business-card)', fg: 'var(--staple)' };
     }
-    const e = wfm25UtilBandEdges_();
-    const c = wfm25UtilColors_();
-    if (u < e.coldMax) return { bg: c.coldBg, fg: c.coldFg };
-    if (u < e.ontargetMax) return { bg: c.ontargetBg, fg: c.ontargetFg };
-    if (u < e.warmMax) return { bg: c.warmBg, fg: c.warmFg };
-    return { bg: c.hotBg, fg: c.hotFg };
+    return utilBandColor_(u);
   }
 
   /**

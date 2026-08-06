@@ -3178,7 +3178,7 @@ function api_getReportingSummary(params) {
 /**
  * Read WFM.25 unified utilization color band edges from Config_Settings.
  * Falls back to UTIL_BAND_DEFAULTS when a key is blank or bands are malformed.
- * @returns {{coldMax:number, coolMax:number, approachingMax:number, ontargetMax:number, warmMax:number}}
+ * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
  */
 function _readUtilBandSettings_() {
   const defaults = UTIL_BAND_DEFAULTS;
@@ -3192,16 +3192,10 @@ function _readUtilBandSettings_() {
     };
     const bands = {
       coldMax: read(keys.coldMax, defaults.coldMax),
-      coolMax: read(keys.coolMax, defaults.coolMax),
-      approachingMax: read(keys.approachingMax, defaults.approachingMax),
       ontargetMax: read(keys.ontargetMax, defaults.ontargetMax),
       warmMax: read(keys.warmMax, defaults.warmMax)
     };
-    const mono = bands.coldMax < bands.coolMax &&
-      bands.coolMax < bands.approachingMax &&
-      bands.approachingMax < bands.ontargetMax &&
-      bands.ontargetMax < bands.warmMax;
-    if (!mono) {
+    if (!(bands.coldMax < bands.ontargetMax && bands.ontargetMax < bands.warmMax)) {
       Logger.log('_readUtilBandSettings_: malformed util_band config — using defaults');
       return Object.assign({}, defaults);
     }
@@ -3223,7 +3217,7 @@ function _isValidUtilHexColor_(value) {
 /**
  * Read WFM.25 unified utilization band colors from Config_Settings.
  * Falls back to UTIL_COLOR_DEFAULTS when a key is blank or malformed.
- * @returns {{coldBg:string, coldFg:string, coolBg:string, coolFg:string, approachingBg:string, approachingFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
+ * @returns {{coldBg:string, coldFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
  */
 function _readUtilColorSettings_() {
   const defaults = UTIL_COLOR_DEFAULTS;
@@ -3241,10 +3235,6 @@ function _readUtilColorSettings_() {
     return {
       coldBg: read(keys.coldBg, defaults.coldBg),
       coldFg: read(keys.coldFg, defaults.coldFg),
-      coolBg: read(keys.coolBg, defaults.coolBg),
-      coolFg: read(keys.coolFg, defaults.coolFg),
-      approachingBg: read(keys.approachingBg, defaults.approachingBg),
-      approachingFg: read(keys.approachingFg, defaults.approachingFg),
       ontargetBg: read(keys.ontargetBg, defaults.ontargetBg),
       ontargetFg: read(keys.ontargetFg, defaults.ontargetFg),
       warmBg: read(keys.warmBg, defaults.warmBg),
@@ -3416,16 +3406,10 @@ function api_getReference() {
       }
     })(),
     utilBandColdMax: utilBands.coldMax,
-    utilBandCoolMax: utilBands.coolMax,
-    utilBandApproachingMax: utilBands.approachingMax,
     utilBandOntargetMax: utilBands.ontargetMax,
     utilBandWarmMax: utilBands.warmMax,
     utilColorColdBg: utilColors.coldBg,
     utilColorColdFg: utilColors.coldFg,
-    utilColorCoolBg: utilColors.coolBg,
-    utilColorCoolFg: utilColors.coolFg,
-    utilColorApproachingBg: utilColors.approachingBg,
-    utilColorApproachingFg: utilColors.approachingFg,
     utilColorOntargetBg: utilColors.ontargetBg,
     utilColorOntargetFg: utilColors.ontargetFg,
     utilColorWarmBg: utilColors.warmBg,

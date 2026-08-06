@@ -5235,8 +5235,23 @@ td.cell-with-bar {
 .wfm25-hc-qth {
   text-align: center;
   min-width: 0;
+  vertical-align: bottom;
 }
-.wfm25-hc-qth.wfm25-cur-qth {
+.wfm25-hc-qth .wfm25-hc-qth-key {
+  display: block;
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.wfm25-hc-qth .wfm25-hc-qth-kind {
+  display: block;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--staple);
+  line-height: 1.2;
+  margin-top: 2px;
+}
+.wfm25-hc-qth.wfm25-cur-qth .wfm25-hc-qth-key {
   color: var(--ballpoint);
 }
 .wfm25-hours-capacity-cell {
@@ -5255,6 +5270,50 @@ td.cell-with-bar {
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+}
+.wfm25-hc-cell-inner--compact {
+  gap: 3px;
+}
+.wfm25-hc-compact-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  justify-content: flex-end;
+}
+.wfm25-hc-util-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.wfm25-hc-util-swatch--empty {
+  background: var(--business-card);
+}
+.wfm25-hc-compact-top .wfm25-hc-util-bar-wrap {
+  flex: 1;
+  min-width: 28px;
+  max-width: 56px;
+  height: 4px;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--cold {
+  box-shadow: inset 3px 0 0 #0a3d7c;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--cool {
+  box-shadow: inset 3px 0 0 #D6EBF9;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--approaching {
+  box-shadow: inset 3px 0 0 #FFF1B8;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--ontarget {
+  box-shadow: inset 3px 0 0 #c8e6c9;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--warm {
+  box-shadow: inset 3px 0 0 #E76F1C;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--hot {
+  box-shadow: inset 3px 0 0 #D6371E;
 }
 .wfm25-hc-util-bar-wrap {
   width: 100%;
@@ -5338,10 +5397,21 @@ td.cell-with-bar {
   vertical-align: middle;
 }
 .wfm25-hc-hours-only-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+}
+.wfm25-hc-xorg-hours {
   font-size: 13px;
   font-weight: 600;
   color: var(--laptop);
-  padding: 8px 4px;
+  font-variant-numeric: tabular-nums;
+}
+.wfm25-hc-xorg-share {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 .wfm25-hours-capacity-cell.has-draft .wfm25-hc-committed {
   opacity: .75;

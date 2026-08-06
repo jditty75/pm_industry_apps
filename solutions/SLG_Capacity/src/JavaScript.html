@@ -9780,15 +9780,70 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Remaining-hours visual treatment (secondary to utilization heat).
-   * @param {number} remaining
-   * @returns {string} CSS class suffix
+   * Utilization-band CSS class for Hours & Capacity cells (ratio-to-target bands).
+   * @param {number|null} util raw utilization (productive ÷ capacity)
+   * @param {number} icpTarget
+   * @returns {string}
    */
-  function wfm25RemainingClass_(remaining) {
-    const r = Number(remaining) || 0;
-    if (r < -0.5) return 'wfm25-remaining-risk';
-    if (r <= 40) return 'wfm25-remaining-tight';
-    return 'wfm25-remaining-ok';
+  function wfm25UtilBandClass_(util, icpTarget) {
+    if (util == null) return '';
+    const ratio = icpTarget > 0 ? util / icpTarget : 1;
+    const b = wfm25UtilBands_();
+    if (ratio < b.coldMax) return 'wfm25-util-band--cold';
+    if (ratio < b.coolMax) return 'wfm25-util-band--cool';
+    if (ratio < b.approachingMax) return 'wfm25-util-band--approaching';
+    if (ratio < b.ontargetMax) return 'wfm25-util-band--ontarget';
+    if (ratio < b.warmMax) return 'wfm25-util-band--warm';
+    return 'wfm25-util-band--hot';
+  }
+
+  /**
+   * Small utilization swatch for compact Hours & Capacity cells.
+   * @param {number|null} util
+   * @param {number} icpTarget
+   * @returns {string}
+   */
+  function wfm25HcUtilSwatchHtml_(util, icpTarget) {
+    if (util == null) {
+      return '<span class="wfm25-hc-util-swatch wfm25-hc-util-swatch--empty" aria-hidden="true"></span>';
+    }
+    const color = cellColor(util, icpTarget);
+    return '<span class="wfm25-hc-util-swatch" style="background:' + color.bg + '"' +
+      ' aria-hidden="true"></span>';
+  }
+
+  /**
+   * Quarter header label for Hours & Capacity (key + Previous/Current/Next kind).
+   * @param {string} qk
+   * @param {number} qi
+   * @param {number} curIdx
+   * @returns {string}
+   */
+  function wfm25HcQuarterHeaderLabel_(qk, qi, curIdx) {
+    let kind = 'Next (forecast)';
+    if (qi < curIdx) kind = 'Previous (actuals)';
+    else if (qi === curIdx) kind = 'Current';
+    const curTag = qi === curIdx ? ' \u25c6' : '';
+    return '<span class="wfm25-hc-qth-key">' + escapeHtml_(qk) + curTag + '</span>' +
+      '<span class="wfm25-hc-qth-kind">' + escapeHtml_(kind) + '</span>';
+  }
+
+  /**
+   * Total delivery hours for one quarter (SLG planned + cross-org groups).
+   * @param {Object} hc wfm25AggregateHoursAndCapacityByTeam_ result
+   * @param {Array<Object>} xorgRows wfm25BuildXorgHcRows_ result
+   * @param {number} qi quarter index
+   * @returns {number}
+   */
+  function wfm25QuarterDeliveryTotalHours_(hc, xorgRows, qi) {
+    const orgQ = hc.orgTotal.quarters[qi];
+    if (!orgQ) return 0;
+    let total = Number(orgQ.planned) || 0;
+    (xorgRows || []).forEach(function (row) {
+      const hrs = row.quarters[qi];
+      if (hrs != null) total += Number(hrs) || 0;
+    });
+    return total;
   }
 
   /**
@@ -9819,39 +9874,71 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Hours-only cell for cross-org aggregate rows (no utilization / remaining).
+   * Hours-only cell for cross-org aggregate rows (hours + share of quarter total).
    * @param {number|null} hours
+   * @param {number|null} [share] fraction of total quarter delivery hours
    * @param {string} [extraCls]
    * @returns {string}
    */
-  function wfm25RenderHoursCapacityHoursOnlyCell_(hours, extraCls) {
+  function wfm25RenderHoursCapacityHoursOnlyCell_(hours, share, extraCls) {
     const h = Number(hours);
-    const has = hours != null && h > 0;
+    const has = hours != null && !isNaN(h);
     const display = has ? fmtHours(h) + 'h' : '\u2014';
+    const shareDisplay = has && share != null ? fmtPct1(share) : '';
     return '<td class="wfm25-hours-capacity-cell wfm25-hours-capacity-hours-only' +
       (extraCls ? ' ' + extraCls : '') + '">' +
-      '<div class="wfm25-hc-hours-only-inner">' + display + '</div></td>';
+      '<div class="wfm25-hc-hours-only-inner">' +
+        '<div class="wfm25-hc-xorg-hours">' + display + '</div>' +
+        (shareDisplay
+          ? '<div class="wfm25-hc-xorg-share muted">' + shareDisplay + '</div>'
+          : '') +
+      '</div></td>';
   }
 
   /**
    * Build cross-org Hours & Capacity aggregate rows (Workday Regions + Contractor).
+   * Previous quarter hours come from worker-type history actuals; current/next from forecast.
    * @param {Object|null} xorgData api_getXorgForecast result
    * @param {string[]} quarterKeys
+   * @param {Object|null} [historyData] api_getWorkerTypeHistory result
    * @returns {Array<{label:string, key:string, quarters:number[]}>}
    */
-  function wfm25BuildXorgHcRows_(xorgData, quarterKeys) {
+  function wfm25BuildXorgHcRows_(xorgData, quarterKeys, historyData) {
     const curIdx = wfm25CurQuarterIndex_(quarterKeys);
+    const quarterClasses = (historyData && historyData.quarterClasses) || {};
     const groups = [
       { label: 'Workday Regions', key: 'Workday Regions' },
       { label: 'Contractor', key: 'Contractor' }
     ];
     return groups.map(function (g) {
       const quarters = (quarterKeys || []).map(function (qk, qi) {
-        if (qi < curIdx) return null;
+        if (qi < curIdx) {
+          const cls = quarterClasses[qk] || {};
+          const val = cls[g.key];
+          return val != null ? Number(val) || 0 : null;
+        }
         return wfm25XorgGroupHours_(xorgData, g.key, qk);
       });
       return { label: g.label, key: g.key, quarters: quarters };
     });
+  }
+
+  /**
+   * Fetch worker-type history if not cached (shared by Mix & Trend and Hours & Capacity).
+   * @returns {Promise<Object|null>}
+   */
+  async function wfm25EnsureHistory_() {
+    if (WFM25State.historyData) return WFM25State.historyData;
+    try {
+      const histReq = ++WFM25State.historyReqId;
+      const history = await call('api_getWorkerTypeHistory', buildServerParams_());
+      if (histReq !== WFM25State.historyReqId) return null;
+      WFM25State.historyData = history;
+      return history;
+    } catch (e) {
+      console.error('[WFM.25] api_getWorkerTypeHistory failed:', e);
+      return null;
+    }
   }
 
   /**
@@ -9889,26 +9976,29 @@ async function _qaRefreshPsaHours_() {
     const plannedStr = committed ? fmtHours(committed.planned) + 'h' : '\u2014';
     const capStr = committed ? fmtHours(committed.capacity) + 'h' : '\u2014';
     const utilStr = util != null ? fmtPct(util) : '\u2014';
-    const remStr = committed
-      ? fmtHours(committed.remaining) + 'h remaining'
-      : '\u2014';
-    const remCls = committed ? wfm25RemainingClass_(committed.remaining) : '';
+    const bandCls = committed ? wfm25UtilBandClass_(util, icpTarget) : '';
 
     const committedInner =
-      wfm25HcUtilBarHtml_(util, icpTarget) +
-      '<div class="wfm25-hc-util-pct">' + utilStr + '</div>' +
-      '<div class="wfm25-hc-detail">' + plannedStr + ' / ' + capStr + '</div>' +
-      '<div class="wfm25-hc-remaining ' + remCls + '">' + remStr + '</div>';
+      '<div class="wfm25-hc-compact-top">' +
+        wfm25HcUtilSwatchHtml_(util, icpTarget) +
+        '<span class="wfm25-hc-util-pct">' + utilStr + '</span>' +
+        wfm25HcUtilBarHtml_(util, icpTarget) +
+      '</div>' +
+      '<div class="wfm25-hc-detail">' + plannedStr + ' / ' + capStr + '</div>';
 
     if (!hasDraft) {
-      return '<td class="wfm25-hours-capacity-cell' + (extraCls ? ' ' + extraCls : '') + '">' +
-        '<div class="wfm25-hc-cell-inner">' + committedInner + '</div></td>';
+      return '<td class="wfm25-hours-capacity-cell' +
+        (bandCls ? ' ' + bandCls : '') +
+        (extraCls ? ' ' + extraCls : '') + '">' +
+        '<div class="wfm25-hc-cell-inner wfm25-hc-cell-inner--compact">' + committedInner + '</div></td>';
     }
 
     const pUtil = projected.util != null ? projected.util : null;
     const arrow = wfm25DraftArrow_(committed.util, pUtil);
-    return '<td class="wfm25-hours-capacity-cell has-draft' + (extraCls ? ' ' + extraCls : '') + '">' +
-      '<div class="wfm25-hc-cell-inner">' +
+    return '<td class="wfm25-hours-capacity-cell has-draft' +
+      (bandCls ? ' ' + bandCls : '') +
+      (extraCls ? ' ' + extraCls : '') + '">' +
+      '<div class="wfm25-hc-cell-inner wfm25-hc-cell-inner--compact">' +
         '<div class="wfm25-hc-committed">' + committedInner + '</div>' +
         '<div class="wfm25-hc-draft">' +
           '<span class="wfm25-draft-label">Your draft</span>' +
@@ -9916,7 +10006,6 @@ async function _qaRefreshPsaHours_() {
             fmtHours(projected.planned) + 'h / ' + fmtHours(projected.capacity) + 'h' +
             ' \u2192 ' + (pUtil != null ? fmtPct(pUtil) : '\u2014') + ' ' + arrow +
           '</span>' +
-          '<span class="wfm25-hc-draft-rem">' + fmtHours(projected.remaining) + 'h remaining</span>' +
         '</div>' +
       '</div></td>';
   }
@@ -10000,17 +10089,17 @@ async function _qaRefreshPsaHours_() {
 
     const hc = wfm25AggregateHoursAndCapacityByTeam_(data);
     const qKeys = hc.quarterKeys;
-    const curQk = fiscalQuarterKey_(new Date());
+    const curIdx = wfm25CurQuarterIndex_(qKeys);
     const projection = State.explorerProjection;
     const hasDraft = State.softBookings && State.softBookings.length;
     const selectedTeam = WFM25State.selectedWorkerTeam;
     const selectedWorker = WFM25State.selectedWorker;
 
     $$('.wfm25-hc-qth', headerRow).forEach(function (el) { el.remove(); });
-    qKeys.forEach(function (qk) {
+    qKeys.forEach(function (qk, qi) {
       const th = document.createElement('th');
-      th.className = 'wfm25-hc-qth' + (qk === curQk ? ' wfm25-cur-qth' : '');
-      th.textContent = qk + (qk === curQk ? ' \u25c6' : '');
+      th.className = 'wfm25-hc-qth' + (qi === curIdx ? ' wfm25-cur-qth' : '');
+      th.innerHTML = wfm25HcQuarterHeaderLabel_(qk, qi, curIdx);
       headerRow.appendChild(th);
     });
 
@@ -10075,10 +10164,15 @@ async function _qaRefreshPsaHours_() {
       );
     });
 
-    const xorgRows = wfm25BuildXorgHcRows_(WFM25State.xorgForecastData, qKeys);
+    const xorgRows = wfm25BuildXorgHcRows_(WFM25State.xorgForecastData, qKeys, WFM25State.historyData);
+    const quarterTotals = qKeys.map(function (_qk, qi) {
+      return wfm25QuarterDeliveryTotalHours_(hc, xorgRows, qi);
+    });
     xorgRows.forEach(function (xorgRow) {
-      const cells = xorgRow.quarters.map(function (hrs) {
-        return wfm25RenderHoursCapacityHoursOnlyCell_(hrs);
+      const cells = xorgRow.quarters.map(function (hrs, qi) {
+        const total = quarterTotals[qi];
+        const share = hrs != null && total > 0 ? (Number(hrs) || 0) / total : null;
+        return wfm25RenderHoursCapacityHoursOnlyCell_(hrs, share);
       }).join('');
       rows.push(
         '<tr class="wfm25-hours-capacity-xorg-row">' +
@@ -10108,6 +10202,7 @@ async function _qaRefreshPsaHours_() {
         WFM25State.scorecardData = await call('api_getQuarterlyScorecard', params);
       }
       await wfm25EnsureXorgForecast_();
+      await wfm25EnsureHistory_();
       renderWFM25HoursCapacityTable_(WFM25State.scorecardData);
     } catch (err) {
       if (body) {

@@ -7634,6 +7634,7 @@ async function _qaRefreshPsaHours_() {
     unfilledDemandRaw: null,          // last api_getUnstaffedDemand result (full tab)
     unfilledDemandWeeklyKeys: [],     // MM/DD/YYYY column keys in sort order
     unfilledDemandGroupBy: 'project', // 'project' | 'practice'
+    unfilledDemandIncludeOpportunity: false, // OFF hides Project names ending in [O]
     staffingActiveTab: 'unfilled-demand' // 'commitments' | 'unfilled-demand'
   };
 
@@ -12024,18 +12025,29 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * True when Project name ends with [O] (upcoming / opportunity deployment).
+   * @param {Object} row
+   * @returns {boolean}
+   */
+  function wfm25UnfilledDemandIsOpportunityProject_(row) {
+    const project = String(row.Project || '').trim();
+    return /\[O\]$/i.test(project);
+  }
+
+  /**
    * Display-time filters for Unstaffed_Demand rows (raw sheet untouched).
-   * (a) hide Worker containing "Do Not Staff" (case-insensitive);
-   * (b) hide rows where ALL weekly columns are zero/blank (Total Hours = 0),
-   *     but keep back-loaded rows with non-zero later weeks.
+   * Order: (1) drop Do Not Staff in Worker or RPL Memo; (2) drop fully-zero-window rows
+   * (keep back-loaded rows with non-zero later weeks); (3) optionally hide [O] projects.
    * @param {Object[]} rows
    * @param {string[]} weeklyKeys
+   * @param {boolean} [includeOpportunity] when false, hide Project names ending in [O]
    * @returns {Object[]}
    */
-  function wfm25FilterUnstaffedDemandRows_(rows, weeklyKeys) {
+  function wfm25FilterUnstaffedDemandRows_(rows, weeklyKeys, includeOpportunity) {
     return (rows || []).filter(function (row) {
       const worker = String(row.Worker || '');
-      if (/do not staff/i.test(worker)) return false;
+      const memo = String(row['RPL Memo'] || '');
+      if (/do not staff/i.test(worker) || /do not staff/i.test(memo)) return false;
 
       let anyWeeklyNonZero = false;
       for (let i = 0; i < weeklyKeys.length; i++) {
@@ -12046,6 +12058,8 @@ async function _qaRefreshPsaHours_() {
       }
       const total = wfm25WeeklyHour_(row['Total Hours']);
       if (!anyWeeklyNonZero && total === 0) return false;
+
+      if (!includeOpportunity && wfm25UnfilledDemandIsOpportunityProject_(row)) return false;
       return true;
     });
   }
@@ -12150,7 +12164,8 @@ async function _qaRefreshPsaHours_() {
     const weeklyKeys = WFM25State.unfilledDemandWeeklyKeys || [];
     const filtered = wfm25FilterUnstaffedDemandRows_(
       WFM25State.unfilledDemandRaw || [],
-      weeklyKeys
+      weeklyKeys,
+      WFM25State.unfilledDemandIncludeOpportunity
     );
 
     if (!filtered.length) {
@@ -12194,6 +12209,12 @@ async function _qaRefreshPsaHours_() {
         const series = wfm25UnfilledDemandWeeklySeries_(row, weeklyKeys);
         const spark = wfm25MixTrendSparklineSvg_(series, 'var(--wfm25-chrome-accent)', 72, 20);
         const memo = String(row['RPL Memo'] || '');
+        const memoTitleAttr = memo ? ' title="' + escapeHtml_(memo) + '"' : '';
+        const isOpp = WFM25State.unfilledDemandIncludeOpportunity &&
+          wfm25UnfilledDemandIsOpportunityProject_(row);
+        const oppBadge = isOpp
+          ? '<span class="wfm25-ud-opp-badge">Opportunity</span>'
+          : '';
 
         html += '<tr class="wfm25-ud-data-row">' +
           '<td class="wfm25-ud-col-skill">' +
@@ -12201,13 +12222,14 @@ async function _qaRefreshPsaHours_() {
             (skill.sub ? '<div class="wfm25-ud-sub muted">' + escapeHtml_(skill.sub) + '</div>' : '') +
           '</td>' +
           '<td class="wfm25-ud-col-project">' +
-            '<div class="wfm25-ud-primary">' + escapeHtml_(proj.primary) + '</div>' +
+            '<div class="wfm25-ud-primary">' + escapeHtml_(proj.primary) + oppBadge + '</div>' +
             (proj.sub ? '<div class="wfm25-ud-sub muted">' + escapeHtml_(proj.sub) + '</div>' : '') +
           '</td>' +
           '<td class="wfm25-ud-col-manager">' + escapeHtml_(manager) + '</td>' +
           '<td class="wfm25-ud-col-hours num">' + fmtHours(total) + '</td>' +
           '<td class="wfm25-ud-col-shape">' + spark + '</td>' +
-          '<td class="wfm25-ud-col-memo"><span class="wfm25-ud-memo">' + escapeHtml_(memo) + '</span></td>' +
+          '<td class="wfm25-ud-col-memo"><span class="wfm25-ud-memo"' + memoTitleAttr + '>' +
+            escapeHtml_(memo) + '</span></td>' +
           '<td class="wfm25-ud-col-action">' +
             '<button type="button" class="btn-primary wfm25-fill-this-btn" data-wfm25-fill-this>Fill this</button>' +
           '</td>' +
@@ -12244,9 +12266,50 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Inject unfilled-demand table note row and opportunity toggle (once).
+   */
+  function wfm25InitUnfilledDemandChrome_() {
+    const table = document.getElementById('wfm25UnfilledDemandTable');
+    if (table && !table.querySelector('.wfm25-ud-note-row')) {
+      const thead = table.querySelector('thead');
+      const headerRow = thead && thead.querySelector('tr');
+      if (thead && headerRow) {
+        const noteRow = document.createElement('tr');
+        noteRow.className = 'wfm25-ud-note-row';
+        noteRow.innerHTML =
+          '<th colspan="7" class="wfm25-ud-note">' +
+          'This list excludes roles marked Do Not Staff (in the Worker or RPL Memo field) and rows with no forecast hours. ' +
+          'Use \'Include Opportunity Projects\' to add upcoming (not-yet-active) deployments.' +
+          '</th>';
+        thead.insertBefore(noteRow, headerRow);
+      }
+    }
+
+    const groupByEl = document.getElementById('wfm25UnfilledDemandGroupBy');
+    if (groupByEl && !document.getElementById('wfm25UnfilledDemandIncludeOpp')) {
+      const label = document.createElement('label');
+      label.className = 'wfm25-ud-opp-toggle';
+      label.innerHTML =
+        '<input type="checkbox" id="wfm25UnfilledDemandIncludeOpp" /> Include Opportunity Projects';
+      groupByEl.appendChild(label);
+    }
+  }
+
+  /**
    * Wire staffing tab, group-by, and Fill-this stub handlers.
    */
   function initWFM25Staffing_() {
+    wfm25InitUnfilledDemandChrome_();
+
+    const oppToggle = document.getElementById('wfm25UnfilledDemandIncludeOpp');
+    if (oppToggle) {
+      oppToggle.checked = WFM25State.unfilledDemandIncludeOpportunity;
+      oppToggle.addEventListener('change', function () {
+        WFM25State.unfilledDemandIncludeOpportunity = oppToggle.checked;
+        if (WFM25State.unfilledDemandRaw) renderWFM25UnfilledDemand_();
+      });
+    }
+
     $$('[data-wfm25-staffing-tab]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         wfm25ActivateStaffingTab_(btn.dataset.wfm25StaffingTab);

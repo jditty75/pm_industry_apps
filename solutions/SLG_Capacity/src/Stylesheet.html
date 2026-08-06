@@ -3493,9 +3493,6 @@ td.cell-with-bar {
   font-size: 12px;
 }
 .wfm25-unfilled-demand-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   background: #fff;
   font-size: 11px;
   font-weight: 600;
@@ -3504,18 +3501,42 @@ td.cell-with-bar {
   border-bottom: 1px solid var(--business-card);
   white-space: nowrap;
 }
+.wfm25-unfilled-demand-table thead tr:not(.wfm25-ud-note-row) th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.wfm25-ud-note-row th {
+  position: static;
+  z-index: auto;
+  padding: 8px 12px 6px;
+  border-bottom: none;
+  white-space: normal;
+}
+.wfm25-ud-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--staple);
+  line-height: 1.45;
+  text-align: left;
+}
 .wfm25-unfilled-demand-table tbody td {
   padding: 8px 12px;
   border-bottom: 1px solid var(--desk);
   vertical-align: top;
 }
 .wfm25-ud-group-row td {
-  background: var(--business-card);
-  padding: 10px 12px;
+  background: rgba(11, 30, 63, .06);
+  padding: 12px 12px 10px;
+  border-top: 2px solid var(--wfm25-chrome-bdr);
   border-bottom: 1px solid var(--wfm25-chrome-bdr);
 }
+.wfm25-ud-group-row:first-child td {
+  border-top: none;
+}
 .wfm25-ud-group-label {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 13px;
   color: var(--after-hours);
   margin-right: 10px;
 }
@@ -3547,7 +3568,39 @@ td.cell-with-bar {
   font-style: italic;
   color: var(--staple);
   line-height: 1.4;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  cursor: default;
+}
+.wfm25-ud-opp-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  font-style: normal;
+  line-height: 1.4;
+  vertical-align: middle;
+  background: #fff3cc;
+  color: #8a5c00;
+}
+.wfm25-ud-opp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  font-size: 12px;
+  color: var(--laptop);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.wfm25-ud-opp-toggle input {
+  margin: 0;
+  cursor: pointer;
 }
 .wfm25-fill-this-btn {
   font-size: 11px;

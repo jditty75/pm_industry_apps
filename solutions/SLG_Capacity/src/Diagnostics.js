@@ -5013,6 +5013,58 @@ function _dbg_reconcileWFM25Stage4() {
 }
 
 /**
+ * WFM.25 worker-row utilization validation: FY27-Q3 anchor workers must match
+ * Utilization_Quarterly qtd_icp_plus_forecast / target_hours via buildWorkerQuarters_.
+ * Logger.log only; does not mutate data.
+ */
+function _dbg_wfm25WorkerUtilValidation_() {
+  _dbg_requireAdmin_();
+  var TRACE_Q = 'FY27-Q3';
+  var curQ = fiscalQuarterKey_(new Date());
+  var cases = [
+    { name: 'Bhoomi Shah', pct: 106 },
+    { name: 'Chris Collins', pct: 94 },
+    { name: 'Syed Salehin', pct: 95 }
+  ];
+  var settings = readSettings_();
+  var holidays = readHolidays_();
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var forecast = computeWeeklyForecast_({ viewMode: 'Committed', workerScope: 'SLG', includeTimeOff: false });
+  var failures = [];
+
+  Logger.log('=== WFM.25 worker-row util validation (' + TRACE_Q + ', curQ=' + curQ + ') ===');
+  cases.forEach(function (c) {
+    var worker = (forecast.workers || []).find(function (w) { return w.resource === c.name; });
+    if (!worker) {
+      Logger.log('  ' + c.name + ': worker NOT FOUND');
+      failures.push(c.name + ' not in forecast scope');
+      return;
+    }
+    var wowNum = quarterForecastIcpFromWoW_(worker.employeeId, TRACE_Q);
+    var wowDen = quarterTargetFromWoW_(worker.employeeId, TRACE_Q);
+    var quarters = buildWorkerQuarters_(
+      worker, [TRACE_Q], forecast.weeks, holidays, actualsSummary, settings, curQ);
+    var cell = quarters[0];
+    var gotPct = cell && cell.icpUtil != null ? Math.round(cell.icpUtil * 100) : null;
+    var expUtil = (wowNum != null && wowDen > 0) ? wowNum / wowDen : null;
+    var ok = gotPct === c.pct;
+    Logger.log('  ' + c.name + ': WoW ' + wowNum + '/' + wowDen +
+      ' => ' + (expUtil != null ? (expUtil * 100).toFixed(1) + '%' : 'n/a') +
+      ' | cell icpUtil=' + (cell ? (cell.icpUtil * 100).toFixed(1) + '%' : 'n/a') +
+      ' (expect ' + c.pct + '%)' + (ok ? ' OK' : ' FAIL'));
+    Logger.log('    source=' + (cell ? cell.source : 'n/a') +
+      ' productiveHours=' + (cell ? cell.productiveHours : 'n/a') +
+      ' targetHours=' + (cell ? cell.targetHours : 'n/a'));
+    if (!ok) failures.push(c.name + ' FY27-Q3 util expected ' + c.pct + '% got ' + gotPct + '%');
+  });
+
+  Logger.log(failures.length === 0
+    ? '_dbg_wfm25WorkerUtilValidation_: ALL OK'
+    : '_dbg_wfm25WorkerUtilValidation_: ' + failures.length + ' FAIL(S)');
+}
+
+/**
  * WFM.25 investigation: trace inverted worker icpUtil delta on first soft-book
  * add vs second add. Logger.log only; does not persist or mutate production data.
  */

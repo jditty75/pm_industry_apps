@@ -2414,7 +2414,6 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     const wd = quarterWorkdaySummary_(qk, holidays);
     const isCurrent = (qk === curQ);
     const appTarget = quarterTargetHoursFor_(worker.icpRole, worker.jobProfile, qk, holidays, settings);
-    const summary = worker.employeeId ? actualsSummary[worker.employeeId] : null;
     let productiveHours = 0;
     let targetHours = appTarget;
     let bonusAttainment = null;
@@ -2424,27 +2423,30 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     let committedAssignmentHours = 0;
 
     const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
-    if (wowTarget != null) targetHours = wowTarget;
+    const hasWowTarget = wowTarget != null && wowTarget > 0;
+    if (hasWowTarget) targetHours = wowTarget;
 
     // WFM.25: icpUtil = numerator / target_hours for every quarter.
-    // Current quarter with WoW actuals: qtd_icp_plus_forecast (+ committed).
-    if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
-        summary.bonus_target_billable_hours_eoq > 0) {
-      committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
-      productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours;
-      if (wowTarget == null) targetHours = summary.bonus_target_billable_hours_eoq;
-      source = 'actuals_plus_forecast';
-      stale = !(wowTarget != null && wowTarget > 0);
-    } else if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+    // Previous: qtd_actual_icp / target_hours; Current+Next: qtd_icp_plus_forecast / target_hours.
+    // When Utilization_Quarterly is present, use WoW fields verbatim — never Actuals_Worker_Summary.
+    const cmp = compareFiscalQuarterKeys_(qk, curQ);
+    if (cmp < 0) {
       const wowActual = quarterActualIcpFromWoW_(worker.employeeId, qk);
       productiveHours = wowActual != null ? wowActual : 0;
       source = 'actuals';
+      stale = wowActual == null;
     } else {
-      committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
       const wowForecast = quarterForecastIcpFromWoW_(worker.employeeId, qk);
-      productiveHours = (wowForecast != null ? wowForecast :
-        sumForecastProductiveForQuarter_(worker, qk, weeks)) + committedAssignmentHours;
-      source = 'forecast';
+      if (wowForecast != null && hasWowTarget) {
+        productiveHours = wowForecast;
+        source = isCurrent ? 'actuals_plus_forecast' : 'forecast';
+      } else {
+        committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+        productiveHours = (wowForecast != null ? wowForecast :
+          sumForecastProductiveForQuarter_(worker, qk, weeks)) + committedAssignmentHours;
+        source = isCurrent ? 'actuals_plus_forecast' : 'forecast';
+        stale = !hasWowTarget || wowForecast == null;
+      }
     }
 
     if (targetHours > 0) {

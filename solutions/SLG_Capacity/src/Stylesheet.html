@@ -4035,7 +4035,7 @@ td.cell-with-bar {
   position: absolute;
   left: 0;
   top: calc(100% + 4px);
-  z-index: 20;
+  z-index: 100;
   min-width: 10rem;
   max-width: 16rem;
   padding: 8px 10px;
@@ -4060,6 +4060,25 @@ td.cell-with-bar {
 .wfm25-onleave-breakout:focus-visible .wfm25-onleave-popover,
 .wfm25-onleave-breakout.is-open .wfm25-onleave-popover {
   display: block;
+}
+/* Util table: on-leave popover must escape row bounds and stack above following rows */
+#wfm25UtilTable,
+#wfm25UtilTable tbody,
+#wfm25UtilTable tbody td:first-child,
+#wfm25UtilTable .wfm25-team-name-cell,
+#wfm25UtilTable .wfm25-team-count {
+  overflow: visible;
+}
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:hover),
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:focus-visible),
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout.is-open) {
+  position: relative;
+  z-index: 5;
+}
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:hover) > td,
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:focus-visible) > td,
+#wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout.is-open) > td {
+  overflow: visible;
 }
 .wfm25-org-total-row td {
   background: var(--keyboard);

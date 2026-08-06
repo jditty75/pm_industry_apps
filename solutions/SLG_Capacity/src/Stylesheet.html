@@ -4035,7 +4035,7 @@ td.cell-with-bar {
   position: absolute;
   left: 0;
   top: calc(100% + 4px);
-  z-index: 100;
+  z-index: 200;
   min-width: 10rem;
   max-width: 16rem;
   padding: 8px 10px;
@@ -4073,7 +4073,7 @@ td.cell-with-bar {
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:focus-visible),
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout.is-open) {
   position: relative;
-  z-index: 5;
+  z-index: 20;
 }
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:hover) > td,
 #wfm25UtilTable tbody tr.wfm25-team-row:has(.wfm25-onleave-breakout:focus-visible) > td,
@@ -4430,8 +4430,7 @@ td.cell-with-bar {
   min-width: 0;
   width: 34%;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 #wfm25UtilTable .wfm25-qth,
 #wfm25UtilTable tbody td:not(.wfm25-team-col) {
@@ -4477,8 +4476,37 @@ td.cell-with-bar {
 }
 .wfm25-team-name-cell {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
+.wfm25-team-name-row {
+  display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+.wfm25-team-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wfm25-team-meta {
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.35;
+  max-width: 100%;
+  overflow: hidden;
+}
+.wfm25-team-meta .wfm25-team-count {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .wfm25-team-swatch {
   width: 8px;

@@ -7903,19 +7903,36 @@ async function _qaRefreshPsaHours_() {
     const roster = WFM25State.onLeaveRoster || {};
     const onLeave = roster[teamLabel] || [];
     const names = onLeave.map(function (x) { return x.name; }).filter(Boolean);
-    let html = ' <span class="wfm25-team-count muted">(' + activeCount;
+    let inner = String(activeCount);
     if (names.length) {
       const namesHtml = names.map(function (n) {
         return '<span class="wfm25-onleave-popover-name">' + escapeHtml_(n) + '</span>';
       }).join('');
-      html += ' \u00b7 <span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
+      inner += ' \u00b7 <span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
         ' aria-label="' + names.length + ' on leave: ' + escapeHtml_(names.join(', ')) + '">' +
         names.length + ' on leave' +
         '<span class="wfm25-onleave-popover" role="tooltip">' + namesHtml + '</span>' +
         '</span>';
     }
-    html += ')</span>';
-    return html;
+    return '<div class="wfm25-team-meta muted"><span class="wfm25-team-count">(' + inner + ')</span></div>';
+  }
+
+  /**
+   * Team name cell (label row + count/on-leave meta row).
+   * @param {string} teamLabel
+   * @param {string} teamColor
+   * @param {number} activeCount
+   * @returns {string}
+   */
+  function wfm25TeamNameCellHtml_(teamLabel, teamColor, activeCount) {
+    return '<td class="wfm25-team-col"><div class="wfm25-team-name-cell">' +
+      '<div class="wfm25-team-name-row">' +
+        '<span class="wfm25-team-swatch" style="background:' + teamColor + '"></span>' +
+        '<span class="wfm25-team-label">' + escapeHtml_(teamLabel) + '</span>' +
+        '<span class="wfm25-expand-chev">\u25ba</span>' +
+      '</div>' +
+      wfm25TeamCountBreakoutHtml_(teamLabel, activeCount) +
+    '</div></td>';
   }
 
   /**
@@ -9425,12 +9442,7 @@ async function _qaRefreshPsaHours_() {
       rows.push(
         '<tr class="wfm25-team-row' + (isExpanded ? ' expanded' : '') +
         '" data-wfm25-team="' + escapeHtml_(team.label) + '">' +
-        '<td class="wfm25-team-col"><div class="wfm25-team-name-cell">' +
-          '<span class="wfm25-team-swatch" style="background:' + team.color + '"></span>' +
-          escapeHtml_(team.label) +
-          wfm25TeamCountBreakoutHtml_(team.label, teamCount) +
-          '<span class="wfm25-expand-chev">\u25ba</span>' +
-        '</div></td>' +
+        wfm25TeamNameCellHtml_(team.label, team.color, teamCount) +
         teamQCells + '</tr>'
       );
 

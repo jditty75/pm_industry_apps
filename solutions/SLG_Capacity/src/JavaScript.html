@@ -7632,7 +7632,7 @@ async function _qaRefreshPsaHours_() {
     expandedWeekKey:  null,          // weekKey for open weekly bar breakdown, or null
     onLeaveRoster:    null,           // api_getOnLeaveRoster sidecar (display-only; not in util math)
     unfilledDemandRaw: null,          // last api_getUnstaffedDemand result (full tab)
-    unfilledDemandWeeklyKeys: [],     // MM/DD/YYYY column keys in sort order
+    unfilledDemandWeeklyKeys: [],     // weekly WoW column keys in date sort order
     unfilledDemandGroupBy: 'project', // 'project' | 'practice'
     unfilledDemandIncludeOpportunity: false, // OFF hides Project names ending in [O]
     staffingActiveTab: 'unfilled-demand' // 'commitments' | 'unfilled-demand'
@@ -11988,12 +11988,55 @@ async function _qaRefreshPsaHours_() {
   // ── WFM.25 Unfilled Demand (read-only display) ───────────────
 
   /**
-   * True when a header is a WoW weekly date column (MM/DD/YYYY).
-   * @param {string} header
-   * @returns {boolean}
+   * Parse a weekly column header to a week-start Date (mirrors detectWeekColumns_).
+   * Accepts MM/DD/YYYY, MM/DD/YY, Sheets date serial, ISO date strings, and
+   * Date.toString() keys from serialized sheet headers.
+   * @param {*} header
+   * @returns {Date|null}
    */
-  function wfm25IsWeeklyDateCol_(header) {
-    return /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(header || '').trim());
+  function wfm25ParseWeekHeader_(header) {
+    if (header === '' || header == null) return null;
+    const sLower = String(header).trim().toLowerCase();
+    if (!sLower || sLower === 'total hours') return null;
+
+    if (header instanceof Date && !isNaN(header.getTime())) {
+      return new Date(header.getFullYear(), header.getMonth(), header.getDate());
+    }
+
+    const s = String(header).trim();
+    const reMDYYYY = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+    const reMDYY = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/;
+    let m = s.match(reMDYYYY);
+    if (m) {
+      const d = new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]));
+      return isNaN(d.getTime()) ? null : d;
+    }
+    m = s.match(reMDYY);
+    if (m) {
+      const yy = Number(m[3]) + 2000;
+      const d = new Date(yy, Number(m[1]) - 1, Number(m[2]));
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    const n = Number(s);
+    if (s !== '' && !isNaN(n) && n > 20000 && n < 80000) {
+      const epoch = new Date(1899, 11, 30);
+      const d = new Date(epoch.getTime() + n * 86400000);
+      return isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+
+    const reIso = /^(\d{4})-(\d{2})-(\d{2})$/;
+    m = s.match(reIso);
+    if (m) {
+      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    const parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) {
+      return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+    }
+    return null;
   }
 
   /**
@@ -12006,11 +12049,11 @@ async function _qaRefreshPsaHours_() {
     const keySet = {};
     rows.forEach(function (row) {
       Object.keys(row || {}).forEach(function (k) {
-        if (wfm25IsWeeklyDateCol_(k)) keySet[k] = true;
+        if (wfm25ParseWeekHeader_(k)) keySet[k] = true;
       });
     });
     return Object.keys(keySet).sort(function (a, b) {
-      return new Date(a) - new Date(b);
+      return wfm25ParseWeekHeader_(a) - wfm25ParseWeekHeader_(b);
     });
   }
 
@@ -12120,13 +12163,47 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
-   * Weekly hour series for sparkline rendering.
+   * Month-granularity label for a date range, e.g. "Aug – Oct 2026".
+   * @param {Date} startDate
+   * @param {Date} endDate
+   * @returns {string}
+   */
+  function wfm25UnfilledDemandDateRangeLabel_(startDate, endDate) {
+    if (!startDate || !endDate) return '';
+    const sy = startDate.getFullYear();
+    const sm = startDate.getMonth();
+    const ey = endDate.getFullYear();
+    const em = endDate.getMonth();
+    const fmtMonth = function (d) {
+      return d.toLocaleString('en-US', { month: 'short' });
+    };
+    const fmtMonthYear = function (d) {
+      return d.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+    };
+    if (sy === ey && sm === em) return fmtMonthYear(startDate);
+    if (sy === ey) return fmtMonth(startDate) + ' \u2013 ' + fmtMonth(endDate) + ' ' + sy;
+    return fmtMonthYear(startDate) + ' \u2013 ' + fmtMonthYear(endDate);
+  }
+
+  /**
+   * Active date range for a demand row from first/last non-zero weekly hours.
    * @param {Object} row
    * @param {string[]} weeklyKeys
-   * @returns {number[]}
+   * @returns {string} display label or '' when no non-zero weeks
    */
-  function wfm25UnfilledDemandWeeklySeries_(row, weeklyKeys) {
-    return weeklyKeys.map(function (k) { return wfm25WeeklyHour_(row[k]); });
+  function wfm25UnfilledDemandDateRange_(row, weeklyKeys) {
+    let firstDate = null;
+    let lastDate = null;
+    for (let i = 0; i < weeklyKeys.length; i++) {
+      const k = weeklyKeys[i];
+      if (wfm25WeeklyHour_(row[k]) === 0) continue;
+      const d = wfm25ParseWeekHeader_(k);
+      if (!d) continue;
+      if (!firstDate) firstDate = d;
+      lastDate = d;
+    }
+    if (!firstDate || !lastDate) return '';
+    return wfm25UnfilledDemandDateRangeLabel_(firstDate, lastDate);
   }
 
   /**
@@ -12206,8 +12283,7 @@ async function _qaRefreshPsaHours_() {
         const proj = wfm25UnfilledDemandProjectAccount_(row);
         const manager = wfm25UnfilledDemandManager_(row);
         const total = wfm25WeeklyHour_(row['Total Hours']);
-        const series = wfm25UnfilledDemandWeeklySeries_(row, weeklyKeys);
-        const spark = wfm25MixTrendSparklineSvg_(series, 'var(--wfm25-chrome-accent)', 72, 20);
+        const dateRange = wfm25UnfilledDemandDateRange_(row, weeklyKeys);
         const memo = String(row['RPL Memo'] || '');
         const memoTitleAttr = memo ? ' title="' + escapeHtml_(memo) + '"' : '';
         const isOpp = WFM25State.unfilledDemandIncludeOpportunity &&
@@ -12227,7 +12303,7 @@ async function _qaRefreshPsaHours_() {
           '</td>' +
           '<td class="wfm25-ud-col-manager">' + escapeHtml_(manager) + '</td>' +
           '<td class="wfm25-ud-col-hours num">' + fmtHours(total) + '</td>' +
-          '<td class="wfm25-ud-col-shape">' + spark + '</td>' +
+          '<td class="wfm25-ud-col-dates">' + escapeHtml_(dateRange) + '</td>' +
           '<td class="wfm25-ud-col-memo"><span class="wfm25-ud-memo"' + memoTitleAttr + '>' +
             escapeHtml_(memo) + '</span></td>' +
           '<td class="wfm25-ud-col-action">' +

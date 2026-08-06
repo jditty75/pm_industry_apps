@@ -1464,29 +1464,45 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
   }
 
   /**
-   * D8 current-quarter icpUtil numerator/denominator for one worker, or null
-   * when the standard productiveHours/icpAvailableHours path applies.
+   * WFM.25: target-based icpUtil numerator/denominator for one worker-quarter,
+   * or null when target_hours <= 0 (excluded from team roll-ups).
    * @param {Object} worker forecast worker row
    * @param {number} productiveHours forecast productive hours for the quarter
    * @param {string} qk
    * @return {{num:number, den:number}|null}
    */
-  function d8IcpUtilPair_(worker, productiveHours, qk) {
+  function icpUtilPair_(worker, productiveHours, qk) {
     var employeeId = String(worker.employeeId || '');
+    var den = employeeId ? quarterTargetFromWoW_(employeeId, qk) : null;
+    if (den == null || den <= 0) return null;
+
     var summary = employeeId ? actualsSummary[employeeId] : null;
-    if (qk !== curQ || !summary || !(summary.qtd_icp_plus_forecast_hours > 0) ||
-        !(summary.bonus_target_billable_hours_eoq > 0)) {
-      return null;
-    }
+    var prod = Number(productiveHours) || 0;
     var committedHrs = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
-    // WFM.25 item 3: current-quarter D8 numerator excludes reductions (forward weeks only).
-    var num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
-    var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
-    if (baselineForecast) {
-      var baseWorker = baselineByEmployeeId[employeeId];
-      if (baseWorker) {
-        var baseProd = _workerQuarterProductive_(baseWorker, qk, baselineForecast.weeks || []);
-        num += (Number(productiveHours) || 0) - baseProd;
+    var num;
+
+    if (qk === curQ && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
+        summary.bonus_target_billable_hours_eoq > 0) {
+      num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
+      if (baselineForecast) {
+        var baseWorker = baselineByEmployeeId[employeeId];
+        if (baseWorker) {
+          var baseProd = _workerQuarterProductive_(baseWorker, qk, baselineForecast.weeks || []);
+          num += prod - baseProd;
+        }
+      }
+    } else if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+      var actual = quarterActualIcpFromWoW_(employeeId, qk);
+      num = actual != null ? actual : 0;
+    } else {
+      var wowFc = quarterForecastIcpFromWoW_(employeeId, qk);
+      num = (wowFc != null ? wowFc : prod) + committedHrs;
+      if (baselineForecast) {
+        var baseWorkerFwd = baselineByEmployeeId[employeeId];
+        if (baseWorkerFwd) {
+          var baseProdFwd = _workerQuarterProductive_(baseWorkerFwd, qk, baselineForecast.weeks || []);
+          num += prod - baseProdFwd;
+        }
       }
     }
     return { num: num, den: den };
@@ -1497,11 +1513,9 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
     var icpAvail = qinfo.icpAvailableHours;
     var rawCap = qinfo.rawCapacityHours;
     var prod = Number(productiveHours) || 0;
-    var d8 = d8IcpUtilPair_(worker, prod, qk);
-    var displayProd = d8 ? d8.num : prod;
-    var icpUtil = d8
-      ? (d8.den > 0 ? d8.num / d8.den : 0)
-      : (icpAvail > 0 ? prod / icpAvail : 0);
+    var pair = icpUtilPair_(worker, prod, qk);
+    var displayProd = pair ? pair.num : prod;
+    var icpUtil = pair ? (pair.den > 0 ? pair.num / pair.den : null) : null;
     return {
       quarterKey: String(qk),
       productiveHours: displayProd,
@@ -1521,31 +1535,22 @@ function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actua
       var sumIcpNum = 0;
       var sumIcpDen = 0;
       var approx = false;
-      var isCurQ = (qk === curQ);
       group.forEach(function (w) {
         var prod = _workerQuarterProductive_(w, qk, weeks);
         var qinfo = _quarterCapacityForProjection_(qk, holidays);
         sumIcpAvail += qinfo.icpAvailableHours;
         sumRawCap += qinfo.rawCapacityHours;
         if (qinfo.approximate) approx = true;
-        if (isCurQ) {
-          var d8 = d8IcpUtilPair_(w, prod, qk);
-          if (d8) {
-            sumProd += d8.num;
-            sumIcpNum += d8.num;
-            sumIcpDen += d8.den;
-          } else {
-            sumProd += prod;
-            sumIcpNum += prod;
-            sumIcpDen += qinfo.icpAvailableHours;
-          }
+        var pair = icpUtilPair_(w, prod, qk);
+        if (pair) {
+          sumProd += pair.num;
+          sumIcpNum += pair.num;
+          sumIcpDen += pair.den;
         } else {
           sumProd += prod;
         }
       });
-      var icpUtil = isCurQ
-        ? (sumIcpDen > 0 ? sumIcpNum / sumIcpDen : 0)
-        : (sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0);
+      var icpUtil = sumIcpDen > 0 ? sumIcpNum / sumIcpDen : null;
       return {
         quarterKey: String(qk),
         productiveHours: Number(sumProd) || 0,

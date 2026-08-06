@@ -501,18 +501,13 @@
   }
 
   /**
-   * Ratio-to-target for quarterly ICP cells (single normalization at caller).
-   * Current-quarter actuals: icpUtil is already productive÷target — use as-is.
-   * Forward/forecast quarters: icpUtil is productive÷icpAvailable — divide by icpTarget.
+   * Ratio-to-target for quarterly ICP cells (WFM.25: icpUtil is always productive÷target).
    * @param {Object|null} q
    * @param {number} icpTarget
    * @returns {number}
    */
   function wfm25QuarterIcpColorRatio_(q, icpTarget) {
-    if (!q) return 0;
-    if (q.isCurrentQuarter && q.source === 'actuals_plus_forecast') {
-      return Number(q.bonusAttainment) || Number(q.icpUtil) || 0;
-    }
+    if (!q || q.icpUtil == null) return 0;
     const target = Number(icpTarget) || 0;
     const util = Number(q.icpUtil) || 0;
     return target > 0 ? util / target : util;
@@ -9166,18 +9161,17 @@ async function _qaRefreshPsaHours_() {
       return ((ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi)) || a.label.localeCompare(b.label);
     });
 
-    // Compute per-quarter weighted-avg utilization for each team
+    // Compute per-quarter target-based utilization for each team (WFM.25).
     teamList.forEach(function (team) {
       team.quarters = quarterKeys.map(function (qk, qi) {
-        var sumProd = 0, sumAvail = 0, count = 0;
+        var sumProd = 0, sumTarget = 0;
         team.workerRows.forEach(function (w) {
           const q = (w.quarters || [])[qi];
-          if (!q) return;
+          if (!q || !(Number(q.targetHours) > 0)) return;
           sumProd  += Number(q.productiveHours) || 0;
-          sumAvail += Number(q.icpAvailableHours) || 0;
-          count++;
+          sumTarget += Number(q.targetHours) || 0;
         });
-        const util = (count > 0 && sumAvail > 0) ? (sumProd / sumAvail) : null;
+        const util = sumTarget > 0 ? (sumProd / sumTarget) : null;
         return { qk: qk, util: util };
       });
 
@@ -9210,18 +9204,20 @@ async function _qaRefreshPsaHours_() {
     const scopeWorkers = wfm25ScopeWorkers_(data);
     const counts = { over: 0, under: 0, ontrack: 0 };
     let sumProd = 0;
-    let sumAvail = 0;
+    let sumTarget = 0;
 
     scopeWorkers.forEach(function (w) {
       const q = (w.quarters || [])[qi];
       if (!q) return;
       const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
       counts[band]++;
-      sumProd += Number(q.productiveHours) || 0;
-      sumAvail += Number(q.icpAvailableHours) || 0;
+      if (Number(q.targetHours) > 0) {
+        sumProd += Number(q.productiveHours) || 0;
+        sumTarget += Number(q.targetHours) || 0;
+      }
     });
 
-    const scopeUtil = sumAvail > 0 ? sumProd / sumAvail : null;
+    const scopeUtil = sumTarget > 0 ? sumProd / sumTarget : null;
     let tightestTeam = null;
     let tightestRatio = -Infinity;
 
@@ -9777,13 +9773,19 @@ async function _qaRefreshPsaHours_() {
       const quarters = quarterKeys.map(function (qk, qi) {
         let sumProd = 0;
         let sumAvail = 0;
+        let sumUtilProd = 0;
+        let sumUtilTarget = 0;
         team.workerRows.forEach(function (w) {
           const q = (w.quarters || [])[qi];
           if (!q) return;
           sumProd += Number(q.productiveHours) || 0;
           sumAvail += Number(q.icpAvailableHours) || 0;
+          if (Number(q.targetHours) > 0) {
+            sumUtilProd += Number(q.productiveHours) || 0;
+            sumUtilTarget += Number(q.targetHours) || 0;
+          }
         });
-        const util = sumAvail > 0 ? sumProd / sumAvail : null;
+        const util = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
         return {
           qk: qk,
           planned: sumProd,
@@ -9807,13 +9809,19 @@ async function _qaRefreshPsaHours_() {
       quarters: quarterKeys.map(function (qk, qi) {
         let sumProd = 0;
         let sumAvail = 0;
+        let sumUtilProd = 0;
+        let sumUtilTarget = 0;
         workers.forEach(function (w) {
           const q = (w.quarters || [])[qi];
           if (!q) return;
           sumProd += Number(q.productiveHours) || 0;
           sumAvail += Number(q.icpAvailableHours) || 0;
+          if (Number(q.targetHours) > 0) {
+            sumUtilProd += Number(q.productiveHours) || 0;
+            sumUtilTarget += Number(q.targetHours) || 0;
+          }
         });
-        const util = sumAvail > 0 ? sumProd / sumAvail : null;
+        const util = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
         return {
           qk: qk,
           planned: sumProd,

@@ -1968,6 +1968,7 @@ var _committedAsgIdxMemo_ = null;
 var _committedReductionIdxMemo_ = null;
 var _wowTargetIdxMemo_ = null;
 var _wowActualIcpIdxMemo_ = null;
+var _wowForecastIcpIdxMemo_ = null;
 
 /**
  * Clear per-execution projection indexes (committed assignments, reductions, WoW targets).
@@ -1977,6 +1978,7 @@ function _resetProjectionMemos_() {
   _committedReductionIdxMemo_ = null;
   _wowTargetIdxMemo_ = null;
   _wowActualIcpIdxMemo_ = null;
+  _wowForecastIcpIdxMemo_ = null;
 }
 
 /**
@@ -1988,17 +1990,21 @@ function _wowQuarterTargetIndex_() {
   if (_wowTargetIdxMemo_) return _wowTargetIdxMemo_;
   var idx = {};
   var actuals = {};
+  var forecasts = {};
   cachedRead_(CFG_UTIL_QUARTERLY).forEach(function (r) {
     var eid = String(r.employee_id || '').trim();
     var qk = String(r.fiscal_quarter || '').trim();
     if (!eid || !qk) return;
     if (!idx[eid]) idx[eid] = {};
     if (!actuals[eid]) actuals[eid] = {};
+    if (!forecasts[eid]) forecasts[eid] = {};
     idx[eid][qk] = Number(r.target_hours) || 0;
     actuals[eid][qk] = Number(r.qtd_actual_icp) || 0;
+    forecasts[eid][qk] = Number(r.qtd_icp_plus_forecast) || 0;
   });
   _wowTargetIdxMemo_ = idx;
   _wowActualIcpIdxMemo_ = actuals;
+  _wowForecastIcpIdxMemo_ = forecasts;
   return idx;
 }
 
@@ -2021,16 +2027,30 @@ function quarterActualIcpFromWoW_(employeeId, fiscalQuarter) {
 }
 
 /**
- * WoW-first quarter target from Utilization_Quarterly (WFM.24 D5).
+ * Forecast-quarter ICP hours from Utilization_Quarterly (UTIL_Next rows).
+ * Returns qtd_icp_plus_forecast verbatim — no re-derivation.
+ *
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter e.g. 'FY27-Q4'
+ * @return {number|null}
+ */
+function quarterForecastIcpFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return null;
+  _wowQuarterTargetIndex_();
+  var byQ = _wowForecastIcpIdxMemo_[employeeId];
+  return (byQ && Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter))
+    ? byQ[fiscalQuarter] : null;
+}
+
+/**
+ * WoW-first quarter target from Utilization_Quarterly (WFM.24 D5 / WFM.25).
  *
  * Returns target_hours for the worker+quarter when a WoW row exists, else null
  * so the caller can fall back to quarterTargetHoursFor_.
  *
- * Same column, two roles by quarter position in the WoW snapshot:
- *   UTIL_Current target_hours — bonus-scale current-quarter target (D8 ICP-util
- *     denominator; pairs with qtd_icp_plus_forecast on the same scale).
- *   UTIL_Previous / UTIL_Next target_hours — ICP-scale forward
- *     (and prior) quarter targets for scorecard targetHours / tracking.
+ * target_hours is the utilization denominator for all quarters (WFM.25).
  *
  * WoW coverage is FY27-Q1..Q4 in the current workbook; outside that window
  * this returns null and the formula path applies.
@@ -2397,63 +2417,44 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
     const summary = worker.employeeId ? actualsSummary[worker.employeeId] : null;
     let productiveHours = 0;
     let targetHours = appTarget;
-    let bonusAttainment = 0;
+    let bonusAttainment = null;
     let source = 'forecast';
-    let icpUtil = 0;
+    let icpUtil = null;
     let stale = false;
     let committedAssignmentHours = 0;
 
-    // D8.1: the current-quarter actuals path only applies when a same-scale
-    // bonus target exists. The qtd_icp_plus_forecast numerator is bonus-scale
-    // (tied to the WoW UTIL_Current row / bonus_target_billable_hours_eoq), so
-    // its icpUtil denominator MUST be that same row/scale. Without a valid bonus
-    // target there is no same-scale pairing, so fall through to the pure
-    // forecast path (ICP-scale consistent) rather than a mismatched ratio.
+    const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
+    if (wowTarget != null) targetHours = wowTarget;
+
+    // WFM.25: icpUtil = numerator / target_hours for every quarter.
+    // Current quarter with WoW actuals: qtd_icp_plus_forecast (+ committed).
     if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
         summary.bonus_target_billable_hours_eoq > 0) {
       committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
-      // WFM.25 item 3: current quarter is D8 actuals-driven; reductions apply on
-      // forward-quarter weekly maps only — never subtract from this numerator.
       productiveHours = summary.qtd_icp_plus_forecast_hours + committedAssignmentHours;
-      targetHours = summary.bonus_target_billable_hours_eoq;
-      bonusAttainment = productiveHours / targetHours;
+      if (wowTarget == null) targetHours = summary.bonus_target_billable_hours_eoq;
       source = 'actuals_plus_forecast';
-      // D8.1: numerator and denominator share the SAME WoW row / scale. The
-      // numerator is bonus-scale, so the denominator is the same-row bonus
-      // target — making icpUtil == bonusAttainment by construction. Do NOT key
-      // the denominator on quarterTargetFromWoW_(qk): after a fiscal-quarter
-      // rollover qk is a FORWARD (ICP-scale) WoW row while the numerator still
-      // reflects the WoW snapshot's own (earlier, bonus-scale) current quarter,
-      // and bonus-scale / ICP-scale forward = garbage (the 357%/283% drift).
-      icpUtil = targetHours > 0 ? productiveHours / targetHours : 0;
-      // Staleness: the WoW snapshot's current quarter has fallen behind the
-      // calendar current quarter when quarterTargetFromWoW_ has no target for
-      // the calendar-current qk yet we still hold qtd actuals (which therefore
-      // describe a different/earlier quarter than qk).
-      const wowCurTarget = quarterTargetFromWoW_(worker.employeeId, qk);
-      stale = !(wowCurTarget != null && wowCurTarget > 0);
+      stale = !(wowTarget != null && wowTarget > 0);
     } else if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
-      // WFM.25: completed quarters are outside the forecast horizon; source
-      // productive hours from Utilization_Quarterly qtd_actual_icp (UTIL_Previous).
       const wowActual = quarterActualIcpFromWoW_(worker.employeeId, qk);
       productiveHours = wowActual != null ? wowActual : 0;
-      const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
-      targetHours = wowTarget != null ? wowTarget : appTarget;
-      bonusAttainment = targetHours > 0 ? productiveHours / targetHours : 0;
       source = 'actuals';
-      icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
     } else {
-      productiveHours = sumForecastProductiveForQuarter_(worker, qk, weeks);
-      const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
-      targetHours = wowTarget != null ? wowTarget : appTarget;
-      bonusAttainment = targetHours > 0 ? productiveHours / targetHours : 0;
+      committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+      const wowForecast = quarterForecastIcpFromWoW_(worker.employeeId, qk);
+      productiveHours = (wowForecast != null ? wowForecast :
+        sumForecastProductiveForQuarter_(worker, qk, weeks)) + committedAssignmentHours;
       source = 'forecast';
-      icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
+    }
+
+    if (targetHours > 0) {
+      bonusAttainment = productiveHours / targetHours;
+      icpUtil = bonusAttainment;
     }
 
     const financeUtil = wd.rawCapacityHours > 0 ? productiveHours / wd.rawCapacityHours : 0;
     const icpTarget = Number(worker.icpTarget) || 0;
-    const ratioToTarget = icpTarget > 0 ? icpUtil / icpTarget : 0;
+    const ratioToTarget = (icpTarget > 0 && icpUtil != null) ? icpUtil / icpTarget : 0;
     const trackingHours = productiveHours - targetHours;
 
     return {
@@ -2466,10 +2467,10 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       targetHours: Number(targetHours) || 0,
       appTargetHours: Number(appTarget) || 0,
       trackingHours: Number(trackingHours) || 0,
-      icpUtil: Number(icpUtil) || 0,
+      icpUtil: icpUtil,
       financeUtil: Number(financeUtil) || 0,
       ratioToTarget: Number(ratioToTarget) || 0,
-      bonusAttainment: Number(bonusAttainment) || 0,
+      bonusAttainment: bonusAttainment,
       source: source,
       stale: !!stale,
       committedAssignmentHours: Number(committedAssignmentHours) || 0
@@ -2511,6 +2512,7 @@ function computeQuarterlyScorecard_(params) {
 
   const teamSummary = quarterKeys.map(function (qk, qi) {
     let sumProd = 0, sumIcpAvail = 0, sumRawCap = 0, sumTarget = 0, sumTracking = 0;
+    let sumUtilProd = 0, sumUtilTarget = 0;
     workersOut.forEach(function (wr) {
       const q = wr.quarters[qi];
       if (!q) return;
@@ -2519,14 +2521,19 @@ function computeQuarterlyScorecard_(params) {
       sumRawCap += q.rawCapacityHours;
       sumTarget += q.targetHours;
       sumTracking += q.trackingHours;
+      if (q.targetHours > 0) {
+        sumUtilProd += q.productiveHours;
+        sumUtilTarget += q.targetHours;
+      }
     });
+    const targetUtil = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : 0;
     return {
       quarterKey: qk,
       quarterLabel: qk,
       isCurrentQuarter: qk === curQ,
-      icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
+      icpUtil: targetUtil,
       financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
-      bonusAttainment: sumTarget > 0 ? sumProd / sumTarget : 0,
+      bonusAttainment: targetUtil,
       trackingHours: sumTracking,
       productiveHours: sumProd,
       targetHours: sumTarget

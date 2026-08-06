@@ -2225,6 +2225,7 @@ function _dbg_reconcileWFM17() {
     var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
     (scorecard.quarterKeys || []).forEach(function (qk, qi) {
       var sumProd = 0, sumIcpAvail = 0, sumRawCap = 0, sumTarget = 0;
+      var sumUtilProd = 0, sumUtilTarget = 0;
       (scorecard.workers || []).forEach(function (w) {
         var q = w.quarters[qi];
         if (!q) return;
@@ -2232,11 +2233,16 @@ function _dbg_reconcileWFM17() {
         sumIcpAvail += q.icpAvailableHours;
         sumRawCap += q.rawCapacityHours;
         sumTarget += q.targetHours;
+        if (q.targetHours > 0) {
+          sumUtilProd += q.productiveHours;
+          sumUtilTarget += q.targetHours;
+        }
       });
       var team = scorecard.teamSummary[qi];
-      var icpOk = Math.abs(team.icpUtil - (sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0)) < 1e-9;
+      var expectedIcp = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : 0;
+      var icpOk = Math.abs(team.icpUtil - expectedIcp) < 1e-9;
       var finOk = Math.abs(team.financeUtil - (sumRawCap > 0 ? sumProd / sumRawCap : 0)) < 1e-9;
-      var bonusOk = Math.abs(team.bonusAttainment - (sumTarget > 0 ? sumProd / sumTarget : 0)) < 1e-9;
+      var bonusOk = Math.abs(team.bonusAttainment - expectedIcp) < 1e-9;
       Logger.log('  ' + qk + ': team icp=' + (team.icpUtil * 100).toFixed(2) + '%' +
         ' finance=' + (team.financeUtil * 100).toFixed(2) + '%' +
         ' bonus=' + (team.bonusAttainment * 100).toFixed(2) + '%' +
@@ -4712,8 +4718,7 @@ function _dbg_reconcileWFM24() {
     // --- B2b: forecast fallback when no same-scale bonus target exists ---
     // Simulate a worker whose current-quarter actuals lack a usable bonus
     // target (bonus_target_billable_hours_eoq == 0). Clone the summary map so
-    // no persistent data is mutated. FIX 1 must fall through to the pure
-    // forecast path rather than pair the bonus-scale qtd with icpAvailableHours.
+    // no persistent data is mutated. WFM.25: forecast path uses target_hours.
     var clonedSummary = {};
     Object.keys(actualsSummary).forEach(function (k) {
       clonedSummary[k] = actualsSummary[k];
@@ -4731,16 +4736,18 @@ function _dbg_reconcileWFM24() {
       return;
     }
     var fcHours = sumForecastProductiveForQuarter_(probe, curQ, weeks);
-    var expFbIcp = fbCell.icpAvailableHours > 0 ? fcHours / fbCell.icpAvailableHours : 0;
+    var fbTarget = quarterTargetFromWoW_(probe.employeeId, curQ);
+    if (fbTarget == null) fbTarget = fbCell.targetHours;
+    var expFbIcp = fbTarget > 0 ? fcHours / fbTarget : null;
     if (fbCell.source !== 'forecast') {
       failures.push('D8 rollover: ' + probe.resource + ' no-bonus-target source=' +
         fbCell.source + ' expect forecast');
     }
-    if (!near_(fbCell.icpUtil, expFbIcp)) {
+    if (expFbIcp != null && !near_(fbCell.icpUtil, expFbIcp)) {
       failures.push('D8 rollover: ' + probe.resource + ' forecast icpUtil=' +
-        fbCell.icpUtil + ' expect forecast/icpAvail=' + expFbIcp);
+        fbCell.icpUtil + ' expect forecast/target=' + expFbIcp);
     }
-    if (!(fbCell.icpUtil <= SANE_CAP)) {
+    if (fbCell.icpUtil != null && !(fbCell.icpUtil <= SANE_CAP)) {
       failures.push('D8 rollover: ' + probe.resource + ' forecast icpUtil=' +
         (fbCell.icpUtil * 100).toFixed(2) + '% exceeds sane cap');
     }
@@ -4749,11 +4756,11 @@ function _dbg_reconcileWFM24() {
         ' forecast-path stale=' + fbCell.stale + ' expect false');
     }
     Logger.log('  B2b ' + probe.resource + ' no-bonus-target source=' + fbCell.source +
-      ' icpUtil=' + (fbCell.icpUtil * 100).toFixed(2) + '%' +
-      ' expect=' + (expFbIcp * 100).toFixed(2) + '%' +
+      ' icpUtil=' + (fbCell.icpUtil != null ? (fbCell.icpUtil * 100).toFixed(2) + '%' : 'null') +
+      ' expect=' + (expFbIcp != null ? (expFbIcp * 100).toFixed(2) + '%' : 'null') +
       ' stale=' + fbCell.stale +
-      ((fbCell.source === 'forecast' && near_(fbCell.icpUtil, expFbIcp) &&
-        fbCell.icpUtil <= SANE_CAP && fbCell.stale === false) ? ' OK' : ' FAILED'));
+      ((fbCell.source === 'forecast' && (expFbIcp == null || near_(fbCell.icpUtil, expFbIcp)) &&
+        (fbCell.icpUtil == null || fbCell.icpUtil <= SANE_CAP) && fbCell.stale === false) ? ' OK' : ' FAILED'));
   })();
 
   // ---- Check C: no regression ----
@@ -4811,15 +4818,15 @@ function _dbg_reconcileWFM25Stage4() {
       var out = {};
       Object.keys(teamMap).forEach(function (tl) {
         out[tl] = quarterKeys.map(function (qk, qi) {
-          var sumProd = 0;
-          var sumAvail = 0;
+          var sumUtilProd = 0;
+          var sumUtilTarget = 0;
           teamMap[tl].forEach(function (w) {
             var q = (w.quarters || [])[qi];
-            if (!q) return;
-            sumProd += Number(q.productiveHours) || 0;
-            sumAvail += Number(q.icpAvailableHours) || 0;
+            if (!q || !(Number(q.targetHours) > 0)) return;
+            sumUtilProd += Number(q.productiveHours) || 0;
+            sumUtilTarget += Number(q.targetHours) || 0;
           });
-          return sumAvail > 0 ? sumProd / sumAvail : null;
+          return sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
         });
       });
       return out;
@@ -4827,16 +4834,16 @@ function _dbg_reconcileWFM25Stage4() {
 
     Object.keys(utilAgg).forEach(function (tl) {
       utilAgg[tl].forEach(function (util, qi) {
-        var sumProd = 0;
-        var sumAvail = 0;
+        var sumUtilProd = 0;
+        var sumUtilTarget = 0;
         (scorecard.workers || []).forEach(function (w) {
           if ((w.teamLabel || 'Unknown') !== tl) return;
           var q = (w.quarters || [])[qi];
-          if (!q) return;
-          sumProd += Number(q.productiveHours) || 0;
-          sumAvail += Number(q.icpAvailableHours) || 0;
+          if (!q || !(Number(q.targetHours) > 0)) return;
+          sumUtilProd += Number(q.productiveHours) || 0;
+          sumUtilTarget += Number(q.targetHours) || 0;
         });
-        var hcUtil = sumAvail > 0 ? sumProd / sumAvail : null;
+        var hcUtil = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
         if (util != null && hcUtil != null && !near_(util, hcUtil, 0.0001)) {
           failures.push('HoursCapacity: team=' + tl + ' qIdx=' + qi +
             ' util=' + util + ' hcUtil=' + hcUtil);
@@ -6141,28 +6148,42 @@ function _dbg_instrumentedAggregateBaseline_(
     });
   }
 
-  function d8IcpUtilPair_(worker, productiveHours, qk) {
+  function icpUtilPair_(worker, productiveHours, qk) {
     var employeeId = String(worker.employeeId || '');
+    var den = employeeId ? quarterTargetFromWoW_(employeeId, qk) : null;
+    if (den == null || den <= 0) return null;
+
     var summary = employeeId ? actualsSummary[employeeId] : null;
-    if (qk !== curQ || !summary || !(summary.qtd_icp_plus_forecast_hours > 0) ||
-        !(summary.bonus_target_billable_hours_eoq > 0)) {
-      return null;
-    }
+    var prod = Number(productiveHours) || 0;
     var committedHrs = timed_('committedAssignmentHoursForQuarter_', function () {
       return committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
     });
-    var num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
-    var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
-    if (baselineForecast) {
-      var baseWorker = baselineByEmployeeId[employeeId];
-      if (baseWorker) {
-        var baseProd = workerQuarterProductive_(baseWorker, qk);
-        num += (Number(productiveHours) || 0) - baseProd;
+    var num;
+
+    if (qk === curQ && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
+        summary.bonus_target_billable_hours_eoq > 0) {
+      num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
+      if (baselineForecast) {
+        var baseWorker = baselineByEmployeeId[employeeId];
+        if (baseWorker) {
+          var baseProd = workerQuarterProductive_(baseWorker, qk);
+          num += prod - baseProd;
+        }
+      }
+    } else if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+      var actual = quarterActualIcpFromWoW_(employeeId, qk);
+      num = actual != null ? actual : 0;
+    } else {
+      var wowFc = quarterForecastIcpFromWoW_(employeeId, qk);
+      num = (wowFc != null ? wowFc : prod) + committedHrs;
+      if (baselineForecast) {
+        var baseWorkerFwd = baselineByEmployeeId[employeeId];
+        if (baseWorkerFwd) {
+          var baseProdFwd = workerQuarterProductive_(baseWorkerFwd, qk);
+          num += prod - baseProdFwd;
+        }
       }
     }
-    timed_('quarterTargetFromWoW_', function () {
-      return quarterTargetFromWoW_(worker.employeeId, qk);
-    });
     return { num: num, den: den };
   }
 
@@ -6172,11 +6193,9 @@ function _dbg_instrumentedAggregateBaseline_(
     var icpAvail = qinfo.icpAvailableHours;
     var rawCap = qinfo.rawCapacityHours;
     var prod = Number(productiveHours) || 0;
-    var d8 = d8IcpUtilPair_(worker, prod, qk);
-    var displayProd = d8 ? d8.num : prod;
-    var icpUtil = d8
-      ? (d8.den > 0 ? d8.num / d8.den : 0)
-      : (icpAvail > 0 ? prod / icpAvail : 0);
+    var pair = icpUtilPair_(worker, prod, qk);
+    var displayProd = pair ? pair.num : prod;
+    var icpUtil = pair ? (pair.den > 0 ? pair.num / pair.den : null) : null;
     return {
       quarterKey: String(qk),
       productiveHours: displayProd,
@@ -6196,31 +6215,22 @@ function _dbg_instrumentedAggregateBaseline_(
       var sumIcpNum = 0;
       var sumIcpDen = 0;
       var approx = false;
-      var isCurQ = (qk === curQ);
       group.forEach(function (w) {
         var prod = workerQuarterProductive_(w, qk);
         var qinfo = quarterCapacity_(qk);
         sumIcpAvail += qinfo.icpAvailableHours;
         sumRawCap += qinfo.rawCapacityHours;
         if (qinfo.approximate) approx = true;
-        if (isCurQ) {
-          var d8 = d8IcpUtilPair_(w, prod, qk);
-          if (d8) {
-            sumProd += d8.num;
-            sumIcpNum += d8.num;
-            sumIcpDen += d8.den;
-          } else {
-            sumProd += prod;
-            sumIcpNum += prod;
-            sumIcpDen += qinfo.icpAvailableHours;
-          }
+        var pair = icpUtilPair_(w, prod, qk);
+        if (pair) {
+          sumProd += pair.num;
+          sumIcpNum += pair.num;
+          sumIcpDen += pair.den;
         } else {
           sumProd += prod;
         }
       });
-      var icpUtil = isCurQ
-        ? (sumIcpDen > 0 ? sumIcpNum / sumIcpDen : 0)
-        : (sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0);
+      var icpUtil = sumIcpDen > 0 ? sumIcpNum / sumIcpDen : null;
       return {
         quarterKey: String(qk),
         productiveHours: Number(sumProd) || 0,

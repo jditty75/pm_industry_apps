@@ -7650,7 +7650,8 @@ async function _qaRefreshPsaHours_() {
     selectedWorkerDetail: null,     // last api_getResourceDetailV2 result
     workerReqId:      0,             // race-guard for worker detail fetch
     utilAllocFilter:  null,          // null | 'over' | 'under' — tile filter within scope
-    expandedWeekKey:  null           // weekKey for open weekly bar breakdown, or null
+    expandedWeekKey:  null,          // weekKey for open weekly bar breakdown, or null
+    onLeaveRoster:    null           // api_getOnLeaveRoster sidecar (display-only; not in util math)
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -7890,6 +7891,31 @@ async function _qaRefreshPsaHours_() {
       count++;
     });
     return count;
+  }
+
+  /**
+   * Team active count + optional on-leave breakout (display-only; not in util math).
+   * @param {string} teamLabel
+   * @param {number} activeCount
+   * @returns {string}
+   */
+  function wfm25TeamCountBreakoutHtml_(teamLabel, activeCount) {
+    const roster = WFM25State.onLeaveRoster || {};
+    const onLeave = roster[teamLabel] || [];
+    const names = onLeave.map(function (x) { return x.name; }).filter(Boolean);
+    let html = ' <span class="wfm25-team-count muted">(' + activeCount;
+    if (names.length) {
+      const namesHtml = names.map(function (n) {
+        return '<span class="wfm25-onleave-popover-name">' + escapeHtml_(n) + '</span>';
+      }).join('');
+      html += ' · <span class="wfm25-onleave-breakout" tabindex="0" role="button"' +
+        ' aria-label="' + names.length + ' on leave: ' + escapeHtml_(names.join(', ')) + '">' +
+        names.length + ' on leave' +
+        '<span class="wfm25-onleave-popover" role="tooltip">' + namesHtml + '</span>' +
+        '</span>';
+    }
+    html += ')</span>';
+    return html;
   }
 
   /**
@@ -9401,7 +9427,7 @@ async function _qaRefreshPsaHours_() {
         '<td><div class="wfm25-team-name-cell">' +
           '<span class="wfm25-team-swatch" style="background:' + team.color + '"></span>' +
           escapeHtml_(team.label) +
-          ' <span class="wfm25-team-count muted">(' + teamCount + ')</span>' +
+          wfm25TeamCountBreakoutHtml_(team.label, teamCount) +
           '<span class="wfm25-expand-chev">\u25ba</span>' +
         '</div></td>' +
         teamQCells + '</tr>'
@@ -9475,7 +9501,8 @@ async function _qaRefreshPsaHours_() {
       body.innerHTML = rows.join('');
 
       $$('.wfm25-team-row', body).forEach(function (tr) {
-        tr.addEventListener('click', function () {
+        tr.addEventListener('click', function (e) {
+          if (e.target.closest('.wfm25-onleave-breakout')) return;
           if (WFM25State.selectedWorker) {
             wfm25CloseWorkerPanel_();
           }
@@ -9488,6 +9515,23 @@ async function _qaRefreshPsaHours_() {
             wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, tl]);
           }
           renderWFM25UtilTable_(WFM25State.scorecardData);
+        });
+      });
+
+      $$('.wfm25-onleave-breakout', body).forEach(function (el) {
+        el.addEventListener('click', function (e) {
+          e.stopPropagation();
+          const wasOpen = el.classList.contains('is-open');
+          $$('.wfm25-onleave-breakout.is-open', body).forEach(function (node) {
+            node.classList.remove('is-open');
+          });
+          if (!wasOpen) el.classList.add('is-open');
+        });
+        el.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            el.click();
+          }
         });
       });
 
@@ -9528,8 +9572,12 @@ async function _qaRefreshPsaHours_() {
     try {
       // Use SLG worker scope (same default as Dashboard; directors scoped via State.filters)
       const params = buildServerParams_({ workerScope: 'SLG' });
-      const data = await call('api_getQuarterlyScorecard', params);
-      renderWFM25UtilTable_(data);
+      const results = await Promise.all([
+        call('api_getQuarterlyScorecard', params),
+        call('api_getOnLeaveRoster').catch(function () { return {}; })
+      ]);
+      WFM25State.onLeaveRoster = results[1] || {};
+      renderWFM25UtilTable_(results[0]);
       wfm25SetUtilLoading_(false);
     } catch (err) {
       wfm25SetUtilLoading_(false);

@@ -4018,6 +4018,49 @@ td.cell-with-bar {
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
+.wfm25-onleave-breakout {
+  position: relative;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.wfm25-onleave-breakout:hover,
+.wfm25-onleave-breakout:focus-visible,
+.wfm25-onleave-breakout.is-open {
+  color: var(--ballpoint);
+  outline: none;
+}
+.wfm25-onleave-popover {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 10rem;
+  max-width: 16rem;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid var(--desk);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(11, 30, 63, 0.12);
+  text-align: left;
+  text-decoration: none;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink);
+  white-space: normal;
+}
+.wfm25-onleave-popover-name {
+  display: block;
+}
+.wfm25-onleave-popover-name + .wfm25-onleave-popover-name {
+  margin-top: 4px;
+}
+.wfm25-onleave-breakout:hover .wfm25-onleave-popover,
+.wfm25-onleave-breakout:focus-visible .wfm25-onleave-popover,
+.wfm25-onleave-breakout.is-open .wfm25-onleave-popover {
+  display: block;
+}
 .wfm25-org-total-row td {
   background: var(--keyboard);
 }

@@ -3218,11 +3218,16 @@
     return !!(WFM25State && WFM25State.commitmentEditRow);
   }
 
+  function wfm25IsDemandFillMode_() {
+    return !!(WFM25State && WFM25State.demandFillRow);
+  }
+
   /**
-   * Refresh soft-book drawer chrome for draft vs commitment-edit mode.
+   * Refresh soft-book drawer chrome for draft vs commitment-edit vs demand-fill mode.
    */
   function wfm25RefreshSoftBookDrawerChrome_() {
     const editRow = WFM25State.commitmentEditRow;
+    const isFill = wfm25IsDemandFillMode_();
     const isEdit = !!editRow;
     const isReduce = wfm25GetSoftBookDirection_() === 'reduce';
     const addBtn = document.getElementById('wfm25SbDirAdd');
@@ -3231,6 +3236,10 @@
     const submitBtn = document.getElementById('wfm25SbAdd');
     const dirGroup = document.querySelector('.wfm25-adjust-direction');
     const reduceNote = document.getElementById('wfm25SbReduceNote');
+    const fillFields = document.getElementById('wfm25SbFillFields');
+    const workerPicker = document.getElementById('wfm25SbWorkerPicker');
+    const workerInput = document.getElementById('wfm25SbWorker');
+    const drawer = document.querySelector('.wfm25-softbook-drawer');
     if (addBtn) {
       addBtn.classList.toggle('on', !isReduce);
       addBtn.setAttribute('aria-pressed', !isReduce ? 'true' : 'false');
@@ -3239,17 +3248,27 @@
       reduceBtn.classList.toggle('on', isReduce);
       reduceBtn.setAttribute('aria-pressed', isReduce ? 'true' : 'false');
     }
-    if (title) title.textContent = isEdit ? 'Modify commitment' : 'Adjust hours';
-    if (reduceNote) reduceNote.hidden = isEdit || !isReduce;
+    if (title) {
+      title.textContent = isFill ? 'Fill demand' : (isEdit ? 'Modify commitment' : 'Adjust hours');
+    }
+    if (reduceNote) reduceNote.hidden = isFill || isEdit || !isReduce;
     if (submitBtn) {
-      submitBtn.textContent = isEdit
-        ? 'Save changes'
-        : (isReduce ? 'Reduce to draft' : 'Add to draft');
+      submitBtn.textContent = isFill
+        ? 'Save as Modeled'
+        : (isEdit ? 'Save changes' : (isReduce ? 'Reduce to draft' : 'Add to draft'));
     }
     if (dirGroup) {
-      const hideDir = isEdit && editRow && editRow.object_type === 'assignment';
+      const hideDir = isFill || (isEdit && editRow && editRow.object_type === 'assignment');
       dirGroup.hidden = hideDir;
     }
+    if (fillFields) fillFields.hidden = !isFill;
+    if (workerPicker) workerPicker.hidden = !isFill;
+    if (workerInput) {
+      workerInput.readOnly = true;
+      workerInput.placeholder = isFill ? 'Select a worker below' : '';
+      workerInput.hidden = isFill;
+    }
+    if (drawer) drawer.classList.toggle('wfm25-softbook-drawer--fill', isFill);
   }
 
   function wfm25SetSoftBookDirection_(direction) {
@@ -7673,7 +7692,11 @@ async function _qaRefreshPsaHours_() {
     commitmentsScenarios: null,        // last api_getCommitmentsScenarioRollups result
     commitmentsGroupBy: 'worker',        // 'worker' | 'scenario'
     commitmentsIncludeArchived: false, // OFF hides Archived (void) bookings
-    commitmentEditRow: null            // ledger row when soft-book drawer is in edit mode
+    commitmentEditRow: null,           // ledger row when soft-book drawer is in edit mode
+    demandFillRow: null,               // Unstaffed_Demand row when drawer is in fill mode
+    demandFillContext: null,           // derived fill context (dates, hours, distribution, …)
+    demandFillSelectedWorker: '',      // worker picked in fill mode
+    unfilledDemandFiltered: []         // last filtered rows (index-stable for Fill-this)
   };
 
   // ── Breadcrumb helpers ────────────────────────────────────────
@@ -9100,6 +9123,9 @@ async function _qaRefreshPsaHours_() {
     const overlay = document.getElementById('wfm25SoftBookOverlay');
     if (overlay) overlay.hidden = true;
     WFM25State.commitmentEditRow = null;
+    WFM25State.demandFillRow = null;
+    WFM25State.demandFillContext = null;
+    WFM25State.demandFillSelectedWorker = '';
     wfm25RefreshSoftBookDrawerChrome_();
   }
 
@@ -9107,6 +9133,9 @@ async function _qaRefreshPsaHours_() {
     const overlay = document.getElementById('wfm25SoftBookOverlay');
     if (!overlay) return;
     WFM25State.commitmentEditRow = null;
+    WFM25State.demandFillRow = null;
+    WFM25State.demandFillContext = null;
+    WFM25State.demandFillSelectedWorker = '';
     const workerInput = document.getElementById('wfm25SbWorker');
     const startInput = document.getElementById('wfm25SbStart');
     const endInput = document.getElementById('wfm25SbEnd');
@@ -9118,6 +9147,7 @@ async function _qaRefreshPsaHours_() {
     if (hoursInput) hoursInput.value = '';
     wfm25SetSoftBookDirection_('add');
     overlay.hidden = false;
+    wfm25RefreshSoftBookDrawerChrome_();
     if (hoursInput) hoursInput.focus();
   }
 
@@ -9129,6 +9159,9 @@ async function _qaRefreshPsaHours_() {
     const overlay = document.getElementById('wfm25SoftBookOverlay');
     if (!overlay || !row) return;
     WFM25State.commitmentEditRow = row;
+    WFM25State.demandFillRow = null;
+    WFM25State.demandFillContext = null;
+    WFM25State.demandFillSelectedWorker = '';
     const workerInput = document.getElementById('wfm25SbWorker');
     const startInput = document.getElementById('wfm25SbStart');
     const endInput = document.getElementById('wfm25SbEnd');
@@ -9142,7 +9175,447 @@ async function _qaRefreshPsaHours_() {
       : 'add';
     wfm25SetSoftBookDirection_(dir);
     overlay.hidden = false;
+    wfm25RefreshSoftBookDrawerChrome_();
     if (hoursInput) hoursInput.focus();
+  }
+
+  /**
+   * Format a Date as YYYY-MM-DD (local).
+   * @param {Date} d
+   * @returns {string}
+   */
+  function wfm25IsoDate_(d) {
+    if (!d || isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  /**
+   * First/last non-zero week dates for a demand row (ISO start + week-end).
+   * @param {Object} row
+   * @param {string[]} weeklyKeys
+   * @returns {{start:string, end:string}}
+   */
+  function wfm25UnfilledDemandDateRangeIso_(row, weeklyKeys) {
+    let firstDate = null;
+    let lastDate = null;
+    for (let i = 0; i < weeklyKeys.length; i++) {
+      const k = weeklyKeys[i];
+      if (wfm25WeeklyHour_(row[k]) === 0) continue;
+      const d = wfm25ParseWeekHeader_(k);
+      if (!d) continue;
+      if (!firstDate) firstDate = d;
+      lastDate = d;
+    }
+    if (!firstDate || !lastDate) return { start: '', end: '' };
+    const endOfWeek = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate() + 6);
+    return { start: wfm25IsoDate_(firstDate), end: wfm25IsoDate_(endOfWeek) };
+  }
+
+  /**
+   * Fiscal quarters touched by non-zero demand weeks.
+   * @param {Object} row
+   * @param {string[]} weeklyKeys
+   * @returns {string[]}
+   */
+  function wfm25DemandQuarterKeys_(row, weeklyKeys) {
+    const set = {};
+    weeklyKeys.forEach(function (k) {
+      if (wfm25WeeklyHour_(row[k]) === 0) return;
+      const d = wfm25ParseWeekHeader_(k);
+      if (!d) return;
+      set[fiscalQuarterKey_(d)] = true;
+    });
+    return Object.keys(set).sort(compareFiscalQuarterKeys_);
+  }
+
+  /**
+   * Infer Even / Front-loaded / Back-loaded from demand weekly hours.
+   * @param {Object} row
+   * @param {string[]} weeklyKeys
+   * @returns {string}
+   */
+  function wfm25InferDistributionFromDemand_(row, weeklyKeys) {
+    const hrs = [];
+    weeklyKeys.forEach(function (k) {
+      const h = wfm25WeeklyHour_(row[k]);
+      if (h > 0) hrs.push(h);
+    });
+    if (hrs.length <= 1) return 'Even';
+    const first = hrs[0];
+    const last = hrs[hrs.length - 1];
+    const mid = hrs[Math.floor(hrs.length / 2)];
+    const avg = hrs.reduce(function (s, x) { return s + x; }, 0) / hrs.length;
+    const tol = Math.max(avg * 0.08, 1);
+    if (Math.abs(first - last) <= tol && Math.abs(mid - avg) <= tol) return 'Even';
+    if (last > first + tol) return 'Back-loaded';
+    if (first > last + tol) return 'Front-loaded';
+    return 'Even';
+  }
+
+  /**
+   * Map demand skill fields to a Team family label (Functional / Technical / Delivery).
+   * @param {Object} row
+   * @returns {string|null}
+   */
+  function wfm25DemandTeamFamily_(row) {
+    const parts = [
+      String(row['Project Role Category'] || ''),
+      String(row['Specialty Practice'] || ''),
+      String(row['Sub-Specialty Practice'] || '')
+    ].join(' ').toLowerCase();
+    if (/functional/.test(parts)) return 'Functional Consulting';
+    if (/technical|integration|reporting|analytics|data conversion/.test(parts)) {
+      return 'Technical Consulting';
+    }
+    if (/delivery|engagement manager|project director/.test(parts)) return 'Delivery';
+    return null;
+  }
+
+  /**
+   * Normalize project/account strings for loose matching.
+   * @param {string} s
+   * @returns {string}
+   */
+  function wfm25NormDemandLabel_(s) {
+    return String(s || '').replace(/\s*\[O\]\s*$/i, '').trim().toLowerCase();
+  }
+
+  /**
+   * Resolve demand Project/Account to an opportunity_id when possible.
+   * @param {Object} row
+   * @returns {{opportunity_id:string, project_label:string}}
+   */
+  function wfm25ResolveDemandOpportunity_(row) {
+    const proj = wfm25UnfilledDemandProjectAccount_(row);
+    const projectLabel = proj.primary || proj.sub || '—';
+    const np = wfm25NormDemandLabel_(proj.primary);
+    const na = wfm25NormDemandLabel_(proj.sub || row.Account);
+    const opps = State.opportunities || [];
+    let bestId = '';
+    let bestScore = 0;
+    opps.forEach(function (o) {
+      const on = wfm25NormDemandLabel_(o.opportunity_name || '');
+      const oa = wfm25NormDemandLabel_(o.account || o.account_name || '');
+      let score = 0;
+      if (np && on && (on === np || on.indexOf(np) >= 0 || np.indexOf(on) >= 0)) score += 2;
+      if (na && oa && (oa === na || oa.indexOf(na) >= 0 || na.indexOf(oa) >= 0)) score += 1;
+      if (score > bestScore) {
+        bestScore = score;
+        bestId = o.opportunity_id || '';
+      }
+    });
+    return { opportunity_id: bestScore >= 2 ? bestId : '', project_label: projectLabel };
+  }
+
+  /**
+   * Peak utilization (numerator ÷ target_hours) for a worker across demand quarters.
+   * @param {string} workerName
+   * @param {string[]} quarterKeys
+   * @returns {number|null}
+   */
+  function wfm25WorkerUtilForDemandQuarters_(workerName, quarterKeys) {
+    const data = WFM25State.scorecardData;
+    if (!data || !quarterKeys.length) return null;
+    const wr = (data.workers || []).find(function (w) { return w.worker === workerName; });
+    if (!wr) return null;
+    const allQ = data.quarterKeys || [];
+    let peak = null;
+    quarterKeys.forEach(function (qk) {
+      const qi = allQ.indexOf(qk);
+      if (qi < 0) return;
+      const q = (wr.quarters || [])[qi];
+      if (!q || q.icpUtil == null) return;
+      peak = peak == null ? q.icpUtil : Math.max(peak, q.icpUtil);
+    });
+    return peak;
+  }
+
+  /**
+   * True when a resource's resolved team matches the demand Team family.
+   * @param {Object} resource
+   * @param {string|null} teamFamily
+   * @returns {boolean}
+   */
+  function wfm25ResourceInDemandTeamFamily_(resource, teamFamily) {
+    if (!teamFamily) return true;
+    const rt = String(resource.resolvedTeam || '').toLowerCase();
+    const fam = teamFamily.toLowerCase();
+    if (fam.indexOf('functional') >= 0) return rt.indexOf('functional') >= 0;
+    if (fam.indexOf('technical') >= 0) return rt.indexOf('technical') >= 0;
+    if (fam.indexOf('delivery') >= 0) return rt.indexOf('delivery') >= 0;
+    return rt === fam;
+  }
+
+  /**
+   * Build capacity-ranked SLG worker candidates for a demand row.
+   * @param {Object} row
+   * @param {string[]} weeklyKeys
+   * @returns {Array<{name:string, util:number|null, bandClass:string, statusWord:string}>}
+   */
+  function wfm25BuildDemandFillCandidates_(row, weeklyKeys) {
+    const teamFamily = wfm25DemandTeamFamily_(row);
+    const quarterKeys = wfm25DemandQuarterKeys_(row, weeklyKeys);
+    const resources = (State.ref && State.ref.resources) || [];
+    const candidates = resources.filter(function (r) {
+      if (r.worker_class !== 'SLG_Real' && r.worker_class !== 'SLG_Generic') return false;
+      return wfm25ResourceInDemandTeamFamily_(r, teamFamily);
+    }).map(function (r) {
+      const util = wfm25WorkerUtilForDemandQuarters_(r.name, quarterKeys);
+      return {
+        name: r.name,
+        util: util,
+        bandClass: wfm25UtilBandClass_(util),
+        statusWord: wfm25UtilStatusWord_(util)
+      };
+    });
+    candidates.sort(function (a, b) {
+      const au = a.util;
+      const bu = b.util;
+      if (au == null && bu == null) return a.name.localeCompare(b.name);
+      if (au == null) return 1;
+      if (bu == null) return -1;
+      if (au !== bu) return au - bu;
+      return a.name.localeCompare(b.name);
+    });
+    return candidates;
+  }
+
+  /**
+   * Paint the capacity-aware worker picker list in fill mode.
+   * @param {Array} candidates
+   */
+  function wfm25RenderDemandFillWorkerPicker_(candidates) {
+    const picker = document.getElementById('wfm25SbWorkerPicker');
+    if (!picker) return;
+    if (!candidates.length) {
+      picker.innerHTML = '<div class="muted wfm25-sb-worker-empty">No SLG workers in this Team family.</div>';
+      return;
+    }
+    let html = '';
+    candidates.forEach(function (c) {
+      const selected = c.name === WFM25State.demandFillSelectedWorker;
+      const utilLabel = c.util != null ? fmtPct(c.util) : '—';
+      html += '<button type="button" class="wfm25-sb-worker-opt' +
+        (selected ? ' selected' : '') + '" data-wfm25-sb-worker="' + escapeHtml_(c.name) + '">' +
+        '<span class="wfm25-sb-worker-name">' + escapeHtml_(c.name) + '</span>' +
+        '<span class="wfm25-sb-worker-util ' + escapeHtml_(c.bandClass) + '">' +
+          utilLabel + (c.statusWord ? ' · ' + escapeHtml_(c.statusWord) : '') +
+        '</span></button>';
+    });
+    picker.innerHTML = html;
+    picker.querySelectorAll('[data-wfm25-sb-worker]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        WFM25State.demandFillSelectedWorker = btn.dataset.wfm25SbWorker || '';
+        wfm25RenderDemandFillWorkerPicker_(candidates);
+      });
+    });
+  }
+
+  /**
+   * Render a compact weekly-hours preview for fill mode.
+   * @param {Object} row
+   * @param {string[]} weeklyKeys
+   * @returns {string}
+   */
+  function wfm25DemandWeeklyPreviewHtml_(row, weeklyKeys) {
+    const cells = [];
+    weeklyKeys.forEach(function (k) {
+      const h = wfm25WeeklyHour_(row[k]);
+      if (!h) return;
+      const d = wfm25ParseWeekHeader_(k);
+      const label = d
+        ? d.toLocaleString('en-US', { month: 'short', day: 'numeric' })
+        : String(k).slice(0, 8);
+      cells.push('<span class="wfm25-sb-week-cell" title="' + escapeHtml_(String(k)) + '">' +
+        escapeHtml_(label) + ': ' + fmtHours(h) + 'h</span>');
+    });
+    return cells.length
+      ? cells.join('')
+      : '<span class="muted">No weekly hours</span>';
+  }
+
+  /**
+   * Open soft-book drawer pre-populated from an Unfilled Demand row (Fill this).
+   * @param {Object} row demand row
+   */
+  async function openWFM25SoftBookOverlayForDemandFill_(row) {
+    const overlay = document.getElementById('wfm25SoftBookOverlay');
+    if (!overlay || !row) return;
+
+    if (!WFM25State.scorecardData) {
+      try {
+        const params = buildServerParams_({ workerScope: 'SLG' });
+        WFM25State.scorecardData = await call('api_getQuarterlyScorecard', params);
+      } catch (e) {
+        console.warn('[WFM.25] scorecard load for fill picker failed:', e);
+      }
+    }
+    if (!State.scenarios || !State.scenarios.length) {
+      try { await loadScenariosList(); } catch (e) { /* ignore */ }
+    }
+    if (!State.opportunities || !State.opportunities.length) {
+      try { State.opportunities = await call('api_listOpportunities', {}); } catch (e) { /* ignore */ }
+    }
+
+    const weeklyKeys = WFM25State.unfilledDemandWeeklyKeys || [];
+    const dates = wfm25UnfilledDemandDateRangeIso_(row, weeklyKeys);
+    const total = wfm25WeeklyHour_(row['Total Hours']);
+    const opp = wfm25ResolveDemandOpportunity_(row);
+    const skill = wfm25UnfilledDemandSkillPractice_(row);
+    const distribution = wfm25InferDistributionFromDemand_(row, weeklyKeys);
+
+    WFM25State.commitmentEditRow = null;
+    WFM25State.demandFillRow = row;
+    WFM25State.demandFillSelectedWorker = '';
+    WFM25State.demandFillContext = {
+      start_date: dates.start,
+      end_date: dates.end,
+      total_hours: total,
+      distribution: distribution,
+      opportunity_id: opp.opportunity_id,
+      project_label: opp.project_label,
+      team_family: wfm25DemandTeamFamily_(row),
+      quarter_keys: wfm25DemandQuarterKeys_(row, weeklyKeys)
+    };
+
+    const projectInput = document.getElementById('wfm25SbProject');
+    const oppIdInput = document.getElementById('wfm25SbOpportunityId');
+    const skillEl = document.getElementById('wfm25SbSkillContext');
+    const scenSel = document.getElementById('wfm25SbScenario');
+    const weeklyPreview = document.getElementById('wfm25SbWeeklyPreview');
+    const startInput = document.getElementById('wfm25SbStart');
+    const endInput = document.getElementById('wfm25SbEnd');
+    const hoursInput = document.getElementById('wfm25SbHours');
+    const workerInput = document.getElementById('wfm25SbWorker');
+
+    if (projectInput) projectInput.value = opp.project_label;
+    if (oppIdInput) oppIdInput.value = opp.opportunity_id || '';
+    if (skillEl) {
+      skillEl.textContent = skill.primary + (skill.sub ? ' · ' + skill.sub : '');
+    }
+    if (scenSel) {
+      scenSel.innerHTML = '<option value="">— No scenario —</option>' +
+        (State.scenarios || []).filter(function (s) { return s.status !== 'Archived'; })
+          .map(function (s) {
+            return '<option value="' + escapeHtml_(s.scenario_id) + '">' +
+              escapeHtml_(s.name) + '</option>';
+          }).join('');
+      scenSel.value = '';
+    }
+    if (weeklyPreview) weeklyPreview.innerHTML = wfm25DemandWeeklyPreviewHtml_(row, weeklyKeys);
+    if (startInput) startInput.value = dates.start;
+    if (endInput) endInput.value = dates.end;
+    if (hoursInput) hoursInput.value = String(total || '');
+    if (workerInput) workerInput.value = '';
+
+    wfm25SetSoftBookDirection_('add');
+    const candidates = wfm25BuildDemandFillCandidates_(row, weeklyKeys);
+    wfm25RenderDemandFillWorkerPicker_(candidates);
+
+    overlay.hidden = false;
+    wfm25RefreshSoftBookDrawerChrome_();
+  }
+
+  /**
+   * Save a demand-fill booking as Modeled via the standard assignment path.
+   */
+  async function wfm25SaveDemandFill_() {
+    const ctx = WFM25State.demandFillContext;
+    if (!ctx || !WFM25State.demandFillRow) return;
+    const worker = WFM25State.demandFillSelectedWorker || '';
+    if (!worker) {
+      toast('Select a worker.', 'err');
+      return;
+    }
+    const start = (document.getElementById('wfm25SbStart') && document.getElementById('wfm25SbStart').value) || ctx.start_date;
+    const end = (document.getElementById('wfm25SbEnd') && document.getElementById('wfm25SbEnd').value) || ctx.end_date;
+    const hours = Number(document.getElementById('wfm25SbHours') && document.getElementById('wfm25SbHours').value);
+    if (!start || !end || !hours || hours <= 0) {
+      toast('Enter start date, end date, and total hours.', 'err');
+      return;
+    }
+    if (new Date(start) > new Date(end)) {
+      toast('Start date must be on or before end date.', 'err');
+      return;
+    }
+    const resourceType = getResourceTypeForWorker_(worker);
+    if (!resourceType) {
+      toast('Could not resolve role for ' + worker + '.', 'err');
+      return;
+    }
+    const scenSel = document.getElementById('wfm25SbScenario');
+    const submitBtn = document.getElementById('wfm25SbAdd');
+    try {
+      if (submitBtn) submitBtn.disabled = true;
+      await call('api_saveAssignment', {
+        opportunity_id: ctx.opportunity_id || '',
+        resource_type: resourceType,
+        role: '',
+        resource_name: worker,
+        start_date: start,
+        end_date: end,
+        estimated_hours: hours,
+        distribution: ctx.distribution || 'Even',
+        scenario_id: (scenSel && scenSel.value) || null,
+        notes: '',
+        status: 'Modeled'
+      });
+      toast('Booking saved as Modeled', 'ok');
+      closeWFM25SoftBookOverlay_();
+      WFM25State.commitmentsLedger = null;
+      WFM25State.commitmentsScenarios = null;
+      renderWFM25UnfilledDemand_();
+    } catch (err) {
+      toast('Save failed: ' + (err.message || String(err)), 'err');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
+  /**
+   * Derived Level-1 badge: committed booking plausibly matches this demand row.
+   * @param {Object} row
+   * @param {string[]} weeklyKeys
+   * @param {Object[]} ledger
+   * @returns {boolean}
+   */
+  function wfm25DemandHasMatchingCommitment_(row, weeklyKeys, ledger) {
+    const dates = wfm25UnfilledDemandDateRangeIso_(row, weeklyKeys);
+    if (!dates.start || !dates.end) return false;
+    const proj = wfm25UnfilledDemandProjectAccount_(row);
+    const demandProj = wfm25NormDemandLabel_(proj.primary);
+    const demandAcct = wfm25NormDemandLabel_(proj.sub || row.Account);
+    const resolved = wfm25ResolveDemandOpportunity_(row);
+    const teamFamily = wfm25DemandTeamFamily_(row);
+
+    return (ledger || []).some(function (cm) {
+      if (cm.status !== 'Committed' || cm.object_type !== 'assignment') return false;
+      if (cm.end_date < dates.start || cm.start_date > dates.end) return false;
+
+      if (resolved.opportunity_id && cm.opportunity_id &&
+          resolved.opportunity_id === cm.opportunity_id) {
+        return true;
+      }
+
+      const cmProj = wfm25NormDemandLabel_(cm.project_label);
+      const projectMatch = demandProj && cmProj && (
+        cmProj.indexOf(demandProj) >= 0 || demandProj.indexOf(cmProj.split('—')[0].trim()) >= 0
+      );
+      const accountMatch = !demandAcct || !cmProj || cmProj.indexOf(demandAcct) >= 0;
+      if (!projectMatch && !accountMatch) return false;
+
+      if (teamFamily && cm.team) {
+        const cmTeam = String(cm.team).toLowerCase();
+        const fam = teamFamily.toLowerCase();
+        if (fam.indexOf('functional') >= 0 && cmTeam.indexOf('functional') < 0) return false;
+        if (fam.indexOf('technical') >= 0 && cmTeam.indexOf('technical') < 0) return false;
+        if (fam.indexOf('delivery') >= 0 && cmTeam.indexOf('delivery') < 0) return false;
+      }
+      return true;
+    });
   }
 
   /**
@@ -12420,6 +12893,7 @@ async function _qaRefreshPsaHours_() {
       weeklyKeys,
       WFM25State.unfilledDemandIncludeOpportunity
     );
+    WFM25State.unfilledDemandFiltered = filtered;
 
     if (!filtered.length) {
       body.innerHTML = '<tr><td colspan="7" class="muted wfm25-ud-empty">No unfilled demand rows match the current filters.</td></tr>';
@@ -12438,6 +12912,7 @@ async function _qaRefreshPsaHours_() {
       return a.localeCompare(b, undefined, { sensitivity: 'base' });
     });
 
+    const ledger = WFM25State.commitmentsLedger || [];
     let html = '';
     groupKeys.forEach(function (gKey) {
       const rows = groups[gKey].slice().sort(function (a, b) {
@@ -12467,6 +12942,11 @@ async function _qaRefreshPsaHours_() {
         const oppBadge = isOpp
           ? '<span class="wfm25-ud-opp-badge">Opportunity</span>'
           : '';
+        const hasCommitment = wfm25DemandHasMatchingCommitment_(row, weeklyKeys, ledger);
+        const cmBadge = hasCommitment
+          ? '<span class="wfm25-ud-cm-badge">Commitment exists</span>'
+          : '';
+        const fillIdx = filtered.indexOf(row);
 
         html += '<tr class="wfm25-ud-data-row">' +
           '<td class="wfm25-ud-col-skill">' +
@@ -12474,7 +12954,7 @@ async function _qaRefreshPsaHours_() {
             (skill.sub ? '<div class="wfm25-ud-sub muted">' + escapeHtml_(skill.sub) + '</div>' : '') +
           '</td>' +
           '<td class="wfm25-ud-col-project">' +
-            '<div class="wfm25-ud-primary">' + escapeHtml_(proj.primary) + oppBadge + '</div>' +
+            '<div class="wfm25-ud-primary">' + escapeHtml_(proj.primary) + oppBadge + cmBadge + '</div>' +
             (proj.sub ? '<div class="wfm25-ud-sub muted">' + escapeHtml_(proj.sub) + '</div>' : '') +
           '</td>' +
           '<td class="wfm25-ud-col-manager">' + escapeHtml_(manager) + '</td>' +
@@ -12483,7 +12963,8 @@ async function _qaRefreshPsaHours_() {
           '<td class="wfm25-ud-col-memo"><span class="wfm25-ud-memo"' + memoTitleAttr + '>' +
             escapeHtml_(memo) + '</span></td>' +
           '<td class="wfm25-ud-col-action">' +
-            '<button type="button" class="btn-primary wfm25-fill-this-btn" data-wfm25-fill-this>Fill this</button>' +
+            '<button type="button" class="btn-primary wfm25-fill-this-btn" data-wfm25-fill-this="' +
+              fillIdx + '">Fill this</button>' +
           '</td>' +
         '</tr>';
       });
@@ -12502,14 +12983,26 @@ async function _qaRefreshPsaHours_() {
 
     if (WFM25State.unfilledDemandRaw) {
       renderWFM25UnfilledDemand_();
+      call('api_getCommitmentsLedger').then(function (ledger) {
+        WFM25State.commitmentsLedger = Array.isArray(ledger) ? ledger : [];
+        renderWFM25UnfilledDemand_();
+      }).catch(function () { /* badge refresh optional */ });
       return;
     }
 
     wfm25ShowLoading_(wrap);
     try {
-      const rows = await call('api_getUnstaffedDemand');
-      WFM25State.unfilledDemandRaw = Array.isArray(rows) ? rows : [];
+      const results = await Promise.all([
+        call('api_getUnstaffedDemand'),
+        WFM25State.commitmentsLedger
+          ? Promise.resolve(WFM25State.commitmentsLedger)
+          : call('api_getCommitmentsLedger')
+      ]);
+      WFM25State.unfilledDemandRaw = Array.isArray(results[0]) ? results[0] : [];
       WFM25State.unfilledDemandWeeklyKeys = wfm25DetectWeeklyKeys_(WFM25State.unfilledDemandRaw);
+      if (!WFM25State.commitmentsLedger) {
+        WFM25State.commitmentsLedger = Array.isArray(results[1]) ? results[1] : [];
+      }
       renderWFM25UnfilledDemand_();
     } catch (err) {
       body.innerHTML = '<tr><td colspan="7" class="muted wfm25-ud-error">Failed to load: ' +
@@ -12958,7 +13451,13 @@ async function _qaRefreshPsaHours_() {
       udBody.addEventListener('click', function (e) {
         const btn = e.target.closest('[data-wfm25-fill-this]');
         if (!btn) return;
-        toast('Staffing from demand — coming soon');
+        const idx = Number(btn.dataset.wfm25FillThis);
+        const row = (WFM25State.unfilledDemandFiltered || [])[idx];
+        if (!row) {
+          toast('Demand row not found — refresh and try again.', 'err');
+          return;
+        }
+        openWFM25SoftBookOverlayForDemandFill_(row);
       });
     }
   }
@@ -13938,7 +14437,9 @@ async function _qaRefreshPsaHours_() {
     const sbAdd = document.getElementById('wfm25SbAdd');
     if (sbAdd) {
       sbAdd.addEventListener('click', function () {
-        if (wfm25IsCommitmentEditMode_()) {
+        if (wfm25IsDemandFillMode_()) {
+          wfm25SaveDemandFill_();
+        } else if (wfm25IsCommitmentEditMode_()) {
           wfm25SaveCommitmentEdit_();
         } else {
           addWFM25SoftBooking_();
@@ -13949,7 +14450,9 @@ async function _qaRefreshPsaHours_() {
     if (sbHours) {
       sbHours.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
-          if (wfm25IsCommitmentEditMode_()) {
+          if (wfm25IsDemandFillMode_()) {
+            wfm25SaveDemandFill_();
+          } else if (wfm25IsCommitmentEditMode_()) {
             wfm25SaveCommitmentEdit_();
           } else {
             addWFM25SoftBooking_();

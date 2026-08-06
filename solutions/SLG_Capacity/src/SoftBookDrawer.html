@@ -9,8 +9,22 @@
       <button type="button" class="icon-btn" id="wfm25SoftBookClose" aria-label="Close">✕</button>
     </header>
     <div class="wfm25-softbook-body">
-      <label class="field-label">Worker</label>
+      <div id="wfm25SbFillFields" class="wfm25-sb-fill-fields" hidden>
+        <label class="field-label">Project / opportunity</label>
+        <input type="text" class="input" id="wfm25SbProject" readonly>
+        <input type="hidden" id="wfm25SbOpportunityId">
+        <label class="field-label">Skill context</label>
+        <div class="wfm25-sb-skill-context muted" id="wfm25SbSkillContext">—</div>
+        <label class="field-label">Scenario</label>
+        <select class="input" id="wfm25SbScenario">
+          <option value="">— No scenario —</option>
+        </select>
+        <label class="field-label">Weekly shape</label>
+        <div class="wfm25-sb-weekly-preview" id="wfm25SbWeeklyPreview"></div>
+      </div>
+      <label class="field-label" id="wfm25SbWorkerLabel">Worker</label>
       <input type="text" class="input" id="wfm25SbWorker" readonly>
+      <div class="wfm25-sb-worker-picker" id="wfm25SbWorkerPicker" hidden></div>
       <div class="wfm25-adjust-direction" role="group" aria-label="Adjustment direction">
         <button type="button" class="btn-toggle on" id="wfm25SbDirAdd" data-direction="add"
                 aria-pressed="true">Add</button>

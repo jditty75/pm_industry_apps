@@ -3247,6 +3247,30 @@ function _readUtilColorSettings_() {
   }
 }
 
+/**
+ * Read WFM.25 exception-glyph settings from Config_Settings (read-only).
+ * Falls back to UTIL_GLYPH_DEFAULTS when a key is blank.
+ * @returns {{fire:string, cold:string, enabled:string}}
+ */
+function _readUtilGlyphSettings_() {
+  const defaults = UTIL_GLYPH_DEFAULTS;
+  const keys = UTIL_GLYPH_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      return raw || fallback;
+    };
+    return {
+      fire: read(keys.fire, defaults.fire),
+      cold: read(keys.cold, defaults.cold),
+      enabled: read(keys.enabled, defaults.enabled)
+    };
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
 function api_getReference() {
   _requireAuthorized_();
   // Per-user 60-second cache wrapper. api_getReference is hit on every
@@ -3367,6 +3391,7 @@ function api_getReference() {
 
   const utilBands = _readUtilBandSettings_();
   const utilColors = _readUtilColorSettings_();
+  const utilGlyphs = _readUtilGlyphSettings_();
 
   const response = {
     user: userResolution.email,
@@ -3416,6 +3441,9 @@ function api_getReference() {
     utilColorWarmFg: utilColors.warmFg,
     utilColorHotBg: utilColors.hotBg,
     utilColorHotFg: utilColors.hotFg,
+    utilGlyphFire: utilGlyphs.fire,
+    utilGlyphCold: utilGlyphs.cold,
+    utilGlyphEnabled: utilGlyphs.enabled,
     // WFM-FIX.1: no longer used to drive boot behavior (see
     // applyAutoManagerDefaults_, JavaScript.html, which now personalizes
     // the boot default off matchedManager/userIsAdmin instead). Left in

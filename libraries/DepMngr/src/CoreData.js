@@ -4204,6 +4204,14 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // S1: Student data layer
     filterDeploymentsByStudent_: filterDeploymentsByStudent_,
     buildStudentTabData_:        buildStudentTabData_,
-    saveStudentDeploymentFields: saveStudentDeploymentFields
+    saveStudentDeploymentFields: saveStudentDeploymentFields,
+
+    // N7: MDS/PGL notifications (delegates to CoreNotify)
+    getDeploymentContactsMap_:   getDeploymentContactsMap_,
+    runNotifications:            function (c) { return CoreNotify.runNotifications(c); },
+    validateNotificationConfig:  function (c) { return CoreNotify.validateNotificationConfig(c); },
+    sendTestNotification:        function (c, k, r) { return CoreNotify.sendTestNotification(c, k, r); },
+    initNotificationConfigSheet: function (c) { return CoreNotify.initNotificationConfigSheet(c); },
+    getNotificationKeysForMenu:  function (c) { return CoreNotify.getNotificationKeysForMenu(c); }
   };
 })();

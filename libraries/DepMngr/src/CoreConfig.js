@@ -367,6 +367,20 @@ var CoreConfig = (function () {
     if (!cfg.freshness.logSheet) cfg.freshness.logSheet = 'Auto Refresh Execution Log';
 
     // -------------------------------------------------------------------------
+    // MDS/PGL notifications (N7)
+    // -------------------------------------------------------------------------
+    cfg.notify = cfg.notify || {};
+    if (cfg.notify.enabled === undefined) cfg.notify.enabled = true;
+    if (!cfg.notify.configSheet) cfg.notify.configSheet = 'NotificationConfig';
+    if (!cfg.notify.testDefaultRecipient)
+      cfg.notify.testDefaultRecipient = 'jeffrey.ditty@workday.com';
+    if (!Array.isArray(cfg.notify.allowedFromAliases) || !cfg.notify.allowedFromAliases.length) {
+      cfg.notify.allowedFromAliases = [
+        'jeffrey.ditty@workday.com'
+      ];
+    }
+
+    // -------------------------------------------------------------------------
     // Notable (Part 1)
     // -------------------------------------------------------------------------
     cfg.notable = cfg.notable || {};

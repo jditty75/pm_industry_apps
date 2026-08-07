@@ -31,6 +31,8 @@
  *
  * The dual-path check mirrors the production access gate in
  * AccessControl.gs::isAuthorized_ which uses the same admin_emails setting.
+ * 
+ * This will make clasp force the push.  Another one
  */
 function _dbg_requireAdmin_() {
   try {

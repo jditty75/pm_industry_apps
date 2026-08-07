@@ -51,3 +51,7 @@ Create a new file C:\JD\.gitattributes with this content:
 *.jpg  binary
 *.gif  binary
 *.pdf  binary
+
+# agent temp scratch files
+.tmp-*
+**/.tmp-*

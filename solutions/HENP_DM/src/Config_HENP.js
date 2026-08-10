@@ -102,6 +102,17 @@ var APP_CONFIG = {
         { label: 'Higher Education', match: ['Higher Education'] },
         { label: 'Non-Profit', match: ['Non-Profit'] }
       ]
+    },
+
+    sections: { approach: true },
+
+    distribution: {
+      enabled: false,
+      fromAlias: '',
+      to: [],
+      cc: [],
+      subjectTemplate: 'HENP Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      logSheet: 'ReportDistributionLog'
     }
   },
   salesforce: {

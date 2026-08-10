@@ -113,6 +113,17 @@ var APP_CONFIG = {
         { label: 'Post Acute',                     match: ['Post Acute'] },
         { label: 'Other Healthcare',               match: ['Other Healthcare'] }
       ]
+    },
+
+    sections: { approach: true },
+
+    distribution: {
+      enabled: false,
+      fromAlias: '',
+      to: [],
+      cc: [],
+      subjectTemplate: 'Healthcare Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      logSheet: 'ReportDistributionLog'
     }
   },
 

@@ -111,16 +111,90 @@ var BAR_CONFIG = {
 // ============================================================================
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('📊 SLG Deployment Health Tools')
+  var ui = SpreadsheetApp.getUi();
+  var menu = ui.createMenu('📊 SLG Deployment Health Tools')
     .addItem('🌐 Open Web App', 'openWebApp')
     .addSeparator()
     .addItem('▶ Preview HTML report', 'previewHtml')
     .addItem('💾 Export HTML to My Drive', 'exportHtmlToDrive')
+    .addItem('💾 Export V2 Report to My Drive (New)', 'exportReportV2ToDrive')
     .addSeparator()
+    .addItem('📧 Send Monthly Report (New)', 'sendMonthlyReportNew')
+    .addItem('🧪 Send Test Monthly Report (New)', 'sendMonthlyReportTestNew')
+    .addSeparator()
+    .addItem('📋 Init Notification Config', 'initNotificationConfigSheet')
+    .addItem('✅ Validate Notification Config', 'validateNotificationConfig')
+    .addItem('📋 Init Report Distribution Log', 'initReportDistributionLog');
+
+  var testSub = ui.createMenu('Send Test Notification');
+  getNotificationMenuKeys_().forEach(function (key) {
+    var handler = getTestNotificationHandler_(key);
+    if (handler) testSub.addItem(key, handler);
+  });
+  menu.addSubMenu(testSub);
+  menu.addSeparator()
     .addItem('🔍 Debug: Show detected table ranges', 'debugShowTableRanges')
-    .addItem('🔍 Debug: Show all cell values', 'debugShowCellValues')
-    .addToUi();
+    .addItem('🔍 Debug: Show all cell values', 'debugShowCellValues');
+  menu.addToUi();
+}
+
+/**
+ * Returns notification keys for the test-send submenu.
+ * @return {Array<string>}
+ * @private
+ */
+function getNotificationMenuKeys_() {
+  try {
+    return CoreLib.CoreData.getNotificationKeysForMenu(APP_CONFIG);
+  } catch (e) {
+    return ['em_reminder_first', 'em_reminder_final', 'dd_digest'];
+  }
+}
+
+/**
+ * Maps notificationKey to a container-bound handler function name.
+ * @param {string} key
+ * @return {string|null}
+ * @private
+ */
+function getTestNotificationHandler_(key) {
+  var handlers = {
+    em_reminder_first: 'sendTestNotification_em_reminder_first',
+    em_reminder_final: 'sendTestNotification_em_reminder_final',
+    dd_digest: 'sendTestNotification_dd_digest'
+  };
+  return handlers[key] || null;
+}
+
+/**
+ * Prompts for recipient and sends a [TEST] notification.
+ * @param {string} notificationKey
+ */
+function sendTestNotificationPrompt(notificationKey) {
+  var ui = SpreadsheetApp.getUi();
+  var result = ui.prompt(
+    'Send Test Notification',
+    'Recipient email (default: jeffrey.ditty@workday.com):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (result.getSelectedButton() !== ui.Button.OK) return;
+  var recipient = result.getResponseText().trim() || 'jeffrey.ditty@workday.com';
+  var ok = sendTestNotification(notificationKey, recipient);
+  ui.alert(ok ?
+    'Test notification sent to ' + recipient :
+    'Test send failed — check execution log.');
+}
+
+function sendTestNotification_em_reminder_first() {
+  sendTestNotificationPrompt('em_reminder_first');
+}
+
+function sendTestNotification_em_reminder_final() {
+  sendTestNotificationPrompt('em_reminder_final');
+}
+
+function sendTestNotification_dd_digest() {
+  sendTestNotificationPrompt('dd_digest');
 }
 
 /**
@@ -181,6 +255,34 @@ function previewHtml() {
  */
 function exportHtmlToDrive() {
   CoreLib.CoreReport.exportInlineAndOutlookToDrive(APP_CONFIG);
+}
+
+function exportReportV2ToDrive() {
+  return CoreLib.CoreReport.exportReportV2ToDrive(APP_CONFIG);
+}
+
+/**
+ * N8: menu wrapper — native Gmail production send (V2 report).
+ */
+function sendMonthlyReportNew() {
+  var result = sendMonthlyReport();
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    result.status + (result.error ? ': ' + result.error : ''),
+    'Send Monthly Report (New)',
+    10
+  );
+}
+
+/**
+ * N8: menu wrapper — test send to self, no distribution log.
+ */
+function sendMonthlyReportTestNew() {
+  var result = sendMonthlyReportTest();
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    result.status + (result.error ? ': ' + result.error : ''),
+    'Send Test Monthly Report (New)',
+    10
+  );
 }
 
 // ============================================================================

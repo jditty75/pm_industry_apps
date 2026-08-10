@@ -14,7 +14,7 @@ var CoreNotify = (function () {
     'subject', 'bodyTemplate', 'status'
   ];
 
-  var EM_TOKENS_ = ['emName', 'account', 'deploymentName', 'surveyType', 'eventDate', 'dd', 'daysUntil'];
+  var EM_TOKENS_ = ['emName', 'account', 'deploymentName', 'surveyType', 'eventDate', 'dd', 'daysUntil', 'mtpDate', 'contactList'];
   var DIGEST_TOKENS_ = ['ddName', 'upcomingList', 'windowDays', 'periodLabel'];
 
   var SEED_KEYS_ = ['em_reminder_first', 'em_reminder_final', 'dd_digest'];
@@ -473,14 +473,70 @@ var CoreNotify = (function () {
   }
 
   /**
+   * @param {{name?: string, email?: string}|null} c
+   * @return {string}
+   * @private
+   */
+  function _contactLineHtml_(c) {
+    if (!c) return '';
+    var name = String(c.name || '').trim();
+    var email = String(c.email || '').trim();
+    if (!name && !email) return '';
+    if (name && email) return _escapeHtml_(name) + ' — ' + _escapeHtml_(email);
+    return _escapeHtml_(name || email);
+  }
+
+  /**
+   * Renders grouped deployment contacts (excludes Delivery Director).
+   * @param {Object|null} contacts  getDeploymentContactsMap_ shape
+   * @return {string}
+   * @private
+   */
+  function _buildContactListHtml_(contacts) {
+    contacts = contacts || {};
+    var roleGroups = [
+      { label: 'Project Managers', list: contacts.projectManagers },
+      { label: 'Executive Sponsors', list: contacts.execSponsors },
+      { label: 'Deployment Sponsor', single: contacts.wdSponsor },
+      { label: 'Engagement Managers', list: contacts.engagementManagers }
+    ];
+
+    var parts = [];
+    var hasAny = false;
+    roleGroups.forEach(function (g) {
+      var lines = [];
+      if (g.single) {
+        var singleLine = _contactLineHtml_(g.single);
+        if (singleLine) lines.push(singleLine);
+      } else {
+        (g.list || []).forEach(function (c) {
+          var line = _contactLineHtml_(c);
+          if (line) lines.push(line);
+        });
+      }
+      if (!lines.length) return;
+      hasAny = true;
+      parts.push('<li><strong>' + _escapeHtml_(g.label) + '</strong><ul>');
+      lines.forEach(function (line) {
+        parts.push('<li>' + line + '</li>');
+      });
+      parts.push('</ul></li>');
+    });
+
+    if (!hasAny) return '(no contacts on file)';
+    return '<ul>' + parts.join('') + '</ul>';
+  }
+
+  /**
    * @param {Object} dep
    * @param {Object} contactsMap
    * @param {string} tz
    * @param {number} daysUntil
+   * @param {AppConfig} cfg
    * @return {Object<string,string>}
    * @private
    */
-  function _emTokenValues_(dep, contactsMap, tz, daysUntil) {
+  function _emTokenValues_(dep, contactsMap, tz, daysUntil, cfg) {
     var contacts = dep.contacts || contactsMap[dep.deploymentId] || {};
     var emNames = [];
     if (contacts.engagementManagers) {
@@ -491,6 +547,25 @@ var CoreNotify = (function () {
     var eventDateStr = dep.eventDate ?
       Utilities.formatDate(new Date(dep.eventDate), tz, 'yyyy-MM-dd') : '';
 
+    var mtpDateStr = '';
+    if (cfg && dep && dep.deploymentId) {
+      var effectiveByDeploymentId = {};
+      try {
+        CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+          if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
+        });
+      } catch (e) {
+        Logger.log('CoreNotify._emTokenValues_: getAllEffectiveDeployments failed: ' + e);
+      }
+      var effective = effectiveByDeploymentId[dep.deploymentId];
+      if (effective && effective.mtpDate) {
+        var d = new Date(effective.mtpDate);
+        if (!isNaN(d.getTime())) {
+          mtpDateStr = Utilities.formatDate(d, tz, 'MMM d, yyyy');
+        }
+      }
+    }
+
     return {
       emName: emNames.join(', ') || 'Engagement Manager',
       account: dep.accountName || '',
@@ -498,7 +573,9 @@ var CoreNotify = (function () {
       surveyType: dep.surveyType || '',
       eventDate: eventDateStr,
       dd: dep.deliveryDirector || '',
-      daysUntil: String(daysUntil != null ? daysUntil : '')
+      daysUntil: String(daysUntil != null ? daysUntil : ''),
+      mtpDate: mtpDateStr,
+      contactList: _buildContactListHtml_(contacts)
     };
   }
 
@@ -541,6 +618,168 @@ var CoreNotify = (function () {
   }
 
   /**
+   * @param {string} bodyHtml
+   * @param {string} token
+   * @return {string}
+   * @private
+   */
+  function _embedTrackingToken_(bodyHtml, token) {
+    var span = '<span style="display:none!important;visibility:hidden;font-size:0;' +
+      'line-height:0;max-height:0;max-width:0;opacity:0;overflow:hidden;" ' +
+      'data-dhm-track="' + token + '">' + token + '</span>';
+    var html = String(bodyHtml || '');
+    if (/<\/body>/i.test(html)) {
+      return html.replace(/<\/body>/i, span + '</body>');
+    }
+    return html + span;
+  }
+
+  /**
+   * @param {string} from
+   * @param {string} to
+   * @param {string} cc
+   * @param {string} subject
+   * @param {string} htmlBody
+   * @return {string}
+   * @private
+   */
+  function _buildRfc2822Mime_(from, to, cc, subject, htmlBody) {
+    var lines = [
+      'From: ' + from,
+      'To: ' + to
+    ];
+    var ccStr = String(cc || '').trim();
+    if (ccStr) lines.push('Cc: ' + ccStr);
+    lines.push('Subject: ' + subject);
+    lines.push('MIME-Version: 1.0');
+    lines.push('Content-Type: text/html; charset=UTF-8');
+    lines.push('Content-Transfer-Encoding: 7bit');
+    lines.push('');
+    lines.push(htmlBody);
+    return lines.join('\r\n');
+  }
+
+  /**
+   * @param {string} rawMime
+   * @return {string}
+   * @private
+   */
+  function _base64UrlEncodeMime_(rawMime) {
+    var bytes = Utilities.newBlob(String(rawMime), 'text/plain', 'UTF-8').getBytes();
+    return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/, '');
+  }
+
+  /**
+   * @param {string} fromAlias
+   * @param {string} token
+   * @return {{messageId: string, threadId: string, captureMethod: string}}
+   * @private
+   */
+  function _heuristicCaptureIds_(fromAlias, token) {
+    var result = { messageId: '', threadId: '', captureMethod: 'none' };
+    try {
+      var q = 'in:sent newer_than:2m from:' + fromAlias + ' "' + token + '"';
+      var threads = GmailApp.search(q, 0, 1);
+      if (!threads.length) return result;
+      var thread = threads[0];
+      result.threadId = thread.getId();
+      var messages = thread.getMessages();
+      if (messages.length) {
+        result.messageId = messages[messages.length - 1].getId();
+      }
+      result.captureMethod = result.messageId ? 'heuristic' : 'none';
+    } catch (e) {
+      Logger.log('CoreNotify._heuristicCaptureIds_: search failed: ' + e);
+    }
+    return result;
+  }
+
+  /**
+   * Sends HTML email and returns Gmail message/thread IDs when available.
+   * Primary: Advanced Gmail API (Gmail.Users.Messages.send).
+   * Fallback: GmailApp.sendEmail + token-based GmailApp.search.
+   *
+   * @param {string} to
+   * @param {string} subject
+   * @param {string} htmlBody
+   * @param {string} fromAlias
+   * @param {string} cc
+   * @param {Array<string>} allowedAliases
+   * @return {{ok: boolean, messageId: string, threadId: string,
+   *           captureMethod: 'advanced'|'heuristic'|'none'}}
+   * @private
+   */
+  function _gmailSendWithIds_(to, subject, htmlBody, fromAlias, cc, allowedAliases) {
+    var fail = { ok: false, messageId: '', threadId: '', captureMethod: 'none' };
+    var toStr = String(to || '').trim();
+    if (!toStr) {
+      Logger.log('CoreNotify._gmailSendWithIds_: empty to; skipped.');
+      return fail;
+    }
+
+    var from = String(fromAlias || '').trim();
+    if (!from || allowedAliases.indexOf(from) < 0) {
+      Logger.log('CoreNotify._gmailSendWithIds_: fromAlias "' + from +
+                 '" not in allowed list; skipped.');
+      return fail;
+    }
+
+    var token = Utilities.getUuid();
+    var bodyWithToken = _embedTrackingToken_(htmlBody, token);
+    var ccStr = String(cc || '').trim();
+
+    try {
+      if (typeof Gmail === 'undefined' || !Gmail || !Gmail.Users || !Gmail.Users.Messages) {
+        throw new ReferenceError('Gmail advanced service is not enabled');
+      }
+
+      var rawMime = _buildRfc2822Mime_(from, toStr, ccStr, subject, bodyWithToken);
+      var encoded = _base64UrlEncodeMime_(rawMime);
+      var response = Gmail.Users.Messages.send({ raw: encoded }, 'me');
+      var messageId = response && response.id ? String(response.id) : '';
+      var threadId = response && response.threadId ? String(response.threadId) : '';
+
+      if (!messageId) {
+        throw new Error('Gmail.Users.Messages.send returned empty id');
+      }
+
+      Logger.log('CoreNotify._gmailSendWithIds_: advanced send to ' + toStr +
+                 ' from ' + from + ', messageId=' + messageId);
+      return {
+        ok: true,
+        messageId: messageId,
+        threadId: threadId,
+        captureMethod: 'advanced'
+      };
+    } catch (advancedErr) {
+      Logger.log('CoreNotify._gmailSendWithIds_: advanced path failed (' +
+                 advancedErr + '); falling back to GmailApp.');
+    }
+
+    var opts = { htmlBody: bodyWithToken, from: from };
+    if (ccStr) opts.cc = ccStr;
+    var plain = String(bodyWithToken).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    try {
+      GmailApp.sendEmail(toStr, subject, plain, opts);
+    } catch (e) {
+      Logger.log('CoreNotify._gmailSendWithIds_: GmailApp fallback send failed: ' + e);
+      return fail;
+    }
+
+    var captured = _heuristicCaptureIds_(from, token);
+    Logger.log('CoreNotify._gmailSendWithIds_: heuristic send to ' + toStr +
+               ' from ' + from + ', captureMethod=' + captured.captureMethod +
+               ', messageId=' + captured.messageId);
+    return {
+      ok: true,
+      messageId: captured.messageId,
+      threadId: captured.threadId,
+      captureMethod: captured.captureMethod
+    };
+  }
+
+  /**
    * @param {Object} row
    * @param {Object} dep
    * @param {Object} contactsMap
@@ -553,7 +792,7 @@ var CoreNotify = (function () {
    */
   function _sendEmReminder_(row, dep, contactsMap, cfg, isTest, testRecipient, daysUntil) {
     var tz = Session.getScriptTimeZone();
-    var tokens = _emTokenValues_(dep, contactsMap, tz, daysUntil);
+    var tokens = _emTokenValues_(dep, contactsMap, tz, daysUntil, cfg);
     var subjResult = _renderTemplate_(row.subject, tokens, EM_TOKENS_);
     var bodyResult = _renderTemplate_(row.bodyTemplate, tokens, EM_TOKENS_);
     if (subjResult.errors.length || bodyResult.errors.length) {
@@ -1040,13 +1279,13 @@ var CoreNotify = (function () {
     sheet.getRange(1, 1).setValue(
       'Allowed fromAlias values (must be verified Gmail send-as aliases): ' + aliases
     );
-    sheet.getRange(2, 1, 2, HEADERS_.length).setValues([HEADERS_]);
+    sheet.getRange(2, 1, 1, HEADERS_.length).setValues([HEADERS_]);
     sheet.setFrozenRows(2);
-    sheet.getRange(2, 1, 2, HEADERS_.length).setFontWeight('bold');
+    sheet.getRange(2, 1, 1, HEADERS_.length).setFontWeight('bold');
 
     var seedRows = _defaultSeedRows_(cfg);
     if (seedRows.length) {
-      sheet.getRange(3, 1, 2 + seedRows.length, HEADERS_.length).setValues(seedRows);
+      sheet.getRange(3, 1, seedRows.length, HEADERS_.length).setValues(seedRows);
     }
 
     _applyConfigValidations_(sheet, 3, 2 + seedRows.length);
@@ -1073,7 +1312,7 @@ var CoreNotify = (function () {
     var missing = HEADERS_.filter(function (h) { return existingHeaders.indexOf(h) < 0; });
     if (missing.length) {
       var startCol = existingHeaders.length + 1;
-      sheet.getRange(headerRow, startCol, headerRow, startCol + missing.length - 1)
+      sheet.getRange(headerRow, startCol, 1, missing.length)
         .setValues([missing]);
     }
 
@@ -1096,7 +1335,7 @@ var CoreNotify = (function () {
     });
     if (toAdd.length) {
       var insertRow = lastRow + 1;
-      sheet.getRange(insertRow, 1, insertRow + toAdd.length - 1, HEADERS_.length).setValues(toAdd);
+      sheet.getRange(insertRow, 1, toAdd.length, HEADERS_.length).setValues(toAdd);
       _applyConfigValidations_(sheet, insertRow, insertRow + toAdd.length - 1);
       Logger.log('CoreNotify.initNotificationConfigSheet: added missing seed rows: ' +
                  toAdd.map(function (r) { return r[0]; }).join(', '));
@@ -1192,6 +1431,7 @@ var CoreNotify = (function () {
     getNotificationKeysForMenu:    getNotificationKeysForMenu,
     _resolveRecipients_:           _resolveRecipients_,
     _renderTemplate_:              _renderTemplate_,
-    _gmailSend_:                   _gmailSend_
+    _gmailSend_:                   _gmailSend_,
+    _gmailSendWithIds_:            _gmailSendWithIds_
   };
 })();

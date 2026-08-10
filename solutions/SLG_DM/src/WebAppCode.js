@@ -164,6 +164,23 @@ function getHtmlReportPreviewOutlook() {
   return CoreLib.CoreReport.buildOutlookHtml(APP_CONFIG);
 }
 
+/**
+ * N8: production native Gmail send for the V2 monthly report.
+ * @return {{status: string, error?: string}}
+ */
+function sendMonthlyReport() {
+  return CoreLib.CoreDistribute.sendMonthlyReport(APP_CONFIG);
+}
+
+/**
+ * N8: test send to self — no distribution log row.
+ * @param {string=} recipient
+ * @return {{status: string, error?: string}}
+ */
+function sendMonthlyReportTest(recipient) {
+  return CoreLib.CoreDistribute.sendMonthlyReportTest(APP_CONFIG, recipient);
+}
+
 // ============================================================================
 // PHASE 1 — PORTFOLIO HEALTH (unchanged)
 // ============================================================================
@@ -384,6 +401,52 @@ function getDataFreshnessForUI() {
  */
 function checkDataFreshness() {
   return CoreLib.CoreData.checkDataFreshnessAndAlert_(APP_CONFIG);
+}
+
+// ============================================================================
+// N7 — MDS/PGL NOTIFICATIONS
+// ============================================================================
+
+/**
+ * Daily trigger entry point for config-driven MDS/PGL notifications.
+ * @return {void}
+ */
+function runNotifications() {
+  return CoreLib.CoreData.runNotifications(APP_CONFIG);
+}
+
+/**
+ * Validates NotificationConfig rows and writes per-row status.
+ * @return {{valid:Array<Object>, invalid:Array<Object>}}
+ */
+function validateNotificationConfig() {
+  return CoreLib.CoreData.validateNotificationConfig(APP_CONFIG);
+}
+
+/**
+ * Side-effect-free test send via production render path.
+ * @param {string} notificationKey
+ * @param {string=} recipient
+ * @return {boolean}
+ */
+function sendTestNotification(notificationKey, recipient) {
+  return CoreLib.CoreData.sendTestNotification(APP_CONFIG, notificationKey, recipient);
+}
+
+/**
+ * One-time idempotent setup for the NotificationConfig sheet tab.
+ * @return {void}
+ */
+function initNotificationConfigSheet() {
+  return CoreLib.CoreData.initNotificationConfigSheet(APP_CONFIG);
+}
+
+/**
+ * One-time idempotent setup for the ReportDistributionLog sheet tab.
+ * @return {GoogleAppsScript.Spreadsheet.Sheet}
+ */
+function initReportDistributionLog() {
+  return CoreLib.CoreDistribute.initReportDistributionLog(APP_CONFIG);
 }
 
 // ============================================================================
@@ -925,4 +988,13 @@ function flushCache() {
             ' cache keys across ' + prefixes.length + ' prefixes.';
   Logger.log(msg);
   return msg;
+}
+function _probeGmailAdvanced() {
+  try {
+    var me = Gmail.Users.getProfile('me');
+    Logger.log('Advanced Gmail OK — mailbox: ' + me.emailAddress +
+               ', messagesTotal: ' + me.messagesTotal);
+  } catch (e) {
+    Logger.log('Advanced Gmail BLOCKED: ' + e);
+  }
 }

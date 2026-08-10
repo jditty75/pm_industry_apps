@@ -116,6 +116,7 @@ function onOpen() {
     .addSeparator()
     .addItem('▶ Preview HTML report', 'previewHtml')
     .addItem('💾 Export HTML to My Drive', 'exportHtmlToDrive')
+    .addItem('💾 Export V2 Report to My Drive (New)', 'exportReportV2ToDrive')
     .addSeparator()
     .addItem('📧 Send Monthly Report (New)', 'sendMonthlyReportNew')
     .addItem('🧪 Send Test Monthly Report (New)', 'sendMonthlyReportTestNew')
@@ -253,6 +254,10 @@ function previewHtml() {
  */
 function exportHtmlToDrive() {
   CoreLib.CoreReport.exportInlineAndOutlookToDrive(APP_CONFIG);
+}
+
+function exportReportV2ToDrive() {
+  return CoreLib.CoreReport.exportReportV2ToDrive(APP_CONFIG);
 }
 
 /**

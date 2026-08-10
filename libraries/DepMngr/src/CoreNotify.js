@@ -14,7 +14,7 @@ var CoreNotify = (function () {
     'subject', 'bodyTemplate', 'status'
   ];
 
-  var EM_TOKENS_ = ['emName', 'account', 'deploymentName', 'surveyType', 'eventDate', 'dd', 'daysUntil'];
+  var EM_TOKENS_ = ['emName', 'account', 'deploymentName', 'surveyType', 'eventDate', 'dd', 'daysUntil', 'mtpDate', 'contactList'];
   var DIGEST_TOKENS_ = ['ddName', 'upcomingList', 'windowDays', 'periodLabel'];
 
   var SEED_KEYS_ = ['em_reminder_first', 'em_reminder_final', 'dd_digest'];
@@ -473,14 +473,70 @@ var CoreNotify = (function () {
   }
 
   /**
+   * @param {{name?: string, email?: string}|null} c
+   * @return {string}
+   * @private
+   */
+  function _contactLineHtml_(c) {
+    if (!c) return '';
+    var name = String(c.name || '').trim();
+    var email = String(c.email || '').trim();
+    if (!name && !email) return '';
+    if (name && email) return _escapeHtml_(name) + ' — ' + _escapeHtml_(email);
+    return _escapeHtml_(name || email);
+  }
+
+  /**
+   * Renders grouped deployment contacts (excludes Delivery Director).
+   * @param {Object|null} contacts  getDeploymentContactsMap_ shape
+   * @return {string}
+   * @private
+   */
+  function _buildContactListHtml_(contacts) {
+    contacts = contacts || {};
+    var roleGroups = [
+      { label: 'Project Managers', list: contacts.projectManagers },
+      { label: 'Executive Sponsors', list: contacts.execSponsors },
+      { label: 'Deployment Sponsor', single: contacts.wdSponsor },
+      { label: 'Engagement Managers', list: contacts.engagementManagers }
+    ];
+
+    var parts = [];
+    var hasAny = false;
+    roleGroups.forEach(function (g) {
+      var lines = [];
+      if (g.single) {
+        var singleLine = _contactLineHtml_(g.single);
+        if (singleLine) lines.push(singleLine);
+      } else {
+        (g.list || []).forEach(function (c) {
+          var line = _contactLineHtml_(c);
+          if (line) lines.push(line);
+        });
+      }
+      if (!lines.length) return;
+      hasAny = true;
+      parts.push('<li><strong>' + _escapeHtml_(g.label) + '</strong><ul>');
+      lines.forEach(function (line) {
+        parts.push('<li>' + line + '</li>');
+      });
+      parts.push('</ul></li>');
+    });
+
+    if (!hasAny) return '(no contacts on file)';
+    return '<ul>' + parts.join('') + '</ul>';
+  }
+
+  /**
    * @param {Object} dep
    * @param {Object} contactsMap
    * @param {string} tz
    * @param {number} daysUntil
+   * @param {AppConfig} cfg
    * @return {Object<string,string>}
    * @private
    */
-  function _emTokenValues_(dep, contactsMap, tz, daysUntil) {
+  function _emTokenValues_(dep, contactsMap, tz, daysUntil, cfg) {
     var contacts = dep.contacts || contactsMap[dep.deploymentId] || {};
     var emNames = [];
     if (contacts.engagementManagers) {
@@ -491,6 +547,25 @@ var CoreNotify = (function () {
     var eventDateStr = dep.eventDate ?
       Utilities.formatDate(new Date(dep.eventDate), tz, 'yyyy-MM-dd') : '';
 
+    var mtpDateStr = '';
+    if (cfg && dep && dep.deploymentId) {
+      var effectiveByDeploymentId = {};
+      try {
+        CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+          if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
+        });
+      } catch (e) {
+        Logger.log('CoreNotify._emTokenValues_: getAllEffectiveDeployments failed: ' + e);
+      }
+      var effective = effectiveByDeploymentId[dep.deploymentId];
+      if (effective && effective.mtpDate) {
+        var d = new Date(effective.mtpDate);
+        if (!isNaN(d.getTime())) {
+          mtpDateStr = Utilities.formatDate(d, tz, 'MMM d, yyyy');
+        }
+      }
+    }
+
     return {
       emName: emNames.join(', ') || 'Engagement Manager',
       account: dep.accountName || '',
@@ -498,7 +573,9 @@ var CoreNotify = (function () {
       surveyType: dep.surveyType || '',
       eventDate: eventDateStr,
       dd: dep.deliveryDirector || '',
-      daysUntil: String(daysUntil != null ? daysUntil : '')
+      daysUntil: String(daysUntil != null ? daysUntil : ''),
+      mtpDate: mtpDateStr,
+      contactList: _buildContactListHtml_(contacts)
     };
   }
 
@@ -715,7 +792,7 @@ var CoreNotify = (function () {
    */
   function _sendEmReminder_(row, dep, contactsMap, cfg, isTest, testRecipient, daysUntil) {
     var tz = Session.getScriptTimeZone();
-    var tokens = _emTokenValues_(dep, contactsMap, tz, daysUntil);
+    var tokens = _emTokenValues_(dep, contactsMap, tz, daysUntil, cfg);
     var subjResult = _renderTemplate_(row.subject, tokens, EM_TOKENS_);
     var bodyResult = _renderTemplate_(row.bodyTemplate, tokens, EM_TOKENS_);
     if (subjResult.errors.length || bodyResult.errors.length) {

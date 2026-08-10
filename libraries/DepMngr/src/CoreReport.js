@@ -99,6 +99,34 @@ var CoreReport = (function () {
     Logger.log('✅ Saved: ' + filenameInline + ' and ' + filenameOutlook);
   }
 
+  /**
+   * Exports the V2 monthly report HTML to Drive root,
+   * replacing any existing file with the same name.
+   *
+   * @param {AppConfig} config
+   * @return {void}
+   */
+  function exportReportV2ToDrive(config) {
+    var cfg = CoreConfig.withDefaults(config);
+
+    var htmlV2 = buildReportV2WithAnalytics(cfg);
+
+    var root = DriveApp.getRootFolder();
+    var filenameV2 = cfg.report.v2ExportFilename;
+    var existingV2 = root.getFilesByName(filenameV2);
+    while (existingV2.hasNext()) {
+      existingV2.next().setTrashed(true);
+    }
+    root.createFile(filenameV2, htmlV2, MimeType.HTML);
+
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      filenameV2 + ' saved to the root of My Drive.',
+      '✅ Export Complete',
+      7
+    );
+    Logger.log('exportReportV2ToDrive: ✅ Saved: ' + filenameV2);
+  }
+
   // --- BODY SECTION BUILDER --------------------------------------------------
 
   /**
@@ -1697,8 +1725,12 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
   // --- N8 V2 GMAIL REPORT PATH (additive; V1 untouched) ---------------------
 
+  /** @const {number} V2.1: max visible rows per Partner/Approach breakdown column. */
+  var V2_BREAKDOWN_TOP_N_ = 10;
+
   /**
    * N8 V2: Gmail-targeted div bar (no nested-table bar hack).
+   * V2.1: label row uses table layout (Gmail-safe; no flex).
    *
    * @param {string} label
    * @param {number} pct0to100
@@ -1712,12 +1744,15 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var color = barColor || '#0f4c81';
     return (
       '<div style="margin-bottom:10px; font-family:Arial,sans-serif;">' +
-      '<div style="display:flex; justify-content:space-between; font-size:11px; ' +
-      'color:#333333; margin-bottom:3px;">' +
-      '<span>' + CoreUtils.escapeHtml(label) + '</span>' +
-      '<span style="white-space:nowrap; margin-left:8px;">' +
-      CoreUtils.escapeHtml(rightLabel) + '</span>' +
-      '</div>' +
+      '<table cellpadding="0" cellspacing="0" style="width:100%; margin-bottom:3px;">' +
+      '<tr>' +
+      '<td style="font-size:11px; color:#333333; overflow:hidden; text-overflow:ellipsis; ' +
+      'white-space:nowrap; max-width:0; width:100%;">' +
+      CoreUtils.escapeHtml(label) + '</td>' +
+      '<td style="font-size:11px; color:#333333; white-space:nowrap; padding-left:8px; ' +
+      'vertical-align:top; text-align:right;">' +
+      CoreUtils.escapeHtml(rightLabel) + '</td>' +
+      '</tr></table>' +
       '<div style="background-color:#eeeeee; border-radius:4px; height:18px; overflow:hidden;">' +
       '<div style="width:' + pct + '%; height:100%; background-color:' +
       CoreUtils.escapeHtml(color) + '; border-radius:4px;"></div>' +
@@ -1758,7 +1793,81 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * N8 V2: Red/Yellow deployments table (code-built, no sheet reads).
+   * V2.2: single Red/Yellow deployment card (filled badge, bold account, chip metadata).
+   * @param {Object} row
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function _renderRedYellowCardV2_(row, cfg) {
+    var h = (row.health || '').toLowerCase();
+    var borderColor = h === 'red' ? '#F44336' : '#FBBC04';
+    var badgeLabel = h === 'red' ? 'RED' : 'YELLOW';
+    var ownerLabel = cfg.report.redYellowOwnerLabel || 'EM';
+    var ownerVal = row.deliveryDirector || row.wdEngManager || '';
+
+    var mtpStr = '';
+    if (row.mtpDate) {
+      var d = new Date(row.mtpDate);
+      mtpStr = !isNaN(d.getTime())
+        ? d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+        : String(row.mtpDate);
+    }
+
+    var CHIP =
+      'display:inline-block; background-color:#f0f3f7; border:1px solid #e0e4ea; border-radius:3px; ' +
+      'padding:2px 7px; margin:2px 6px 2px 0; font-size:10px; color:#444444; ' +
+      'white-space:normal; word-wrap:break-word;';
+    var CHIP_LABEL = 'color:#888888; font-weight:600; margin-right:2px;';
+
+    function chip(label, value) {
+      if (!value) return '';
+      return (
+        '<span style="' + CHIP + '">' +
+        '<span style="' + CHIP_LABEL + '">' + CoreUtils.escapeHtml(label) + '</span>' +
+        CoreUtils.escapeHtml(value) +
+        '</span>'
+      );
+    }
+
+    var metaChips = [];
+    if (row.deploymentName) metaChips.push(chip('Deployment', row.deploymentName));
+    if (cfg.report.includeIndustryRedYellow && row.industry) {
+      metaChips.push(chip('Industry', row.industry));
+    }
+    if (row.partner) metaChips.push(chip('Partner', row.partner));
+    if (mtpStr) metaChips.push(chip('MTP', mtpStr));
+    if (ownerVal) metaChips.push(chip(ownerLabel, ownerVal));
+
+    var accountName = CoreUtils.escapeHtml(row.accountName || '(No account)');
+
+    return (
+      '<div style="border:1px solid #cccccc; border-left:6px solid ' + borderColor + '; ' +
+      'border-radius:4px; margin-bottom:18px; font-family:Arial,sans-serif; overflow:hidden;">' +
+      '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;">' +
+      '<tr>' +
+      '<td style="background-color:' + borderColor + '; color:#ffffff; font-weight:bold; ' +
+      'font-size:11px; padding:7px 14px; width:1%; white-space:nowrap; vertical-align:top; ' +
+      'font-family:Arial,sans-serif; letter-spacing:0.5px;">' +
+      badgeLabel + '</td>' +
+      '<td style="padding:10px 14px 6px 14px; vertical-align:top; background-color:#ffffff;">' +
+      '<div style="font-size:15px; font-weight:bold; color:#1a1a1a; line-height:1.35;">' +
+      accountName + '</div></td></tr></table>' +
+      (metaChips.length
+        ? '<div style="padding:2px 14px 10px 14px; line-height:1.8; background-color:#ffffff;">' +
+          metaChips.join('') + '</div>'
+        : '') +
+      '<div style="border-top:1px solid #e0e4ea; background-color:#f5f7fa; padding:8px 14px; ' +
+      'font-size:10px; line-height:1.55; color:#555555;">' +
+      '<span style="font-weight:600; color:#888888;">Current Update:</span> ' +
+      '<span style="white-space:normal; word-wrap:break-word;">' +
+      CoreUtils.escapeHtml(row.currentUpdate || '') +
+      '</span></div></div>'
+    );
+  }
+
+  /**
+   * N8 V2: Red/Yellow deployments as per-deployment cards (code-built, no sheet reads).
    * @param {AppConfig} config
    * @return {string}
    * @private
@@ -1772,53 +1881,11 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
         '(No Red/Yellow deployments in report)</p>');
     }
 
-    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; font-size:11px; font-family:Arial,sans-serif;';
-    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; padding:6px 8px; text-align:left; font-size:11px;';
-    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px;';
-    var includeIndustry = !!cfg.report.includeIndustryRedYellow;
-
-    var theadParts = [
-      '<th style="' + TH_STYLE + '">Health</th>',
-      '<th style="' + TH_STYLE + '">Account Name</th>'
-    ];
-    if (includeIndustry) theadParts.push('<th style="' + TH_STYLE + '">Industry</th>');
-    theadParts.push(
-      '<th style="' + TH_STYLE + '">Deployment Name</th>',
-      '<th style="' + TH_STYLE + '">Partner</th>',
-      '<th style="' + TH_STYLE + '">MTP Date</th>',
-      '<th style="' + TH_STYLE + '">' + CoreUtils.escapeHtml(cfg.report.redYellowOwnerLabel || 'Owner') + '</th>',
-      '<th style="' + TH_STYLE + '">Current Update</th>'
-    );
-
-    var tbodyHtml = rows.map(function (row, ri) {
-      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
-      function td(content, extra) {
-        return '<td style="' + TD_STYLE + ' background-color:' + bg + ';' + (extra || '') + '">' +
-          CoreUtils.escapeHtml(content || '') + '</td>';
-      }
-      var healthStyle = '';
-      var h = (row.health || '').toLowerCase();
-      if (h === 'red') healthStyle = ' color:#F44336; font-weight:bold;';
-      else if (h === 'yellow') healthStyle = ' color:#FBBC04; font-weight:bold;';
-
-      var mtpStr = '';
-      if (row.mtpDate) {
-        var d = new Date(row.mtpDate);
-        mtpStr = !isNaN(d.getTime())
-          ? d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-          : String(row.mtpDate);
-      }
-
-      var ownerVal = row.deliveryDirector || row.wdEngManager || '';
-      var tds = [td(row.health, healthStyle), td(row.accountName)];
-      if (includeIndustry) tds.push(td(row.industry || ''));
-      tds.push(td(row.deploymentName), td(row.partner), td(mtpStr), td(ownerVal), td(row.currentUpdate || ''));
-      return '<tr>' + tds.join('') + '</tr>';
+    var cardsHtml = rows.map(function (row) {
+      return _renderRedYellowCardV2_(row, cfg);
     }).join('');
 
-    var tableHtml = '<table style="' + TABLE_STYLE + '"><thead><tr>' + theadParts.join('') +
-      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
-    return wrapSectionV2_('Red / Yellow Deployments', tableHtml);
+    return wrapSectionV2_('Red / Yellow Deployments', cardsHtml);
   }
 
   /**
@@ -1868,21 +1935,71 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * N8 V2: Recent Go-Lives section.
+   * V2.3: full-width go-lives table with wrapping text columns (inner HTML only).
+   * @param {Array<Object>} rows
+   * @param {Object} effectiveByDeploymentId
+   * @param {string} dateField 'recentDates' | 'upcomingDates'
+   * @param {string} emptyMsg
+   * @return {string}
+   * @private
+   */
+  function _buildGoLivesTableV2_(rows, effectiveByDeploymentId, dateField, emptyMsg) {
+    if (!rows || !rows.length) {
+      return '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
+        CoreUtils.escapeHtml(emptyMsg) + '</p>';
+    }
+
+    var TABLE_STYLE =
+      'border-collapse:collapse; width:100%; max-width:680px; table-layout:fixed; ' +
+      'font-size:10px; font-family:Arial,sans-serif;';
+    var TH_STYLE =
+      'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; padding:4px 6px; ' +
+      'text-align:left; font-size:10px; vertical-align:top;';
+    var TD_BASE =
+      'border:1px solid #dddddd; padding:4px 6px; text-align:left; font-size:10px; vertical-align:top;';
+    var TD_WRAP = TD_BASE + ' word-wrap:break-word; overflow-wrap:break-word;';
+    var TD_DATE = TD_WRAP;
+
+    var colgroupHtml =
+      '<colgroup>' +
+      '<col style="width:110px;">' +
+      '<col style="width:30%;">' +
+      '<col style="width:40%;">' +
+      '<col style="width:20%;">' +
+      '</colgroup>';
+
+    var tbodyHtml = rows.map(function (row, ri) {
+      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
+      return '<tr>' +
+        '<td style="' + TD_DATE + ' background-color:' + bg + ';">' +
+        _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, dateField) + '</td>' +
+        '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
+        CoreUtils.escapeHtml(row.accountName || '') + '</td>' +
+        '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
+        CoreUtils.escapeHtml(row.deploymentName || '') + '</td>' +
+        '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
+        CoreUtils.escapeHtml(row.partner || '') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    return '<table style="' + TABLE_STYLE + '">' + colgroupHtml + '<thead><tr>' +
+      '<th style="' + TH_STYLE + '">Date</th>' +
+      '<th style="' + TH_STYLE + '">Account</th>' +
+      '<th style="' + TH_STYLE + '">Deployment</th>' +
+      '<th style="' + TH_STYLE + '">Partner</th>' +
+      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
+  }
+
+  /**
+   * N8 V2: Recent Go-Lives inner content (used by side-by-side renderer).
    * @param {AppConfig} config
    * @return {string}
    * @private
    */
-  function renderRecentGoLivesSectionV2_(config) {
+  function _buildRecentGoLivesContentV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var rows = CoreData.getRecentGoLives(cfg, null) || [];
     rows = rows.filter(function (r) { return !r.excludeFromReport; });
-
-    if (!rows.length) {
-      return wrapSectionV2_('Recent Go-Lives',
-        '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
-        '(No recent go lives in report)</p>');
-    }
 
     var effectiveByDeploymentId = {};
     CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
@@ -1903,46 +2020,20 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       return String(a.accountName || '').localeCompare(String(b.accountName || ''));
     });
 
-    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; font-size:11px; font-family:Arial,sans-serif;';
-    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; padding:6px 8px; text-align:left; font-size:11px;';
-    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px; vertical-align:top;';
-
-    var tbodyHtml = rows.map(function (row, ri) {
-      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
-      return '<tr>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
-        _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, 'recentDates') + '</td>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.accountName || '') + '</td>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.deploymentName || '') + '</td>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.partner || '') + '</td>' +
-        '</tr>';
-    }).join('');
-
-    var tableHtml = '<table style="' + TABLE_STYLE + '"><thead><tr>' +
-      '<th style="' + TH_STYLE + '">Date</th>' +
-      '<th style="' + TH_STYLE + '">Account</th>' +
-      '<th style="' + TH_STYLE + '">Deployment</th>' +
-      '<th style="' + TH_STYLE + '">Partner</th>' +
-      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
-    return wrapSectionV2_('Recent Go-Lives', tableHtml);
+    return _buildGoLivesTableV2_(rows, effectiveByDeploymentId, 'recentDates',
+      '(No recent go lives in report)');
   }
 
   /**
-   * N8 V2: Upcoming Go-Lives section.
+   * N8 V2: Upcoming Go-Lives inner content (used by side-by-side renderer).
    * @param {AppConfig} config
    * @return {string}
    * @private
    */
-  function renderUpcomingGoLivesSectionV2_(config) {
+  function _buildUpcomingGoLivesContentV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var rows = CoreData.getUpcomingGoLives(cfg, null) || [];
     rows = rows.filter(function (r) { return !r.excludeFromReport; });
-
-    if (!rows.length) {
-      return wrapSectionV2_('Upcoming Go-Lives',
-        '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
-        '(No upcoming go lives in report)</p>');
-    }
 
     var effectiveByDeploymentId = {};
     CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
@@ -1957,28 +2048,55 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       return String(a.accountName || '').localeCompare(String(b.accountName || ''));
     });
 
-    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; font-size:11px; font-family:Arial,sans-serif;';
-    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; padding:6px 8px; text-align:left; font-size:11px;';
-    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px; vertical-align:top;';
+    return _buildGoLivesTableV2_(rows, effectiveByDeploymentId, 'upcomingDates',
+      '(No upcoming go lives in report)');
+  }
 
-    var tbodyHtml = rows.map(function (row, ri) {
-      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
-      return '<tr>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
-        _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, 'upcomingDates') + '</td>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.accountName || '') + '</td>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.deploymentName || '') + '</td>' +
-        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.partner || '') + '</td>' +
-        '</tr>';
-    }).join('');
+  /**
+   * V2.1: Recent + Upcoming Go-Lives side-by-side (Gmail-safe two-column table).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderGoLivesSideBySideSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var recentHtml = _buildRecentGoLivesContentV2_(cfg);
+    var upcomingHtml = _buildUpcomingGoLivesContentV2_(cfg);
 
-    var tableHtml = '<table style="' + TABLE_STYLE + '"><thead><tr>' +
-      '<th style="' + TH_STYLE + '">Date</th>' +
-      '<th style="' + TH_STYLE + '">Account</th>' +
-      '<th style="' + TH_STYLE + '">Deployment</th>' +
-      '<th style="' + TH_STYLE + '">Partner</th>' +
-      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
-    return wrapSectionV2_('Upcoming Go-Lives', tableHtml);
+    var SUB_HEADING =
+      'font-family:Arial,sans-serif; color:#0f4c81; font-size:12px; font-weight:bold; ' +
+      'border-bottom:1px solid #c9d9f0; padding-bottom:3px; margin:0 0 8px 0;';
+
+    var innerHtml =
+      '<table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse;">' +
+      '<tr>' +
+      '<td style="width:50%; vertical-align:top; padding-right:8px;">' +
+      '<div style="' + SUB_HEADING + '">Recent Go-Lives</div>' + recentHtml + '</td>' +
+      '<td style="width:50%; vertical-align:top; padding-left:8px;">' +
+      '<div style="' + SUB_HEADING + '">Upcoming Go-Lives</div>' + upcomingHtml + '</td>' +
+      '</tr></table>';
+
+    return '<div style="margin-bottom:32px;">' + innerHtml + '</div>';
+  }
+
+  /**
+   * N8 V2: Recent Go-Lives section (standalone; retained for compatibility).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderRecentGoLivesSectionV2_(config) {
+    return wrapSectionV2_('Recent Go-Lives', _buildRecentGoLivesContentV2_(config));
+  }
+
+  /**
+   * N8 V2: Upcoming Go-Lives section (standalone; retained for compatibility).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderUpcomingGoLivesSectionV2_(config) {
+    return wrapSectionV2_('Upcoming Go-Lives', _buildUpcomingGoLivesContentV2_(config));
   }
 
   /**
@@ -2001,7 +2119,8 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * N8 V2: Deployment Health Breakdown as KPI tiles.
+   * N8 V2: Deployment Health Breakdown as compact KPI tiles (single row).
+   * V2.1: table layout + portfolio summary line.
    * @param {AppConfig} config
    * @return {string}
    * @private
@@ -2018,26 +2137,46 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
         CoreUtils.escapeHtml(String(err)) + '</p>');
     }
 
+    var colCount = result.rows.length || 1;
+    var colWidth = Math.floor(100 / colCount) + '%';
+
     var tilesHtml = result.rows.map(function (row) {
       var pctStr = (row.currentPct * 100).toFixed(1) + '%';
       return (
-        '<div style="flex:1; min-width:150px; border:1px solid #dddddd; border-radius:8px; ' +
-        'padding:14px; border-top:4px solid ' + CoreUtils.escapeHtml(row.color) + '; ' +
-        'background-color:#ffffff; font-family:Arial,sans-serif;">' +
-        '<div style="font-size:11px; color:#666666; text-transform:uppercase; letter-spacing:0.5px;">' +
+        '<td style="width:' + colWidth + '; vertical-align:top; padding:4px;">' +
+        '<div style="border:1px solid #dddddd; border-radius:6px; padding:8px 10px; ' +
+        'border-top:3px solid ' + CoreUtils.escapeHtml(row.color) + '; ' +
+        'background-color:#ffffff; font-family:Arial,sans-serif; text-align:center;">' +
+        '<div style="font-size:9px; color:#666666; text-transform:uppercase; letter-spacing:0.4px;">' +
         CoreUtils.escapeHtml(row.status) + '</div>' +
-        '<div style="font-size:28px; font-weight:bold; color:' + CoreUtils.escapeHtml(row.color) +
-        '; line-height:1.2; margin:4px 0;">' + CoreUtils.escapeHtml(String(row.currentCount)) + '</div>' +
-        '<div style="font-size:14px; color:#333333; font-weight:600;">' +
+        '<div style="font-size:22px; font-weight:bold; color:' + CoreUtils.escapeHtml(row.color) +
+        '; line-height:1.1; margin:2px 0;">' + CoreUtils.escapeHtml(String(row.currentCount)) + '</div>' +
+        '<div style="font-size:12px; color:#333333; font-weight:600;">' +
         CoreUtils.escapeHtml(pctStr) + '</div>' +
-        _renderTrendChipV2_(row.momTrend, 'MoM') +
-        _renderTrendChipV2_(row.ytdTrend, 'YTD') +
-        '</div>'
+        '<div style="font-size:9px; color:#666666; margin-top:2px; line-height:1.3;">' +
+        'MoM: <span style="color:' +
+        (row.momTrend.polarity === 'good' ? '#4CAF50' : row.momTrend.polarity === 'bad' ? '#F44336' : '#999999') +
+        '; font-weight:bold;">' + CoreUtils.escapeHtml(row.momTrend.arrow + ' ' + row.momTrend.label) + '</span>' +
+        ' &middot; YTD: <span style="color:' +
+        (row.ytdTrend.polarity === 'good' ? '#4CAF50' : row.ytdTrend.polarity === 'bad' ? '#F44336' : '#999999') +
+        '; font-weight:bold;">' + CoreUtils.escapeHtml(row.ytdTrend.arrow + ' ' + row.ytdTrend.label) + '</span>' +
+        '</div></div></td>'
       );
     }).join('');
 
+    var totalActive = result.dataIntegrity.reconciledTotal;
+    if (totalActive === undefined || totalActive === null) {
+      totalActive = result.rows.reduce(function (sum, row) {
+        return sum + (row.currentCount || 0);
+      }, 0);
+    }
+
     var innerHtml =
-      '<div style="display:flex; flex-wrap:wrap; gap:12px;">' + tilesHtml + '</div>';
+      '<table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; margin-bottom:6px;">' +
+      '<tr>' + tilesHtml + '</tr></table>' +
+      '<div style="font-size:11px; color:#666666; font-family:Arial,sans-serif; margin-bottom:4px;">' +
+      'Portfolio: <strong style="color:#333333;">' + CoreUtils.escapeHtml(String(totalActive)) +
+      '</strong> active deployments</div>';
 
     if (result.dataIntegrity.showDisclaimer) {
       innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.healthBreakdown);
@@ -2047,21 +2186,24 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * N8 V2: Partner Breakdown div bars.
+   * V2.1: Partner breakdown inner HTML (top-N capped).
    * @param {AppConfig} config
    * @return {string}
    * @private
    */
-  function renderPartnerBreakdownSectionV2_(config) {
+  function _buildPartnerBreakdownContentV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var result;
     try {
       result = CoreAnalytics.getPartnerBreakdown(cfg);
     } catch (err) {
-      Logger.log('CoreReport.renderPartnerBreakdownSectionV2_: failed: ' + err);
-      return wrapSectionV2_('Partner Breakdown',
-        '<p style="font-size:11px; color:#cc0000;">\u26A0 Partner Breakdown unavailable: ' +
-        CoreUtils.escapeHtml(String(err)) + '</p>');
+      Logger.log('CoreReport._buildPartnerBreakdownContentV2_: failed: ' + err);
+      return '<p style="font-size:11px; color:#cc0000;">\u26A0 Partner Breakdown unavailable: ' +
+        CoreUtils.escapeHtml(String(err)) + '</p>';
+    }
+
+    if (!result.rows || !result.rows.length) {
+      return '<p style="font-size:11px; color:#666666;">(No data)</p>';
     }
 
     var maxPct = 0;
@@ -2069,35 +2211,46 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       if (row.pct > maxPct) maxPct = row.pct;
     });
 
-    var barsHtml = result.rows.map(function (row) {
+    var visible = result.rows.slice(0, V2_BREAKDOWN_TOP_N_);
+    var remaining = result.rows.length - visible.length;
+
+    var barsHtml = visible.map(function (row) {
       var barPct = maxPct > 0 ? (row.pct / maxPct) * 100 : 0;
       var rightLabel = row.count + ' (' + (row.pct * 100).toFixed(1) + '%)';
       return renderDivBarV2_(row.partner, barPct, '#0f4c81', rightLabel);
     }).join('');
 
-    var innerHtml = barsHtml || '<p style="font-size:11px; color:#666666;">(No data)</p>';
+    if (remaining > 0) {
+      barsHtml += '<p style="font-size:10px; color:#999999; margin:4px 0 0 0; font-family:Arial,sans-serif;">+' +
+        remaining + ' more</p>';
+    }
+
+    var innerHtml = barsHtml;
     if (result.dataIntegrity.showDisclaimer) {
       innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.partnerBreakdown);
     }
-    return wrapSectionV2_('Partner Breakdown', innerHtml);
+    return innerHtml;
   }
 
   /**
-   * N8 V2: Services Approach Breakdown div bars (uses displayPct labels).
+   * V2.1: Services Approach breakdown inner HTML (top-N capped).
    * @param {AppConfig} config
    * @return {string}
    * @private
    */
-  function renderApproachBreakdownSectionV2_(config) {
+  function _buildApproachBreakdownContentV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var result;
     try {
       result = CoreAnalytics.getApproachBreakdown(cfg);
     } catch (err) {
-      Logger.log('CoreReport.renderApproachBreakdownSectionV2_: failed: ' + err);
-      return wrapSectionV2_('Services Approach Breakdown',
-        '<p style="font-size:11px; color:#cc0000;">\u26A0 Approach Breakdown unavailable: ' +
-        CoreUtils.escapeHtml(String(err)) + '</p>');
+      Logger.log('CoreReport._buildApproachBreakdownContentV2_: failed: ' + err);
+      return '<p style="font-size:11px; color:#cc0000;">\u26A0 Approach Breakdown unavailable: ' +
+        CoreUtils.escapeHtml(String(err)) + '</p>';
+    }
+
+    if (!result.rows || !result.rows.length) {
+      return '<p style="font-size:11px; color:#666666;">(No data)</p>';
     }
 
     var maxPct = 0;
@@ -2105,18 +2258,79 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       if (row.pct > maxPct) maxPct = row.pct;
     });
 
-    var barsHtml = result.rows.map(function (row) {
+    var visible = result.rows.slice(0, V2_BREAKDOWN_TOP_N_);
+    var remaining = result.rows.length - visible.length;
+
+    var barsHtml = visible.map(function (row) {
       var barPct = maxPct > 0 ? (row.pct / maxPct) * 100 : 0;
       var displayPct = row.displayPct !== undefined ? row.displayPct : Math.round(row.pct * 100);
       var rightLabel = row.count + ' (' + displayPct + '%)';
       return renderDivBarV2_(row.approach, barPct, '#0f4c81', rightLabel);
     }).join('');
 
-    var innerHtml = barsHtml || '<p style="font-size:11px; color:#666666;">(No data)</p>';
+    if (remaining > 0) {
+      barsHtml += '<p style="font-size:10px; color:#999999; margin:4px 0 0 0; font-family:Arial,sans-serif;">+' +
+        remaining + ' more</p>';
+    }
+
+    var innerHtml = barsHtml;
     if (result.dataIntegrity.showDisclaimer) {
       innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.approachBreakdown);
     }
-    return wrapSectionV2_('Services Approach Breakdown', innerHtml);
+    return innerHtml;
+  }
+
+  /**
+   * V2.1: Partner + Services Approach side-by-side (Gmail-safe two-column table).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderPartnerAndApproachSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var partnerHtml = _buildPartnerBreakdownContentV2_(cfg);
+
+    var approachHtml;
+    if (!cfg.report.sections || cfg.report.sections.approach !== false) {
+      approachHtml = _buildApproachBreakdownContentV2_(cfg);
+    } else {
+      approachHtml = '<p style="font-size:11px; color:#666666;">(Section disabled)</p>';
+    }
+
+    var SUB_HEADING =
+      'font-family:Arial,sans-serif; color:#0f4c81; font-size:12px; font-weight:bold; ' +
+      'border-bottom:1px solid #c9d9f0; padding-bottom:3px; margin:0 0 8px 0;';
+
+    var innerHtml =
+      '<table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse;">' +
+      '<tr>' +
+      '<td style="width:50%; vertical-align:top; padding-right:8px;">' +
+      '<div style="' + SUB_HEADING + '">Partner Breakdown</div>' + partnerHtml + '</td>' +
+      '<td style="width:50%; vertical-align:top; padding-left:8px;">' +
+      '<div style="' + SUB_HEADING + '">Services Approach Breakdown</div>' + approachHtml + '</td>' +
+      '</tr></table>';
+
+    return '<div style="margin-bottom:32px;">' + innerHtml + '</div>';
+  }
+
+  /**
+   * N8 V2: Partner Breakdown div bars (standalone; retained for compatibility).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderPartnerBreakdownSectionV2_(config) {
+    return wrapSectionV2_('Partner Breakdown', _buildPartnerBreakdownContentV2_(config));
+  }
+
+  /**
+   * N8 V2: Services Approach Breakdown div bars (standalone; retained for compatibility).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderApproachBreakdownSectionV2_(config) {
+    return wrapSectionV2_('Services Approach Breakdown', _buildApproachBreakdownContentV2_(config));
   }
 
   /**
@@ -2134,11 +2348,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
     sections.push(renderHealthBreakdownSectionV2_(cfg));
     sections.push(renderRedYellowSectionV2_(cfg));
-    sections.push(renderPartnerBreakdownSectionV2_(cfg));
-    if (!cfg.report.sections || cfg.report.sections.approach !== false) {
-      sections.push(renderApproachBreakdownSectionV2_(cfg));
-    }
-
+    sections.push(renderPartnerAndApproachSectionV2_(cfg));
     sections.push(renderRecentGoLivesSectionV2_(cfg));
     sections.push(renderUpcomingGoLivesSectionV2_(cfg));
 
@@ -2192,7 +2402,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
       '<title>' + CoreUtils.escapeHtml(title) + '</title></head>' +
       '<body style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
-      'max-width:1000px; margin:0 auto; padding:20px;">' +
+      'max-width:680px; margin:0 auto; padding:20px;">' +
       headerHtml +
       (cfg.student && cfg.student.reportDisclosure && cfg.student.reportDisclosure.enabled === true
         ? '<div style="font-size:11px; color:#4a628f; padding:4px 12px; font-style:italic;">' +
@@ -2232,6 +2442,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     buildOutlookHtml: buildOutlookHtml,
     buildInlineHtmlWithAnalytics: buildInlineHtmlWithAnalytics,
     exportInlineAndOutlookToDrive: exportInlineAndOutlookToDrive,
+    exportReportV2ToDrive: exportReportV2ToDrive,
     buildReportV2: buildReportV2,
     buildReportV2WithAnalytics: buildReportV2WithAnalytics
   };

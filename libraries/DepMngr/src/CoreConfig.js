@@ -111,6 +111,7 @@
  * @typedef {Object} ReportConfig
  * @property {string}  inlineFilename
  * @property {string}  outlookFilename
+ * @property {string}  v2ExportFilename
  * @property {string}  title
  * @property {string}  headerLogoUrl
  * @property {string}  sanaLogoUrl
@@ -316,6 +317,8 @@ var CoreConfig = (function () {
     // Report
     // -------------------------------------------------------------------------
     cfg.report = cfg.report || {};
+    if (!cfg.report.v2ExportFilename)
+      cfg.report.v2ExportFilename = (cfg.appId || 'App') + '_DeploymentHealth_Report_V2.html';
     if (cfg.report.goLivesWindowDays === undefined)        cfg.report.goLivesWindowDays = 30;
     if (cfg.report.redYellowPartnerFilter === undefined)   cfg.report.redYellowPartnerFilter = null;
     if (cfg.report.includeIndustryRedYellow === undefined) cfg.report.includeIndustryRedYellow = false;

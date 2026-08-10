@@ -130,10 +130,10 @@ var APP_CONFIG = {
 
     distribution: {
       enabled: false,
-      fromAlias: '',
+      fromAlias: 'jeffrey.ditty@workday.com',
       to: [],
       cc: [],
-      subjectTemplate: 'SLG Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'State & Local Government \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },

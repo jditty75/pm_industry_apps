@@ -160,11 +160,73 @@ var CoreExecSummary = (function () {
     );
   }
 
+  /**
+   * N8 V2: reads plain bullet lines from ExecSummary!B2 (one per line).
+   * Strips leading list markers; ignores empty lines.
+   *
+   * @param {AppConfig} config
+   * @return {Array<string>}
+   * @private
+   */
+  function getBulletLinesV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var raw = '';
+    try {
+      raw = get(cfg) || '';
+    } catch (err) {
+      Logger.log('CoreExecSummary.getBulletLinesV2_: get() failed: ' + err);
+      return [];
+    }
+
+    if (!raw || String(raw).trim() === '') return [];
+
+    return String(raw)
+      .split(/\r?\n/)
+      .map(function (line) { return line.replace(/^[-*•]\s*/, '').trim(); })
+      .filter(function (line) { return line !== ''; });
+  }
+
+  /**
+   * N8 V2: structured Executive Summary — sanitized bullet list from plain lines.
+   * No pasted HTML passthrough. Returns empty string when no content.
+   *
+   * @param {AppConfig} config
+   * @return {string}
+   */
+  function buildSectionHtmlV2(config) {
+    var lines = getBulletLinesV2_(config);
+    if (!lines.length) {
+      Logger.log('CoreExecSummary.buildSectionHtmlV2: no bullet lines; skipping section.');
+      return '';
+    }
+
+    var items = lines
+      .map(function (line) {
+        return '<li style="margin-bottom:4px;">' + CoreUtils.escapeHtml(line) + '</li>';
+      })
+      .join('');
+
+    var headingHtml = renderSectionHeading_('Executive Summary');
+    var bodyHtml =
+      '<ul style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
+      'margin:6px 0 0 20px; padding:0; line-height:1.5;">' +
+      items +
+      '</ul>';
+
+    return (
+      '<div style="margin-bottom:32px;">' +
+      headingHtml +
+      bodyHtml +
+      '</div>'
+    );
+  }
+
   // --- EXPORTS ---------------------------------------------------------------
 
   return {
     get: get,
     save: save,
-    buildSectionHtml: buildSectionHtml
+    buildSectionHtml: buildSectionHtml,
+    buildSectionHtmlV2: buildSectionHtmlV2
   };
 })();

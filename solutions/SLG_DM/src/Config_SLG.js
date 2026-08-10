@@ -124,6 +124,17 @@ var APP_CONFIG = {
         { label: 'SLG',               match: ['State & Local Government'] },
         { label: 'Special Districts', match: ['Special Districts'] }
       ]
+    },
+
+    sections: { approach: true },
+
+    distribution: {
+      enabled: false,
+      fromAlias: '',
+      to: [],
+      cc: [],
+      subjectTemplate: 'SLG Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      logSheet: 'ReportDistributionLog'
     }
   },
 

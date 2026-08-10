@@ -352,6 +352,27 @@ var CoreConfig = (function () {
     if (cfg.report.portfolioHealth.slideExportEnabled === undefined)
       cfg.report.portfolioHealth.slideExportEnabled = true;
 
+    // N8: V2 report sections + native Gmail distribution defaults.
+    cfg.report.sections = cfg.report.sections || {};
+    if (cfg.report.sections.approach === undefined)
+      cfg.report.sections.approach = true;
+
+    cfg.report.distribution = cfg.report.distribution || {};
+    if (cfg.report.distribution.enabled === undefined)
+      cfg.report.distribution.enabled = false;
+    if (cfg.report.distribution.fromAlias === undefined)
+      cfg.report.distribution.fromAlias = '';
+    if (!Array.isArray(cfg.report.distribution.to))
+      cfg.report.distribution.to = [];
+    if (!Array.isArray(cfg.report.distribution.cc))
+      cfg.report.distribution.cc = [];
+    if (!cfg.report.distribution.subjectTemplate) {
+      cfg.report.distribution.subjectTemplate =
+        '{{appTitle}} \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}';
+    }
+    if (!cfg.report.distribution.logSheet)
+      cfg.report.distribution.logSheet = 'ReportDistributionLog';
+
     // -------------------------------------------------------------------------
     // Data freshness (N4)
     // -------------------------------------------------------------------------

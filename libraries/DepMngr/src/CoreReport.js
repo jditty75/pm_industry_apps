@@ -1982,6 +1982,71 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
+   * N8 V2: trend chip for KPI tiles.
+   * @param {Object} trend
+   * @param {string} label
+   * @return {string}
+   * @private
+   */
+  function _renderTrendChipV2_(trend, label) {
+    var color = trend.polarity === 'good' ? '#4CAF50'
+              : trend.polarity === 'bad'  ? '#F44336'
+              : '#999999';
+    return (
+      '<div style="font-size:10px; color:#666666; margin-top:4px;">' +
+      CoreUtils.escapeHtml(label) + ': ' +
+      '<span style="color:' + color + '; font-weight:bold;">' +
+      CoreUtils.escapeHtml(trend.arrow + ' ' + trend.label) + '</span></div>'
+    );
+  }
+
+  /**
+   * N8 V2: Deployment Health Breakdown as KPI tiles.
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderHealthBreakdownSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var result;
+    try {
+      result = CoreAnalytics.getHealthBreakdown(cfg);
+    } catch (err) {
+      Logger.log('CoreReport.renderHealthBreakdownSectionV2_: failed: ' + err);
+      return wrapSectionV2_('Deployment Health Breakdown',
+        '<p style="font-size:11px; color:#cc0000;">\u26A0 Health Breakdown unavailable: ' +
+        CoreUtils.escapeHtml(String(err)) + '</p>');
+    }
+
+    var tilesHtml = result.rows.map(function (row) {
+      var pctStr = (row.currentPct * 100).toFixed(1) + '%';
+      return (
+        '<div style="flex:1; min-width:150px; border:1px solid #dddddd; border-radius:8px; ' +
+        'padding:14px; border-top:4px solid ' + CoreUtils.escapeHtml(row.color) + '; ' +
+        'background-color:#ffffff; font-family:Arial,sans-serif;">' +
+        '<div style="font-size:11px; color:#666666; text-transform:uppercase; letter-spacing:0.5px;">' +
+        CoreUtils.escapeHtml(row.status) + '</div>' +
+        '<div style="font-size:28px; font-weight:bold; color:' + CoreUtils.escapeHtml(row.color) +
+        '; line-height:1.2; margin:4px 0;">' + CoreUtils.escapeHtml(String(row.currentCount)) + '</div>' +
+        '<div style="font-size:14px; color:#333333; font-weight:600;">' +
+        CoreUtils.escapeHtml(pctStr) + '</div>' +
+        _renderTrendChipV2_(row.momTrend, 'MoM') +
+        _renderTrendChipV2_(row.ytdTrend, 'YTD') +
+        '</div>'
+      );
+    }).join('');
+
+    var innerHtml =
+      '<div style="display:flex; flex-wrap:wrap; gap:12px;">' + tilesHtml + '</div>';
+
+    if (result.dataIntegrity.showDisclaimer) {
+      innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.healthBreakdown);
+    }
+
+    return wrapSectionV2_('Deployment Health Breakdown', innerHtml);
+  }
+
+  /**
    * N8 V2: assembles body sections (health/partner/approach added in later phases).
    * @param {AppConfig} config
    * @return {string}
@@ -1994,6 +2059,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var execHtml = CoreExecSummary.buildSectionHtmlV2(cfg);
     if (execHtml) sections.push(execHtml);
 
+    sections.push(renderHealthBreakdownSectionV2_(cfg));
     sections.push(renderRedYellowSectionV2_(cfg));
     sections.push(renderRecentGoLivesSectionV2_(cfg));
     sections.push(renderUpcomingGoLivesSectionV2_(cfg));

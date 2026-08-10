@@ -1695,12 +1695,400 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     );
   }
 
+  // --- N8 V2 GMAIL REPORT PATH (additive; V1 untouched) ---------------------
+
+  /**
+   * N8 V2: Gmail-targeted div bar (no nested-table bar hack).
+   *
+   * @param {string} label
+   * @param {number} pct0to100
+   * @param {string} barColor
+   * @param {string} rightLabel
+   * @return {string}
+   * @private
+   */
+  function renderDivBarV2_(label, pct0to100, barColor, rightLabel) {
+    var pct = CoreUtils.clamp(pct0to100, 0, 100);
+    var color = barColor || '#0f4c81';
+    return (
+      '<div style="margin-bottom:10px; font-family:Arial,sans-serif;">' +
+      '<div style="display:flex; justify-content:space-between; font-size:11px; ' +
+      'color:#333333; margin-bottom:3px;">' +
+      '<span>' + CoreUtils.escapeHtml(label) + '</span>' +
+      '<span style="white-space:nowrap; margin-left:8px;">' +
+      CoreUtils.escapeHtml(rightLabel) + '</span>' +
+      '</div>' +
+      '<div style="background-color:#eeeeee; border-radius:4px; height:18px; overflow:hidden;">' +
+      '<div style="width:' + pct + '%; height:100%; background-color:' +
+      CoreUtils.escapeHtml(color) + '; border-radius:4px;"></div>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  /**
+   * N8 V2: section heading.
+   * @param {string} text
+   * @return {string}
+   * @private
+   */
+  function renderSectionHeadingV2_(text) {
+    return (
+      '<h2 style="font-family:Arial,sans-serif; color:#0f4c81; font-size:15px; ' +
+      'border-bottom:2px solid #0f4c81; padding-bottom:4px; margin:0 0 10px 0;">' +
+      CoreUtils.escapeHtml(text) +
+      '</h2>'
+    );
+  }
+
+  /**
+   * N8 V2: wraps a section title + inner HTML.
+   * @param {string} heading
+   * @param {string} innerHtml
+   * @return {string}
+   * @private
+   */
+  function wrapSectionV2_(heading, innerHtml) {
+    return (
+      '<div style="margin-bottom:32px;">' +
+      renderSectionHeadingV2_(heading) +
+      innerHtml +
+      '</div>'
+    );
+  }
+
+  /**
+   * N8 V2: Red/Yellow deployments table (code-built, no sheet reads).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderRedYellowSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var rows = CoreReportHelpers.getEffectiveRedYellowForExport_(cfg);
+    if (!rows || !rows.length) {
+      return wrapSectionV2_('Red / Yellow Deployments',
+        '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
+        '(No Red/Yellow deployments in report)</p>');
+    }
+
+    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; font-size:11px; font-family:Arial,sans-serif;';
+    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; padding:6px 8px; text-align:left; font-size:11px;';
+    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px;';
+    var includeIndustry = !!cfg.report.includeIndustryRedYellow;
+
+    var theadParts = [
+      '<th style="' + TH_STYLE + '">Health</th>',
+      '<th style="' + TH_STYLE + '">Account Name</th>'
+    ];
+    if (includeIndustry) theadParts.push('<th style="' + TH_STYLE + '">Industry</th>');
+    theadParts.push(
+      '<th style="' + TH_STYLE + '">Deployment Name</th>',
+      '<th style="' + TH_STYLE + '">Partner</th>',
+      '<th style="' + TH_STYLE + '">MTP Date</th>',
+      '<th style="' + TH_STYLE + '">' + CoreUtils.escapeHtml(cfg.report.redYellowOwnerLabel || 'Owner') + '</th>',
+      '<th style="' + TH_STYLE + '">Current Update</th>'
+    );
+
+    var tbodyHtml = rows.map(function (row, ri) {
+      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
+      function td(content, extra) {
+        return '<td style="' + TD_STYLE + ' background-color:' + bg + ';' + (extra || '') + '">' +
+          CoreUtils.escapeHtml(content || '') + '</td>';
+      }
+      var healthStyle = '';
+      var h = (row.health || '').toLowerCase();
+      if (h === 'red') healthStyle = ' color:#F44336; font-weight:bold;';
+      else if (h === 'yellow') healthStyle = ' color:#FBBC04; font-weight:bold;';
+
+      var mtpStr = '';
+      if (row.mtpDate) {
+        var d = new Date(row.mtpDate);
+        mtpStr = !isNaN(d.getTime())
+          ? d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+          : String(row.mtpDate);
+      }
+
+      var ownerVal = row.deliveryDirector || row.wdEngManager || '';
+      var tds = [td(row.health, healthStyle), td(row.accountName)];
+      if (includeIndustry) tds.push(td(row.industry || ''));
+      tds.push(td(row.deploymentName), td(row.partner), td(mtpStr), td(ownerVal), td(row.currentUpdate || ''));
+      return '<tr>' + tds.join('') + '</tr>';
+    }).join('');
+
+    var tableHtml = '<table style="' + TABLE_STYLE + '"><thead><tr>' + theadParts.join('') +
+      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
+    return wrapSectionV2_('Red / Yellow Deployments', tableHtml);
+  }
+
+  /**
+   * N8 V2: format a yyyy-MM-dd date for report display.
+   * @param {string} dateStr
+   * @return {string}
+   * @private
+   */
+  function _fmtReportDateV2_(dateStr) {
+    if (!dateStr) return '';
+    var d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  /**
+   * N8 V2: builds date cell HTML for go-live rows (no colgroup hacks).
+   * @param {Object} row
+   * @param {Object} effectiveByDeploymentId
+   * @param {string} dateField 'recentDates' | 'upcomingDates'
+   * @return {string}
+   * @private
+   */
+  function _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, dateField) {
+    var dates = row[dateField] || [];
+    var effective = effectiveByDeploymentId[row.deploymentId];
+    var parentMtp = (effective && effective.mtpDate) || '';
+
+    if (!dates.length) {
+      if (row.lastGoLiveDate) return CoreUtils.escapeHtml(_fmtReportDateV2_(row.lastGoLiveDate));
+      var single = row.nextGoLiveDate || row.mtpDate || '';
+      return CoreUtils.escapeHtml(_fmtReportDateV2_(single));
+    }
+    if (dates.length === 1) {
+      return CoreUtils.escapeHtml(_fmtReportDateV2_(dates[0].date));
+    }
+    var lines = dates.map(function (d) {
+      var dateStr = _fmtReportDateV2_(d.date);
+      var differs = d.date !== parentMtp;
+      var hasProducts = d.products && d.products.length > 0;
+      if (differs && hasProducts) {
+        return CoreUtils.escapeHtml(dateStr + ' \u2014 ' + d.products.join(', '));
+      }
+      return CoreUtils.escapeHtml(dateStr);
+    });
+    return lines.join('<br>');
+  }
+
+  /**
+   * N8 V2: Recent Go-Lives section.
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderRecentGoLivesSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var rows = CoreData.getRecentGoLives(cfg, null) || [];
+    rows = rows.filter(function (r) { return !r.excludeFromReport; });
+
+    if (!rows.length) {
+      return wrapSectionV2_('Recent Go-Lives',
+        '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
+        '(No recent go lives in report)</p>');
+    }
+
+    var effectiveByDeploymentId = {};
+    CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+      if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
+    });
+
+    function earliestDate_(r) {
+      if (!r.recentDates || !r.recentDates.length) return r.lastGoLiveDate || '';
+      return r.recentDates.reduce(function (min, d) {
+        return (!min || d.date < min) ? d.date : min;
+      }, '');
+    }
+    rows = rows.slice().sort(function (a, b) {
+      var ad = earliestDate_(a);
+      var bd = earliestDate_(b);
+      if (ad < bd) return -1;
+      if (ad > bd) return 1;
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
+
+    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; font-size:11px; font-family:Arial,sans-serif;';
+    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; padding:6px 8px; text-align:left; font-size:11px;';
+    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px; vertical-align:top;';
+
+    var tbodyHtml = rows.map(function (row, ri) {
+      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
+      return '<tr>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+        _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, 'recentDates') + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.accountName || '') + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.deploymentName || '') + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.partner || '') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var tableHtml = '<table style="' + TABLE_STYLE + '"><thead><tr>' +
+      '<th style="' + TH_STYLE + '">Date</th>' +
+      '<th style="' + TH_STYLE + '">Account</th>' +
+      '<th style="' + TH_STYLE + '">Deployment</th>' +
+      '<th style="' + TH_STYLE + '">Partner</th>' +
+      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
+    return wrapSectionV2_('Recent Go-Lives', tableHtml);
+  }
+
+  /**
+   * N8 V2: Upcoming Go-Lives section.
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderUpcomingGoLivesSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var rows = CoreData.getUpcomingGoLives(cfg, null) || [];
+    rows = rows.filter(function (r) { return !r.excludeFromReport; });
+
+    if (!rows.length) {
+      return wrapSectionV2_('Upcoming Go-Lives',
+        '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
+        '(No upcoming go lives in report)</p>');
+    }
+
+    var effectiveByDeploymentId = {};
+    CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+      if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
+    });
+
+    rows = rows.slice().sort(function (a, b) {
+      var ad = a.nextGoLiveDate || a.mtpDate || '';
+      var bd = b.nextGoLiveDate || b.mtpDate || '';
+      if (ad < bd) return -1;
+      if (ad > bd) return 1;
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
+
+    var TABLE_STYLE = 'border-collapse:collapse; width:100%; max-width:960px; font-size:11px; font-family:Arial,sans-serif;';
+    var TH_STYLE = 'border:1px solid #aaaaaa; background-color:#0f4c81; color:#ffffff; padding:6px 8px; text-align:left; font-size:11px;';
+    var TD_STYLE = 'border:1px solid #dddddd; padding:5px 8px; text-align:left; font-size:11px; vertical-align:top;';
+
+    var tbodyHtml = rows.map(function (row, ri) {
+      var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
+      return '<tr>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' +
+        _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, 'upcomingDates') + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.accountName || '') + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.deploymentName || '') + '</td>' +
+        '<td style="' + TD_STYLE + ' background-color:' + bg + ';">' + CoreUtils.escapeHtml(row.partner || '') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    var tableHtml = '<table style="' + TABLE_STYLE + '"><thead><tr>' +
+      '<th style="' + TH_STYLE + '">Date</th>' +
+      '<th style="' + TH_STYLE + '">Account</th>' +
+      '<th style="' + TH_STYLE + '">Deployment</th>' +
+      '<th style="' + TH_STYLE + '">Partner</th>' +
+      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
+    return wrapSectionV2_('Upcoming Go-Lives', tableHtml);
+  }
+
+  /**
+   * N8 V2: assembles body sections (health/partner/approach added in later phases).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function buildReportSectionsV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var sections = [];
+
+    var execHtml = CoreExecSummary.buildSectionHtmlV2(cfg);
+    if (execHtml) sections.push(execHtml);
+
+    sections.push(renderRedYellowSectionV2_(cfg));
+    sections.push(renderRecentGoLivesSectionV2_(cfg));
+    sections.push(renderUpcomingGoLivesSectionV2_(cfg));
+
+    return sections.join('\n');
+  }
+
+  /**
+   * N8 V2: single Gmail HTML shell.
+   * @param {AppConfig} config
+   * @param {string} bodyContent
+   * @return {string}
+   * @private
+   */
+  function wrapReportShellV2_(config, bodyContent) {
+    var cfg = CoreConfig.withDefaults(config);
+    var dateLbl = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMMM yyyy');
+    var title = cfg.report.title || 'Deployment Health Report';
+    var freshnessBanner = buildFreshnessReportBanner_(cfg);
+
+    var headerHtml =
+      '<div style="background-color:#0f4c81; margin-bottom:24px; padding:18px 26px; ' +
+      'display:flex; align-items:center; font-family:Arial,sans-serif;">' +
+      '<div style="background-color:#ffffff; padding:10px 14px; border-radius:6px; margin-right:20px;">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" width="80" height="80">' +
+      '<rect fill="#ffffff" x="0" y="0" width="1540" height="2000"/>' +
+      '<path fill="#0f2e66" d="M1221.5,1999.8h-179.3c-26.9,0-49-12.3-56.3-41.9l-216-760.4-216,760.6c-7.3,29.6-29.4,41.9-56.3,41.9h-179.3c-29.4,0-46.7-12.3-56.3-41.9C146.5,1637.3,68.1,1318.5,1.8,997.7c-7.3-32.3,7.3-54.4,41.5-54.4h159.7c29.4,0,49,14.8,54.2,41.9,41.5,227.3,90.9,461.5,157.2,691.5l191.4-691.5c7.3-27.1,26.9-41.9,56.3-41.9h216c29.4,0,49,14.8,56.3,41.9l191.4,691.5c66.3-229.4,115.7-464.2,157.2-691.5,4.8-27.1,24.6-41.9,54.2-41.9h159.7c34.2,0,49,22.3,41.5,54.4-66.3,320.9-144.7,639.6-260.1,960.4-10,29.6-27.1,41.7-56.5,41.7Z"/>' +
+      '<path fill="#fc5b05" d="M375.1,408.1c105.5-105.7,245.7-163.7,395-163.9,149.1,0,289.2,58,394.4,163.3,54.8,54.8,96.6,118.9,124.3,188.7,6.3,16.1,22.1,26.7,39.4,26.7h168.7c28.2,0,49-27.1,40.9-54-37.7-124.9-105.7-239.2-200.4-334.1C1185.9,83.6,984.5,0,770.3,0S354.2,83.6,202.6,235.4C107.7,330.3,39.8,444.6,2.4,569.1c-8.1,26.9,12.7,54,40.9,54h168.7c17.3,0,33-10.6,39.4-26.7,27.5-69.7,69.2-133.7,123.7-188.3Z"/>' +
+      '</svg></div>' +
+      '<div><div style="color:#ffffff; font-size:20px; font-weight:bold;">' +
+      CoreUtils.escapeHtml(title) + '</div>' +
+      '<div style="color:#c9d9f0; font-size:12px; margin-top:4px;">Monthly Report \u2013 ' +
+      dateLbl + '</div></div></div>';
+
+    var footerHtml =
+      '<div style="background-color:#0f4c81; margin-top:24px; padding:10px 16px; font-family:Arial,sans-serif;">' +
+      '<div style="background-color:#ffffff; border-radius:6px; padding:8px 12px; ' +
+      'display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#555555;">' +
+      '<div><strong style="color:#0f2e66;">' +
+      CoreUtils.escapeHtml(cfg.report.footerAttribution || '') +
+      '</strong><span> \u00b7 Powered by Sana </span>' +
+      (cfg.report.sanaLogoUrl
+        ? '<img alt="Sana" style="height:12px; width:12px; margin-left:4px; vertical-align:middle;" src="' +
+          CoreUtils.escapeHtml(cfg.report.sanaLogoUrl) + '">'
+        : '') +
+      '</div>' +
+      '<div style="font-size:10px; color:#999999; white-space:nowrap;">Generated ' + dateLbl + '</div>' +
+      '</div></div>';
+
+    return (
+      '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+      '<title>' + CoreUtils.escapeHtml(title) + '</title></head>' +
+      '<body style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
+      'max-width:1000px; margin:0 auto; padding:20px;">' +
+      headerHtml +
+      (cfg.student && cfg.student.reportDisclosure && cfg.student.reportDisclosure.enabled === true
+        ? '<div style="font-size:11px; color:#4a628f; padding:4px 12px; font-style:italic;">' +
+          CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') + '</div>'
+        : '') +
+      freshnessBanner +
+      bodyContent +
+      footerHtml +
+      '</body></html>'
+    );
+  }
+
+  /**
+   * N8 V2: builds the full Gmail-targeted monthly report HTML.
+   * @param {AppConfig} config
+   * @return {string}
+   */
+  function buildReportV2(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    return wrapReportShellV2_(cfg, buildReportSectionsV2_(cfg));
+  }
+
+  /**
+   * N8 V2: run analytics then build report.
+   * @param {AppConfig} config
+   * @return {string}
+   */
+  function buildReportV2WithAnalytics(config) {
+    CoreAnalytics.update(config);
+    return buildReportV2(config);
+  }
+
   // --- EXPORTS ---------------------------------------------------------------
 
   return {
     buildInlineHtml: buildInlineHtml,
     buildOutlookHtml: buildOutlookHtml,
     buildInlineHtmlWithAnalytics: buildInlineHtmlWithAnalytics,
-    exportInlineAndOutlookToDrive: exportInlineAndOutlookToDrive
+    exportInlineAndOutlookToDrive: exportInlineAndOutlookToDrive,
+    buildReportV2: buildReportV2,
+    buildReportV2WithAnalytics: buildReportV2WithAnalytics
   };
 })();

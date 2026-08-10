@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_blank">
+    <meta charset="utf-8">
+    <style>
+      :root {
+        /* Core */
+        --after-hours:   #0B1E3F;
+        --ink:           #0A3D7C;
+        --ballpoint:     #0875C1;
+        --water-cooler:  #2FA4E7;
+        --blue-sky:      #AED9F4;
+        --paper:         #FDFCF7;
+        --keyboard:      #F4EFDF;
+        --highlighter:   #F7E26B;
+        --pencil:        #F5B700;
+        --lunch-break:   #E8A317;
+        /* Secondary */
+        --tack:          #5BB5C4;
+        --eraser:        #F2C5E0;
+        --smoothie:      #A659C4;
+        --happy-hour:    #E76F1C;
+        --thumbtack:     #D6371E;
+        --laptop:        #4A5463;
+        --staple:        #8A94A1;
+        --desk:          #BFC6CF;
+        --business-card: #ECEEF1;
+      }
+      * { box-sizing: border-box; }
+
+      html, body {
+        margin: 0;
+        padding: 0;
+        background:
+          radial-gradient(1200px 600px at 0% 0%, var(--keyboard), transparent 60%),
+          radial-gradient(1000px 500px at 100% 0%, #E9F4FB, transparent 50%),
+          var(--paper);
+        min-height: 100vh;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--laptop);
+      }
+
+      /* Hide scrollbars inside iframe sandbox (Sites still controls outer iframe) */
+      html, body {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar { display: none; }
+
+      .shell {
+        max-width: 1200px;
+        margin: 32px auto 48px;
+        padding: 0 16px;
+      }
+
+      .portal-card {
+        background: #fff;
+        border-radius: 20px;
+        box-shadow: 0 12px 40px rgba(11, 30, 63, 0.08);
+        padding: 24px 24px 28px;
+      }
+
+      .portal-header {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 16px;
+      }
+
+      .portal-title {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--ink);
+        margin: 0;
+      }
+
+      .portal-subtitle {
+        font-size: 13px;
+        color: var(--staple);
+        line-height: 1.5;
+      }
+
+      /* Announcements */
+      .announcements {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 12px 0 18px;
+      }
+
+      .announcement {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .announcement .ann-bullet {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        margin-top: 7px;
+        flex-shrink: 0;
+      }
+
+      .ann-INFO {
+        background: #E9F4FB;
+        color: var(--ink);
+        border: 1px solid #CCE4F4;
+      }
+      .ann-INFO .ann-bullet { background: var(--ballpoint); }
+
+      .ann-WARN {
+        background: #FFF6D6;
+        color: #6A4D00;
+        border: 1px solid #F2DC8B;
+      }
+      .ann-WARN .ann-bullet { background: var(--pencil); }
+
+      .ann-CRITICAL {
+        background: #FCE6E0;
+        color: #6B1F12;
+        border: 1px solid #F2B7AB;
+      }
+      .ann-CRITICAL .ann-bullet { background: var(--thumbtack); }
+
+      /* Industry columns */
+      .industry-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      @media (max-width: 900px) {
+        .industry-grid { grid-template-columns: 1fr; }
+      }
+
+      .industry-column {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .industry-heading {
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--staple);
+        margin-bottom: 2px;
+      }
+
+      .industry-empty {
+        font-size: 12px;
+        color: var(--desk);
+        font-style: italic;
+        padding: 8px 4px;
+      }
+
+      /* App tiles */
+      .app-tile {
+        border-radius: 14px;
+        border: 1px solid var(--business-card);
+        overflow: hidden;
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+      }
+
+      .app-tile:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 18px rgba(11, 30, 63, 0.08);
+      }
+
+      .app-tile-top {
+        height: 4px;
+      }
+
+      .app-tile-body {
+        padding: 12px 14px 8px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+      }
+
+      .app-tile-title-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .app-tile-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--ink);
+        margin: 0;
+      }
+
+      .app-tile-desc {
+        font-size: 12px;
+        color: var(--laptop);
+        margin-top: 4px;
+      }
+
+      .app-tile-right {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+      }
+
+      .app-icon-circle {
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+      }
+
+      .app-tile-badge {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+
+      .badge-domain {
+        background: var(--blue-sky);
+        color: var(--ink);
+      }
+
+      .badge-restricted {
+        background: rgba(231,111,28,0.14);
+        color: var(--thumbtack);
+      }
+
+      .app-footer {
+        padding: 4px 14px 14px;
+        display: flex;
+        justify-content: flex-start;
+      }
+
+      .app-link-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 14px;
+        border-radius: 999px;
+        background: var(--ballpoint);
+        color: #fff;
+        font-size: 12px;
+        text-decoration: none;
+        transition: background 0.15s ease;
+      }
+
+      .app-link-btn:hover {
+        background: var(--water-cooler);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="portal-card">
+        <div class="portal-header">
+          <h1 class="portal-title">Workday Professional Services – US Industry Tool Portal</h1>
+          <div class="portal-subtitle">
+            Default: Anyone at Workday can access supported apps in read‑only mode.
+            Some apps are restricted to specific users. If you need additional access, contact
+            <a href="mailto:jeffrey.ditty@workday.com">jeffrey.ditty@workday.com</a>.
+            The first time you open each app, you may see a Google authorization prompt; this is expected.
+          </div>
+        </div>
+
+        <div id="announcements" class="announcements"></div>
+
+        <div id="industryGrid" class="industry-grid">
+          <!-- Three industry columns will be rendered here -->
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Industry columns to show, in order.
+      // Each "match" array lists team values from the Apps sheet that should map into this column.
+      // This lets you tolerate variations like "SLG" or "State & Local Government".
+      var INDUSTRIES = [
+        {
+          label: 'State & Local Government',
+          match: ['State & Local Government', 'SLG'],
+          color: '#F7E26B' // highlighter
+        },
+        {
+          label: 'Higher Education / Nonprofit',
+          match: ['Higher Education / Nonprofit', 'Higher Education', 'Nonprofit', 'HE', 'HE/NP', 'HCM'],
+          color: '#A659C4' // smoothie
+        },
+        {
+          label: 'Healthcare',
+          match: ['Healthcare', 'HC', 'FINS', 'Health Care'],
+          color: '#5BB5C4' // tack
+        }
+      ];
+
+      var STATE = {
+        apps: [],
+        announcements: []
+      };
+
+      google.script.run.withSuccessHandler(onPortalDataLoaded).getPortalData();
+
+      function onPortalDataLoaded(data) {
+        STATE.apps = data.apps || [];
+        STATE.announcements = data.announcements || [];
+        renderAnnouncements();
+        renderIndustryColumns();
+      }
+
+      function renderAnnouncements() {
+        var container = document.getElementById('announcements');
+        container.innerHTML = '';
+        if (!STATE.announcements.length) return;
+
+        STATE.announcements.forEach(function(a) {
+          var item = document.createElement('div');
+          item.className = 'announcement ann-' + a.level;
+
+          var bullet = document.createElement('span');
+          bullet.className = 'ann-bullet';
+          item.appendChild(bullet);
+
+          var msg = document.createElement('div');
+          msg.textContent = a.message;
+          item.appendChild(msg);
+
+          container.appendChild(item);
+        });
+      }
+
+      function appBelongsToIndustry(app, industry) {
+        var team = (app.team || '').toString().trim();
+        for (var i = 0; i < industry.match.length; i++) {
+          if (team.toLowerCase() === industry.match[i].toLowerCase()) return true;
+        }
+        return false;
+      }
+
+      function renderIndustryColumns() {
+        var grid = document.getElementById('industryGrid');
+        grid.innerHTML = '';
+
+        INDUSTRIES.forEach(function(industry) {
+          var col = document.createElement('div');
+          col.className = 'industry-column';
+
+          var heading = document.createElement('div');
+          heading.className = 'industry-heading';
+          heading.textContent = industry.label;
+          col.appendChild(heading);
+
+          var appsForCol = STATE.apps.filter(function(a) {
+            return appBelongsToIndustry(a, industry);
+          });
+
+          if (!appsForCol.length) {
+            var empty = document.createElement('div');
+            empty.className = 'industry-empty';
+            empty.textContent = 'No apps yet for this industry.';
+            col.appendChild(empty);
+          } else {
+            appsForCol.forEach(function(app) {
+              col.appendChild(buildAppTile(app, industry.color));
+            });
+          }
+
+          grid.appendChild(col);
+        });
+      }
+
+      function buildAppTile(app, color) {
+        var tile = document.createElement('div');
+        tile.className = 'app-tile';
+
+        var top = document.createElement('div');
+        top.className = 'app-tile-top';
+        top.style.background = 'linear-gradient(90deg, ' + color + ', var(--blue-sky))';
+        tile.appendChild(top);
+
+        var body = document.createElement('div');
+        body.className = 'app-tile-body';
+
+        var left = document.createElement('div');
+
+        var titleRow = document.createElement('div');
+        titleRow.className = 'app-tile-title-row';
+
+        var title = document.createElement('div');
+        title.className = 'app-tile-title';
+        title.textContent = app.name;
+        titleRow.appendChild(title);
+
+        left.appendChild(titleRow);
+
+        if (app.description) {
+          var desc = document.createElement('div');
+          desc.className = 'app-tile-desc';
+          desc.textContent = app.description;
+          left.appendChild(desc);
+        }
+        body.appendChild(left);
+
+        var right = document.createElement('div');
+        right.className = 'app-tile-right';
+
+        var dot = document.createElement('div');
+        dot.className = 'app-icon-circle';
+        dot.style.background = color;
+        right.appendChild(dot);
+
+        var badge = document.createElement('span');
+        badge.className = 'app-tile-badge ' + (app.visibility === 'RESTRICTED_DOMAIN' ? 'badge-restricted' : 'badge-domain');
+        badge.textContent = app.visibility === 'RESTRICTED_DOMAIN' ? 'Restricted' : 'Domain read-only';
+        right.appendChild(badge);
+
+        body.appendChild(right);
+        tile.appendChild(body);
+
+        if (app.url) {
+          var footer = document.createElement('div');
+          footer.className = 'app-footer';
+          var link = document.createElement('a');
+          link.className = 'app-link-btn';
+          link.href = app.url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = 'Open app';
+          footer.appendChild(link);
+          tile.appendChild(footer);
+        }
+
+        return tile;
+      }
+    </script>
+  </body>
+</html>

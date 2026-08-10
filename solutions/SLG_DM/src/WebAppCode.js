@@ -164,6 +164,23 @@ function getHtmlReportPreviewOutlook() {
   return CoreLib.CoreReport.buildOutlookHtml(APP_CONFIG);
 }
 
+/**
+ * N8: production native Gmail send for the V2 monthly report.
+ * @return {{status: string, error?: string}}
+ */
+function sendMonthlyReport() {
+  return CoreLib.CoreDistribute.sendMonthlyReport(APP_CONFIG);
+}
+
+/**
+ * N8: test send to self — no distribution log row.
+ * @param {string=} recipient
+ * @return {{status: string, error?: string}}
+ */
+function sendMonthlyReportTest(recipient) {
+  return CoreLib.CoreDistribute.sendMonthlyReportTest(APP_CONFIG, recipient);
+}
+
 // ============================================================================
 // PHASE 1 — PORTFOLIO HEALTH (unchanged)
 // ============================================================================

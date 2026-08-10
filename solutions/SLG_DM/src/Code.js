@@ -118,6 +118,9 @@ function onOpen() {
     .addItem('▶ Preview HTML report', 'previewHtml')
     .addItem('💾 Export HTML to My Drive', 'exportHtmlToDrive')
     .addSeparator()
+    .addItem('📧 Send Monthly Report (New)', 'sendMonthlyReportNew')
+    .addItem('🧪 Send Test Monthly Report (New)', 'sendMonthlyReportTestNew')
+    .addSeparator()
     .addItem('🔍 Debug: Show detected table ranges', 'debugShowTableRanges')
     .addItem('🔍 Debug: Show all cell values', 'debugShowCellValues')
     .addToUi();
@@ -181,6 +184,30 @@ function previewHtml() {
  */
 function exportHtmlToDrive() {
   CoreLib.CoreReport.exportInlineAndOutlookToDrive(APP_CONFIG);
+}
+
+/**
+ * N8: menu wrapper — native Gmail production send (V2 report).
+ */
+function sendMonthlyReportNew() {
+  var result = sendMonthlyReport();
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    result.status + (result.error ? ': ' + result.error : ''),
+    'Send Monthly Report (New)',
+    10
+  );
+}
+
+/**
+ * N8: menu wrapper — test send to self, no distribution log.
+ */
+function sendMonthlyReportTestNew() {
+  var result = sendMonthlyReportTest();
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    result.status + (result.error ? ': ' + result.error : ''),
+    'Send Test Monthly Report (New)',
+    10
+  );
 }
 
 // ============================================================================

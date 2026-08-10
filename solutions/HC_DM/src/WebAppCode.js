@@ -106,6 +106,52 @@ function sendMonthlyReportTest(recipient) {
 }
 
 // ============================================================================
+// N7 — MDS/PGL NOTIFICATIONS
+// ============================================================================
+
+/**
+ * Daily trigger entry point for config-driven MDS/PGL notifications.
+ * @return {void}
+ */
+function runNotifications() {
+  return CoreLib.CoreData.runNotifications(APP_CONFIG);
+}
+
+/**
+ * Validates NotificationConfig rows and writes per-row status.
+ * @return {{valid:Array<Object>, invalid:Array<Object>}}
+ */
+function validateNotificationConfig() {
+  return CoreLib.CoreData.validateNotificationConfig(APP_CONFIG);
+}
+
+/**
+ * Side-effect-free test send via production render path.
+ * @param {string} notificationKey
+ * @param {string=} recipient
+ * @return {boolean}
+ */
+function sendTestNotification(notificationKey, recipient) {
+  return CoreLib.CoreData.sendTestNotification(APP_CONFIG, notificationKey, recipient);
+}
+
+/**
+ * One-time idempotent setup for the NotificationConfig sheet tab.
+ * @return {void}
+ */
+function initNotificationConfigSheet() {
+  return CoreLib.CoreData.initNotificationConfigSheet(APP_CONFIG);
+}
+
+/**
+ * One-time idempotent setup for the ReportDistributionLog sheet tab.
+ * @return {GoogleAppsScript.Spreadsheet.Sheet}
+ */
+function initReportDistributionLog() {
+  return CoreLib.CoreDistribute.initReportDistributionLog(APP_CONFIG);
+}
+
+// ============================================================================
 // PORTFOLIO HEALTH
 // ============================================================================
 

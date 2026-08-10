@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SLED Upcoming Core Go-Lives</title>
+  <?!= include('Styles') ?>
+</head>
+<body>
+  <header class="top-bar" id="topBar">
+    <div class="top-bar-left">
+      <h1 class="app-title">Upcoming Core Go-Lives</h1>
+      <p class="app-subtitle">Core production go-lives in the next 6 months</p>
+    </div>
+    <div class="top-bar-controls">
+      <div class="range-toggle" id="rangeToggle" role="group" aria-label="Time range">
+        <button type="button" class="range-btn active" data-range="d30">Next 30 days</button>
+        <button type="button" class="range-btn" data-range="d90">Next 90 days</button>
+        <button type="button" class="range-btn" data-range="m6">Next 6 months</button>
+      </div>
+      <div class="product-filters" id="productFilters" aria-label="Core product filters">
+        <button type="button" class="product-pill filter-pill" data-product="HCM">HCM</button>
+        <button type="button" class="product-pill filter-pill" data-product="Financials">Financials</button>
+        <button type="button" class="product-pill filter-pill" data-product="Payroll">Payroll</button>
+      </div>
+      <div class="legend-chip" title="Deployments delivered by Workday Professional Services">
+        <span class="legend-dot"></span>
+        Workday-delivered
+      </div>
+      <button type="button" class="export-btn" id="exportBtn">Export to Excel</button>
+    </div>
+    <div class="top-bar-meta">
+      <span id="liveCount" class="live-count">Loading…</span>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div id="loadingState" class="state-panel">
+      <div class="spinner"></div>
+      <p>Loading upcoming go-lives…</p>
+    </div>
+    <div id="errorState" class="state-panel hidden">
+      <p id="errorMessage">Something went wrong.</p>
+      <button type="button" id="retryBtn" class="export-btn">Retry</button>
+    </div>
+    <div id="emptyState" class="state-panel hidden">
+      <p id="emptyMessage">No core go-lives in this window — try Next 90 days.</p>
+    </div>
+    <div id="timeline" class="timeline timeline-panel hidden"></div>
+  </main>
+
+  <?!= include('JavaScript') ?>
+</body>
+</html>

@@ -1,0 +1,337 @@
+<script>
+(function() {
+  'use strict';
+
+  var state = {
+    today: '',
+    milestones: [],
+    fieldRegistry: [],
+    pillOrder: [],
+    range: 'd30',
+    productFilters: [],
+    loading: true,
+    error: null
+  };
+
+  var KEY_ROLE_FIELDS = [
+    { key: 'csm', label: 'CSM' },
+    { key: 'emdm', label: 'EM/DM' },
+    { key: 'ae', label: 'AE' },
+    { key: 'implementationPartner', label: 'Impl. Partner' },
+    { key: 'managingPartner', label: 'Managing Partner' }
+  ];
+
+  var PRODUCT_CLASS = {
+    HCM: 'hcm',
+    Financials: 'financials',
+    Payroll: 'payroll',
+    Student: 'student',
+    Core: 'core'
+  };
+
+  function el(id) { return document.getElementById(id); }
+
+  function show(id) { el(id).classList.remove('hidden'); }
+  function hide(id) { el(id).classList.add('hidden'); }
+
+  function parseIso(iso) {
+    var p = iso.split('-');
+    return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+  }
+
+  function daysBetween(todayIso, targetIso) {
+    var start = parseIso(todayIso);
+    var end = parseIso(targetIso);
+    return Math.round((end - start) / 86400000);
+  }
+
+  function formatDateShort(iso) {
+    var d = parseIso(iso);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  function formatMonthHeader(iso) {
+    var d = parseIso(iso);
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
+  }
+
+  function countdownText(days) {
+    if (days <= 0) return 'today';
+    if (days === 1) return 'in 1 day';
+    return 'in ' + days + ' days';
+  }
+
+  function formatIsoDate(d) {
+    var y = d.getFullYear();
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+
+  function getRangeEndIso(range) {
+    var start = parseIso(state.today);
+    var end = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    if (range === 'd30') end.setDate(end.getDate() + 30);
+    else if (range === 'd90') end.setDate(end.getDate() + 90);
+    else end.setMonth(end.getMonth() + 6);
+    return formatIsoDate(end);
+  }
+
+  function filterMilestones() {
+    var endIso = getRangeEndIso(state.range);
+    return state.milestones.filter(function(m) {
+      if (m.goLiveDate < state.today || m.goLiveDate > endIso) return false;
+      if (state.productFilters.length === 0) return true;
+      return state.productFilters.some(function(p) {
+        return (m.coreProducts || []).indexOf(p) !== -1;
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function renderProductPills(products) {
+    return (products || []).map(function(p) {
+      var cls = PRODUCT_CLASS[p] || 'core';
+      return '<span class="product-pill ' + cls + '">' + escapeHtml(p) + '</span>';
+    }).join('');
+  }
+
+  function renderKeyRoles(keyContacts) {
+    var kc = keyContacts || {};
+    return KEY_ROLE_FIELDS.map(function(f) {
+      var val = kc[f.key] ? String(kc[f.key]).trim() : '';
+      return '<div class="key-role-line">' +
+        '<span class="role-label">' + f.label + ':</span> ' +
+        '<span class="role-value' + (val ? '' : ' muted') + '">' +
+        (val ? escapeHtml(val) : 'Not assigned') +
+        '</span></div>';
+    }).join('');
+  }
+
+  function renderDeploymentContacts(contacts) {
+    var list = contacts || [];
+    if (!list.length) {
+      return '<div class="contacts-empty">No deployment contacts listed</div>';
+    }
+    return '<div class="contacts-list">' +
+      list.map(function(c) {
+        var name = escapeHtml(c.name || 'Unknown');
+        var role = c.role ? escapeHtml(c.role) : '';
+        var namePart = c.email
+          ? '<a href="mailto:' + escapeHtml(c.email) + '" class="contact-link">' + name + '</a>'
+          : '<span class="contact-name">' + name + '</span>';
+        var line = role
+          ? namePart + ' <span class="contact-sep">—</span> <span class="contact-role">' + role + '</span>'
+          : namePart;
+        return '<div class="contact-line">' + line + '</div>';
+      }).join('') +
+    '</div>';
+  }
+
+  function getCountdownDays(m) {
+    if (typeof m.countdownDays === 'number') return m.countdownDays;
+    return daysBetween(state.today, m.goLiveDate);
+  }
+
+  function renderRow(m) {
+    var days = getCountdownDays(m);
+    var rowClass = 'timeline-row' + (m.isWorkdayDelivered ? ' workday-delivered' : '');
+    var countdownClass = days <= 0 ? 'countdown today' : 'countdown';
+    var depName = m.deploymentName || '';
+    var badge = m.isWorkdayDelivered
+      ? '<span class="wd-badge">Workday Professional Services</span>' : '';
+
+    return '<div class="' + rowClass + '">' +
+      '<div class="col-date">' +
+        '<div class="date-short">' + escapeHtml(formatDateShort(m.goLiveDate)) + '</div>' +
+        '<div class="' + countdownClass + '">' + escapeHtml(countdownText(days)) + '</div>' +
+      '</div>' +
+      '<div class="col-customer">' +
+        '<div class="customer-line">' +
+          '<span class="customer-name">' + escapeHtml(m.customerName) + '</span>' +
+          badge +
+        '</div>' +
+        (depName ? '<div class="depl-name" title="' + escapeHtml(depName) + '">' + escapeHtml(depName) + '</div>' : '') +
+        (m.industry ? '<div class="industry">' + escapeHtml(m.industry) + '</div>' : '') +
+        '<div class="product-pills">' + renderProductPills(m.coreProducts) + '</div>' +
+      '</div>' +
+      '<div class="col-key-roles">' + renderKeyRoles(m.keyContacts) + '</div>' +
+      '<div class="col-contacts">' + renderDeploymentContacts(m.deploymentContacts) + '</div>' +
+    '</div>';
+  }
+
+  function updateStickyOffset() {
+    var tb = el('topBar');
+    if (tb) {
+      document.documentElement.style.setProperty('--sticky-offset', tb.offsetHeight + 'px');
+    }
+  }
+
+  function monthKeyFromIso(iso) {
+    return String(iso || '').slice(0, 7);
+  }
+
+  function makeMonthHeader(monthLabel) {
+    var header = document.createElement('h3');
+    header.className = 'month-header';
+    header.textContent = monthLabel;
+    return header;
+  }
+
+  function appendTimelineRow(container, m) {
+    var temp = document.createElement('div');
+    temp.innerHTML = renderRow(m).trim();
+    if (temp.firstElementChild) {
+      container.appendChild(temp.firstElementChild);
+    }
+  }
+
+  function renderTimeline() {
+    var filtered = filterMilestones();
+    el('liveCount').textContent = 'Showing ' + filtered.length + ' go-lives';
+
+    if (filtered.length === 0) {
+      hide('timeline');
+      show('emptyState');
+      var msg = 'No core go-lives in this window';
+      if (state.range === 'd30') msg += ' — try Next 90 days.';
+      else if (state.range === 'd90') msg += ' — try Next 6 months.';
+      el('emptyMessage').textContent = msg + '.';
+      return;
+    }
+
+    hide('emptyState');
+    show('timeline');
+
+    var sorted = filtered.slice().sort(function(a, b) {
+      if (a.goLiveDate < b.goLiveDate) return -1;
+      if (a.goLiveDate > b.goLiveDate) return 1;
+      return (a.customerName || '').localeCompare(b.customerName || '');
+    });
+
+    var timeline = el('timeline');
+    timeline.innerHTML = '';
+    var prevMonthKey = null;
+    sorted.forEach(function(m) {
+      var monthKey = monthKeyFromIso(m.goLiveDate);
+      if (monthKey !== prevMonthKey) {
+        timeline.appendChild(makeMonthHeader(formatMonthHeader(m.goLiveDate)));
+        prevMonthKey = monthKey;
+      }
+      appendTimelineRow(timeline, m);
+    });
+    updateStickyOffset();
+  }
+
+  function setLoading(on) {
+    state.loading = on;
+    if (on) {
+      show('loadingState');
+      hide('timeline');
+      hide('emptyState');
+      hide('errorState');
+    } else {
+      hide('loadingState');
+    }
+  }
+
+  function loadData() {
+    setLoading(true);
+    state.error = null;
+    google.script.run
+      .withSuccessHandler(function(payload) {
+        state.today = payload.today;
+        state.milestones = payload.milestones || [];
+        state.fieldRegistry = payload.fieldRegistry || [];
+        state.pillOrder = payload.pillOrder || [];
+        state.range = payload.defaultRange || 'd30';
+        document.querySelectorAll('.range-btn').forEach(function(btn) {
+          btn.classList.toggle('active', btn.getAttribute('data-range') === state.range);
+        });
+        setLoading(false);
+        renderTimeline();
+      })
+      .withFailureHandler(function(err) {
+        setLoading(false);
+        state.error = err && err.message ? err.message : String(err);
+        el('errorMessage').textContent = state.error;
+        show('errorState');
+        el('liveCount').textContent = 'Error loading data';
+      })
+      .getUpcomingGoLives();
+  }
+
+  function downloadBase64(filename, b64) {
+    var link = document.createElement('a');
+    link.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + b64;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function exportView() {
+    var rows = filterMilestones();
+    if (!rows.length) return;
+
+    var btn = el('exportBtn');
+    btn.disabled = true;
+    var original = btn.textContent;
+    btn.textContent = 'Exporting…';
+
+    google.script.run
+      .withSuccessHandler(function(result) {
+        btn.disabled = false;
+        btn.textContent = original;
+        if (result && result.b64) downloadBase64(result.filename, result.b64);
+      })
+      .withFailureHandler(function(err) {
+        btn.disabled = false;
+        btn.textContent = original;
+        alert('Export failed: ' + (err && err.message ? err.message : err));
+      })
+      .exportCurrentView(rows);
+  }
+
+  function bindControls() {
+    document.querySelectorAll('.range-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        state.range = btn.getAttribute('data-range');
+        document.querySelectorAll('.range-btn').forEach(function(b) {
+          b.classList.toggle('active', b === btn);
+        });
+        renderTimeline();
+      });
+    });
+
+    document.querySelectorAll('.filter-pill').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var product = btn.getAttribute('data-product');
+        var idx = state.productFilters.indexOf(product);
+        if (idx === -1) {
+          state.productFilters.push(product);
+          btn.classList.add('active');
+        } else {
+          state.productFilters.splice(idx, 1);
+          btn.classList.remove('active');
+        }
+        renderTimeline();
+      });
+    });
+
+    el('exportBtn').addEventListener('click', exportView);
+    el('retryBtn').addEventListener('click', loadData);
+    window.addEventListener('resize', updateStickyOffset);
+  }
+
+  bindControls();
+  loadData();
+})();
+</script>

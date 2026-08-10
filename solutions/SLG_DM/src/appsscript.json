@@ -7,8 +7,14 @@
       {
         "userSymbol": "CoreLib",
         "libraryId": "1qIBm-m342W-uJVhnWu0iGZQu-ovnI2qaTuKCKoZej94lsvjalQViAhi3",
-        "version": "81",
-        "developmentMode": false
+        "version": "88"
+      }
+    ],
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Gmail",
+        "serviceId": "gmail",
+        "version": "v1"
       }
     ]
   },

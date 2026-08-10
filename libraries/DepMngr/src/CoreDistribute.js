@@ -2,7 +2,7 @@
  * CoreDistribute.js
  *
  * N8: Native Gmail distribution for the V2 monthly report.
- * Reuses CoreReport.buildReportV2WithAnalytics and CoreNotify._gmailSend_.
+ * Reuses CoreReport.buildReportV2WithAnalytics and CoreNotify send helpers.
  */
 
 var CoreDistribute = (function () {
@@ -10,7 +10,7 @@ var CoreDistribute = (function () {
   var LOG_HEADERS_ = [
     'timestamp', 'appId', 'monthLabel', 'fromAlias', 'subject',
     'toCount', 'ccCount', 'toList', 'ccList', 'status', 'error',
-    'messageId', 'threadId', 'sentBy', 'mode'
+    'messageId', 'threadId', 'captureMethod', 'sentBy', 'mode'
   ];
 
   /**
@@ -93,7 +93,7 @@ var CoreDistribute = (function () {
     var missing = LOG_HEADERS_.filter(function (h) { return existing.indexOf(h) < 0; });
     if (missing.length) {
       var startCol = existing.length + 1;
-      sheet.getRange(1, startCol, 1, startCol + missing.length - 1).setValues([missing]);
+      sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
       sheet.getRange(1, 1, 1, sheet.getLastColumn()).setFontWeight('bold');
       Logger.log('CoreDistribute.initReportDistributionLog_: added columns: ' + missing.join(', '));
     }
@@ -113,33 +113,6 @@ var CoreDistribute = (function () {
     sheet.appendRow(values);
     Logger.log('CoreDistribute.appendDistributionLogRow_: status=' + row.status +
       ', month=' + row.monthLabel);
-  }
-
-  /**
-   * Best-effort capture of sent message/thread IDs via Gmail search.
-   *
-   * @param {string} subject
-   * @param {string} fromAlias
-   * @return {{messageId: string, threadId: string}}
-   * @private
-   */
-  function _captureSentMessageIds_(subject, fromAlias) {
-    var result = { messageId: '', threadId: '' };
-    try {
-      var q = 'in:sent newer_than:2m from:' + fromAlias + ' subject:"' +
-        String(subject).replace(/"/g, '') + '"';
-      var threads = GmailApp.search(q, 0, 1);
-      if (!threads.length) return result;
-      var thread = threads[0];
-      result.threadId = thread.getId();
-      var messages = thread.getMessages();
-      if (messages.length) {
-        result.messageId = messages[messages.length - 1].getId();
-      }
-    } catch (e) {
-      Logger.log('CoreDistribute._captureSentMessageIds_: search failed: ' + e);
-    }
-    return result;
   }
 
   /**
@@ -189,6 +162,7 @@ var CoreDistribute = (function () {
         error: error || '',
         messageId: (ids && ids.messageId) || '',
         threadId: (ids && ids.threadId) || '',
+        captureMethod: (ids && ids.captureMethod) || '',
         sentBy: sentBy,
         mode: mode || 'prod'
       });
@@ -225,19 +199,28 @@ var CoreDistribute = (function () {
       return { status: 'failed', error: buildErr };
     }
 
-    var sent = CoreNotify._gmailSend_(toStr, subject, htmlBody, fromAlias, ccStr,
+    var sendResult = CoreNotify._gmailSendWithIds_(toStr, subject, htmlBody, fromAlias, ccStr,
       cfg.notify.allowedFromAliases);
-    if (!sent) {
-      var sendErr = 'GmailApp send failed or was blocked (see Logs)';
+    if (!sendResult.ok) {
+      var sendErr = 'Gmail send failed or was blocked (see Logs)';
       logRow('failed', sendErr, null, 'prod');
       return { status: 'failed', error: sendErr };
     }
 
-    var ids = _captureSentMessageIds_(subject, fromAlias);
+    var ids = {
+      messageId: sendResult.messageId,
+      threadId: sendResult.threadId,
+      captureMethod: sendResult.captureMethod
+    };
     logRow('sent', '', ids, 'prod');
     Logger.log('CoreDistribute.sendMonthlyReport: sent to ' + toList.length +
-      ' recipient(s), messageId=' + ids.messageId);
-    return { status: 'sent', messageId: ids.messageId, threadId: ids.threadId };
+      ' recipient(s), messageId=' + ids.messageId + ', captureMethod=' + ids.captureMethod);
+    return {
+      status: 'sent',
+      messageId: ids.messageId,
+      threadId: ids.threadId,
+      captureMethod: ids.captureMethod
+    };
   }
 
   /**

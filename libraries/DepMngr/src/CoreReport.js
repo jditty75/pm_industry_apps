@@ -2047,6 +2047,79 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
+   * N8 V2: Partner Breakdown div bars.
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderPartnerBreakdownSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var result;
+    try {
+      result = CoreAnalytics.getPartnerBreakdown(cfg);
+    } catch (err) {
+      Logger.log('CoreReport.renderPartnerBreakdownSectionV2_: failed: ' + err);
+      return wrapSectionV2_('Partner Breakdown',
+        '<p style="font-size:11px; color:#cc0000;">\u26A0 Partner Breakdown unavailable: ' +
+        CoreUtils.escapeHtml(String(err)) + '</p>');
+    }
+
+    var maxPct = 0;
+    result.rows.forEach(function (row) {
+      if (row.pct > maxPct) maxPct = row.pct;
+    });
+
+    var barsHtml = result.rows.map(function (row) {
+      var barPct = maxPct > 0 ? (row.pct / maxPct) * 100 : 0;
+      var rightLabel = row.count + ' (' + (row.pct * 100).toFixed(1) + '%)';
+      return renderDivBarV2_(row.partner, barPct, '#0f4c81', rightLabel);
+    }).join('');
+
+    var innerHtml = barsHtml || '<p style="font-size:11px; color:#666666;">(No data)</p>';
+    if (result.dataIntegrity.showDisclaimer) {
+      innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.partnerBreakdown);
+    }
+    return wrapSectionV2_('Partner Breakdown', innerHtml);
+  }
+
+  /**
+   * N8 V2: Services Approach Breakdown div bars (uses displayPct labels).
+   * @param {AppConfig} config
+   * @return {string}
+   * @private
+   */
+  function renderApproachBreakdownSectionV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var result;
+    try {
+      result = CoreAnalytics.getApproachBreakdown(cfg);
+    } catch (err) {
+      Logger.log('CoreReport.renderApproachBreakdownSectionV2_: failed: ' + err);
+      return wrapSectionV2_('Services Approach Breakdown',
+        '<p style="font-size:11px; color:#cc0000;">\u26A0 Approach Breakdown unavailable: ' +
+        CoreUtils.escapeHtml(String(err)) + '</p>');
+    }
+
+    var maxPct = 0;
+    result.rows.forEach(function (row) {
+      if (row.pct > maxPct) maxPct = row.pct;
+    });
+
+    var barsHtml = result.rows.map(function (row) {
+      var barPct = maxPct > 0 ? (row.pct / maxPct) * 100 : 0;
+      var displayPct = row.displayPct !== undefined ? row.displayPct : Math.round(row.pct * 100);
+      var rightLabel = row.count + ' (' + displayPct + '%)';
+      return renderDivBarV2_(row.approach, barPct, '#0f4c81', rightLabel);
+    }).join('');
+
+    var innerHtml = barsHtml || '<p style="font-size:11px; color:#666666;">(No data)</p>';
+    if (result.dataIntegrity.showDisclaimer) {
+      innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.approachBreakdown);
+    }
+    return wrapSectionV2_('Services Approach Breakdown', innerHtml);
+  }
+
+  /**
    * N8 V2: assembles body sections (health/partner/approach added in later phases).
    * @param {AppConfig} config
    * @return {string}
@@ -2061,6 +2134,11 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
     sections.push(renderHealthBreakdownSectionV2_(cfg));
     sections.push(renderRedYellowSectionV2_(cfg));
+    sections.push(renderPartnerBreakdownSectionV2_(cfg));
+    if (!cfg.report.sections || cfg.report.sections.approach !== false) {
+      sections.push(renderApproachBreakdownSectionV2_(cfg));
+    }
+
     sections.push(renderRecentGoLivesSectionV2_(cfg));
     sections.push(renderUpcomingGoLivesSectionV2_(cfg));
 

@@ -48,6 +48,7 @@
     opportunities: [],
     deployments: [],
     projectIndex: [],
+    projectIndexScope: null, // 'all' | 'reduce' — tracks whether projectIndex is full or worker-scoped
     scenarios: [],
     currentView: 'dashboard',
     selectedResource: null,
@@ -3470,14 +3471,16 @@
    * @returns {Promise<Object[]>}
    */
   async function wfm25EnsureProjectIndex_(force) {
-    if (!force && State.projectIndex && State.projectIndex.length) {
+    if (!force && State.projectIndexScope === 'all' && State.projectIndex && State.projectIndex.length) {
       return State.projectIndex;
     }
     try {
-      State.projectIndex = await call('api_getProjectIndex');
+      const raw = await call('api_getProjectIndex');
+      State.projectIndex = Array.isArray(raw) ? raw : [];
+      State.projectIndexScope = 'all';
     } catch (e) {
       console.warn('[WFM.25] project index load failed:', e);
-      State.projectIndex = State.projectIndex || [];
+      State.projectIndex = State.projectIndexScope === 'all' ? (State.projectIndex || []) : [];
     }
     return State.projectIndex;
   }
@@ -3610,33 +3613,40 @@
     if (pick && identityInput) identityInput.value = pick;
   }
 
+  /** @type {number} Monotonic id so stale async picker loads cannot overwrite a newer fetch. */
+  let wfm25ProjectPickerLoadId_ = 0;
+
   /**
    * Load project picker options for the soft-book drawer (Add = full index, Reduce = worker-scoped).
+   * Reduce mode calls api_getWorkerReduceProjects and renders the server result directly.
    */
   async function wfm25LoadSoftBookProjectPicker_() {
+    const loadId = ++wfm25ProjectPickerLoadId_;
     const resourceName = WFM25State.selectedWorker ||
       (document.getElementById('wfm25SbWorker') && document.getElementById('wfm25SbWorker').value) || '';
     const isReduce = wfm25GetSoftBookDirection_() === 'reduce';
-    const start = (document.getElementById('wfm25SbStart') && document.getElementById('wfm25SbStart').value) || '';
-    const end = (document.getElementById('wfm25SbEnd') && document.getElementById('wfm25SbEnd').value) || '';
     const filterEl = document.getElementById('wfm25SbProjectFilter');
     const identityInput = document.getElementById('wfm25SbProjectIdentity');
     const prevKey = identityInput ? identityInput.value : '';
 
-    if (isReduce && resourceName) {
-      try {
-        State.projectIndex = await call('api_getWorkerReduceProjects', {
-          resource_name: resourceName,
-          start_date: start,
-          end_date: end
-        });
-      } catch (e) {
-        console.warn('[WFM.25] worker reduce projects failed:', e);
-        State.projectIndex = [];
+    let items = [];
+    try {
+      if (isReduce && resourceName) {
+        const raw = await call('api_getWorkerReduceProjects', { resource_name: resourceName });
+        items = Array.isArray(raw) ? raw : [];
+      } else {
+        const force = State.projectIndexScope === 'reduce';
+        items = await wfm25EnsureProjectIndex_(force);
       }
-    } else {
-      await wfm25EnsureProjectIndex_(false);
+    } catch (e) {
+      console.warn('[WFM.25] soft-book project picker load failed:', e);
+      items = [];
     }
+
+    if (loadId !== wfm25ProjectPickerLoadId_) return;
+
+    State.projectIndex = items;
+    State.projectIndexScope = (isReduce && resourceName) ? 'reduce' : 'all';
 
     if (filterEl) filterEl.value = '';
     wfm25RenderSoftBookProjectSelect_('', prevKey);
@@ -9528,7 +9538,6 @@ async function _qaRefreshPsaHours_() {
     wfm25SetSoftBookDirection_('add');
     overlay.hidden = false;
     wfm25RefreshSoftBookDrawerChrome_();
-    wfm25LoadSoftBookProjectPicker_();
     if (hoursInput) hoursInput.focus();
   }
 
@@ -14880,15 +14889,6 @@ async function _qaRefreshPsaHours_() {
         wfm25RenderSoftBookProjectSelect_(sbProjectFilter ? sbProjectFilter.value : '', key);
       });
     }
-    const sbStart = document.getElementById('wfm25SbStart');
-    const sbEnd = document.getElementById('wfm25SbEnd');
-    const reloadProjectsOnDate = debounce_(function () {
-      if (wfm25IsDemandFillMode_() || wfm25IsCommitmentEditMode_()) return;
-      if (wfm25GetSoftBookDirection_() === 'reduce') wfm25LoadSoftBookProjectPicker_();
-    }, 250);
-    if (sbStart) sbStart.addEventListener('change', reloadProjectsOnDate);
-    if (sbEnd) sbEnd.addEventListener('change', reloadProjectsOnDate);
-
     initWFM25DraftTray_();
 
     document.addEventListener('click', wfm25WorkerPanelOutsideClick_);

@@ -4,7 +4,7 @@
 // execution; consumed by Add/Commit pickers and Commitments ledger.
 // ============================================================
 
-/** @type {{ list: Object[], byKey: Object }|null} */
+/** @type {(Object[] & { byKey?: Object })|null} */
 var _projectIndexCache_ = null;
 
 /**
@@ -37,10 +37,10 @@ function _projectIndexKey_(idType, id) {
 }
 
 /**
- * Return the cached unified project index (flat list + byKey map).
+ * Return the cached unified project index (flat entry array; byKey map on the array for lookups).
  * Tiers: opportunity (OPPS_NORM) → deployment (PSA Project ↔ Deployments.PSA Project Name)
  * → psa fallback (active ALLOC_NORM Account+Project with no deployment match).
- * @return {{ list: Object[], byKey: Object }}
+ * @return {Object[]}
  */
 function getProjectIndex_() {
   if (_projectIndexCache_) return _projectIndexCache_;
@@ -185,8 +185,9 @@ function getProjectIndex_() {
     return String(a.label).localeCompare(String(b.label), undefined, { sensitivity: 'base' });
   });
 
-  _projectIndexCache_ = { list: list, byKey: byKey };
-  return _projectIndexCache_;
+  list.byKey = byKey;
+  _projectIndexCache_ = list;
+  return list;
 }
 
 /**
@@ -252,7 +253,7 @@ function getWorkerReduceProjectIndex_(resourceName, startDate, endDate) {
     Logger.log('getWorkerReduceProjectIndex_: ' + e);
   }
 
-  return getProjectIndex_().list.filter(function (p) {
+  return getProjectIndex_().filter(function (p) {
     if (p.id_type === 'opportunity') return false;
     var key = _psaFallbackKey_(p.account, p.psa_project);
     return key && workerProjectKeys[key];
@@ -330,7 +331,7 @@ function resolveBookingProjectIdentity_(b) {
  */
 function api_getProjectIndex() {
   _requireAuthorized_();
-  return getProjectIndex_().list;
+  return getProjectIndex_();
 }
 
 /**

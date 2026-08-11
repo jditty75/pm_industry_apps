@@ -340,10 +340,12 @@
   // ============================================================
   function buildServerParams_(extra) {
     const f = State.filters;
+    const scopeAll = (typeof WFM25_SHELL !== 'undefined' && WFM25_SHELL &&
+      typeof WFM25State !== 'undefined' && WFM25State.scopeMode === 'all');
     return Object.assign({
-      teams: (f.managers && f.managers.length) ? f.managers : null,
+      teams: scopeAll ? null : ((f.managers && f.managers.length) ? f.managers : null),
       teamLabel: f.teamLabel || null,
-      includeMyManagers: !!f.includeMyManagers,
+      includeMyManagers: scopeAll ? false : !!f.includeMyManagers,
       workerScope: f.workerScope || 'All',
       viewMode: f.viewMode || 'Committed',
       scenarioId: f.scenarioId || null,
@@ -7820,6 +7822,7 @@ async function _qaRefreshPsaHours_() {
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend' | 'specialty-demand'
     groupBy:          'team',        // 'team' | 'role'
     landingBreadcrumb: 'SLG Org',
+    scopeMode:          'all',          // 'all' | 'myTeam' — session-only; default full SLG
     activeView:       'capacity',     // 'capacity' | 'staffing' | 'admin'
     selectedWorker:   null,          // worker name when panel is open
     selectedWorkerTeam: null,       // team label for breadcrumb + live aggregate shift
@@ -7854,12 +7857,86 @@ async function _qaRefreshPsaHours_() {
    * @returns {string}
    */
   function wfm25LandingBreadcrumb_(ref) {
-    if (!ref || ref.userIsAdmin || !ref.matchedManager) return 'SLG Org';
-    const resources = Array.isArray(ref.resources) ? ref.resources : [];
-    const report = resources.find(function (r) {
-      return r.manager === ref.matchedManager && r.resolvedTeam;
+    return 'SLG Org';
+  }
+
+  /**
+   * Breadcrumb prefix reflecting the active global scope toggle.
+   * @returns {string[]}
+   */
+  function wfm25ScopeBreadcrumbPrefix_() {
+    if (WFM25State.scopeMode === 'myTeam') {
+      return ['SLG Org', 'My Team'];
+    }
+    return ['SLG Org'];
+  }
+
+  /**
+   * Sync scope segmented-control UI to WFM25State.scopeMode.
+   */
+  function wfm25SyncScopeToggleUi_() {
+    $$('[data-wfm25-scope]').forEach(function (btn) {
+      const on = btn.dataset.wfm25Scope === WFM25State.scopeMode;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
-    return (report && report.resolvedTeam) ? report.resolvedTeam : 'SLG Org';
+  }
+
+  /**
+   * Clear cached payloads that depend on manager scope.
+   */
+  function wfm25InvalidateScopeCaches_() {
+    WFM25State.scorecardData = null;
+    WFM25State.xorgForecastData = null;
+    WFM25State.specialtyDemandData = null;
+    WFM25State.specialtyActualsData = null;
+    WFM25State.unfilledDemandRaw = null;
+    WFM25State.unfilledDemandWeeklyKeys = [];
+    WFM25State.commitmentsLedger = null;
+    WFM25State.commitmentsScenarios = null;
+    WFM25State.historyData = null;
+    State.explorerProjection = null;
+    State.dashboardCache = null;
+  }
+
+  /**
+   * Apply global scope mode and re-fetch the active surface.
+   * @param {'all'|'myTeam'} mode
+   */
+  async function wfm25SetScopeMode_(mode) {
+    mode = mode === 'myTeam' ? 'myTeam' : 'all';
+    if (WFM25State.scopeMode === mode) return;
+    WFM25State.scopeMode = mode;
+    if (mode === 'myTeam') {
+      applyAutoManagerDefaults_();
+    }
+    WFM25State.landingBreadcrumb = 'SLG Org';
+    wfm25SyncScopeToggleUi_();
+    wfm25InvalidateScopeCaches_();
+    if (WFM25State.selectedWorker) {
+      wfm25CloseWorkerPanel_();
+    }
+    if (WFM25State.activeView === 'staffing') {
+      if (WFM25State.staffingActiveTab === 'commitments') {
+        await loadWFM25Commitments_(true);
+      } else {
+        await loadWFM25UnfilledDemand_(true);
+      }
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat(
+        WFM25State.staffingActiveTab === 'commitments' ? ['Commitments'] : ['Unfilled Demand']
+      ));
+      return;
+    }
+    if (WFM25State.activeView === 'admin') {
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat(['Admin']));
+      return;
+    }
+    if (WFM25State.expandedTeam) {
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat([WFM25State.expandedTeam]));
+    } else {
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
+    }
+    await wfm25ActivateTab_(WFM25State.activeTab);
   }
 
   /**
@@ -9218,7 +9295,7 @@ async function _qaRefreshPsaHours_() {
 
     setWFM25WorkerPanelHeader_(workerName, teamLabel);
 
-    const crumbs = [WFM25State.landingBreadcrumb];
+    const crumbs = wfm25ScopeBreadcrumbPrefix_().slice();
     if (teamLabel) crumbs.push(teamLabel);
     crumbs.push(workerName);
     wfm25SetBreadcrumb_(crumbs);
@@ -9281,9 +9358,9 @@ async function _qaRefreshPsaHours_() {
     }
 
     if (WFM25State.expandedTeam) {
-      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, WFM25State.expandedTeam]);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat([WFM25State.expandedTeam]));
     } else {
-      wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
     }
   }
 
@@ -10364,10 +10441,10 @@ async function _qaRefreshPsaHours_() {
           const tl = tr.dataset.wfm25Team;
           if (WFM25State.expandedTeam === tl) {
             WFM25State.expandedTeam = null;
-            wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+            wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
           } else {
             WFM25State.expandedTeam = tl;
-            wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, tl]);
+            wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat([tl]));
           }
           renderWFM25UtilTable_(WFM25State.scorecardData);
         });
@@ -12815,7 +12892,7 @@ async function _qaRefreshPsaHours_() {
     if (view === 'admin') {
       clearWFM25SoftBookings_('admin');
       wfm25CloseWorkerPanel_();
-      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Admin']);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat(['Admin']));
       loadWFM25Admin_();
       return;
     }
@@ -12828,9 +12905,9 @@ async function _qaRefreshPsaHours_() {
     }
 
     if (WFM25State.expandedTeam) {
-      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, WFM25State.expandedTeam]);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat([WFM25State.expandedTeam]));
     } else {
-      wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
     }
   }
 
@@ -13075,10 +13152,10 @@ async function _qaRefreshPsaHours_() {
     if (cmGroupByEl) cmGroupByEl.hidden = (tabKey !== 'commitments');
 
     if (tabKey === 'unfilled-demand') {
-      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Unfilled Demand']);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat(['Unfilled Demand']));
       loadWFM25UnfilledDemand_();
     } else {
-      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, 'Commitments']);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat(['Commitments']));
       loadWFM25Commitments_();
     }
   }
@@ -13693,9 +13770,9 @@ async function _qaRefreshPsaHours_() {
     wfm25ActivateTab_('utilization');
     WFM25State.expandedTeam = teamLabel || null;
     if (teamLabel) {
-      wfm25SetBreadcrumb_([WFM25State.landingBreadcrumb, teamLabel]);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat([teamLabel]));
     } else {
-      wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
     }
     if (WFM25State.scorecardData) {
       renderWFM25UtilTable_(WFM25State.scorecardData);
@@ -14557,8 +14634,10 @@ async function _qaRefreshPsaHours_() {
     const ref = State.ref || {};
 
     // ── Landing breadcrumb (role-aware) ──
-    WFM25State.landingBreadcrumb = wfm25LandingBreadcrumb_(ref);
-    wfm25SetBreadcrumb_(WFM25State.landingBreadcrumb);
+    WFM25State.landingBreadcrumb = 'SLG Org';
+    WFM25State.scopeMode = 'all';
+    wfm25SyncScopeToggleUi_();
+    wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
 
     // ── Left icon strip: Capacity ↔ Staffing ↔ Admin ──
     $$('.wfm25-strip-btn').forEach(function (btn) {
@@ -14586,13 +14665,22 @@ async function _qaRefreshPsaHours_() {
       });
     });
 
+    // ── Scope toggle (All SLG / My Team) ──
+    $$('[data-wfm25-scope]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25SetScopeMode_(btn.dataset.wfm25Scope);
+      });
+    });
+
     // ── Group-by toggle (Team only in Stage 4) ──
-    $$('.wfm25-groupby-btn').forEach(function (btn) {
+    $$('.wfm25-groupby-btn[data-wfm25-groupby]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         if (WFM25State.selectedWorker) {
           wfm25CloseWorkerPanel_();
         }
-        $$('.wfm25-groupby-btn').forEach(function (b) { b.classList.remove('active'); });
+        $$('.wfm25-groupby-btn[data-wfm25-groupby]').forEach(function (b) {
+          b.classList.remove('active');
+        });
         btn.classList.add('active');
         WFM25State.groupBy = btn.dataset.wfm25Groupby;
         if (WFM25State.groupBy === 'role') {

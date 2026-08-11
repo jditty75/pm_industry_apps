@@ -18,13 +18,22 @@
               role="tab" aria-selected="false" id="wfm25TabSpecialtyDemand"
               aria-controls="wfm25PanelSpecialtyDemand">Specialty Demand</button>
     </div>
-    <div class="wfm25-groupby" aria-label="Group by">
-      <span class="wfm25-groupby-label">Group by:</span>
-      <button class="wfm25-groupby-btn active" data-wfm25-groupby="team"
-              aria-pressed="true">Team</button>
-      <!-- Role grouping deferred to Stage 6; hidden from Stage 4 VP deck -->
-      <button class="wfm25-groupby-btn wfm25-groupby-deferred" data-wfm25-groupby="role"
-              hidden aria-hidden="true" tabindex="-1">Role</button>
+    <div class="wfm25-tab-bar-controls">
+      <div class="wfm25-groupby wfm25-scope" aria-label="Scope">
+        <span class="wfm25-groupby-label">Scope:</span>
+        <button type="button" class="wfm25-groupby-btn active" data-wfm25-scope="all"
+                aria-pressed="true">All SLG</button>
+        <button type="button" class="wfm25-groupby-btn" data-wfm25-scope="myTeam"
+                aria-pressed="false">My Team</button>
+      </div>
+      <div class="wfm25-groupby" aria-label="Group by">
+        <span class="wfm25-groupby-label">Group by:</span>
+        <button class="wfm25-groupby-btn active" data-wfm25-groupby="team"
+                aria-pressed="true">Team</button>
+        <!-- Role grouping deferred to Stage 6; hidden from Stage 4 VP deck -->
+        <button class="wfm25-groupby-btn wfm25-groupby-deferred" data-wfm25-groupby="role"
+                hidden aria-hidden="true" tabindex="-1">Role</button>
+      </div>
     </div>
   </div>
 

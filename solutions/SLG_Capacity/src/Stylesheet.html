@@ -4831,6 +4831,15 @@ td.cell-with-bar {
 .wfm25-worker-qstrip-cell {
   border-radius: 4px;
   min-width: 64px;
+  cursor: pointer;
+}
+.wfm25-worker-qstrip-cell.is-selected {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: -2px;
+}
+.wfm25-worker-qstrip-cell:focus-visible {
+  outline: 2px solid var(--ballpoint);
+  outline-offset: -2px;
 }
 
 /* ── Tab bar ─────────────────────────────────────────────── */

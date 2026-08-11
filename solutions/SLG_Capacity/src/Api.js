@@ -504,6 +504,8 @@ function api_getResourceDetailV2(params) {
     ? getActualsSummaryByEmployee_() : {};
   const settings = readSettings_();
   const curQ = fiscalQuarterKey_(new Date());
+  const selectedQuarter = String(params.selectedQuarter || '') || curQ;
+  const isPastQuarter = compareFiscalQuarterKeys_(selectedQuarter, curQ) < 0;
   const quartersOut = buildWorkerQuarters_(
     w,
     scorecardWindowKeys_(),
@@ -514,31 +516,43 @@ function api_getResourceDetailV2(params) {
     curQ
   );
 
-  const projectsOut = Object.keys(w.projects || {}).sort().map(function (proj) {
-    return {
-      project: String(proj),
-      weekly: visibleWeeks.map(function (vw) {
-        return {
-          weekKey: String(vw.week_key),
-          hours: Number((w.projects[proj] || {})[vw.week_key] || 0) || 0
-        };
-      })
-    };
-  });
+  let projectsOut;
+  let roleCategoryRollup;
+  let specialtyPracticeRollup;
 
-  const roleCategoryPayload = buildResourceRoleCategoryRollup_(
-    resourceName, projectsOut, curQ, visibleWeeks
-  );
-  const roleCategoryRollup = roleCategoryPayload.rollup;
-  const specialtyPracticeRollup = buildResourceSpecialtyPracticeRollup_(
-    resourceName, curQ, visibleWeeks
-  );
-  const projectNameEnrichment = enrichResourceProjectNames_(resourceName, projectsOut);
-  projectsOut.forEach(function (p, i) {
-    p.roleCategory = roleCategoryPayload.roleCategories[i] || 'Unclassified';
-    p.account_name = projectNameEnrichment[i].account_name;
-    p.project_name = projectNameEnrichment[i].project_name;
-  });
+  if (isPastQuarter) {
+    const historyRollups = buildResourceHistoryRollups_(resourceName, selectedQuarter);
+    projectsOut = historyRollups.projects;
+    roleCategoryRollup = historyRollups.roleCategoryRollup;
+    specialtyPracticeRollup = historyRollups.specialtyPracticeRollup;
+  } else {
+    projectsOut = Object.keys(w.projects || {}).sort().map(function (proj) {
+      return {
+        project: String(proj),
+        weekly: visibleWeeks.map(function (vw) {
+          return {
+            weekKey: String(vw.week_key),
+            hours: Number((w.projects[proj] || {})[vw.week_key] || 0) || 0
+          };
+        })
+      };
+    });
+
+    const roleCategoryPayload = buildResourceRoleCategoryRollup_(
+      resourceName, projectsOut, selectedQuarter, visibleWeeks
+    );
+    roleCategoryRollup = roleCategoryPayload.rollup;
+    specialtyPracticeRollup = buildResourceSpecialtyPracticeRollup_(
+      resourceName, selectedQuarter, visibleWeeks
+    );
+    const projectNameEnrichment = enrichResourceProjectNames_(resourceName, projectsOut);
+    projectsOut.forEach(function (p, i) {
+      p.roleCategory = roleCategoryPayload.roleCategories[i] || 'Unclassified';
+      p.account_name = projectNameEnrichment[i].account_name;
+      p.project_name = projectNameEnrichment[i].project_name;
+      p.quarterHours = _projectQuarterHoursFromWeekly_(p, visibleWeeks, selectedQuarter);
+    });
+  }
 
   let totalProductive = 0;
   let totalIcpAvailable = 0;
@@ -569,6 +583,7 @@ function api_getResourceDetailV2(params) {
   return {
     resource: resourceName,
     found: true,
+    selectedQuarter: selectedQuarter,
     weeks: weeksOut,
     quarters: quartersOut,
     projects: projectsOut,
@@ -586,6 +601,101 @@ function api_getResourceDetailV2(params) {
       },
       windowLabel: String(blendedFiscalWindowLabel_() || '')
     }
+  };
+}
+
+/**
+ * Sum a project's hours for one fiscal quarter from weekly forecast payload.
+ * @param {{weekly:Array}} p
+ * @param {Array} visibleWeeks
+ * @param {string} selectedQuarter
+ * @return {number}
+ * @private
+ */
+function _projectQuarterHoursFromWeekly_(p, visibleWeeks, selectedQuarter) {
+  var curWeekKeys = {};
+  (visibleWeeks || []).forEach(function (vw) {
+    if (fiscalQuarterKey_(vw.week_start) === selectedQuarter) {
+      curWeekKeys[String(vw.week_key)] = true;
+    }
+  });
+  var sum = 0;
+  (p.weekly || []).forEach(function (wk) {
+    if (curWeekKeys[wk.weekKey]) sum += Number(wk.hours) || 0;
+  });
+  return sum;
+}
+
+/**
+ * Past-quarter Projects + Specialty from Actuals_History (WoW actuals, consumed as-is).
+ * @param {string} resourceName
+ * @param {string} fiscalQuarter
+ * @return {{specialtyPracticeRollup:Array, roleCategoryRollup:Array, projects:Array}}
+ */
+function buildResourceHistoryRollups_(resourceName, fiscalQuarter) {
+  var rows = readTable_(ACTUALS_HISTORY) || [];
+  var specialtyHours = {};
+  var roleCatHours = {};
+  var projectHours = {};
+  var projectRoleVotes = {};
+
+  rows.forEach(function (r) {
+    if (String(r.resource_name || '') !== resourceName) return;
+    if (String(r.fiscal_quarter || '').trim() !== fiscalQuarter) return;
+    var hrs = Number(r.worked_hours) || 0;
+    if (!hrs) return;
+    var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
+    specialtyHours[sp] = (specialtyHours[sp] || 0) + hrs;
+    var rc = String(r.project_role_category || '').trim() || 'Unclassified';
+    roleCatHours[rc] = (roleCatHours[rc] || 0) + hrs;
+    var proj = String(r.project || '').trim();
+    if (!proj) return;
+    projectHours[proj] = (projectHours[proj] || 0) + hrs;
+    if (!projectRoleVotes[proj]) projectRoleVotes[proj] = {};
+    projectRoleVotes[proj][rc] = (projectRoleVotes[proj][rc] || 0) + hrs;
+  });
+
+  function pickTopRole_(proj) {
+    var votes = projectRoleVotes[proj] || {};
+    var keys = Object.keys(votes);
+    if (!keys.length) return 'Unclassified';
+    keys.sort(function (a, b) { return (votes[b] || 0) - (votes[a] || 0); });
+    return keys[0];
+  }
+
+  var specialtyPracticeRollup = Object.keys(specialtyHours).map(function (sp) {
+    return {
+      specialtyPractice: sp,
+      currentQuarterHours: Number(specialtyHours[sp]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
+
+  var roleCategoryRollup = Object.keys(roleCatHours).map(function (rc) {
+    return {
+      roleCategory: rc,
+      currentQuarterHours: Number(roleCatHours[rc]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
+
+  var projects = Object.keys(projectHours).sort().map(function (proj) {
+    return {
+      project: proj,
+      account_name: '',
+      project_name: proj,
+      roleCategory: pickTopRole_(proj),
+      weekly: [],
+      quarterHours: Number(projectHours[proj]) || 0
+    };
+  });
+
+  return {
+    specialtyPracticeRollup: specialtyPracticeRollup,
+    roleCategoryRollup: roleCategoryRollup,
+    projects: projects
   };
 }
 

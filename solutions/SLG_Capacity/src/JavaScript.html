@@ -7951,6 +7951,7 @@ async function _qaRefreshPsaHours_() {
     workerReqId:      0,             // race-guard for worker detail fetch
     utilAllocFilter:  null,          // null | 'over' | 'under' — tile filter within scope
     expandedWeekKey:  null,          // weekKey for open weekly bar breakdown, or null
+    selectedPanelQuarter: null,     // null = current quarter; else fiscal-quarter key
     onLeaveRoster:    null,           // api_getOnLeaveRoster sidecar (display-only; not in util math)
     unfilledDemandRaw: null,          // last api_getUnstaffedDemand result (full tab)
     unfilledDemandWeeklyKeys: [],     // weekly WoW column keys in date sort order
@@ -8509,6 +8510,14 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Effective fiscal quarter for worker-panel drilldown (null state = current quarter).
+   * @returns {string}
+   */
+  function wfm25EffectivePanelQuarter_() {
+    return WFM25State.selectedPanelQuarter || fiscalQuarterKey_(new Date());
+  }
+
+  /**
    * Sum forward-quarter productive hours from existing quarter payload (reduction-rule basis).
    * @param {Array} quarters
    * @returns {number}
@@ -8564,10 +8573,15 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * HTML for current-quarter actual vs forecast hours explainer (worker panel).
+   * Shown only when the panel is drilled to the actual current quarter.
    * @param {Array} weeks
+   * @param {string} [viewQk] effective panel quarter; omit to infer from state
    * @returns {string}
    */
-  function wfm25CurrentQuarterSplitHtml_(weeks) {
+  function wfm25CurrentQuarterSplitHtml_(weeks, viewQk) {
+    const curQk = fiscalQuarterKey_(new Date());
+    const effQ = viewQk || wfm25EffectivePanelQuarter_();
+    if (effQ !== curQk) return '';
     const split = wfm25CurrentQuarterHoursSplit_(weeks);
     if (!split.total && !split.actual && !split.forecast) return '';
     return '<div class="wfm25-curq-split" role="note">' +
@@ -8592,31 +8606,37 @@ async function _qaRefreshPsaHours_() {
    */
   function renderWFM25WorkerKpiTiles_(detail, icpTarget) {
     const quarters = detail.quarters || [];
-    const curQ = quarters.find(function (q) { return q.isCurrentQuarter; }) || null;
+    const effQ = wfm25EffectivePanelQuarter_();
+    const curQk = fiscalQuarterKey_(new Date());
+    const selQ = quarters.find(function (q) { return q.quarterKey === effQ; }) || null;
+    const isPast = compareFiscalQuarterKeys_(effQ, curQk) < 0;
 
-    const attainment = curQ ? curQ.bonusAttainment : 0;
-    const attainColor = wfm25WorkerPanelAttainmentTileColor_(curQ);
-    const tracking = curQ ? curQ.trackingHours : 0;
-    const trackColor = wfm25TrackingKpiColor_(tracking, curQ);
+    const attainment = selQ ? selQ.bonusAttainment : 0;
+    const attainColor = wfm25WorkerPanelAttainmentTileColor_(selQ);
+    const tracking = selQ ? selQ.trackingHours : 0;
+    const trackColor = wfm25TrackingKpiColor_(tracking, selQ);
     const trackSign = tracking >= 0 ? '+' : '';
-    const forecastRemaining = wfm25ForwardForecastRemaining_(quarters);
+    const thirdTileLabel = isPast ? 'Total Worked' : 'Forecast Remaining';
+    const thirdTileValue = isPast
+      ? Math.round(Number(selQ && selQ.productiveHours) || 0).toLocaleString() + 'h'
+      : Math.round(wfm25ForwardForecastRemaining_(quarters)).toLocaleString() + 'h';
+    const attainmentLabel = isPast ? (effQ + ' Attainment') : 'Current Qtr Attainment';
 
-    const status = wfm25WorkerPanelStatus_(curQ);
+    const status = wfm25WorkerPanelStatus_(selQ);
     const statusLabel = status.label;
     const statusColor = status.color;
 
-    const curQk = fiscalQuarterKey_(new Date());
-    const curWeeks = (detail.weeks || []).filter(function (w) {
-      return w.fiscalQuarterKey === curQk;
+    const selWeeks = (detail.weeks || []).filter(function (w) {
+      return w.fiscalQuarterKey === effQ;
     });
-    const icpSeries = curWeeks.map(function (w) { return w.icpUtil; });
-    const sparkBase = curQ ? curQ.icpUtil : (icpTarget || 0.75);
+    const icpSeries = selWeeks.map(function (w) { return w.icpUtil; });
+    const sparkBase = selQ ? selQ.icpUtil : (icpTarget || 0.75);
     const sparkColor = cellColor(sparkBase, icpTarget).fg;
     const spark = wfm25MixTrendSparklineSvg_(icpSeries, sparkColor, 72, 26);
 
     return '<div class="wfm25-worker-kpi-strip qs-summary-strip" role="group" aria-label="Worker KPIs">' +
       '<div class="wfm25-worker-kpi-tile" style="background:' + attainColor.bg + ';color:' + attainColor.fg + '">' +
-        '<div class="wfm25-worker-kpi-label">Current Qtr Attainment</div>' +
+        '<div class="wfm25-worker-kpi-label">' + escapeHtml_(attainmentLabel) + '</div>' +
         '<div class="wfm25-worker-kpi-value">' + fmtPct(attainment) + '</div>' +
       '</div>' +
       '<div class="wfm25-worker-kpi-tile" style="background:' + trackColor.bg + ';color:' + trackColor.fg + '">' +
@@ -8624,8 +8644,8 @@ async function _qaRefreshPsaHours_() {
         '<div class="wfm25-worker-kpi-value">' + trackSign + Math.round(tracking) + 'h</div>' +
       '</div>' +
       '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--neutral">' +
-        '<div class="wfm25-worker-kpi-label">Forecast Remaining</div>' +
-        '<div class="wfm25-worker-kpi-value">' + Math.round(forecastRemaining).toLocaleString() + 'h</div>' +
+        '<div class="wfm25-worker-kpi-label">' + escapeHtml_(thirdTileLabel) + '</div>' +
+        '<div class="wfm25-worker-kpi-value">' + thirdTileValue + '</div>' +
       '</div>' +
       '<div class="wfm25-worker-kpi-tile" style="background:' + statusColor.bg + ';color:' + statusColor.fg + '">' +
         '<div class="wfm25-worker-kpi-label">Status</div>' +
@@ -8644,12 +8664,15 @@ async function _qaRefreshPsaHours_() {
    * @returns {string}
    */
   function renderWFM25WorkerProjectsSection_(detail) {
-    const curQk = fiscalQuarterKey_(new Date());
+    const effQ = wfm25EffectivePanelQuarter_();
     const weeks = detail.weeks || [];
     const rows = (detail.projects || []).map(function (p) {
+      const curHours = (p.quarterHours != null)
+        ? Number(p.quarterHours) || 0
+        : wfm25ProjectCurQuarterHours_(p, weeks, effQ);
       return {
         project: p,
-        curHours: wfm25ProjectCurQuarterHours_(p, weeks, curQk),
+        curHours: curHours,
         roleCategory: p.roleCategory || 'Unclassified',
         displayOnly: wfm25IsDisplayOnlyProject_(p)
       };
@@ -8663,7 +8686,7 @@ async function _qaRefreshPsaHours_() {
     let html = '<div class="wfm25-chrome-card wfm25-worker-projects-card">' +
       '<div class="wfm25-worker-projects-head">' +
         '<span class="wfm25-worker-projects-title">Projects</span>' +
-        '<span class="muted wfm25-worker-projects-qtr">' + escapeHtml_(curQk) + '</span>' +
+        '<span class="muted wfm25-worker-projects-qtr">' + escapeHtml_(effQ) + '</span>' +
       '</div>';
     if (!productive.length && !displayOnly.length) {
       html += '<div class="muted wfm25-worker-projects-empty">No project hours this quarter.</div>';
@@ -8715,7 +8738,7 @@ async function _qaRefreshPsaHours_() {
    * @returns {string}
    */
   function renderWFM25WorkerSpecialtySection_(detail) {
-    const curQk = fiscalQuarterKey_(new Date());
+    const effQ = wfm25EffectivePanelQuarter_();
     const rollup = (detail.specialtyPracticeRollup || []).filter(function (row) {
       return Number(row.currentQuarterHours) > 0;
     });
@@ -8726,7 +8749,7 @@ async function _qaRefreshPsaHours_() {
     let html = '<div class="wfm25-chrome-card wfm25-worker-specialty-card">' +
       '<div class="wfm25-worker-specialty-head">' +
         '<span class="wfm25-worker-specialty-title">SPECIALTY PRACTICE \u00b7 ' +
-          escapeHtml_(curQk) + '</span>' +
+          escapeHtml_(effQ) + '</span>' +
       '</div>';
     if (!rollup.length) {
       html += '<div class="muted wfm25-worker-specialty-empty">No specialty hours this quarter.</div>';
@@ -8778,6 +8801,7 @@ async function _qaRefreshPsaHours_() {
    */
   function renderWFM25WeeklyBarChart_(weeks, projection, workerName, detail) {
     const curQk = fiscalQuarterKey_(new Date());
+    const effQ = wfm25EffectivePanelQuarter_();
     const detailWeeks = weeks || [];
     const hasDraft = State.softBookings && State.softBookings.length && projection && workerName;
     const projWeeks = hasDraft ? wfm25ProjectionWeeks_(projection, workerName, true) : null;
@@ -8792,7 +8816,7 @@ async function _qaRefreshPsaHours_() {
       detailByKey[String(w.weekKey)] = w;
     });
 
-    let chartWeeks = detailWeeks.filter(function (w) { return w.fiscalQuarterKey === curQk; });
+    let chartWeeks = detailWeeks.filter(function (w) { return w.fiscalQuarterKey === effQ; });
     if (showDraft) {
       const seen = {};
       chartWeeks.forEach(function (w) { seen[String(w.weekKey)] = true; });
@@ -8802,7 +8826,7 @@ async function _qaRefreshPsaHours_() {
         const hrs = wfm25WeekDraftHours_(pw, baseWeekMap, projWeekMap);
         if (Math.abs(hrs.projected - hrs.base) <= 0.05) return;
         const meta = detailByKey[wk] || pw;
-        if (meta.fiscalQuarterKey && meta.fiscalQuarterKey !== curQk) return;
+        if (meta.fiscalQuarterKey && meta.fiscalQuarterKey !== effQ) return;
         chartWeeks.push(meta);
         seen[wk] = true;
       });
@@ -8820,7 +8844,7 @@ async function _qaRefreshPsaHours_() {
         '<div class="wfm25-weekly-head">' +
           '<span class="wfm25-weekly-title">Weekly Capacity (all dates are week ending)</span>' +
         '</div>' +
-        '<div class="muted wfm25-weekly-empty">No weeks in current quarter.</div></div>';
+        '<div class="muted wfm25-weekly-empty">No weeks in ' + escapeHtml_(effQ) + '.</div></div>';
     }
 
     let yMax = 0;
@@ -8909,7 +8933,7 @@ async function _qaRefreshPsaHours_() {
       '<div class="wfm25-weekly-head">' +
         '<span class="wfm25-weekly-title">Weekly Capacity (all dates are week ending)</span>' +
       '</div>' +
-      wfm25CurrentQuarterSplitHtml_(detailWeeks) +
+      wfm25CurrentQuarterSplitHtml_(detailWeeks, effQ) +
       '<div class="wfm25-weekly-legend" aria-hidden="true">' +
         '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--actual"></span>Actual</span>' +
         '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--forecast"></span>Forecast</span>' +
@@ -9062,6 +9086,7 @@ async function _qaRefreshPsaHours_() {
       return;
     }
     strip.hidden = false;
+    const effQ = wfm25EffectivePanelQuarter_();
     const hasDraft = State.softBookings && State.softBookings.length;
     const headerCells = quarters.map(function (q) {
       const curTag = q.isCurrentQuarter ? ' \u25c6' : '';
@@ -9069,6 +9094,7 @@ async function _qaRefreshPsaHours_() {
     }).join('');
     const bodyCells = quarters.map(function (q) {
       const qk = q.quarterKey;
+      const selectedCls = (qk === effQ) ? ' is-selected' : '';
       let baseUtil = q.icpUtil;
       const projUtil = hasDraft
         ? wfm25ProjectionUtil_(projection, 'worker', workerName, qk, true)
@@ -9079,11 +9105,13 @@ async function _qaRefreshPsaHours_() {
       }
       if (!hasDraft || projUtil == null) {
         const color = utilBandColor_(wfm25QuarterIcpColorRatio_(q, icpTarget));
-        return '<td class="wfm25-worker-qstrip-cell" style="background:' + color.bg +
+        return '<td class="wfm25-worker-qstrip-cell' + selectedCls + '" data-quarter-key="' +
+          escapeHtml_(qk) + '" role="button" tabindex="0" style="background:' + color.bg +
           ';color:' + color.fg + '">' + fmtPct(baseUtil) + '</td>';
       }
       const arrow = wfm25DraftArrow_(baseUtil, projUtil);
-      return '<td class="wfm25-worker-qstrip-cell has-draft">' +
+      return '<td class="wfm25-worker-qstrip-cell has-draft' + selectedCls + '" data-quarter-key="' +
+        escapeHtml_(qk) + '" role="button" tabindex="0">' +
         '<div class="wfm25-worker-qstrip-committed">' + fmtPct(baseUtil) + '</div>' +
         '<div class="wfm25-draft-label">Your draft</div>' +
         '<div class="wfm25-worker-qstrip-draft">' + fmtPct(baseUtil) +
@@ -9091,6 +9119,22 @@ async function _qaRefreshPsaHours_() {
     }).join('');
     strip.innerHTML = '<table class="wfm25-worker-qstrip-table"><thead><tr>' +
       headerCells + '</tr></thead><tbody><tr>' + bodyCells + '</tr></tbody></table>';
+
+    strip.querySelectorAll('[data-quarter-key]').forEach(function (cell) {
+      cell.addEventListener('click', function () {
+        const qk = cell.dataset.quarterKey || '';
+        const cur = fiscalQuarterKey_(new Date());
+        WFM25State.selectedPanelQuarter = (qk === cur) ? null : qk;
+        WFM25State.expandedWeekKey = null;
+        wfm25LoadWorkerDetail_();
+      });
+      cell.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          cell.click();
+        }
+      });
+    });
   }
 
   /**
@@ -9322,7 +9366,11 @@ async function _qaRefreshPsaHours_() {
     const workerPromise = workerName
       ? call(
           'api_getResourceDetailV2',
-          buildServerParams_({ resource: workerName, workerScope: 'SLG' })
+          buildServerParams_({
+            resource: workerName,
+            workerScope: 'SLG',
+            selectedQuarter: wfm25EffectivePanelQuarter_()
+          })
         )
       : null;
 
@@ -9384,6 +9432,39 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Load worker detail for the open panel (respects selectedPanelQuarter drill-down).
+   */
+  async function wfm25LoadWorkerDetail_() {
+    const workerName = WFM25State.selectedWorker;
+    if (!workerName) return;
+    const reqId = ++WFM25State.workerReqId;
+    const panelBody = document.getElementById('wfm25WorkerPanelBody');
+    if (panelBody) panelBody.innerHTML = wfm25LoadingSpinnerHtml_();
+    try {
+      const detail = await call(
+        'api_getResourceDetailV2',
+        buildServerParams_({
+          resource: workerName,
+          workerScope: 'SLG',
+          selectedQuarter: wfm25EffectivePanelQuarter_()
+        })
+      );
+      if (reqId !== WFM25State.workerReqId) return;
+      WFM25State.selectedWorkerDetail = detail;
+      paintWFM25WorkerPanel_(State.explorerProjection);
+      if (State.softBookings && State.softBookings.length) {
+        scheduleWFM25Projection_();
+      }
+    } catch (err) {
+      if (reqId !== WFM25State.workerReqId) return;
+      if (panelBody) {
+        panelBody.innerHTML = '<div class="muted" style="padding:12px;color:var(--thumbtack)">Failed to load: ' +
+          escapeHtml_(err.message || String(err)) + '</div>';
+      }
+    }
+  }
+
+  /**
    * Open the right-side worker panel and load detail from api_getResourceDetailV2.
    * @param {string} workerName
    * @param {string} teamLabel
@@ -9394,6 +9475,7 @@ async function _qaRefreshPsaHours_() {
     WFM25State.selectedWorkerTeam = teamLabel || null;
     WFM25State.selectedWorkerDetail = null;
     WFM25State.expandedWeekKey = null;
+    WFM25State.selectedPanelQuarter = null;
     State.selectedResource = workerName;
 
     const panel = document.getElementById('wfm25WorkerPanel');
@@ -9430,25 +9512,7 @@ async function _qaRefreshPsaHours_() {
       strip.innerHTML = '';
     }
 
-    const reqId = ++WFM25State.workerReqId;
-    try {
-      const detail = await call(
-        'api_getResourceDetailV2',
-        buildServerParams_({ resource: workerName, workerScope: 'SLG' })
-      );
-      if (reqId !== WFM25State.workerReqId) return;
-      WFM25State.selectedWorkerDetail = detail;
-      paintWFM25WorkerPanel_(State.explorerProjection);
-      if (State.softBookings && State.softBookings.length) {
-        scheduleWFM25Projection_();
-      }
-    } catch (err) {
-      if (reqId !== WFM25State.workerReqId) return;
-      if (panelBody) {
-        panelBody.innerHTML = '<div class="muted" style="padding:12px;color:var(--thumbtack)">Failed to load: ' +
-          escapeHtml_(err.message || String(err)) + '</div>';
-      }
-    }
+    await wfm25LoadWorkerDetail_();
   }
 
   /**
@@ -9460,6 +9524,7 @@ async function _qaRefreshPsaHours_() {
     WFM25State.selectedWorkerTeam = null;
     WFM25State.selectedWorkerDetail = null;
     WFM25State.expandedWeekKey = null;
+    WFM25State.selectedPanelQuarter = null;
     State.selectedResource = null;
 
     const panel = document.getElementById('wfm25WorkerPanel');

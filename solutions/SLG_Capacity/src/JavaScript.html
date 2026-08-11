@@ -7949,7 +7949,7 @@ async function _qaRefreshPsaHours_() {
     selectedWorkerTeam: null,       // team label for breadcrumb + live aggregate shift
     selectedWorkerDetail: null,     // last api_getResourceDetailV2 result
     workerReqId:      0,             // race-guard for worker detail fetch
-    utilAllocFilter:  null,          // null | 'over' | 'under' — tile filter within scope
+    utilAllocFilter:  null,          // null | 'over' | 'under' | 'ontrack' — tile filter within scope
     expandedWeekKey:  null,          // weekKey for open weekly bar breakdown, or null
     selectedPanelQuarter: null,     // null = current quarter; else fiscal-quarter key
     onLeaveRoster:    null,           // api_getOnLeaveRoster sidecar (display-only; not in util math)
@@ -8796,6 +8796,103 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Calendar bounds for a fiscal quarter (client mirror of Engine.fiscalQuarterBounds_).
+   * Worker-panel display only — not used for gate/reconciled math.
+   * @param {string} quarterKey e.g. 'FY27-Q3'
+   * @returns {{start:Date, end:Date}|null}
+   */
+  function wfm25FiscalQuarterCalendarBounds_(quarterKey) {
+    const m = String(quarterKey || '').match(/^FY(\d{2})-(Q[1-4])$/);
+    if (!m) return null;
+    const fy = 2000 + Number(m[1]);
+    const q = m[2];
+    const fyStartYear = fy - 1;
+    let startYear, startMonth, endYear, endMonth;
+    if (q === 'Q1') {
+      startYear = fyStartYear; startMonth = 1;
+      endYear = fyStartYear; endMonth = 3;
+    } else if (q === 'Q2') {
+      startYear = fyStartYear; startMonth = 4;
+      endYear = fyStartYear; endMonth = 6;
+    } else if (q === 'Q3') {
+      startYear = fyStartYear; startMonth = 7;
+      endYear = fyStartYear; endMonth = 9;
+    } else {
+      startYear = fyStartYear; startMonth = 10;
+      endYear = fy; endMonth = 0;
+    }
+    return {
+      start: new Date(startYear, startMonth, 1),
+      end: new Date(endYear, endMonth + 1, 0)
+    };
+  }
+
+  /**
+   * First and last Mon–Fri workdays in a fiscal quarter (display-only).
+   * @param {string} quarterKey
+   * @returns {{firstWorkday:Date, lastWorkday:Date}|null}
+   */
+  function wfm25FiscalQuarterWorkdayBounds_(quarterKey) {
+    const cal = wfm25FiscalQuarterCalendarBounds_(quarterKey);
+    if (!cal) return null;
+    const start = new Date(cal.start.getFullYear(), cal.start.getMonth(), cal.start.getDate());
+    const end = new Date(cal.end.getFullYear(), cal.end.getMonth(), cal.end.getDate());
+    let firstWorkday = new Date(start);
+    while (firstWorkday <= end) {
+      const dow = firstWorkday.getDay();
+      if (dow !== 0 && dow !== 6) break;
+      firstWorkday.setDate(firstWorkday.getDate() + 1);
+    }
+    let lastWorkday = new Date(end);
+    while (lastWorkday >= start) {
+      const dow = lastWorkday.getDay();
+      if (dow !== 0 && dow !== 6) break;
+      lastWorkday.setDate(lastWorkday.getDate() - 1);
+    }
+    if (firstWorkday > lastWorkday) return null;
+    return { firstWorkday: firstWorkday, lastWorkday: lastWorkday };
+  }
+
+  /**
+   * Mon–Fri dates for a week anchored on Saturday week_start (week-ending label).
+   * @param {string} weekStartIso ISO date (YYYY-MM-DD)
+   * @returns {Date[]}
+   */
+  function wfm25WeekMonFriDates_(weekStartIso) {
+    const sat = new Date(String(weekStartIso) + 'T12:00:00');
+    if (isNaN(sat.getTime())) return [];
+    const dates = [];
+    for (let offset = 5; offset >= 1; offset--) {
+      dates.push(new Date(
+        sat.getFullYear(),
+        sat.getMonth(),
+        sat.getDate() - offset
+      ));
+    }
+    return dates;
+  }
+
+  /**
+   * Whether a week has at least one Mon–Fri workday inside the quarter workday span.
+   * Drops fiscal/calendar boundary weeks from the worker-panel chart only.
+   * @param {Object} week detail week cell (weekStart, fiscalQuarterKey, …)
+   * @param {string} quarterKey displayed fiscal quarter
+   * @returns {boolean}
+   */
+  function wfm25WeekHasWorkdayInQuarter_(week, quarterKey) {
+    if (!week || !quarterKey) return true;
+    const bounds = wfm25FiscalQuarterWorkdayBounds_(quarterKey);
+    if (!bounds) return true;
+    const iso = week.weekStart;
+    if (!iso) return true;
+    const workdays = wfm25WeekMonFriDates_(iso);
+    if (!workdays.length) return true;
+    return workdays.some(function (d) {
+      return d >= bounds.firstWorkday && d <= bounds.lastWorkday;
+    });
+  }
+
+  /**
    * WFM.25 worker-panel weekly capacity bar chart with draft overlay (Pass 2).
    * @param {Array} weeks detail.weeks
    * @param {Object|null} projection api_projectSoftBookings result
@@ -8820,7 +8917,9 @@ async function _qaRefreshPsaHours_() {
       detailByKey[String(w.weekKey)] = w;
     });
 
-    let chartWeeks = detailWeeks.filter(function (w) { return w.fiscalQuarterKey === effQ; });
+    let chartWeeks = detailWeeks.filter(function (w) {
+      return w.fiscalQuarterKey === effQ && wfm25WeekHasWorkdayInQuarter_(w, effQ);
+    });
     if (showDraft) {
       const seen = {};
       chartWeeks.forEach(function (w) { seen[String(w.weekKey)] = true; });
@@ -8831,6 +8930,7 @@ async function _qaRefreshPsaHours_() {
         if (Math.abs(hrs.projected - hrs.base) <= 0.05) return;
         const meta = detailByKey[wk] || pw;
         if (meta.fiscalQuarterKey && meta.fiscalQuarterKey !== effQ) return;
+        if (!wfm25WeekHasWorkdayInQuarter_(meta, effQ)) return;
         chartWeeks.push(meta);
         seen[wk] = true;
       });
@@ -10341,7 +10441,11 @@ async function _qaRefreshPsaHours_() {
       const q = (w.quarters || [])[qi];
       if (!q) return;
       const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
-      counts[band]++;
+      if (band === 'over') counts.over++;
+      else if (band === 'under') counts.under++;
+      if (q.icpUtil != null && wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--ontarget') {
+        counts.ontrack++;
+      }
       if (Number(q.targetHours) > 0) {
         sumProd += Number(q.productiveHours) || 0;
         sumTarget += Number(q.targetHours) || 0;
@@ -10388,8 +10492,12 @@ async function _qaRefreshPsaHours_() {
       return;
     }
     const summary = wfm25ComputeAllocationSummary_(WFM25State.scorecardData);
-    const count = filter === 'over' ? summary.over : summary.under;
-    const label = filter === 'over' ? 'Over-allocated' : 'Under-allocated';
+    const count = filter === 'over' ? summary.over
+      : filter === 'under' ? summary.under
+      : summary.ontrack;
+    const label = filter === 'over' ? 'Over-allocated'
+      : filter === 'under' ? 'Under-allocated'
+      : 'On Track';
     chip.textContent = 'Showing: ' + label + ' (' + count + ')';
     wrap.hidden = false;
   }
@@ -10415,6 +10523,7 @@ async function _qaRefreshPsaHours_() {
 
     const overPressed = activeFilter === 'over';
     const underPressed = activeFilter === 'under';
+    const ontrackPressed = activeFilter === 'ontrack';
 
     const overTile =
       '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--over"' +
@@ -10431,10 +10540,11 @@ async function _qaRefreshPsaHours_() {
       '</button>';
 
     const onTrackTile =
-      '<div class="wfm25-util-banner-tile">' +
+      '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--ontarget"' +
+        ' data-wfm25-alloc-filter="ontrack" aria-pressed="' + (ontrackPressed ? 'true' : 'false') + '">' +
         '<div class="wfm25-util-banner-label">On Track</div>' +
         '<div class="wfm25-util-banner-value">' + summary.ontrack + '</div>' +
-      '</div>';
+      '</button>';
 
     const utilLabel = teamScope ? 'Team Utilization' : 'SLG Utilization';
     const utilTile =
@@ -10840,6 +10950,10 @@ async function _qaRefreshPsaHours_() {
     if (!filter) return true;
     const q = (worker.quarters || [])[qi];
     if (!q) return false;
+    if (filter === 'ontrack') {
+      return q.icpUtil != null &&
+        wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--ontarget';
+    }
     const thresholds = wfm25AllocThresholds_();
     const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
     return band === filter;

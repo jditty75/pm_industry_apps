@@ -469,10 +469,11 @@ function api_getResourceDetailV2(params) {
   const icpTarget = Number(w.icpTarget) || 0;
 
   const weeksOut = visibleWeeks.map(function (vw) {
+    // week_start is the Saturday anchor; week-ending label is that same Saturday (+0).
     const labelDate = new Date(
       vw.week_start.getFullYear(),
       vw.week_start.getMonth(),
-      vw.week_start.getDate() + 6
+      vw.week_start.getDate()
     );
     const cell = (w.blendedWeekly && w.blendedWeekly[vw.week_key]) || { hours: 0, isActual: false };
     const hours = Number(cell.hours) || 0;
@@ -2128,11 +2129,11 @@ function api_getForecastTable(params) {
   const visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
 
   const weeksOut = visibleWeeks.map(w => {
-    // Week-ending label: Saturday anchor + 6 days (Saturday week-ending).
+    // week_start is the Saturday anchor; week-ending label is that same Saturday (+0).
     const labelDate = new Date(
       w.week_start.getFullYear(),
       w.week_start.getMonth(),
-      w.week_start.getDate() + 6
+      w.week_start.getDate()
     );
     return {
       weekKey: String(w.week_key),

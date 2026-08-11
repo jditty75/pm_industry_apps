@@ -78,20 +78,18 @@ function getProjectIndex_() {
     Logger.log('getProjectIndex_: opps read failed — ' + e);
   }
 
-  // Active PSA projects from Allocations_Normalized (distinct project_name with hours)
-  var activePsaByNorm = {};
+  // Active PSA projects from Allocations_Normalized (distinct Account|Project with hours)
+  var activePsaByKey = {};
   try {
     cachedRead_(ALLOC_NORM).forEach(function (a) {
       var proj = String(a.project_name || '').trim();
       if (!proj) return;
       var hrs = Number(a.hours) || 0;
       if (!hrs) return;
-      var norm = _normPsaProject_(proj);
-      if (!activePsaByNorm[norm]) {
-        activePsaByNorm[norm] = {
-          account: String(a.account_name || '').trim(),
-          project: proj
-        };
+      var acct = String(a.account_name || '').trim();
+      var key = _psaFallbackKey_(acct, proj);
+      if (!activePsaByKey[key]) {
+        activePsaByKey[key] = { account: acct, project: proj };
       }
     });
   } catch (e) {
@@ -134,39 +132,47 @@ function getProjectIndex_() {
   }
 
   var psaMatchedToDeployment = {};
-
-  // Tier 2 — Active PSA deployment matched to Deployments (exact PSA Project Name)
+  var deploymentsById = {};
   deployments.forEach(function (d) {
+    var depId = String(d.deployment_id || '').trim();
+    if (!depId) return;
+    if (!deploymentsById[depId]) deploymentsById[depId] = d;
+  });
+
+  // Tier 2 — one entry per distinct Deployment ID matched to active Account|Project
+  Object.keys(deploymentsById).forEach(function (depId) {
+    var d = deploymentsById[depId];
     var psaName = String(d.psa_project_name || '').trim();
     if (!psaName) return;
-    var norm = _normPsaProject_(psaName);
-    if (!activePsaByNorm[norm]) return;
-    psaMatchedToDeployment[norm] = true;
-    var acct = String(d.account_name || activePsaByNorm[norm].account || '').trim();
-    var depLabel = String(d.deployment_name || d.deployment_id || '').trim();
+    var acct = String(d.account_name || '').trim();
+    var psaKey = _psaFallbackKey_(acct, psaName);
+    var activePsa = activePsaByKey[psaKey];
+    if (!activePsa) return;
+    psaMatchedToDeployment[psaKey] = true;
+    if (!acct) acct = String(activePsa.account || '').trim();
+    var depLabel = String(d.deployment_name || depId).trim();
     var label = acct ? acct + ' \u2014 ' + depLabel : depLabel;
     addEntry_({
       id_type: 'deployment',
-      id: String(d.deployment_id),
+      id: depId,
       label: label,
       account: acct,
       psa_project: psaName,
       opportunity_id: '',
-      deployment_id: String(d.deployment_id)
+      deployment_id: depId
     });
   });
 
-  // Tier 3 — PSA fallback (active project with no deployment match)
-  Object.keys(activePsaByNorm).forEach(function (norm) {
-    if (psaMatchedToDeployment[norm]) return;
-    var p = activePsaByNorm[norm];
+  // Tier 3 — PSA fallback (distinct Account|Project with no deployment match)
+  Object.keys(activePsaByKey).forEach(function (psaKey) {
+    if (psaMatchedToDeployment[psaKey]) return;
+    var p = activePsaByKey[psaKey];
     var acct = String(p.account || '').trim();
     var proj = String(p.project || '').trim();
-    var id = _psaFallbackKey_(acct, proj);
     var label = acct ? acct + ' \u2014 ' + proj : proj;
     addEntry_({
       id_type: 'psa',
-      id: id,
+      id: psaKey,
       label: label,
       account: acct,
       psa_project: proj,
@@ -228,7 +234,7 @@ function getWorkerReduceProjectIndex_(resourceName, startDate, endDate) {
   if (start && isNaN(start.getTime())) start = null;
   if (end && isNaN(end.getTime())) end = null;
 
-  var workerPsa = {};
+  var workerProjectKeys = {};
   try {
     cachedRead_(ALLOC_NORM).forEach(function (a) {
       if (String(a.resource_name || '') !== resourceName) return;
@@ -238,8 +244,9 @@ function getWorkerReduceProjectIndex_(resourceName, startDate, endDate) {
         var ws = a.week_start instanceof Date ? a.week_start : new Date(a.week_start);
         if (!isNaN(ws.getTime()) && (ws < start || ws > end)) return;
       }
+      var acct = String(a.account_name || '').trim();
       var proj = String(a.project_name || '').trim();
-      if (proj) workerPsa[_normPsaProject_(proj)] = true;
+      if (proj) workerProjectKeys[_psaFallbackKey_(acct, proj)] = true;
     });
   } catch (e) {
     Logger.log('getWorkerReduceProjectIndex_: ' + e);
@@ -247,8 +254,8 @@ function getWorkerReduceProjectIndex_(resourceName, startDate, endDate) {
 
   return getProjectIndex_().list.filter(function (p) {
     if (p.id_type === 'opportunity') return false;
-    var psa = _normPsaProject_(p.psa_project);
-    return psa && workerPsa[psa];
+    var key = _psaFallbackKey_(p.account, p.psa_project);
+    return key && workerProjectKeys[key];
   });
 }
 

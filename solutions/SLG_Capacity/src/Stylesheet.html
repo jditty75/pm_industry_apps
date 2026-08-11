@@ -4211,6 +4211,16 @@ td.cell-with-bar {
   border-radius: 4px;
   position: relative;
 }
+.wfm25-weekly-bar-total {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--staple);
+  line-height: 1.1;
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
 .wfm25-weekly-bar-btn:hover {
   background: rgba(8, 117, 193, .06);
 }
@@ -4536,6 +4546,91 @@ td.cell-with-bar {
 }
 .wfm25-sb-project-fields[hidden] {
   display: none !important;
+}
+.wfm25-sb-project-list {
+  min-height: 8.5rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid var(--desk);
+  border-radius: 6px;
+  background: var(--canvas);
+}
+.wfm25-sb-project-empty {
+  padding: 12px 10px;
+  font-size: 13px;
+}
+.wfm25-sb-project-group-label {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 10px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--staple);
+  background: var(--business-card);
+  border-bottom: 1px solid var(--desk);
+}
+.wfm25-sb-project-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--desk);
+  background: transparent;
+  cursor: pointer;
+}
+.wfm25-sb-project-item:last-child {
+  border-bottom: 0;
+}
+.wfm25-sb-project-item:hover,
+.wfm25-sb-project-item.is-selected {
+  background: rgba(8, 117, 193, .08);
+}
+.wfm25-sb-project-item.is-selected {
+  box-shadow: inset 3px 0 0 var(--wfm25-chrome-accent);
+}
+.wfm25-sb-project-item-primary {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.3;
+  white-space: normal;
+  word-break: break-word;
+}
+.wfm25-sb-project-item-secondary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--staple);
+}
+.wfm25-sb-project-item-context {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  word-break: break-word;
+}
+.wfm25-sb-project-pill {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--staple);
+  background: var(--business-card);
+  border: 1px solid var(--desk);
+}
+.wfm25-sb-project-mark {
+  background: rgba(231, 111, 28, .22);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
 }
 .wfm25-sb-project-select {
   min-height: 8.5rem;

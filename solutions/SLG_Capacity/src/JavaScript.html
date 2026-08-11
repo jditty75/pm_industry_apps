@@ -3425,7 +3425,16 @@
     if (!f) return items;
     return items.filter(function (item) {
       const label = formatSoftBookLinkLabel_(whatType, item).toLowerCase();
-      return label.indexOf(f) >= 0;
+      const display = (whatType === 'project' && typeof wfm25ProjectPickerDisplay_ === 'function')
+        ? wfm25ProjectPickerDisplay_(item) : { primary: '', secondary: '' };
+      const hay = [
+        label,
+        String(item.account || ''),
+        String(item.psa_project || ''),
+        display.primary,
+        display.secondary
+      ].join(' ').toLowerCase();
+      return hay.indexOf(f) >= 0;
     });
   }
 
@@ -3474,28 +3483,131 @@
   }
 
   /**
-   * Render the Add/Reduce project picker list (client-side filter + sort).
+   * Group header for soft-book project picker tiers.
+   * @param {string} idType
+   * @returns {string}
+   */
+  function wfm25ProjectPickerGroupLabel_(idType) {
+    if (idType === 'opportunity') return 'OPPORTUNITIES';
+    if (idType === 'deployment') return 'ACTIVE DEPLOYMENTS';
+    if (idType === 'psa') return 'PSA PROJECTS';
+    return '';
+  }
+
+  /**
+   * Type pill label for a project index entry.
+   * @param {string} idType
+   * @returns {string}
+   */
+  function wfm25ProjectPickerTypePill_(idType) {
+    if (idType === 'opportunity') return 'Opportunity';
+    if (idType === 'deployment') return 'Deployment';
+    if (idType === 'psa') return 'PSA';
+    return '';
+  }
+
+  /**
+   * Primary / secondary display lines for grouped project picker rows.
+   * @param {Object} item
+   * @returns {{primary:string, secondary:string}}
+   */
+  function wfm25ProjectPickerDisplay_(item) {
+    const account = String(item.account || '').trim();
+    const label = String(item.label || '');
+    const parts = label.split(' \u2014 ');
+    if (item.id_type === 'psa') {
+      return {
+        primary: String(item.psa_project || label).trim(),
+        secondary: account
+      };
+    }
+    if (parts.length >= 2) {
+      return {
+        primary: parts.slice(1).join(' \u2014 ').trim(),
+        secondary: account || parts[0].trim()
+      };
+    }
+    return { primary: label, secondary: account };
+  }
+
+  /**
+   * Wrap filter substring matches in a highlight span (case-insensitive).
+   * @param {string} text
+   * @param {string} filterText
+   * @returns {string} safe HTML
+   */
+  function wfm25HighlightPickerMatch_(text, filterText) {
+    const raw = String(text || '');
+    const f = String(filterText || '').trim();
+    if (!f) return escapeHtml_(raw);
+    const lower = raw.toLowerCase();
+    const fl = f.toLowerCase();
+    let out = '';
+    let pos = 0;
+    let idx = lower.indexOf(fl, pos);
+    while (idx >= 0) {
+      if (idx > pos) out += escapeHtml_(raw.slice(pos, idx));
+      out += '<mark class="wfm25-sb-project-mark">' + escapeHtml_(raw.slice(idx, idx + f.length)) + '</mark>';
+      pos = idx + f.length;
+      idx = lower.indexOf(fl, pos);
+    }
+    if (pos < raw.length) out += escapeHtml_(raw.slice(pos));
+    return out;
+  }
+
+  /**
+   * Render the Add/Reduce project picker list (grouped, two-line, match-highlighted).
    * @param {string} [filterText]
    * @param {string} [selectedKey] id_type:id
    */
   function wfm25RenderSoftBookProjectSelect_(filterText, selectedKey) {
-    const sel = document.getElementById('wfm25SbProjectSelect');
+    const listEl = document.getElementById('wfm25SbProjectList');
     const identityInput = document.getElementById('wfm25SbProjectIdentity');
-    if (!sel) return;
+    if (!listEl) return;
     const items = filterSoftBookLinkRecords_('project', filterText);
+    const tierOrder = ['opportunity', 'deployment', 'psa'];
+    const grouped = {};
+    items.forEach(function (item) {
+      const tier = String(item.id_type || 'psa');
+      if (!grouped[tier]) grouped[tier] = [];
+      grouped[tier].push(item);
+    });
     let html = '';
     if (!items.length) {
-      html = '<option value="" disabled>No matching projects</option>';
+      html = '<div class="wfm25-sb-project-empty muted">No matching projects</div>';
     } else {
-      items.forEach(function (item) {
-        const key = getSoftBookLinkId_('project', item);
-        html += '<option value="' + escapeHtml_(key) + '">' + escapeHtml_(item.label) + '</option>';
+      tierOrder.forEach(function (tier) {
+        const tierItems = grouped[tier];
+        if (!tierItems || !tierItems.length) return;
+        html += '<div class="wfm25-sb-project-group" role="group" aria-label="' +
+          escapeHtml_(wfm25ProjectPickerGroupLabel_(tier)) + '">' +
+          '<div class="wfm25-sb-project-group-label">' + escapeHtml_(wfm25ProjectPickerGroupLabel_(tier)) + '</div>';
+        tierItems.forEach(function (item) {
+          const key = getSoftBookLinkId_('project', item);
+          const display = wfm25ProjectPickerDisplay_(item);
+          const secondaryBits = [display.secondary];
+          const psa = String(item.psa_project || '').trim();
+          if (psa && item.id_type !== 'psa' && psa !== display.primary) secondaryBits.push(psa);
+          const secondaryText = secondaryBits.filter(Boolean).join(' \u00b7 ');
+          const selected = selectedKey === key || (identityInput && identityInput.value === key);
+          html += '<button type="button" class="wfm25-sb-project-item' + (selected ? ' is-selected' : '') + '"' +
+            ' role="option" aria-selected="' + (selected ? 'true' : 'false') + '"' +
+            ' data-key="' + escapeHtml_(key) + '">' +
+            '<div class="wfm25-sb-project-item-primary">' +
+              wfm25HighlightPickerMatch_(display.primary, filterText) + '</div>' +
+            '<div class="wfm25-sb-project-item-secondary">' +
+              '<span class="wfm25-sb-project-item-context">' +
+                wfm25HighlightPickerMatch_(secondaryText, filterText) + '</span>' +
+              '<span class="wfm25-sb-project-pill">' + escapeHtml_(wfm25ProjectPickerTypePill_(tier)) + '</span>' +
+            '</div>' +
+          '</button>';
+        });
+        html += '</div>';
       });
     }
-    sel.innerHTML = html;
+    listEl.innerHTML = html;
     const pick = selectedKey || (identityInput && identityInput.value) || '';
-    if (pick) sel.value = pick;
-    if (identityInput && sel.value) identityInput.value = sel.value;
+    if (pick && identityInput) identityInput.value = pick;
   }
 
   /**
@@ -3532,11 +3644,11 @@
 
   function wfm25ClearSoftBookProjectSelection_() {
     const filterEl = document.getElementById('wfm25SbProjectFilter');
-    const sel = document.getElementById('wfm25SbProjectSelect');
+    const listEl = document.getElementById('wfm25SbProjectList');
     const identityInput = document.getElementById('wfm25SbProjectIdentity');
     if (filterEl) filterEl.value = '';
     if (identityInput) identityInput.value = '';
-    if (sel) sel.innerHTML = '<option value="" disabled>Select a project</option>';
+    if (listEl) listEl.innerHTML = '<div class="wfm25-sb-project-empty muted">Select a project</div>';
   }
 
   /**
@@ -3545,8 +3657,7 @@
    */
   function wfm25GetSelectedProjectIdentity_() {
     const identityInput = document.getElementById('wfm25SbProjectIdentity');
-    const sel = document.getElementById('wfm25SbProjectSelect');
-    const key = (identityInput && identityInput.value) || (sel && sel.value) || '';
+    const key = (identityInput && identityInput.value) || '';
     const parsed = wfm25ParseProjectKey_(key);
     if (!parsed) return null;
     const items = State.projectIndex || [];
@@ -8758,6 +8869,7 @@ async function _qaRefreshPsaHours_() {
           ' aria-expanded="' + (isOpen ? 'true' : 'false') + '"' +
           ' aria-label="Week ending ' + escapeHtml_(cell.label) + ', ' + Math.round(committedH) + ' hours"' +
           ' title="' + escapeHtml_(tip.join('\n')) + '">' +
+          '<span class="wfm25-weekly-bar-total" aria-hidden="true">' + Math.round(committedH) + 'h</span>' +
           '<div class="wfm25-weekly-bar-stack" style="height:' + plotH + 'px">' +
             (ghostPct > 0
               ? '<div class="wfm25-weekly-bar-ghost" style="height:' + ghostPct.toFixed(2) + '%"' +
@@ -14752,16 +14864,20 @@ async function _qaRefreshPsaHours_() {
       });
     }
     const sbProjectFilter = document.getElementById('wfm25SbProjectFilter');
-    const sbProjectSelect = document.getElementById('wfm25SbProjectSelect');
+    const sbProjectList = document.getElementById('wfm25SbProjectList');
     const sbProjectIdentity = document.getElementById('wfm25SbProjectIdentity');
     if (sbProjectFilter) {
       sbProjectFilter.addEventListener('input', debounce_(function () {
         wfm25RenderSoftBookProjectSelect_(sbProjectFilter.value, sbProjectIdentity ? sbProjectIdentity.value : '');
       }, 150));
     }
-    if (sbProjectSelect) {
-      sbProjectSelect.addEventListener('change', function () {
-        if (sbProjectIdentity) sbProjectIdentity.value = sbProjectSelect.value || '';
+    if (sbProjectList) {
+      sbProjectList.addEventListener('click', function (e) {
+        const item = e.target.closest('.wfm25-sb-project-item');
+        if (!item) return;
+        const key = item.dataset.key || '';
+        if (sbProjectIdentity) sbProjectIdentity.value = key;
+        wfm25RenderSoftBookProjectSelect_(sbProjectFilter ? sbProjectFilter.value : '', key);
       });
     }
     const sbStart = document.getElementById('wfm25SbStart');

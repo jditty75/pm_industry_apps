@@ -8434,11 +8434,15 @@ async function _qaRefreshPsaHours_() {
     if (wfm25IsDisplayOnlyProject_(project)) {
       return wfm25DisplayOnlyProjectLabel_(project);
     }
-    const acct = String(project.account_name || '').trim() || 'Unclassified';
-    const sow = wfm25ExtractSowNum_(project);
-    if (sow) return acct + ' \u2014 SOW #' + sow;
     const proj = String(project.project_name || project.project || '').trim();
-    return proj ? (acct + ' \u2014 ' + proj) : acct;
+    const acct = String(project.account_name || '').trim();
+    // History rollups ship full project name with empty account_name — show verbatim.
+    if (proj && !acct) return proj;
+    if (!proj) return 'Unclassified';
+    const acctLabel = acct || 'Unclassified';
+    const sow = wfm25ExtractSowNum_(project);
+    if (sow) return acctLabel + ' \u2014 SOW #' + sow;
+    return acctLabel + ' \u2014 ' + proj;
   }
 
   /**

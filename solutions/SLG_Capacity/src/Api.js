@@ -472,7 +472,7 @@ function api_getResourceDetailV2(params) {
     const labelDate = new Date(
       vw.week_start.getFullYear(),
       vw.week_start.getMonth(),
-      vw.week_start.getDate() + 1
+      vw.week_start.getDate() + 6
     );
     const cell = (w.blendedWeekly && w.blendedWeekly[vw.week_key]) || { hours: 0, isActual: false };
     const hours = Number(cell.hours) || 0;
@@ -2128,12 +2128,11 @@ function api_getForecastTable(params) {
   const visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
 
   const weeksOut = visibleWeeks.map(w => {
-    // Display label shows the SUNDAY of the week (week_start is the Saturday
-    // export anchor). Data stays Saturday-anchored; this is display-only.
+    // Week-ending label: Saturday anchor + 6 days (Saturday week-ending).
     const labelDate = new Date(
       w.week_start.getFullYear(),
       w.week_start.getMonth(),
-      w.week_start.getDate() + 1
+      w.week_start.getDate() + 6
     );
     return {
       weekKey: String(w.week_key),

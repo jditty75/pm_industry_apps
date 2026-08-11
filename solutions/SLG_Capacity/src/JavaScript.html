@@ -3778,10 +3778,15 @@
       };
     });
     const btn = $('#sbCommitSubmitBtn');
+    const modal = $('#softBookCommitModal');
+    const modalPanel = modal ? modal.querySelector('.modal-panel') : null;
     try {
-      await withLoading_(btn, async function () {
-        await call('api_commitSoftBookings', scenarioName, bookings);
-      }, { label: 'Committing...' });
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Committing…';
+      }
+      wfm25ShowLoading_(modalPanel || modal);
+      await call('api_commitSoftBookings', scenarioName, bookings);
       State.softBookings = (State.softBookings || []).filter(function (b) {
         return committedKeys.indexOf(softBookCommitKey_(b)) < 0;
       });
@@ -3806,6 +3811,12 @@
       if (errEl) {
         errEl.textContent = 'Submit failed: ' + (e.message || e);
         errEl.hidden = false;
+      }
+    } finally {
+      wfm25HideLoading_(modalPanel || modal);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Commit';
       }
     }
   }
@@ -8332,6 +8343,50 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Sum current-quarter productive hours split by actual vs forecast weeks.
+   * @param {Array} weeks detail.weeks from api_getResourceDetailV2
+   * @returns {{actual:number, forecast:number, total:number}}
+   */
+  function wfm25CurrentQuarterHoursSplit_(weeks) {
+    const curQk = fiscalQuarterKey_(new Date());
+    let actual = 0;
+    let forecast = 0;
+    (weeks || []).forEach(function (w) {
+      if (w.fiscalQuarterKey !== curQk) return;
+      const h = Number(w.hours) || 0;
+      if (w.isActual) actual += h;
+      else forecast += h;
+    });
+    return {
+      actual: actual,
+      forecast: forecast,
+      total: actual + forecast
+    };
+  }
+
+  /**
+   * HTML for current-quarter actual vs forecast hours explainer (worker panel).
+   * @param {Array} weeks
+   * @returns {string}
+   */
+  function wfm25CurrentQuarterSplitHtml_(weeks) {
+    const split = wfm25CurrentQuarterHoursSplit_(weeks);
+    if (!split.total && !split.actual && !split.forecast) return '';
+    return '<div class="wfm25-curq-split" role="note">' +
+      '<div class="wfm25-curq-split-row">' +
+        '<span class="wfm25-curq-split-label">Actual (to date)</span>' +
+        '<span class="wfm25-curq-split-value">' + Math.round(split.actual).toLocaleString() + 'h</span>' +
+      '</div>' +
+      '<div class="wfm25-curq-split-row">' +
+        '<span class="wfm25-curq-split-label">Forecast (remaining)</span>' +
+        '<span class="wfm25-curq-split-value">' + Math.round(split.forecast).toLocaleString() + 'h</span>' +
+      '</div>' +
+      '<p class="muted wfm25-curq-split-note">Current quarter = actuals to date + forecast for remaining weeks (' +
+        Math.round(split.total).toLocaleString() + 'h total).</p>' +
+    '</div>';
+  }
+
+  /**
    * WFM.25 worker-panel KPI tiles (current-quarter metrics + trend sparkline).
    * @param {Object} detail api_getResourceDetailV2 result
    * @param {number} icpTarget
@@ -8655,6 +8710,7 @@ async function _qaRefreshPsaHours_() {
       '<div class="wfm25-weekly-head">' +
         '<span class="wfm25-weekly-title">Weekly Capacity (all dates are week ending)</span>' +
       '</div>' +
+      wfm25CurrentQuarterSplitHtml_(detailWeeks) +
       '<div class="wfm25-weekly-legend" aria-hidden="true">' +
         '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--actual"></span>Actual</span>' +
         '<span class="wfm25-weekly-legend-item"><span class="wfm25-weekly-legend-swatch wfm25-weekly-legend-swatch--forecast"></span>Forecast</span>' +

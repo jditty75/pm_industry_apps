@@ -3649,6 +3649,9 @@ td.cell-with-bar {
 .wfm25-loading-active .wfm25-unfilled-demand-table {
   pointer-events: none;
 }
+.modal-panel.wfm25-loading-active {
+  position: relative;
+}
 
 /* ── Commitments ledger ─────────────────────────────────── */
 .wfm25-commitments-wrap {
@@ -4083,6 +4086,30 @@ td.cell-with-bar {
 }
 .wfm25-weekly-head {
   margin-bottom: 8px;
+}
+.wfm25-curq-split {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--business-card);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.wfm25-curq-split-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.wfm25-curq-split-label {
+  color: var(--staple);
+}
+.wfm25-curq-split-value {
+  font-weight: 600;
+}
+.wfm25-curq-split-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
 }
 .wfm25-weekly-title {
   font-size: 12px;

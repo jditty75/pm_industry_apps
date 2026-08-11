@@ -1971,19 +1971,19 @@ function api_commitSoftBookings(scenarioName, bookings) {
     var direction = String(b.direction || 'add').toLowerCase();
     var what = b.what || {};
     var whatType = String(what.type || '');
-    var opportunityId = '';
-    var deploymentId = '';
     var notes = '';
+    var identity = (typeof resolveBookingProjectIdentity_ === 'function')
+      ? resolveBookingProjectIdentity_(b) : {
+        project_id_type: '', project_id: '', project_label: '',
+        opportunity_id: '', deployment_id: ''
+      };
 
-    if (whatType === 'opportunity') {
-      opportunityId = String(what.opportunity_id || '');
-    } else if (whatType === 'deployment') {
-      deploymentId = String(what.deployment_id || what.opportunity_id || '');
-      if (deploymentId) {
-        notes = 'Soft-book deployment: ' + deploymentId;
-      }
-    } else if (whatType === 'label') {
+    if (whatType === 'label') {
       notes = 'Soft-book label: ' + String(what.label || '');
+    } else if (identity.deployment_id && !identity.project_label) {
+      notes = 'Soft-book deployment: ' + identity.deployment_id;
+    } else if (identity.opportunity_id && !identity.project_label) {
+      notes = 'Opportunity: ' + identity.opportunity_id;
     }
 
     var resolvedResourceType = _resolveBookingResourceType_(b);
@@ -1998,8 +1998,8 @@ function api_commitSoftBookings(scenarioName, bookings) {
         distribution: 'Even',
         status: 'Committed',
         scenario_id: scenarioId,
-        deployment_id: deploymentId,
-        reason: notes || (opportunityId ? 'Opportunity: ' + opportunityId : '')
+        deployment_id: identity.deployment_id || '',
+        reason: notes || identity.project_label || ''
       });
       committed.push({
         resource_name: String(savedAdj.resource_name || b.resource_name || ''),
@@ -2010,7 +2010,10 @@ function api_commitSoftBookings(scenarioName, bookings) {
     }
 
     var saved = saveAssignment_({
-      opportunity_id: opportunityId,
+      opportunity_id: identity.opportunity_id || '',
+      project_id_type: identity.project_id_type || '',
+      project_id: identity.project_id || '',
+      project_label: identity.project_label || '',
       resource_name: String(b.resource_name || ''),
       resource_type: resolvedResourceType,
       start_date: b.start_date,
@@ -3668,7 +3671,10 @@ function _sanitizeAssignmentForWire_(a) {
     modified_by: String(a.modified_by || ''),
     modified_at: _toIso_(a.modified_at),
     resource_type: String(a.resource_type || ''),  // Priority 4
-    team_label: String(a.team_label || '')          // Priority 4
+    team_label: String(a.team_label || ''),          // Priority 4
+    project_id_type: String(a.project_id_type || ''),
+    project_id: String(a.project_id || ''),
+    project_label: String(a.project_label || '')
   };
 }
 

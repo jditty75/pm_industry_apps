@@ -47,6 +47,7 @@
     dashboardCache: null,
     opportunities: [],
     deployments: [],
+    projectIndex: [],
     scenarios: [],
     currentView: 'dashboard',
     selectedResource: null,
@@ -3237,6 +3238,7 @@
     const dirGroup = document.querySelector('.wfm25-adjust-direction');
     const reduceNote = document.getElementById('wfm25SbReduceNote');
     const fillFields = document.getElementById('wfm25SbFillFields');
+    const projectFields = document.getElementById('wfm25SbProjectFields');
     const workerPicker = document.getElementById('wfm25SbWorkerPicker');
     const workerInput = document.getElementById('wfm25SbWorker');
     const drawer = document.querySelector('.wfm25-softbook-drawer');
@@ -3262,6 +3264,7 @@
       dirGroup.hidden = hideDir;
     }
     if (fillFields) fillFields.hidden = !isFill;
+    if (projectFields) projectFields.hidden = isFill || isEdit;
     if (workerPicker) workerPicker.hidden = !isFill;
     if (workerInput) {
       workerInput.readOnly = true;
@@ -3284,6 +3287,9 @@
       reduceBtn.setAttribute('aria-pressed', isReduce ? 'true' : 'false');
     }
     wfm25RefreshSoftBookDrawerChrome_();
+    if (!wfm25IsDemandFillMode_() && !wfm25IsCommitmentEditMode_()) {
+      wfm25LoadSoftBookProjectPicker_();
+    }
   }
 
   function showReductionClampWarnings_(warnings) {
@@ -3386,20 +3392,24 @@
   }
 
   function getSoftBookLinkRecords_(whatType) {
-    if (whatType === 'deployment') return State.deployments || [];
-    return State.opportunities || [];
+    if (whatType === 'label') return [];
+    if (whatType === 'project' || whatType === 'opportunity' || whatType === 'deployment') {
+      return State.projectIndex || [];
+    }
+    return State.projectIndex || [];
   }
 
   function formatSoftBookLinkLabel_(whatType, item) {
     if (!item) return '';
-    if (whatType === 'deployment') {
-      return (item.account_name || item.account || '') + ' — ' + (item.deployment_name || item.deployment_id || '');
-    }
-    return (item.account || item.account_name || '') + ' — ' + (item.opportunity_name || item.opportunity_id || '');
+    if (whatType === 'label') return String(item || '');
+    return String(item.label || '');
   }
 
   function getSoftBookLinkId_(whatType, item) {
     if (!item) return '';
+    if (whatType === 'project' || whatType === 'opportunity' || whatType === 'deployment') {
+      return String(item.id_type || '') + ':' + String(item.id || '');
+    }
     return whatType === 'deployment'
       ? String(item.deployment_id || '')
       : String(item.opportunity_id || '');
@@ -3407,14 +3417,19 @@
 
   function filterSoftBookLinkRecords_(whatType, filterText) {
     const f = String(filterText || '').toLowerCase().trim();
-    return getSoftBookLinkRecords_(whatType).filter(function (item) {
+    const items = getSoftBookLinkRecords_(whatType).slice().sort(function (a, b) {
+      return String(a.label || '').localeCompare(String(b.label || ''), undefined, { sensitivity: 'base' });
+    });
+    if (!f) return items;
+    return items.filter(function (item) {
       const label = formatSoftBookLinkLabel_(whatType, item).toLowerCase();
-      return !f || label.indexOf(f) >= 0;
+      return label.indexOf(f) >= 0;
     });
   }
 
   function populateSoftBookLinkSelect_(sel, whatType, filterText, selectedId) {
     if (!sel) return;
+    if (whatType === 'label') return;
     const items = filterSoftBookLinkRecords_(whatType, filterText);
     let html = '<option value="">— Select —</option>';
     items.forEach(function (item) {
@@ -3424,6 +3439,123 @@
     });
     sel.innerHTML = html;
     if (selectedId) sel.value = selectedId;
+  }
+
+  /**
+   * Parse composite project key id_type:id.
+   * @param {string} key
+   * @returns {{id_type:string, id:string}|null}
+   */
+  function wfm25ParseProjectKey_(key) {
+    const s = String(key || '');
+    const idx = s.indexOf(':');
+    if (idx <= 0) return null;
+    return { id_type: s.slice(0, idx), id: s.slice(idx + 1) };
+  }
+
+  /**
+   * Load unified project index for soft-book / commit pickers.
+   * @param {boolean} [force]
+   * @returns {Promise<Object[]>}
+   */
+  async function wfm25EnsureProjectIndex_(force) {
+    if (!force && State.projectIndex && State.projectIndex.length) {
+      return State.projectIndex;
+    }
+    try {
+      State.projectIndex = await call('api_getProjectIndex');
+    } catch (e) {
+      console.warn('[WFM.25] project index load failed:', e);
+      State.projectIndex = State.projectIndex || [];
+    }
+    return State.projectIndex;
+  }
+
+  /**
+   * Render the Add/Reduce project picker list (client-side filter + sort).
+   * @param {string} [filterText]
+   * @param {string} [selectedKey] id_type:id
+   */
+  function wfm25RenderSoftBookProjectSelect_(filterText, selectedKey) {
+    const sel = document.getElementById('wfm25SbProjectSelect');
+    const identityInput = document.getElementById('wfm25SbProjectIdentity');
+    if (!sel) return;
+    const items = filterSoftBookLinkRecords_('project', filterText);
+    let html = '';
+    if (!items.length) {
+      html = '<option value="" disabled>No matching projects</option>';
+    } else {
+      items.forEach(function (item) {
+        const key = getSoftBookLinkId_('project', item);
+        html += '<option value="' + escapeHtml_(key) + '">' + escapeHtml_(item.label) + '</option>';
+      });
+    }
+    sel.innerHTML = html;
+    const pick = selectedKey || (identityInput && identityInput.value) || '';
+    if (pick) sel.value = pick;
+    if (identityInput && sel.value) identityInput.value = sel.value;
+  }
+
+  /**
+   * Load project picker options for the soft-book drawer (Add = full index, Reduce = worker-scoped).
+   */
+  async function wfm25LoadSoftBookProjectPicker_() {
+    const resourceName = WFM25State.selectedWorker ||
+      (document.getElementById('wfm25SbWorker') && document.getElementById('wfm25SbWorker').value) || '';
+    const isReduce = wfm25GetSoftBookDirection_() === 'reduce';
+    const start = (document.getElementById('wfm25SbStart') && document.getElementById('wfm25SbStart').value) || '';
+    const end = (document.getElementById('wfm25SbEnd') && document.getElementById('wfm25SbEnd').value) || '';
+    const filterEl = document.getElementById('wfm25SbProjectFilter');
+    const identityInput = document.getElementById('wfm25SbProjectIdentity');
+    const prevKey = identityInput ? identityInput.value : '';
+
+    if (isReduce && resourceName) {
+      try {
+        State.projectIndex = await call('api_getWorkerReduceProjects', {
+          resource_name: resourceName,
+          start_date: start,
+          end_date: end
+        });
+      } catch (e) {
+        console.warn('[WFM.25] worker reduce projects failed:', e);
+        State.projectIndex = [];
+      }
+    } else {
+      await wfm25EnsureProjectIndex_(false);
+    }
+
+    if (filterEl) filterEl.value = '';
+    wfm25RenderSoftBookProjectSelect_('', prevKey);
+  }
+
+  function wfm25ClearSoftBookProjectSelection_() {
+    const filterEl = document.getElementById('wfm25SbProjectFilter');
+    const sel = document.getElementById('wfm25SbProjectSelect');
+    const identityInput = document.getElementById('wfm25SbProjectIdentity');
+    if (filterEl) filterEl.value = '';
+    if (identityInput) identityInput.value = '';
+    if (sel) sel.innerHTML = '<option value="" disabled>Select a project</option>';
+  }
+
+  /**
+   * Selected project identity from the soft-book drawer.
+   * @returns {{project_id_type:string, project_id:string, project_label:string}|null}
+   */
+  function wfm25GetSelectedProjectIdentity_() {
+    const identityInput = document.getElementById('wfm25SbProjectIdentity');
+    const sel = document.getElementById('wfm25SbProjectSelect');
+    const key = (identityInput && identityInput.value) || (sel && sel.value) || '';
+    const parsed = wfm25ParseProjectKey_(key);
+    if (!parsed) return null;
+    const items = State.projectIndex || [];
+    const hit = items.find(function (p) {
+      return p.id_type === parsed.id_type && String(p.id) === String(parsed.id);
+    });
+    return {
+      project_id_type: parsed.id_type,
+      project_id: parsed.id,
+      project_label: hit ? hit.label : ''
+    };
   }
 
   function syncSoftBookCommitRowWhatUi_(rowEl, row) {
@@ -3458,8 +3590,7 @@
         '<td class="num">' + escapeHtml_(softBookDirectionLabel_(row)) + '</td>' +
         '<td class="sb-commit-what-cell">' +
           '<div class="seg seg-sm sb-commit-what-seg">' +
-            '<button type="button" data-val="deployment">Deployment</button>' +
-            '<button type="button" data-val="opportunity" class="on">Opportunity</button>' +
+            '<button type="button" data-val="project" class="on">Project</button>' +
             '<button type="button" data-val="label">Manual label</button>' +
           '</div>' +
           '<div class="sb-commit-link-wrap">' +
@@ -3521,7 +3652,7 @@
     const whatType = $$('#sbCommitApplyWhatSeg button').find(function (b) {
       return b.classList.contains('on');
     });
-    const type = whatType ? whatType.dataset.val : 'opportunity';
+    const type = whatType ? whatType.dataset.val : 'project';
     const isLabel = type === 'label';
     const search = $('#sbCommitApplySearch');
     const linkSel = $('#sbCommitApplyLink');
@@ -3548,13 +3679,10 @@
       toast('No pending soft bookings.', 'err');
       return;
     }
-    if (!State.opportunities || !State.opportunities.length) {
-      try { State.opportunities = await call('api_listOpportunities', {}); } catch (e) {}
-    }
-    if (!State.deployments || !State.deployments.length) {
-      try { State.deployments = await call('api_listDeployments'); } catch (e) {}
-    }
+    await wfm25EnsureProjectIndex_(true);
     State.softBookCommitDraft = bookings.map(function (b) {
+      const projKey = (b.project_id_type && b.project_id)
+        ? (b.project_id_type + ':' + b.project_id) : '';
       return {
         employee_id: b.employee_id || '',
         resource_name: b.resource_name,
@@ -3562,15 +3690,15 @@
         end_date: b.end_date,
         total_hours: b.total_hours,
         direction: b.direction || 'add',
-        whatType: 'opportunity',
-        linkId: '',
+        whatType: projKey ? 'project' : 'project',
+        linkId: projKey,
         label: ''
       };
     });
     const nameEl = $('#sbCommitScenarioName');
     if (nameEl) nameEl.value = '';
     $$('#sbCommitApplyWhatSeg button').forEach(function (b) {
-      b.classList.toggle('on', b.dataset.val === 'opportunity');
+      b.classList.toggle('on', b.dataset.val === 'project');
     });
     const applySearch = $('#sbCommitApplySearch');
     if (applySearch) applySearch.value = '';
@@ -3618,7 +3746,7 @@
         }
       } else if (!row.linkId) {
         if (errEl) {
-          errEl.textContent = 'Row ' + (i + 1) + ' (' + row.resource_name + '): select a ' + row.whatType + '.';
+          errEl.textContent = 'Row ' + (i + 1) + ' (' + row.resource_name + '): select a project.';
           errEl.hidden = false;
         }
         return;
@@ -3629,9 +3757,12 @@
     });
     const bookings = draft.map(function (row) {
       const what = { type: row.whatType };
-      if (row.whatType === 'opportunity') what.opportunity_id = row.linkId;
-      else if (row.whatType === 'deployment') what.deployment_id = row.linkId;
+      if (row.whatType === 'project') what.project_key = row.linkId;
       else if (row.whatType === 'label') what.label = String(row.label || '').trim();
+      const parsed = row.whatType === 'project' ? wfm25ParseProjectKey_(row.linkId) : null;
+      const idxHit = parsed ? (State.projectIndex || []).find(function (p) {
+        return p.id_type === parsed.id_type && String(p.id) === String(parsed.id);
+      }) : null;
       return {
         employee_id: row.employee_id,
         resource_name: row.resource_name,
@@ -3640,6 +3771,9 @@
         total_hours: row.total_hours,
         direction: row.direction || 'add',
         resource_type: getResourceTypeForWorker_(row.resource_name),
+        project_id_type: parsed ? parsed.id_type : '',
+        project_id: parsed ? parsed.id : '',
+        project_label: idxHit ? idxHit.label : '',
         what: what
       };
     });
@@ -9145,9 +9279,11 @@ async function _qaRefreshPsaHours_() {
     if (startInput) startInput.value = today;
     if (endInput) endInput.value = today;
     if (hoursInput) hoursInput.value = '';
+    wfm25ClearSoftBookProjectSelection_();
     wfm25SetSoftBookDirection_('add');
     overlay.hidden = false;
     wfm25RefreshSoftBookDrawerChrome_();
+    wfm25LoadSoftBookProjectPicker_();
     if (hoursInput) hoursInput.focus();
   }
 
@@ -9552,6 +9688,9 @@ async function _qaRefreshPsaHours_() {
       if (submitBtn) submitBtn.disabled = true;
       await call('api_saveAssignment', {
         opportunity_id: ctx.opportunity_id || '',
+        project_id_type: ctx.opportunity_id ? 'opportunity' : '',
+        project_id: ctx.opportunity_id || '',
+        project_label: ctx.project_label || '',
         resource_type: resourceType,
         role: '',
         resource_name: worker,
@@ -9710,6 +9849,11 @@ async function _qaRefreshPsaHours_() {
       return;
     }
     const direction = wfm25GetSoftBookDirection_();
+    const projectIdentity = wfm25GetSelectedProjectIdentity_();
+    if (!projectIdentity) {
+      toast('Select a project.', 'err');
+      return;
+    }
     if (direction === 'reduce' && isRangeEntirelyInCurrentQuarter_(start, end)) {
       toast('Current-quarter hours are actuals and cannot be reduced. Reduce forward-quarter hours instead.', 'err');
       return;
@@ -9720,7 +9864,10 @@ async function _qaRefreshPsaHours_() {
       start_date: start,
       end_date: end,
       total_hours: hours,
-      direction: direction
+      direction: direction,
+      project_id_type: projectIdentity.project_id_type,
+      project_id: projectIdentity.project_id,
+      project_label: projectIdentity.project_label
     });
     closeWFM25SoftBookOverlay_();
     onWFM25SoftBookingsChanged_();
@@ -14460,6 +14607,27 @@ async function _qaRefreshPsaHours_() {
         }
       });
     }
+    const sbProjectFilter = document.getElementById('wfm25SbProjectFilter');
+    const sbProjectSelect = document.getElementById('wfm25SbProjectSelect');
+    const sbProjectIdentity = document.getElementById('wfm25SbProjectIdentity');
+    if (sbProjectFilter) {
+      sbProjectFilter.addEventListener('input', debounce_(function () {
+        wfm25RenderSoftBookProjectSelect_(sbProjectFilter.value, sbProjectIdentity ? sbProjectIdentity.value : '');
+      }, 150));
+    }
+    if (sbProjectSelect) {
+      sbProjectSelect.addEventListener('change', function () {
+        if (sbProjectIdentity) sbProjectIdentity.value = sbProjectSelect.value || '';
+      });
+    }
+    const sbStart = document.getElementById('wfm25SbStart');
+    const sbEnd = document.getElementById('wfm25SbEnd');
+    const reloadProjectsOnDate = debounce_(function () {
+      if (wfm25IsDemandFillMode_() || wfm25IsCommitmentEditMode_()) return;
+      if (wfm25GetSoftBookDirection_() === 'reduce') wfm25LoadSoftBookProjectPicker_();
+    }, 250);
+    if (sbStart) sbStart.addEventListener('change', reloadProjectsOnDate);
+    if (sbEnd) sbEnd.addEventListener('change', reloadProjectsOnDate);
 
     initWFM25DraftTray_();
 

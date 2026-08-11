@@ -229,7 +229,8 @@ const ASSIGN_HEADERS = [
   'start_date','end_date','estimated_hours','distribution',
   'custom_monthly_json','status','scenario_id','notes',
   'created_by','created_at','modified_by','modified_at',
-  'resource_type','team_label'
+  'resource_type','team_label',
+  'project_id_type','project_id','project_label'
 ];
 
 const SCENARIO_HEADERS = [

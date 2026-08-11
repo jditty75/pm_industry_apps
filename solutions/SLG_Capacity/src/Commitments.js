@@ -122,7 +122,15 @@ function _commitmentsIsoDate_(v) {
  * @return {Object}
  */
 function _ledgerEntryFromAssignment_(a, ctx) {
-  var oppData = ctx.oppIndex[a.opportunity_id] || null;
+  var projectLabel = (typeof resolveAssignmentProjectLabel_ === 'function')
+    ? resolveAssignmentProjectLabel_(a)
+    : (function () {
+      var oppData = ctx.oppIndex[a.opportunity_id] || null;
+      if (oppData) {
+        return oppData.account ? oppData.account + ' \u2014 ' + oppData.name : oppData.name;
+      }
+      return a.opportunity_id || 'Unknown project';
+    })();
   var weekly = expandAssignmentToWeekly_(a, ctx.calendar) || [];
   var worker = ctx.workerByName[a.resource_name] || null;
   var split = _commitmentsLockedReducible_(worker, weekly.map(function (w) {
@@ -137,9 +145,7 @@ function _ledgerEntryFromAssignment_(a, ctx) {
     object_id: String(a.assignment_id || ''),
     worker: String(a.resource_name || ''),
     team: String(a.team_label || a.team || ''),
-    project_label: oppData
-      ? (oppData.account ? oppData.account + ' — ' + oppData.name : oppData.name)
-      : (a.opportunity_id || 'Unknown project'),
+    project_label: projectLabel,
     booking_type: 'Booking',
     committed_hours: Math.round(totalHrs * 100) / 100,
     locked_hours: split.locked_hours,

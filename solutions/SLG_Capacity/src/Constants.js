@@ -192,7 +192,8 @@ const ACTUALS_HISTORY_HEADERS = [
   'fiscal_quarter',
   'project',
   'project_role_category',
-  'worked_hours',
+  'icp_hours',
+  'non_icp_hours',
   'specialty_practice',       // WFM.25 Pass 3A: from History_Normalized
   'sub_specialty_practice'    // WFM.25 Pass 3A: from History_Normalized
 ];

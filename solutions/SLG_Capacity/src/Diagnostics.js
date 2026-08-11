@@ -4908,7 +4908,7 @@ function _dbg_reconcileWFM25Stage4() {
       (readTable_(ACTUALS_HISTORY) || []).forEach(function (r) {
         var fq = String(r.fiscal_quarter || '').trim();
         if (!fq) return;
-        var hrs = Number(r.worked_hours) || 0;
+        var hrs = Number(r.icp_hours) || 0;
         if (!hrs) return;
         var displayClass = historyDisplayClass_(r.worker_class);
         if (!displayClass) return;

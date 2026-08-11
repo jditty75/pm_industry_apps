@@ -755,7 +755,7 @@ function sumConsolidatedPrimary_(sheetName, values, warnings) {
   var colBySheet = {
     Actuals_Current_Normalized: 'actual_icp_hours',
     Utilization_Normalized: 'target_hours',
-    History_Normalized: 'worked_hours'
+    History_Normalized: 'icp_hours'
   };
   var col = colBySheet[sheetName];
   if (!col || idx[col] === undefined) return 0;
@@ -1214,7 +1214,7 @@ function writeConsolidatedHistory_(values) {
   for (var r = 0; r < data.length; r++) {
     var row = data[r];
     out.push(ACTUALS_HISTORY_HEADERS.map(function (h) {
-      if (h === 'worked_hours') {
+      if (h === 'icp_hours' || h === 'non_icp_hours') {
         return Number(row[idx[h]]) || 0;
       }
       if (h === 'workday_region_as_of_date_worked') {

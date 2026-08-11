@@ -642,7 +642,7 @@ function buildResourceHistoryRollups_(resourceName, fiscalQuarter) {
   rows.forEach(function (r) {
     if (String(r.resource_name || '') !== resourceName) return;
     if (String(r.fiscal_quarter || '').trim() !== fiscalQuarter) return;
-    var hrs = Number(r.worked_hours) || 0;
+    var hrs = Number(r.icp_hours) || 0;
     if (!hrs) return;
     var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
     specialtyHours[sp] = (specialtyHours[sp] || 0) + hrs;
@@ -981,7 +981,7 @@ function getWorkerTypeHistory_(params) {
   rows.forEach(function (r) {
     var fq = String(r.fiscal_quarter || '').trim();
     if (!fq) return;
-    var hrs = Number(r.worked_hours) || 0;
+    var hrs = Number(r.icp_hours) || 0;
     if (!hrs) return;
 
     var displayClass = historyDisplayClass_(r.worker_class);
@@ -2422,7 +2422,7 @@ function api_getSpecialtyActuals(params) {
 
     var fq = String(r.fiscal_quarter || '').trim();
     if (!fq) return;
-    var hrs = Number(r.worked_hours) || 0;
+    var hrs = Number(r.icp_hours) || 0;
     if (!hrs) return;
 
     var sp = String(r.specialty_practice || '').trim() || 'Unclassified';

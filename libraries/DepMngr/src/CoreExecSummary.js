@@ -48,7 +48,8 @@ var CoreExecSummary = (function () {
       sheet = ss.insertSheet(cfg.sheets.execSummary);
     }
 
-    sheet.getRange('B2').setValue(html || '');
+    var cleaned = _sanitizeExecHtml_(html || '');
+    sheet.getRange('B2').setValue(cleaned);
 
     var user = Session.getActiveUser().getEmail() ||
                Session.getEffectiveUser().getEmail() || 'unknown';
@@ -161,8 +162,88 @@ var CoreExecSummary = (function () {
   }
 
   /**
+   * Allowlisted tag names for Executive Summary rich HTML.
+   * @type {Object<string, boolean>}
+   * @private
+   */
+  var EXEC_HTML_ALLOWED_TAGS_ = {
+    h2: true, h3: true, h4: true, p: true,
+    ul: true, ol: true, li: true,
+    strong: true, b: true, em: true, i: true, u: true, br: true
+  };
+
+  /**
+   * Regex/string sanitizer for Executive Summary HTML (server-side; no DOMParser).
+   * Keeps allowlisted tags with attributes stripped; unwraps all other tags;
+   * removes comments and Office cruft; drops empty list elements.
+   *
+   * @param {string} html
+   * @return {string}
+   * @private
+   */
+  function _sanitizeExecHtml_(html) {
+    if (!html) return '';
+    var s = String(html);
+
+    // Remove HTML comments (incl. StartFragment/EndFragment).
+    s = s.replace(/<!--[\s\S]*?-->/g, '');
+
+    // Strip Office-specific tags and mso-* fragments.
+    s = s.replace(/<\/?o:p[^>]*>/gi, '');
+    s = s.replace(/\bmso-[^;:"\s>]+/gi, '');
+
+    // Normalize tags: keep allowlisted (attributes stripped); unwrap others.
+    var prev;
+    do {
+      prev = s;
+      s = s.replace(/<\/?([a-zA-Z][\w:-]*)([^>]*)>/g, function (match, tagName, attrs) {
+        var isClose = match.charAt(1) === '/';
+        tagName = tagName.toLowerCase();
+        if (tagName.indexOf(':') !== -1) return '';
+        if (!EXEC_HTML_ALLOWED_TAGS_[tagName]) return '';
+        if (isClose) return '</' + tagName + '>';
+        if (tagName === 'br') return '<br>';
+        return '<' + tagName + '>';
+      });
+    } while (s !== prev);
+
+    // Drop empty list elements.
+    var listPrev;
+    do {
+      listPrev = s;
+      s = s.replace(/<ul>\s*<\/ul>/gi, '');
+      s = s.replace(/<ol>\s*<\/ol>/gi, '');
+      s = s.replace(/<li>\s*<\/li>/gi, '');
+    } while (s !== listPrev);
+
+    // Collapse redundant whitespace between tags and around text.
+    s = s.replace(/>\s+</g, '><');
+    s = s.replace(/\s+/g, ' ').trim();
+
+    return s;
+  }
+
+  /**
+   * Returns true when sanitized HTML has no visible text content.
+   *
+   * @param {string} html
+   * @return {boolean}
+   * @private
+   */
+  function isExecHtmlEmpty_(html) {
+    if (!html || String(html).trim() === '') return true;
+    var textOnly = String(html)
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return textOnly === '';
+  }
+
+  /**
    * N8 V2: reads plain bullet lines from ExecSummary!B2 (one per line).
    * Strips leading list markers; ignores empty lines.
+   * Unused by buildSectionHtmlV2 after N8.2; retained for reference.
    *
    * @param {AppConfig} config
    * @return {Array<string>}
@@ -187,36 +268,36 @@ var CoreExecSummary = (function () {
   }
 
   /**
-   * N8 V2: structured Executive Summary — sanitized bullet list from plain lines.
-   * No pasted HTML passthrough. Returns empty string when no content.
+   * N8 V2: Executive Summary — sanitized rich HTML passthrough from ExecSummary!B2.
+   * Returns empty string when no content.
    *
    * @param {AppConfig} config
    * @return {string}
    */
   function buildSectionHtmlV2(config) {
-    var lines = getBulletLinesV2_(config);
-    if (!lines.length) {
-      Logger.log('CoreExecSummary.buildSectionHtmlV2: no bullet lines; skipping section.');
+    var cfg = CoreConfig.withDefaults(config);
+    var raw = '';
+    try {
+      raw = get(cfg) || '';
+    } catch (err) {
+      Logger.log('CoreExecSummary.buildSectionHtmlV2: get() failed: ' + err);
       return '';
     }
 
-    var items = lines
-      .map(function (line) {
-        return '<li style="margin-bottom:4px;">' + CoreUtils.escapeHtml(line) + '</li>';
-      })
-      .join('');
+    var bodyHtml = _sanitizeExecHtml_(raw);
+    if (isExecHtmlEmpty_(bodyHtml)) {
+      Logger.log('CoreExecSummary.buildSectionHtmlV2: no content; skipping section.');
+      return '';
+    }
 
     var headingHtml = renderSectionHeading_('Executive Summary');
-    var bodyHtml =
-      '<ul style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
-      'margin:6px 0 0 20px; padding:0; line-height:1.5;">' +
-      items +
-      '</ul>';
-
     return (
       '<div style="margin-bottom:32px;">' +
       headingHtml +
+      '<div style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
+      'line-height:1.5; margin-top:6px;">' +
       bodyHtml +
+      '</div>' +
       '</div>'
     );
   }

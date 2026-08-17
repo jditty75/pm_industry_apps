@@ -643,13 +643,15 @@ var CoreNotify = (function () {
    * @return {string}
    * @private
    */
-  function _buildRfc2822Mime_(from, to, cc, subject, htmlBody) {
+  function _buildRfc2822Mime_(from, to, cc, bcc, subject, htmlBody) {
     var lines = [
       'From: ' + from,
       'To: ' + to
     ];
     var ccStr = String(cc || '').trim();
     if (ccStr) lines.push('Cc: ' + ccStr);
+    var bccStr = String(bcc || '').trim();
+    if (bccStr) lines.push('Bcc: ' + bccStr);
     lines.push('Subject: ' + subject);
     lines.push('MIME-Version: 1.0');
     lines.push('Content-Type: text/html; charset=UTF-8');
@@ -705,11 +707,12 @@ var CoreNotify = (function () {
    * @param {string} fromAlias
    * @param {string} cc
    * @param {Array<string>} allowedAliases
+   * @param {string=} bcc
    * @return {{ok: boolean, messageId: string, threadId: string,
    *           captureMethod: 'advanced'|'heuristic'|'none'}}
    * @private
    */
-  function _gmailSendWithIds_(to, subject, htmlBody, fromAlias, cc, allowedAliases) {
+  function _gmailSendWithIds_(to, subject, htmlBody, fromAlias, cc, allowedAliases, bcc) {
     var fail = { ok: false, messageId: '', threadId: '', captureMethod: 'none' };
     var toStr = String(to || '').trim();
     if (!toStr) {
@@ -727,13 +730,14 @@ var CoreNotify = (function () {
     var token = Utilities.getUuid();
     var bodyWithToken = _embedTrackingToken_(htmlBody, token);
     var ccStr = String(cc || '').trim();
+    var bccStr = String(bcc || '').trim();
 
     try {
       if (typeof Gmail === 'undefined' || !Gmail || !Gmail.Users || !Gmail.Users.Messages) {
         throw new ReferenceError('Gmail advanced service is not enabled');
       }
 
-      var rawMime = _buildRfc2822Mime_(from, toStr, ccStr, subject, bodyWithToken);
+      var rawMime = _buildRfc2822Mime_(from, toStr, ccStr, bccStr, subject, bodyWithToken);
       var encoded = _base64UrlEncodeMime_(rawMime);
       var response = Gmail.Users.Messages.send({ raw: encoded }, 'me');
       var messageId = response && response.id ? String(response.id) : '';
@@ -758,6 +762,7 @@ var CoreNotify = (function () {
 
     var opts = { htmlBody: bodyWithToken, from: from };
     if (ccStr) opts.cc = ccStr;
+    if (bccStr) opts.bcc = bccStr;
     var plain = String(bodyWithToken).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
     try {
@@ -777,6 +782,46 @@ var CoreNotify = (function () {
       threadId: captured.threadId,
       captureMethod: captured.captureMethod
     };
+  }
+
+  /**
+   * Appends a CSAT survey notification audit row to ReportDistributionLog.
+   * @param {AppConfig} cfg
+   * @param {Object} opts
+   * @private
+   */
+  function _logSurveyNotification_(cfg, opts) {
+    opts = opts || {};
+    var toList = String(opts.toList || opts.to || '').trim();
+    var ccList = String(opts.ccList || opts.cc || '').trim();
+    var toArr = _parseEmailList_(toList);
+    var ccArr = _parseEmailList_(ccList);
+    try {
+      CoreDistribute.appendDistributionLogRow(cfg, {
+        timestamp: Utilities.formatDate(new Date(), Session.getScriptTimeZone(),
+          'yyyy-MM-dd HH:mm:ss'),
+        appId: cfg.appId || '',
+        category: 'Survey Notification',
+        notificationKey: String(opts.notificationKey || '').trim(),
+        monthLabel: String(opts.periodLabel || opts.monthLabel || '').trim(),
+        fromAlias: String(opts.fromAlias || '').trim(),
+        subject: String(opts.subject || '').trim(),
+        toCount: toArr.length,
+        ccCount: ccArr.length,
+        toList: toList,
+        ccList: ccList,
+        status: String(opts.status || 'sent').trim(),
+        error: String(opts.error || '').trim(),
+        messageId: String(opts.messageId || '').trim(),
+        threadId: String(opts.threadId || '').trim(),
+        captureMethod: String(opts.captureMethod || '').trim(),
+        sentBy: Session.getActiveUser().getEmail() ||
+                Session.getEffectiveUser().getEmail() || 'unknown',
+        mode: String(opts.mode || 'prod').trim()
+      });
+    } catch (e) {
+      Logger.log('CoreNotify._logSurveyNotification_: append failed: ' + e);
+    }
   }
 
   /**
@@ -818,7 +863,19 @@ var CoreNotify = (function () {
         _escapeHtml_(recipients.join(', ') || '(none)') + '</p>' + body;
     }
 
-    return _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases);
+    var sent = _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases);
+    _logSurveyNotification_(cfg, {
+      notificationKey: String(row.notificationKey || '').trim(),
+      fromAlias: row.fromAlias,
+      subject: subject,
+      toList: to,
+      ccList: cc,
+      status: sent ? 'sent' : 'failed',
+      error: sent ? '' : 'Gmail send failed',
+      mode: isTest ? 'test' : 'prod',
+      periodLabel: dep && dep.eventDate ? String(dep.eventDate) : ''
+    });
+    return sent;
   }
 
   /**
@@ -876,12 +933,20 @@ var CoreNotify = (function () {
         _escapeHtml_(recipients.join(', ') || '(none)') + '</p>' + body;
     }
 
-    return _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases);
+    var sent = _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases);
+    _logSurveyNotification_(cfg, {
+      notificationKey: String(row.notificationKey || '').trim(),
+      fromAlias: row.fromAlias,
+      subject: subject,
+      toList: to,
+      ccList: cc,
+      status: sent ? 'sent' : 'failed',
+      error: sent ? '' : 'Gmail send failed',
+      mode: isTest ? 'test' : 'prod',
+      periodLabel: tokens.periodLabel
+    });
+    return sent;
   }
-
-  // ---------------------------------------------------------------------------
-  // PUBLIC API
-  // ---------------------------------------------------------------------------
 
   /**
    * Validates every NotificationConfig row; writes status column.
@@ -1410,6 +1475,80 @@ var CoreNotify = (function () {
   }
 
   /**
+   * Edits an EXISTING NotificationConfig rule (matched by notificationKey).
+   * Rejects unknown keys (no UI-created rules). Writes provided columns, then
+   * re-validates and returns the row's validation result.
+   * @param {AppConfig} config
+   * @param {Object} rule { notificationKey, enabled, toRole, to, cc, fromAlias,
+   *                        grouping, leadDays, finalDays, windowDays, cadence,
+   *                        sendDay, subject, bodyTemplate }
+   * @return {{success:boolean, updated:boolean, status:string, error?:string}}
+   */
+  function upsertNotificationRule(config, rule) {
+    var cfg = CoreConfig.withDefaults(config);
+    Logger.log('CoreNotify.upsertNotificationRule: key=' + (rule && rule.notificationKey));
+
+    if (!rule || !String(rule.notificationKey || '').trim()) {
+      return { success: false, updated: false, status: '', error: 'missing notificationKey' };
+    }
+
+    var key = String(rule.notificationKey).trim();
+    var rows = readNotificationConfig_(cfg);
+    var match = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].notificationKey || '').trim() === key) {
+        match = rows[i];
+        break;
+      }
+    }
+    if (!match) {
+      return { success: false, updated: false, status: '', error: 'unknown notificationKey' };
+    }
+
+    var sheet = _getConfigSheet_(cfg);
+    if (!sheet) {
+      return { success: false, updated: false, status: '', error: 'sheet missing' };
+    }
+
+    var headerRow = _headerRowIndex_(cfg);
+    var lastCol = Math.max(sheet.getLastColumn(), HEADERS_.length);
+    var headerCells = sheet.getRange(headerRow, 1, headerRow, lastCol).getValues()[0]
+      .map(function (h) { return String(h || '').trim(); });
+    var colMap = {};
+    for (var h = 0; h < HEADERS_.length; h++) {
+      var idx = headerCells.indexOf(HEADERS_[h]);
+      colMap[HEADERS_[h]] = idx >= 0 ? idx + 1 : h + 1;
+    }
+
+    var writable = [
+      'enabled', 'toRole', 'to', 'cc', 'fromAlias', 'grouping',
+      'leadDays', 'finalDays', 'windowDays', 'cadence', 'sendDay', 'subject', 'bodyTemplate'
+    ];
+    var sheetRow = match._sheetRow;
+
+    writable.forEach(function (col) {
+      if (!Object.prototype.hasOwnProperty.call(rule, col)) return;
+      var val = rule[col];
+      if (col === 'enabled') {
+        val = _isEnabled_(val) ? 'TRUE' : 'FALSE';
+      }
+      sheet.getRange(sheetRow, colMap[col]).setValue(val);
+    });
+
+    var validation = validateNotificationConfig(cfg);
+    var allRows = validation.valid.concat(validation.invalid);
+    var status = '';
+    for (var j = 0; j < allRows.length; j++) {
+      if (String(allRows[j].notificationKey || '').trim() === key) {
+        status = String(allRows[j].status || '');
+        break;
+      }
+    }
+
+    return { success: true, updated: true, status: status };
+  }
+
+  /**
    * Returns notification keys for menu building.
    * @param {AppConfig} config
    * @return {Array<string>}
@@ -1429,6 +1568,7 @@ var CoreNotify = (function () {
     sendTestNotification:          sendTestNotification,
     initNotificationConfigSheet:   initNotificationConfigSheet,
     getNotificationKeysForMenu:    getNotificationKeysForMenu,
+    upsertNotificationRule:        upsertNotificationRule,
     _resolveRecipients_:           _resolveRecipients_,
     _renderTemplate_:              _renderTemplate_,
     _gmailSend_:                   _gmailSend_,

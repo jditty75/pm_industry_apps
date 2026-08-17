@@ -128,11 +128,20 @@ var APP_CONFIG = {
 
     sections: { approach: true },
 
+    // N9 — monthly report distribution (Jeff fills these per app):
+    // enabled:        true when ready to send from this app
+    // to:             ['<app-google-group>@workday.com']   // the app's leadership distribution group
+    // fromAlias:      '<verified send-as alias>'            // MUST be in cfg.notify.allowedFromAliases
+    // cc:             []                                    // optional default CC
+    // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
+    // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
       enabled: false,
       fromAlias: 'jeffrey.ditty@workday.com',
       to: [],
       cc: [],
+      bcc: 'jeffrey.ditty@workday.com',
+      allowedSenders: ['jeffrey.ditty@workday.com'],
       subjectTemplate: 'State & Local Government \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
@@ -182,7 +191,7 @@ var APP_CONFIG = {
       enabled: true
     },
     // T1: Trends tab.
-    trendsTab: { enabled: true },
+    trendsTab: { enabled: false },
     enableAccountLinks: true,
     deploymentsTable: {
       showIndustry: false,

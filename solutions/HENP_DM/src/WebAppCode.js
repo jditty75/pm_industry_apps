@@ -1,3 +1,5 @@
+// DHM WebAppCode.js - CoreLib CSAT Overhaul v1.0.3 Status Pill & Date Fix
+// v1.0.3 csat-cache-bust
 /**
  * HENP Deployment Health Web App — Server-side wiring layer.
  *
@@ -63,6 +65,68 @@ function getMdsPglBatchViewForUI(viewModeOpts, windowMonths) {
   );
 }
 
+/**
+ * UI Endpoint Wrapper: Fetch CSAT Tab Data
+ * @param {Object=} viewModeOpts
+ * @param {number=} windowMonths  3 or 6. Default 3.
+ */
+function getCsatTabDataForUI(viewModeOpts, windowMonths) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  return CoreLib.CoreData.getCsatTabDataForUI(
+    cfg,
+    viewModeOpts,
+    (windowMonths === 6) ? 6 : 3
+  );
+}
+
+/**
+ * UI Endpoint Wrapper: Upload CSAT In-Flight CSV
+ */
+function uploadCsatInFlightCsvForUI(viewModeOpts, csvText) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  return CoreLib.CoreData.uploadCsatInFlightCsvForUI(cfg, csvText);
+}
+
+/**
+ * UI Endpoint Wrapper: Validate NotificationConfig rows.
+ * @param {Object=} opts
+ * @return {{valid:Array<Object>, invalid:Array<Object>}}
+ */
+function validateNotificationConfigForUI(opts) {
+  return CoreLib.CoreNotify.validateNotificationConfig(APP_CONFIG);
+}
+
+/**
+ * UI Endpoint Wrapper: Send a test survey notification.
+ * @param {Object=} opts
+ * @param {string} notificationKey
+ * @param {string=} recipient
+ * @return {boolean}
+ */
+function sendTestNotificationForUI(opts, notificationKey, recipient) {
+  return CoreLib.CoreNotify.sendTestNotification(APP_CONFIG, notificationKey, recipient);
+}
+
+/**
+ * UI Endpoint Wrapper: Edit an existing NotificationConfig rule.
+ * @param {Object=} opts
+ * @param {Object} rule
+ * @return {{success:boolean, updated:boolean, status:string, error?:string}}
+ */
+function upsertNotificationRuleForUI(opts, rule) {
+  return CoreLib.CoreNotify.upsertNotificationRule(APP_CONFIG, rule);
+}
+
+/**
+ * UI Endpoint Wrapper: Filtered CSAT survey notification audit log.
+ * @param {Object=} opts
+ * @return {{rows:Array<Object>, total:number}}
+ */
+function getDistributionLogDataForUI(opts) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  return CoreLib.CoreData.getDistributionLogDataForUI(cfg);
+}
+
 // ============================================================================
 // EXECUTIVE SUMMARY
 // ============================================================================
@@ -88,6 +152,11 @@ function getHtmlReportPreviewOutlook() {
   return CoreLib.CoreReport.buildOutlookHtml(APP_CONFIG);
 }
 
+/** Preview the exact V2 HTML that the Gmail send path emits. */
+function getGmailReportPreview() {
+  return CoreLib.CoreReport.buildReportV2WithAnalytics(APP_CONFIG);
+}
+
 /**
  * N8: production native Gmail send for the V2 monthly report.
  * @return {{status: string, error?: string}}
@@ -105,6 +174,76 @@ function sendMonthlyReportTest(recipient) {
   return CoreLib.CoreDistribute.sendMonthlyReportTest(APP_CONFIG, recipient);
 }
 
+/**
+ * N9: returns send config for the compose modal; canSend gates the UI.
+ * @return {Object}
+ */
+function getReportSendConfigForUI() {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  var me = (Session.getActiveUser().getEmail() || '').toLowerCase();
+  var allowed = (cfg.report.distribution.allowedSenders || []).map(function (e) {
+    return String(e).toLowerCase();
+  });
+  var monthLabel = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMMM yyyy');
+  var subject = (cfg.report.distribution.subjectTemplate || '')
+    .replace(/\{\{appTitle\}\}/g, (cfg.ui && cfg.ui.appTitle) || cfg.report.title || cfg.appId)
+    .replace(/\{\{monthLabel\}\}/g, monthLabel);
+  return {
+    canSend: allowed.indexOf(me) !== -1,
+    enabled: !!cfg.report.distribution.enabled,
+    to: (cfg.report.distribution.to || []).join(', '),
+    cc: (cfg.report.distribution.cc || []).join(', '),
+    bcc: cfg.report.distribution.bcc || '',
+    fromAlias: cfg.report.distribution.fromAlias || '',
+    allowedAliases: cfg.notify.allowedFromAliases || [],
+    subject: subject,
+    testDefaultRecipient: me || cfg.notify.testDefaultRecipient || ''
+  };
+}
+
+/**
+ * N9: admin-gated production send. Server re-checks allowedSenders.
+ * @param {Object=} envelope
+ * @return {{status: string, error?: string}}
+ */
+function sendMonthlyReportFromUI(envelope) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  var me = (Session.getActiveUser().getEmail() || '').toLowerCase();
+  var allowed = (cfg.report.distribution.allowedSenders || []).map(function (e) {
+    return String(e).toLowerCase();
+  });
+  if (allowed.indexOf(me) === -1) {
+    return { status: 'denied', error: 'Not authorized to send the monthly report.' };
+  }
+  return CoreLib.CoreDistribute.sendMonthlyReport(APP_CONFIG, { force: true, envelope: envelope || {} });
+}
+
+/**
+ * N9: admin-gated test send — no log row.
+ * @param {Object=} envelope
+ * @return {{status: string, error?: string}}
+ */
+function sendMonthlyReportTestFromUI(envelope) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  var me = (Session.getActiveUser().getEmail() || '').toLowerCase();
+  var allowed = (cfg.report.distribution.allowedSenders || []).map(function (e) {
+    return String(e).toLowerCase();
+  });
+  if (allowed.indexOf(me) === -1) {
+    return { status: 'denied', error: 'Not authorized.' };
+  }
+  var to = (envelope && envelope.to) || Session.getActiveUser().getEmail();
+  return CoreLib.CoreDistribute.sendMonthlyReportTest(APP_CONFIG, to);
+}
+
+/**
+ * N9: Send Log rows filtered to Monthly Report category.
+ * @return {{rows: Array<Object>, total: number}}
+ */
+function getReportSendLogForUI() {
+  return CoreLib.CoreDistribute.getMonthlyReportSendLog(APP_CONFIG);
+}
+
 // ============================================================================
 // N7 — MDS/PGL NOTIFICATIONS
 // ============================================================================
@@ -114,7 +253,7 @@ function sendMonthlyReportTest(recipient) {
  * @return {void}
  */
 function runNotifications() {
-  return CoreLib.CoreData.runNotifications(APP_CONFIG);
+  return CoreLib.CoreNotify.runNotifications(APP_CONFIG);
 }
 
 /**
@@ -122,7 +261,7 @@ function runNotifications() {
  * @return {{valid:Array<Object>, invalid:Array<Object>}}
  */
 function validateNotificationConfig() {
-  return CoreLib.CoreData.validateNotificationConfig(APP_CONFIG);
+  return CoreLib.CoreNotify.validateNotificationConfig(APP_CONFIG);
 }
 
 /**
@@ -132,7 +271,7 @@ function validateNotificationConfig() {
  * @return {boolean}
  */
 function sendTestNotification(notificationKey, recipient) {
-  return CoreLib.CoreData.sendTestNotification(APP_CONFIG, notificationKey, recipient);
+  return CoreLib.CoreNotify.sendTestNotification(APP_CONFIG, notificationKey, recipient);
 }
 
 /**
@@ -140,7 +279,7 @@ function sendTestNotification(notificationKey, recipient) {
  * @return {void}
  */
 function initNotificationConfigSheet() {
-  return CoreLib.CoreData.initNotificationConfigSheet(APP_CONFIG);
+  return CoreLib.CoreNotify.initNotificationConfigSheet(APP_CONFIG);
 }
 
 /**

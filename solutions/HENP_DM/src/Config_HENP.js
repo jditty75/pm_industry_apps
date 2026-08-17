@@ -106,11 +106,20 @@ var APP_CONFIG = {
 
     sections: { approach: true },
 
+    // N9 — monthly report distribution (Jeff fills these per app):
+    // enabled:        true when ready to send from this app
+    // to:             ['<app-google-group>@workday.com']   // the app's leadership distribution group
+    // fromAlias:      '<verified send-as alias>'            // MUST be in cfg.notify.allowedFromAliases
+    // cc:             []                                    // optional default CC
+    // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
+    // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
       enabled: false,
       fromAlias: '',
       to: [],
       cc: [],
+      bcc: 'jeffrey.ditty@workday.com',
+      allowedSenders: ['jeffrey.ditty@workday.com'],
       subjectTemplate: 'HENP Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
@@ -134,13 +143,12 @@ var APP_CONFIG = {
       { id: 'report', label: 'Monthly Report Preview' },
       { id: 'portfolio', label: 'Portfolio Health' },
       { id: 'notable', label: 'Notable Deployments' },
-      { id: 'overrides', label: 'Manage Overrides' },
-      { id: 'trends',    label: 'Trends' }
+      { id: 'overrides', label: 'Manage Overrides' }
     ],
     enableAccountLinks: true,
     mgmPglTab: { enabled: false },
     // T1: Trends tab.
-    trendsTab: { enabled: true },
+    trendsTab: { enabled: false },
     notable: { enabled: true },
     deploymentsTable: {
       showIndustry: false,

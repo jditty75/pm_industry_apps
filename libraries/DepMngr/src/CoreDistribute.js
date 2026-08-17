@@ -8,8 +8,8 @@
 var CoreDistribute = (function () {
 
   var LOG_HEADERS_ = [
-    'timestamp', 'appId', 'monthLabel', 'fromAlias', 'subject',
-    'toCount', 'ccCount', 'toList', 'ccList', 'status', 'error',
+    'timestamp', 'appId', 'category', 'notificationKey', 'monthLabel', 'fromAlias', 'subject',
+    'toCount', 'ccCount', 'toList', 'ccList', 'bccCount', 'bccList', 'status', 'error',
     'messageId', 'threadId', 'captureMethod', 'sentBy', 'mode'
   ];
 
@@ -127,6 +127,21 @@ var CoreDistribute = (function () {
   }
 
   /**
+   * @param {Array<string>|string} value
+   * @return {Array<string>}
+   * @private
+   */
+  function _parseRecipientInput_(value) {
+    if (Array.isArray(value)) {
+      return value.map(function (e) { return String(e || '').trim(); })
+        .filter(function (e) { return e !== ''; });
+    }
+    return String(value || '').split(/[,;]+/)
+      .map(function (e) { return String(e || '').trim(); })
+      .filter(function (e) { return e !== ''; });
+  }
+
+  /**
    * Sends the V2 monthly report via native Gmail send-as.
    *
    * @param {AppConfig} config
@@ -137,11 +152,24 @@ var CoreDistribute = (function () {
     opts = opts || {};
     var cfg = CoreConfig.withDefaults(config);
     var dist = cfg.report.distribution || {};
+    var envelope = opts.envelope || {};
     var monthLabel = _monthLabel_(cfg);
-    var subject = _buildSubject_(cfg);
-    var fromAlias = String(dist.fromAlias || '').trim();
-    var toList = Array.isArray(dist.to) ? dist.to.slice() : [];
-    var ccList = Array.isArray(dist.cc) ? dist.cc.slice() : [];
+    var subject = envelope.subject
+      ? String(envelope.subject).trim()
+      : _buildSubject_(cfg);
+    var fromAlias = envelope.fromAlias
+      ? String(envelope.fromAlias).trim()
+      : String(dist.fromAlias || '').trim();
+    var toList = envelope.to !== undefined
+      ? _parseRecipientInput_(envelope.to)
+      : (Array.isArray(dist.to) ? dist.to.slice() : []);
+    var ccList = envelope.cc !== undefined
+      ? _parseRecipientInput_(envelope.cc)
+      : (Array.isArray(dist.cc) ? dist.cc.slice() : []);
+    var bccStr = envelope.bcc !== undefined
+      ? String(envelope.bcc || '').trim()
+      : String(dist.bcc || '').trim();
+    var bccList = _parseRecipientInput_(bccStr);
     var toStr = _joinRecipients_(toList);
     var ccStr = _joinRecipients_(ccList);
     var sentBy = _executingUser_();
@@ -151,6 +179,8 @@ var CoreDistribute = (function () {
         timestamp: Utilities.formatDate(new Date(), Session.getScriptTimeZone(),
           'yyyy-MM-dd HH:mm:ss'),
         appId: cfg.appId || '',
+        category: 'Monthly Report',
+        notificationKey: '',
         monthLabel: monthLabel,
         fromAlias: fromAlias,
         subject: subject,
@@ -158,6 +188,8 @@ var CoreDistribute = (function () {
         ccCount: ccList.length,
         toList: toStr,
         ccList: ccStr,
+        bccCount: bccList.length,
+        bccList: bccStr,
         status: status,
         error: error || '',
         messageId: (ids && ids.messageId) || '',
@@ -200,7 +232,7 @@ var CoreDistribute = (function () {
     }
 
     var sendResult = CoreNotify._gmailSendWithIds_(toStr, subject, htmlBody, fromAlias, ccStr,
-      cfg.notify.allowedFromAliases);
+      cfg.notify.allowedFromAliases, bccStr);
     if (!sendResult.ok) {
       var sendErr = 'Gmail send failed or was blocked (see Logs)';
       logRow('failed', sendErr, null, 'prod');
@@ -279,10 +311,41 @@ var CoreDistribute = (function () {
     return { status: 'sent' };
   }
 
+  /**
+   * Returns ReportDistributionLog rows where category === 'Monthly Report', newest first.
+   *
+   * @param {AppConfig} config
+   * @return {{rows: Array<Object>, total: number}}
+   */
+  function getMonthlyReportSendLog(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var sheet = initReportDistributionLog_(cfg);
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { rows: [], total: 0 };
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+      .map(function (h) { return String(h || '').trim(); });
+    var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var rows = [];
+    values.forEach(function (cells) {
+      var obj = {};
+      for (var i = 0; i < headers.length; i++) if (headers[i]) obj[headers[i]] = cells[i];
+      if (String(obj.category || '').trim() !== 'Monthly Report') return;
+      if (cfg.appId && obj.appId && String(obj.appId) !== String(cfg.appId)) return;
+      rows.push(obj);
+    });
+    rows.sort(function (a, b) {
+      return String(b.timestamp || '').localeCompare(String(a.timestamp || ''));
+    });
+    return { rows: rows, total: rows.length };
+  }
+
   return {
     buildReport: buildReport,
     sendMonthlyReport: sendMonthlyReport,
     sendMonthlyReportTest: sendMonthlyReportTest,
-    initReportDistributionLog: initReportDistributionLog_
+    getMonthlyReportSendLog: getMonthlyReportSendLog,
+    initReportDistributionLog: initReportDistributionLog_,
+    appendDistributionLogRow: appendDistributionLogRow_
   };
 })();

@@ -119,6 +119,8 @@
  * @property {Array<Object>} tables
  * @property {Object}  barConfig
  * @property {number|null} goLivesWindowDays
+ * @property {number} recentWindowDays       V2.6: report-only recent go-live window (default 30).
+ * @property {number} upcomingWindowDays     V2.6: report-only upcoming go-live window (default 60).
  * @property {string|null} redYellowPartnerFilter
  * @property {boolean} includeIndustryRedYellow
  * @property {boolean} includeIndustryGoLives
@@ -264,6 +266,8 @@ var CoreConfig = (function () {
       cfg.sheets.deploymentContacts = 'SFDC_DeploymentContacts';
     if (!cfg.sheets.wellness)
       cfg.sheets.wellness = 'SFDC_Wellness';
+    if (!cfg.sheets.csatInFlight)
+      cfg.sheets.csatInFlight = 'CSAT_InFlight';
 
     // -------------------------------------------------------------------------
     // Salesforce (Phase 3a, extended Phase 3i)
@@ -320,6 +324,8 @@ var CoreConfig = (function () {
     if (!cfg.report.v2ExportFilename)
       cfg.report.v2ExportFilename = (cfg.appId || 'App') + '_DeploymentHealth_Report_V2.html';
     if (cfg.report.goLivesWindowDays === undefined)        cfg.report.goLivesWindowDays = 30;
+    if (cfg.report.recentWindowDays === undefined)         cfg.report.recentWindowDays = 30;
+    if (cfg.report.upcomingWindowDays === undefined)       cfg.report.upcomingWindowDays = 60;
     if (cfg.report.redYellowPartnerFilter === undefined)   cfg.report.redYellowPartnerFilter = null;
     if (cfg.report.includeIndustryRedYellow === undefined) cfg.report.includeIndustryRedYellow = false;
     if (cfg.report.includeIndustryGoLives === undefined)   cfg.report.includeIndustryGoLives = false;
@@ -369,6 +375,11 @@ var CoreConfig = (function () {
       cfg.report.distribution.to = [];
     if (!Array.isArray(cfg.report.distribution.cc))
       cfg.report.distribution.cc = [];
+    if (typeof cfg.report.distribution.bcc === 'undefined')
+      cfg.report.distribution.bcc = '';
+    if (!Array.isArray(cfg.report.distribution.allowedSenders)) {
+      cfg.report.distribution.allowedSenders = ['jeffrey.ditty@workday.com'];
+    }
     if (!cfg.report.distribution.subjectTemplate) {
       cfg.report.distribution.subjectTemplate =
         '{{appTitle}} \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}';
@@ -475,6 +486,15 @@ var CoreConfig = (function () {
       ];
     }
 
+    // V2.8: migrate legacy mgmPgl tab id to unified csat tab.
+    cfg.ui.tabs = cfg.ui.tabs.map(function (t) {
+      if (t.id === 'mgmPgl') {
+        return { id: 'csat', label: (t.label && t.label !== 'MDS/PGL' && t.label !== 'MGM / PGL')
+          ? t.label : 'CSAT' };
+      }
+      return t;
+    });
+
     // Deployments table — Phase 1 keys + Phase 2 additions
     cfg.ui.deploymentsTable = cfg.ui.deploymentsTable || {};
     if (cfg.ui.deploymentsTable.showIndustry === undefined)
@@ -514,12 +534,17 @@ var CoreConfig = (function () {
     if (!cfg.ui.goLivesTab.recentWindowDays)   cfg.ui.goLivesTab.recentWindowDays = 60;
     if (!cfg.ui.goLivesTab.upcomingWindowDays) cfg.ui.goLivesTab.upcomingWindowDays = 90;
 
-    // MDS/PGL tab defaults (MDS-PGL Redesign 2026-06)
+    // MDS/PGL tab defaults (MDS-PGL Redesign 2026-06) — retained as csatTab alias (V2.8)
     cfg.ui.mgmPglTab = cfg.ui.mgmPglTab || {};
     if (cfg.ui.mgmPglTab.enabled === undefined) cfg.ui.mgmPglTab.enabled = true;
     if (!cfg.ui.mgmPglTab.defaultHorizon) cfg.ui.mgmPglTab.defaultHorizon = 3;
     if (!Array.isArray(cfg.ui.mgmPglTab.horizonOptions))
       cfg.ui.mgmPglTab.horizonOptions = [3, 6];
+    cfg.ui.csatTab = cfg.ui.csatTab || cfg.ui.mgmPglTab;
+    if (cfg.ui.csatTab.enabled === undefined) cfg.ui.csatTab.enabled = true;
+    if (!cfg.ui.csatTab.defaultHorizon) cfg.ui.csatTab.defaultHorizon = 3;
+    if (!Array.isArray(cfg.ui.csatTab.horizonOptions))
+      cfg.ui.csatTab.horizonOptions = [3, 6];
 
     // Stage 1: Role-based tab visibility.
     // Maps access role -> list of tab IDs the user is allowed to see.
@@ -531,9 +556,20 @@ var CoreConfig = (function () {
     }
     if (!Array.isArray(cfg.ui.roleVisibility.POWER_USER)) {
       cfg.ui.roleVisibility.POWER_USER = [
-        'deployments', 'golives', 'mgmPgl', 'execsummary',
+        'deployments', 'golives', 'csat', 'mgmPgl', 'execsummary',
         'report', 'portfolio', 'overrides', 'trends', 'notable'
       ];
+    } else {
+      // V2.8: ensure csat is allowed; retain mgmPgl as fallback alias.
+      var _pu = cfg.ui.roleVisibility.POWER_USER;
+      if (_pu.indexOf('csat') === -1 && _pu.indexOf('mgmPgl') !== -1) {
+        _pu.splice(_pu.indexOf('mgmPgl') + 1, 0, 'csat');
+      } else if (_pu.indexOf('csat') === -1) {
+        _pu.push('csat');
+      }
+      if (_pu.indexOf('mgmPgl') === -1 && _pu.indexOf('csat') !== -1) {
+        _pu.splice(_pu.indexOf('csat') + 1, 0, 'mgmPgl');
+      }
     }
     if (!Array.isArray(cfg.ui.roleVisibility.ADMIN)) {
       cfg.ui.roleVisibility.ADMIN = cfg.ui.roleVisibility.POWER_USER.slice();

@@ -123,7 +123,10 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if (filteredUi.overviewTab && filteredUi.overviewTab.enabled !== false) parts.push(_CoreUI_Markup_buildOverviewTab_());
   if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(filteredUi));
   if (tabIds.indexOf('golives') !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(filteredUi));
-  if (tabIds.indexOf('mgmPgl') !== -1 && ui.mgmPglTab && ui.mgmPglTab.enabled) parts.push(_CoreUI_Markup_buildMgmPglTab_(filteredUi));
+  if ((tabIds.indexOf('csat') !== -1 || tabIds.indexOf('mgmPgl') !== -1) &&
+      ui.csatTab && ui.csatTab.enabled !== false) {
+    parts.push(_CoreUI_Markup_buildCsatTab_(filteredUi));
+  }
   if (tabIds.indexOf('execsummary') !== -1 || tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportingTab_(filteredUi, cfg));
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi, cfg));
   if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi, cfg));
@@ -143,6 +146,8 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     parts.push(_CoreUI_Markup_buildGoLivesModal_(filteredUi));
     parts.push(_CoreUI_Markup_buildConfirmModal_(filteredUi));
     parts.push(_CoreUI_Markup_buildAuditDetailModal_(filteredUi));
+    parts.push(_CoreUI_Markup_buildReportSendModal_(filteredUi));
+    parts.push(_CoreUI_Markup_buildCsatRuleModal_(filteredUi));
     if (cfg && cfg.student && cfg.student.enabled === true) {
       parts.push(_CoreUI_Markup_buildStudentEditModal_(filteredUi, cfg));
     }
@@ -383,105 +388,219 @@ function _CoreUI_Markup_buildGoLivesTab_(ui) {
 }
 
 // ---------------------------------------------------------------------------
-// TAB: MDS / PGL (redesign — month-grouped batch view)
+// TAB: CSAT (V2.8 — in-flight surveys + upcoming batches + notifications)
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the MDS / PGL tab markup.
+ * Builds the unified CSAT tab markup.
  *
- * Section 1: Month-group cards (populated by JS via renderMdsPglMonthGroups).
- * Section 2: Exceptions table — unchanged structure.
- *
- * Phase MDS-PGL Redesign (2026-06)
+ * Section 1: In-Flight Surveys (6-column tracking table).
+ * Section 2: Upcoming Survey Batches (month-grouped MDS/PGL cards).
+ * Section 3: Notification Hub (config-driven survey notification triggers).
  *
  * @param {Object} ui  cfg.ui
  * @return {string}
  */
-function _CoreUI_Markup_buildMgmPglTab_(ui) {
+function _CoreUI_Markup_buildCsatTab_(ui) {
   return [
-    '<div id="mgmPgl-tab" class="tab-content">',
+    '<div id="csat-tab" class="tab-content">',
 
     '  <div class="info-banner">',
-    '    \uD83D\uDCCB MDS / PGL &mdash; projected survey schedule by month for Active deployments.',
-    '    Each row represents a distinct go-live event. Update Salesforce if any',
-    '    information is incorrect.',
+    '    \uD83D\uDCCA CSAT &mdash; track in-flight survey responses, upcoming MDS/PGL batches,',
+    '    and survey notification rules.',
     '  </div>',
 
     '  <div class="trends-toolbar no-export">',
-    '    <button class="btn btn-secondary" onclick="loadMgmPglTab()">&#x1F504; Refresh</button>',
-    '    <span id="mgmpgl-as-of"',
+    '    <button class="btn btn-secondary" onclick="loadCsatTab()">&#x1F504; Refresh</button>',
+    '    <span id="csat-last-updated"',
     '          style="margin-left:auto;font-size:12px;color:var(--color-text-muted);"></span>',
     '  </div>',
 
-    '  <!-- Horizon toggle -->',
-    '  <div class="control-bar" style="margin-bottom:0;">',
-    '    <div class="control-row">',
-    '      <div class="seg-control" id="mgmPgl-horizon-toggle" role="group" aria-label="Horizon">',
-    '        <button class="seg-control-btn active" data-mdspgl-horizon="3"',
-    '                onclick="setMdsPglHorizon(3)">3 Months</button>',
-    '        <button class="seg-control-btn" data-mdspgl-horizon="6"',
-    '                onclick="setMdsPglHorizon(6)">6 Months</button>',
+    '  <nav class="csat-subtab-nav" role="tablist" aria-label="CSAT sections">',
+    '    <button type="button" class="csat-subtab-btn active" data-csat-subtab="batches"',
+    '            onclick="switchCsatSubTab(\'batches\')" role="tab" aria-selected="true">',
+    '      Upcoming Batches',
+    '    </button>',
+    '    <button type="button" class="csat-subtab-btn" data-csat-subtab="inflight"',
+    '            onclick="switchCsatSubTab(\'inflight\')" role="tab" aria-selected="false">',
+    '      In-Flight Surveys',
+    '    </button>',
+    '    <button type="button" class="csat-subtab-btn" data-csat-subtab="notify"',
+    '            onclick="switchCsatSubTab(\'notify\')" role="tab" aria-selected="false">',
+    '      Notification Management',
+    '      <span class="csat-subtab-badge hidden" id="csat-notify-error-badge">!</span>',
+    '    </button>',
+    '    <button type="button" class="csat-subtab-btn" data-csat-subtab="upload"',
+    '            onclick="switchCsatSubTab(\'upload\')" role="tab" aria-selected="false">',
+    '      File Upload',
+    '    </button>',
+    '  </nav>',
+
+  // ── Panel 1: Upcoming Batches (default) ───────────────────────────────────
+    '  <div id="csat-panel-batches" class="csat-subtab-panel active" role="tabpanel">',
+    '    <div class="trends-section" id="csat-batches-section">',
+    '      <div class="control-bar" style="margin-bottom:0;">',
+    '        <div class="control-row">',
+    '          <div class="seg-control" id="csat-horizon-toggle" role="group" aria-label="Horizon">',
+    '            <button class="seg-control-btn active" data-mdspgl-horizon="3"',
+    '                    onclick="setMdsPglHorizon(3)">3 Months</button>',
+    '            <button class="seg-control-btn" data-mdspgl-horizon="6"',
+    '                    onclick="setMdsPglHorizon(6)">6 Months</button>',
+    '          </div>',
+    '        </div>',
+    '      </div>',
+
+    '      <div class="control-bar">',
+    '        <div class="control-row">',
+    '          <div class="seg-control" role="group" aria-label="Survey type filter">',
+    '            <button class="seg-control-btn active" data-mgmpgl-type="all"',
+    '                    onclick="setMgmPglFilterType(\'all\')">All</button>',
+    '            <button class="seg-control-btn" data-mgmpgl-type="MGM"',
+    '                    onclick="setMgmPglFilterType(\'MGM\')">MDS</button>',
+    '            <button class="seg-control-btn" data-mgmpgl-type="PGL"',
+    '                    onclick="setMgmPglFilterType(\'PGL\')">PGL</button>',
+    '          </div>',
+    '          <label class="mdspgl-partner-toggle" title="Toggle to include non-WPS partners">',
+    '            <input type="checkbox" id="mgmpgl-show-all-partners"',
+    '                   onchange="setMdsPglPartnerScope(this.checked)">',
+    '            <span class="mdspgl-partner-toggle-label">Show all partners</span>',
+    '          </label>',
+    '          <div class="search-box">',
+    '            <span class="search-icon">&#x1F50D;</span>',
+    '            <input type="text" id="mgmpgl-search"',
+    '                 placeholder="Search by account or deployment&hellip;"',
+    '                 onkeyup="searchMgmPgl()">',
+    '          </div>',
+    '          <button class="btn btn-secondary" onclick="clearMgmPglSearch()">Clear</button>',
+    '        </div>',
+    '      </div>',
+
+    '      <div id="mdspgl-month-groups" class="mdspgl-month-groups"></div>',
+
+    '      <div class="trends-section" id="mgmpgl-exceptions-section"',
+    '           style="margin-top:var(--space-4);">',
+    '        <div class="trends-section-header">',
+    '          <span class="trends-section-title">Exceptions &mdash; Missing Target Dates</span>',
+    '          <span class="trends-section-sub" id="mgmpgl-exceptions-sub"></span>',
+    '        </div>',
+    '        <p style="font-size:13px;color:var(--color-text-muted);margin:0 0 var(--space-3) 0;">',
+    '          Active deployments missing dates needed to schedule surveys.',
+    '        </p>',
+    '        <div class="table-wrapper">',
+    '          <table id="mgmpgl-exceptions-table">',
+    '            <thead><tr>',
+    '              <th>Account</th><th>Deployment</th><th>Missing</th>',
+    '              <th>Type</th><th>Start Date</th><th>Delivery Director</th>',
+    '            </tr></thead>',
+    '            <tbody id="mgmpgl-exceptions-tbody"></tbody>',
+    '          </table>',
+    '        </div>',
     '      </div>',
     '    </div>',
     '  </div>',
 
-    '  <!-- Survey-type chip + partner toggle + search -->',
-    '  <div class="control-bar">',
-    '    <div class="control-row">',
-    '      <div class="seg-control" role="group" aria-label="Survey type filter">',
-    '        <button class="seg-control-btn active" data-mgmpgl-type="all"',
-    '                onclick="setMgmPglFilterType(\'all\')">All</button>',
-    '        <button class="seg-control-btn" data-mgmpgl-type="MGM"',
-    '                onclick="setMgmPglFilterType(\'MGM\')">MDS</button>',
-    '        <button class="seg-control-btn" data-mgmpgl-type="PGL"',
-    '                onclick="setMgmPglFilterType(\'PGL\')">PGL</button>',
+  // ── Panel 2: In-Flight Surveys ────────────────────────────────────────────
+    '  <div id="csat-panel-inflight" class="csat-subtab-panel" role="tabpanel">',
+    '    <div class="stats-grid" id="csat-inflight-kpis" style="margin-bottom:var(--space-4);">',
+    '      <div class="stat-card"><h3>Total Sent</h3><div class="value" id="csat-kpi-sent">&ndash;</div><div class="sub" id="csat-kpi-sent-sub"></div></div>',
+    '      <div class="stat-card yellow"><h3>Open Rate</h3><div class="value" id="csat-kpi-open">&ndash;</div><div class="sub" id="csat-kpi-open-sub"></div></div>',
+    '      <div class="stat-card green"><h3>Completion Rate</h3><div class="value" id="csat-kpi-comp">&ndash;</div><div class="sub" id="csat-kpi-comp-sub"></div></div>',
+    '      <div class="stat-card red"><h3>Bounced</h3><div class="value" id="csat-kpi-bounced">&ndash;</div><div class="sub">undeliverable</div></div>',
+    '    </div>',
+    '    <div class="section-card">',
+    '      <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">',
+    '        <input type="text" id="csat-search-input"',
+    '               placeholder="Search account, recipient, survey type..."',
+    '               style="padding: 8px 12px; border: 1px solid #dadce0; border-radius: 4px; width: 320px;"',
+    '               onkeyup="searchCsatInFlight()">',
+    '        <div style="display: flex; gap: 8px;">',
+    '          <button class="btn btn-secondary" onclick="clearCsatSearch_()">Clear</button>',
+    '          <button class="btn btn-secondary" onclick="exportCsatCsv_()">Export CSV</button>',
+    '        </div>',
     '      </div>',
-    '      <label class="mdspgl-partner-toggle" title="Toggle to include non-WPS partners">',
-    '        <input type="checkbox" id="mgmpgl-show-all-partners"',
-    '               onchange="setMdsPglPartnerScope(this.checked)">',
-    '        <span class="mdspgl-partner-toggle-label">Show all partners</span>',
-    '      </label>',
-    '      <div class="search-box">',
-    '        <span class="search-icon">&#x1F50D;</span>',
-    '        <input type="text" id="mgmpgl-search"',
-    '               placeholder="Search by account or deployment&hellip;"',
-    '               onkeyup="searchMgmPgl()">',
+    '      <div class="seg-control csat-status-filter" role="group" aria-label="Tracking status filter">',
+    '        <button type="button" class="seg-control-btn active" data-csat-status="all" onclick="setCsatStatusFilter(\'all\')">All</button>',
+    '        <button type="button" class="seg-control-btn" data-csat-status="sent" onclick="setCsatStatusFilter(\'sent\')">Sent</button>',
+    '        <button type="button" class="seg-control-btn" data-csat-status="opened" onclick="setCsatStatusFilter(\'opened\')">Opened</button>',
+    '        <button type="button" class="seg-control-btn" data-csat-status="completed" onclick="setCsatStatusFilter(\'completed\')">Completed</button>',
+    '        <button type="button" class="seg-control-btn" data-csat-status="bounced" onclick="setCsatStatusFilter(\'bounced\')">Bounced</button>',
     '      </div>',
-    '      <button class="btn btn-secondary" onclick="clearMgmPglSearch()">Clear</button>',
+    '      <div class="table-responsive">',
+    '        <table class="csat-table">',
+    '          <thead>',
+    '            <tr>',
+    '              <th>ACCOUNT NAME</th>',
+    '              <th>SURVEY TYPE</th>',
+    '              <th>TRACKING STATUS</th>',
+    '              <th>SENT DATE</th>',
+    '              <th>EXPIRY DATE</th>',
+    '              <th>RECIPIENT</th>',
+    '            </tr>',
+    '          </thead>',
+    '          <tbody id="csat-inflight-tbody">',
+    '            <!-- Populated by CoreUI_Js.js -->',
+    '          </tbody>',
+    '        </table>',
+    '      </div>',
     '    </div>',
     '  </div>',
 
-    '  <!-- Section 1: month groups (populated by JS) -->',
-    '  <div id="mdspgl-month-groups" class="mdspgl-month-groups"></div>',
-
-    '  <!-- Section 2: exceptions — unchanged structure -->',
-    '  <div class="trends-section" id="mgmpgl-exceptions-section"',
-    '       style="margin-top:var(--space-5);">',
-    '    <div class="trends-section-header">',
-    '      <span class="trends-section-title">Exceptions &mdash; Missing Target Dates</span>',
-    '      <span class="trends-section-sub" id="mgmpgl-exceptions-sub"></span>',
+  // ── Panel 3: Notification Management ────────────────────────────────────
+    '  <div id="csat-panel-notify" class="csat-subtab-panel" role="tabpanel">',
+    '    <div class="info-banner" style="margin-bottom:var(--space-3);">',
+    '      Edit the rules that drive automated MDS/PGL notification emails. New rules are added by an admin in the NotificationConfig sheet.',
     '    </div>',
-    '    <p style="font-size:13px;color:var(--color-text-muted);margin:0 0 var(--space-3) 0;">',
-    '      Active deployments missing dates needed to schedule surveys. Update these',
-    '      records in Salesforce.',
-    '    </p>',
-    '    <div class="table-wrapper">',
-    '      <table id="mgmpgl-exceptions-table">',
-    '        <thead><tr>',
-    '          <th>Account</th>',
-    '          <th>Deployment</th>',
-    '          <th>Missing</th>',
-    '          <th>Type</th>',
-    '          <th>Start Date</th>',
-    '          <th>Delivery Director</th>',
-    '        </tr></thead>',
-    '        <tbody id="mgmpgl-exceptions-tbody"></tbody>',
-    '      </table>',
+    '    <div class="section-title">Configured Rules</div>',
+    '    <div id="csat-notify-rules"></div>',
+    '',
+    '    <div class="section-title" style="margin-top:var(--space-5);">',
+    '      Notification Audit Log',
+    '      <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--color-text-muted);">&mdash; survey notifications only</span>',
+    '    </div>',
+    '    <div class="table-container"><div class="table-wrapper">',
+    '      <table><thead><tr>',
+    '        <th>Timestamp</th><th>Rule</th><th>Subject</th><th>To</th><th>Status</th><th>Mode</th>',
+    '      </tr></thead><tbody id="csat-notify-log-tbody"></tbody></table>',
+    '    </div></div>',
+    '  </div>',
+
+  // ── Panel 4: File Upload ──────────────────────────────────────────────────
+    '  <div id="csat-panel-upload" class="csat-subtab-panel" role="tabpanel">',
+    '    <div class="trends-section">',
+    '      <div class="trends-section-header">',
+    '        <span class="trends-section-title">Import In-Flight Survey CSV</span>',
+    '      </div>',
+    '      <p style="font-size:13px;color:var(--color-text-muted);margin:0 0 var(--space-3) 0;">',
+    '        Drop a <code>survey_normalized_*.csv</code> export. After a successful upload,',
+    '        the view switches to In-Flight Surveys automatically.',
+    '      </p>',
+    '      <div id="csat-upload-container" class="csat-upload-container">',
+    '        <div class="csat-dropzone" id="csat-dropzone">',
+    '          <input type="file" id="csat-upload-input" accept=".csv,text/csv" style="display:none;">',
+    '          <div class="csat-dropzone-inner">',
+    '            <span class="csat-dropzone-icon">&#x1F4C1;</span>',
+    '            <p class="csat-dropzone-title">Drop <code>survey_normalized</code> CSV here</p>',
+    '            <p class="csat-dropzone-sub">or <button type="button" class="btn btn-secondary btn-sm"',
+    '               onclick="document.getElementById(\'csat-upload-input\').click()">Choose file</button></p>',
+    '          </div>',
+    '        </div>',
+    '        <div id="csat-upload-overlay" class="csat-upload-overlay hidden" aria-live="polite">',
+    '          <div class="report-loading">',
+    '            <div class="spinner-large"></div>',
+    '            <p id="csat-upload-status-text"></p>',
+    '          </div>',
+    '        </div>',
+    '      </div>',
     '    </div>',
     '  </div>',
 
-    '</div>' // #mgmPgl-tab
+    '</div>' // #csat-tab
   ].join('\n');
+}
+
+// Legacy alias — retained for backward compatibility during app config migration.
+function _CoreUI_Markup_buildMgmPglTab_(ui) {
+  return _CoreUI_Markup_buildCsatTab_(ui);
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +661,28 @@ function _CoreUI_Markup_buildOverviewTab_() {
 }
 
 // ---------------------------------------------------------------------------
+// EXECUTIVE SUMMARY EDITOR (shared toolbar + editor shell)
+// ---------------------------------------------------------------------------
+
+/**
+ * Formatting toolbar for the Executive Summary contenteditable editor.
+ * @return {string}
+ * @private
+ */
+function _CoreUI_Markup_buildExecEditorToolbar_() {
+  return [
+    '      <div class="exec-editor-toolbar" style="display:flex; gap:4px; margin-bottom:6px;">',
+    '        <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px;"',
+    '                onclick="execEditorFormat(\'bold\')" title="Bold"><strong>B</strong></button>',
+    '        <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px;"',
+    '                onclick="execEditorFormat(\'insertUnorderedList\')" title="Bullet list">\u2022 List</button>',
+    '        <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px;"',
+    '                onclick="execEditorFormat(\'h3\')" title="Header">H3</button>',
+    '      </div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // TAB: EXECUTIVE SUMMARY (unchanged from Phase 1)
 // ---------------------------------------------------------------------------
 
@@ -556,6 +697,7 @@ function _CoreUI_Markup_buildExecSummaryTab_(ui) {
     '      <p style="margin: 0 0 0.5rem 0; color: var(--color-text-muted); font-size: 12px;">',
     '        Paste or type formatted text below (headings, bold, lists, etc.).',
     '      </p>',
+    _CoreUI_Markup_buildExecEditorToolbar_(),
     '      <div id="exec-editor" contenteditable="true" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); min-height: 200px; padding: 12px; font-size: 14px; line-height: 1.5; overflow-y: auto;"></div>',
     '    </div>',
     '    <div class="filter-group" style="flex-direction: column; align-items: flex-end; gap: 8px;">',
@@ -588,15 +730,12 @@ function _CoreUI_Markup_buildReportTab_(ui, cfg) {
     '  </div>',
     '  <div class="control-bar">',
     '    <div class="control-row" style="justify-content: space-between; align-items: center;">',
-    '      <div class="seg-control" id="report-view-toggle" role="group" aria-label="Report view format">',
-    '        <button class="seg-control-btn active" data-report-view="outlook" onclick="switchReportView(\'outlook\')">Outlook View</button>',
-    '        <button class="seg-control-btn" data-report-view="inline" onclick="switchReportView(\'inline\')">Inline View</button>',
-    '      </div>',
+    '      <span style="font-weight:600;color:var(--color-text);">Gmail View</span>',
     '      <button class="btn btn-primary" onclick="loadReportPreview()">\uD83D\uDD04 Refresh Report</button>',
     '    </div>',
     '    <div class="control-row">',
     '      <p style="margin: 0; color: var(--color-text-muted); font-size: 13px;">',
-    '        <strong>Outlook View</strong> is optimized for email clients. <strong>Inline View</strong> uses modern HTML for browser reading.',
+    '        This preview is the exact HTML that will be sent via Gmail.',
     '      </p>',
     '    </div>',
     '  </div>',
@@ -626,6 +765,8 @@ function _CoreUI_Markup_buildReportingTab_(ui, cfg) {
     '            onclick="switchReportingView(\'execsummary\')">Executive Summary</button>',
     '    <button class="seg-control-btn" data-reporting-view="report"',
     '            onclick="switchReportingView(\'report\')">Monthly Report</button>',
+    '    <button class="seg-control-btn" data-reporting-view="sendlog"',
+    '            onclick="switchReportingView(\'sendlog\')">Send Log</button>',
     '  </div>',
     '  <div id="reporting-execsummary-section">',
     '    <div class="info-banner">',
@@ -636,6 +777,7 @@ function _CoreUI_Markup_buildReportingTab_(ui, cfg) {
     '        <p style="margin: 0 0 0.5rem 0; color: var(--color-text-muted); font-size: 12px;">',
     '          Paste or type formatted text below (headings, bold, lists, etc.).',
     '        </p>',
+    _CoreUI_Markup_buildExecEditorToolbar_(),
     '        <div id="exec-editor" contenteditable="true" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); min-height: 200px; padding: 12px; font-size: 14px; line-height: 1.5; overflow-y: auto;"></div>',
     '      </div>',
     '      <div class="filter-group" style="flex-direction: column; align-items: flex-end; gap: 8px;">',
@@ -656,15 +798,17 @@ function _CoreUI_Markup_buildReportingTab_(ui, cfg) {
     '    </div>',
     '    <div class="control-bar">',
     '      <div class="control-row" style="justify-content: space-between; align-items: center;">',
-    '        <div class="seg-control" id="report-view-toggle" role="group" aria-label="Report view format">',
-    '          <button class="seg-control-btn active" data-report-view="outlook" onclick="switchReportView(\'outlook\')">Outlook View</button>',
-    '          <button class="seg-control-btn" data-report-view="inline" onclick="switchReportView(\'inline\')">Inline View</button>',
+    '        <span style="font-weight:600;color:var(--color-text);">Gmail View</span>',
+    '        <div style="display:flex;gap:8px;align-items:center;">',
+    '          <div id="report-send-controls" style="display:none;">',
+    '            <button class="btn btn-secondary" onclick="openReportSendModal()">\uD83D\uDCE7 Send Monthly Report</button>',
+    '          </div>',
+    '          <button class="btn btn-primary" onclick="loadReportPreview()">\uD83D\uDD04 Refresh Report</button>',
     '        </div>',
-    '        <button class="btn btn-primary" onclick="loadReportPreview()">\uD83D\uDD04 Refresh Report</button>',
     '      </div>',
     '      <div class="control-row">',
     '        <p style="margin: 0; color: var(--color-text-muted); font-size: 13px;">',
-    '          <strong>Outlook View</strong> is optimized for email clients. <strong>Inline View</strong> uses modern HTML for browser reading.',
+    '          This preview is the exact HTML that will be sent via Gmail.',
     '        </p>',
     '      </div>',
     '    </div>',
@@ -674,6 +818,26 @@ function _CoreUI_Markup_buildReportingTab_(ui, cfg) {
     '          <p>Click \u201cRefresh Report\u201d to load the monthly report preview</p>',
     '        </div>',
     '      </div>',
+    '    </div>',
+    '  </div>',
+    '  <div id="reporting-sendlog-section" style="display:none;">',
+    '    <div class="info-banner">',
+    '      \uD83D\uDCE7 Production sends of the monthly report (test sends are not logged).',
+    '    </div>',
+    '    <div class="table-wrapper">',
+    '      <table>',
+    '        <thead><tr>',
+    '          <th>Timestamp</th>',
+    '          <th>To</th>',
+    '          <th>From</th>',
+    '          <th>Subject</th>',
+    '          <th>Status</th>',
+    '          <th>Message ID</th>',
+    '          <th>Sent By</th>',
+    '          <th>Mode</th>',
+    '        </tr></thead>',
+    '        <tbody id="report-sendlog-tbody"></tbody>',
+    '      </table>',
     '    </div>',
     '  </div>',
     '</div>'
@@ -1165,6 +1329,78 @@ function _CoreUI_Markup_buildGoLivesModal_(ui) {
 }
 
 // ---------------------------------------------------------------------------
+// MODAL: CSAT NOTIFICATION RULE EDITOR (V2.8)
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildCsatRuleModal_(ui) {
+  return [
+    '<div id="csat-rule-modal" class="modal-overlay">',
+    '  <div class="modal modal-lg">',
+    '    <div class="modal-header">',
+    '      <h2>Edit Notification Rule</h2>',
+    '      <button class="modal-close" onclick="closeCsatRuleModal()">&times;</button>',
+    '    </div>',
+    '    <div class="modal-body">',
+    '      <div class="form-grid">',
+    '        <div class="form-group"><label class="form-label">Rule Key</label>',
+    '          <input type="text" id="csat-rule-key" class="form-input" readonly></div>',
+    '        <div class="form-group"><label class="form-label">Type</label>',
+    '          <input type="text" id="csat-rule-type" class="form-input" readonly></div>',
+    '        <div class="form-group"><label class="form-label">Enabled</label>',
+    '          <select id="csat-rule-enabled" class="form-input"><option value="TRUE">Yes</option><option value="FALSE">No</option></select></div>',
+    '        <div class="form-group"><label class="form-label">To Role</label>',
+    '          <select id="csat-rule-torole" class="form-input"><option value="">(none)</option>',
+    '            <option value="engagementManager">Engagement Manager</option>',
+    '            <option value="deliveryDirector">Delivery Director</option></select></div>',
+    '        <div class="form-group"><label class="form-label">To (emails)</label>',
+    '          <input type="text" id="csat-rule-to" class="form-input" placeholder="comma-separated"></div>',
+    '        <div class="form-group"><label class="form-label">CC</label>',
+    '          <input type="text" id="csat-rule-cc" class="form-input"></div>',
+    '        <div class="form-group"><label class="form-label">From Alias</label>',
+    '          <input type="text" id="csat-rule-fromalias" class="form-input"></div>',
+    '        <div class="form-group"><label class="form-label">Grouping</label>',
+    '          <select id="csat-rule-grouping" class="form-input"><option value="all">all</option>',
+    '            <option value="perRecipient">perRecipient</option></select></div>',
+    '      </div>',
+    '      <div id="csat-rule-em-timing" class="form-grid" style="margin-top:var(--space-3);">',
+    '        <div class="form-group"><label class="form-label">Lead Days</label>',
+    '          <input type="number" id="csat-rule-leaddays" class="form-input"></div>',
+    '        <div class="form-group"><label class="form-label">Final Days</label>',
+    '          <input type="number" id="csat-rule-finaldays" class="form-input"></div>',
+    '      </div>',
+    '      <div id="csat-rule-digest-timing" class="form-grid" style="margin-top:var(--space-3);display:none;">',
+    '        <div class="form-group"><label class="form-label">Window Days</label>',
+    '          <input type="number" id="csat-rule-windowdays" class="form-input"></div>',
+    '        <div class="form-group"><label class="form-label">Cadence</label>',
+    '          <select id="csat-rule-cadence" class="form-input"><option value="monthly">monthly</option>',
+    '            <option value="bimonthly">bimonthly</option></select></div>',
+    '        <div class="form-group"><label class="form-label">Send Day</label>',
+    '          <input type="number" id="csat-rule-sendday" class="form-input"></div>',
+    '      </div>',
+    '      <div class="section-title" style="margin-top:var(--space-4);">Email Content</div>',
+    '      <div class="form-group full-width"><label class="form-label">Subject</label>',
+    '        <input type="text" id="csat-rule-subject" class="form-input"></div>',
+    '      <div class="exec-editor-toolbar" style="margin:var(--space-2) 0;">',
+    '        <button type="button" class="btn btn-secondary btn-sm" onclick="execCsatEditorFormat(\'bold\')" title="Bold"><strong>B</strong></button>',
+    '        <button type="button" class="btn btn-secondary btn-sm" onclick="execCsatEditorFormat(\'insertUnorderedList\')" title="Bullet list">&bull; List</button>',
+    '        <button type="button" class="btn btn-secondary btn-sm" onclick="execCsatEditorFormat(\'h3\')" title="Header">H3</button>',
+    '      </div>',
+    '      <div id="csat-rule-body" contenteditable="true" class="csat-rule-body-editor"></div>',
+    '      <div class="form-group full-width" style="margin-top:var(--space-3);">',
+    '        <label class="form-label">Token Palette</label>',
+    '        <div id="csat-token-palette"></div>',
+    '      </div>',
+    '    </div>',
+    '    <div class="modal-footer">',
+    '      <button class="btn btn-secondary" onclick="closeCsatRuleModal()">Cancel</button>',
+    '      <button class="btn btn-primary" onclick="saveCsatRule()">Save Rule</button>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // MODAL: CONFIRMATION (Phase 2 — used for bulk clear actions)
 // ---------------------------------------------------------------------------
 
@@ -1184,6 +1420,86 @@ function _CoreUI_Markup_buildConfirmModal_(ui) {
     '      <button class="btn btn-destructive" id="confirm-modal-confirm-btn" onclick="confirmModalConfirm()">',
     '        <span id="confirm-modal-confirm-text">Confirm</span>',
     '        <span id="confirm-modal-spinner" class="spinner hidden"></span>',
+    '      </button>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// MODAL: REPORT SEND (N9 — monthly report compose-and-send)
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildReportSendModal_(ui) {
+  return [
+    '<div id="report-send-modal" class="modal-overlay">',
+    '  <div class="modal" style="max-width:640px;width:92vw;">',
+    '    <div class="modal-header">',
+    '      <h2>Send Monthly Report</h2>',
+    '      <button class="modal-close" onclick="closeReportSendModal()">&times;</button>',
+    '    </div>',
+    '    <div class="modal-body" id="report-send-form-panel">',
+    '      <div id="report-send-test-banner" class="report-test-banner hidden">',
+    '        TEST MODE \u2014 sends only to you, not logged',
+    '      </div>',
+    '      <label class="report-send-test-toggle csat-rule-toggle" style="margin-bottom:12px;">',
+    '        <input type="checkbox" id="report-send-test-toggle" onchange="toggleReportSendTest(this.checked)">',
+    '        Test Send',
+    '      </label>',
+    '      <div class="form-grid">',
+    '        <div class="form-group full-width">',
+    '          <label class="form-label" for="rpt-to">To</label>',
+    '          <input type="text" id="rpt-to" class="form-input">',
+    '        </div>',
+    '        <div class="form-group full-width">',
+    '          <label class="form-label" for="rpt-from">From</label>',
+    '          <select id="rpt-from" class="form-input"></select>',
+    '        </div>',
+    '        <div class="form-group full-width">',
+    '          <label class="form-label" for="rpt-cc">CC</label>',
+    '          <input type="text" id="rpt-cc" class="form-input">',
+    '        </div>',
+    '        <div class="form-group full-width">',
+    '          <label class="form-label" for="rpt-bcc">BCC</label>',
+    '          <input type="text" id="rpt-bcc" class="form-input">',
+    '        </div>',
+    '        <div class="form-group full-width">',
+    '          <label class="form-label" for="rpt-subject">Subject</label>',
+    '          <input type="text" id="rpt-subject" class="form-input">',
+    '        </div>',
+    '      </div>',
+    '      <p style="font-size:13px;color:var(--color-text-muted);margin-top:12px;">',
+    '        Report body = current Gmail View.',
+    '        <button type="button" class="btn btn-link" style="padding:0;vertical-align:baseline;"',
+    '                onclick="openReportPreviewFromSendModal()">Open Gmail View preview</button>',
+    '      </p>',
+    '    </div>',
+    '    <div class="modal-body hidden" id="report-send-confirm">',
+    '      <p style="font-weight:600;margin-bottom:12px;">Review and confirm this send:</p>',
+    '      <div class="form-grid">',
+    '        <div class="form-group full-width"><label class="form-label">To</label>',
+    '          <div id="report-send-confirm-to" class="form-readonly"></div></div>',
+    '        <div class="form-group full-width"><label class="form-label">From</label>',
+    '          <div id="report-send-confirm-from" class="form-readonly"></div></div>',
+    '        <div class="form-group full-width"><label class="form-label">CC</label>',
+    '          <div id="report-send-confirm-cc" class="form-readonly"></div></div>',
+    '        <div class="form-group full-width"><label class="form-label">BCC</label>',
+    '          <div id="report-send-confirm-bcc" class="form-readonly"></div></div>',
+    '        <div class="form-group full-width"><label class="form-label">Subject</label>',
+    '          <div id="report-send-confirm-subject" class="form-readonly"></div></div>',
+    '      </div>',
+    '    </div>',
+    '    <div class="modal-footer" id="report-send-footer-form">',
+    '      <button class="btn btn-secondary" onclick="closeReportSendModal()">Cancel</button>',
+    '      <button class="btn btn-primary" id="report-send-primary-btn" onclick="reportSendPrimaryAction()">',
+    '        Review &amp; Send',
+    '      </button>',
+    '    </div>',
+    '    <div class="modal-footer hidden" id="report-send-footer-confirm">',
+    '      <button class="btn btn-secondary" onclick="reportSendConfirmBack()">Back</button>',
+    '      <button class="btn btn-primary" id="report-send-confirm-btn" onclick="confirmReportSend()">',
+    '        Confirm Send',
     '      </button>',
     '    </div>',
     '  </div>',

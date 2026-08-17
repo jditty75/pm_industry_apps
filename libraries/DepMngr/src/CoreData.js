@@ -1122,6 +1122,7 @@ function _sfdcDataVersion_(cfg) {
         return a.health < b.health ? -1 : 1;
       });
 
+    redYellow = filterDeploymentsByStudent_(redYellow, 'exclude', cfg);
     return applyViewModeFilter_(cfg, redYellow, viewModeOpts);
   }
 
@@ -2591,6 +2592,24 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Coerces a sheet/API date value to a JSON-serializable string for google.script.run.
+   * Raw Date objects in payloads cause the client success handler to receive null.
+   * @param {*} val
+   * @param {*=} emptyVal  Returned when val is null/empty.
+   * @return {string|null}
+   * @private
+   */
+  function _coerceUiDateField_(val, emptyVal) {
+    if (val == null || val === '') {
+      return emptyVal !== undefined ? emptyVal : null;
+    }
+    if (val instanceof Date) {
+      return CoreUtils.formatDateToIsoString(val);
+    }
+    return String(val);
+  }
+
+  /**
    * Computes the one-third point between a deployment start and a target date.
    * @param {string} start  'YYYY-MM-DD'
    * @param {string} end    'YYYY-MM-DD'
@@ -2905,12 +2924,12 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           partner:          r.partner     || '',
           isExecutiveWatch: !!r.isExecutiveWatch,
           surveyType:       ev.kind,
-          eventDate:        ev.eventDate,
+          eventDate:        _coerceUiDateField_(ev.eventDate),
           products:         ev.products,
           isMultipleGoLives: isMultipleGoLives,
-          oneThirdPoint:    ev.oneThirdPoint || null,
-          startDate:        r.deploymentStartDate || null,
-          currentMtp:       r.mtpDate             || null,
+          oneThirdPoint:    _coerceUiDateField_(ev.oneThirdPoint, null),
+          startDate:        _coerceUiDateField_(r.deploymentStartDate, null),
+          currentMtp:       _coerceUiDateField_(r.mtpDate, null),
           contacts:         contactsMap[depId]    || null,
           _batchYearMonth:  scheduleEntry.yearMonth
         });
@@ -3080,6 +3099,708 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       Logger.log('OK: Bellingham not in exceptions (Bellingham fix confirmed).');
     }
     Logger.log('=== END ===');
+  }
+
+  // ===========================================================================
+  // V2.8: CSAT IN-FLIGHT SURVEYS
+  // ===========================================================================
+
+  /** @const {string[]} CSAT_InFlight sheet storage schema */
+  var _CSAT_INFLIGHT_COLUMNS_ = [
+    'deployment_id', 'account_name', 'deployment_name',
+    'survey_type', 'tracking_status', 'response_received',
+    'contact_name', 'contact_email', 'contact_role',
+    'engagement_manager', 'partner_name',
+    'sent_date', 'opened_date', 'started_date', 'finished_date',
+    'survey_expires'
+  ];
+
+  /**
+   * Sanitizes ISO or locale date strings into YYYY-MM-DD.
+   * @param {*} dVal
+   * @return {string}
+   * @private
+   */
+  function formatShortDate_(dVal) {
+    if (!dVal || dVal === '\u2014' || dVal === 'null' || dVal === 'undefined') return '\u2014';
+    var str = String(dVal).trim();
+
+    // Handle MM/DD/YYYY format
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+      var parts = str.split('/');
+      var mm = parts[0].padStart(2, '0');
+      var dd = parts[1].padStart(2, '0');
+      var yyyy = parts[2];
+      return yyyy + '-' + mm + '-' + dd;
+    }
+
+    var d = new Date(str);
+    if (isNaN(d.getTime())) return str.split('T')[0] || '\u2014';
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  /**
+   * Formats a date value for UI display as M/d/yyyy.
+   * Accepts Date objects and parseable date strings; blank/invalid returns em-dash.
+   * @param {*} dVal
+   * @return {string}
+   * @private
+   */
+  function _formatUiDate_(dVal) {
+    if (!dVal || dVal === '\u2014' || dVal === 'null' || dVal === 'undefined') return '\u2014';
+    if (dVal instanceof Date) {
+      if (isNaN(dVal.getTime())) return '\u2014';
+      return Utilities.formatDate(dVal, Session.getScriptTimeZone(), 'M/d/yyyy');
+    }
+    var str = String(dVal).trim();
+    if (!str) return '\u2014';
+    var d = new Date(str);
+    if (isNaN(d.getTime())) return '\u2014';
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'M/d/yyyy');
+  }
+
+  /**
+   * Normalizes a raw survey_status string to a UI tracking status.
+   * @param {string} raw
+   * @return {string} Sent|Opened|Completed|Bounced
+   * @private
+   */
+  function _normalizeCsatTrackingStatus_(raw) {
+    var s = String(raw || '').trim().toLowerCase();
+    if (!s) return 'Sent';
+    if (s.indexOf('bounce') !== -1 || s.indexOf('undeliver') !== -1 || s.indexOf('fail') !== -1) {
+      return 'Bounced/Undeliverable';
+    }
+    if (s.indexOf('complete') !== -1 || s.indexOf('submit') !== -1) return 'Completed';
+    if (s.indexOf('open') !== -1 || s.indexOf('start') !== -1 || s.indexOf('progress') !== -1) {
+      return 'Opened';
+    }
+    return 'Sent';
+  }
+
+  /**
+   * Parses survey_normalized CSV text into row objects keyed by schema columns.
+   * @param {string} csvText
+   * @return {Array<Object>}
+   * @private
+   */
+  function _parseCsatInFlightCsv_(csvText) {
+    var rows = Utilities.parseCsv(String(csvText || ''));
+    if (!rows || !rows.length) return [];
+
+    var headerRow = rows[0].map(function (h) {
+      return String(h || '').trim().toLowerCase().replace(/\s+/g, '_');
+    });
+    var colIndex = {};
+    headerRow.forEach(function (name, i) {
+      if (name) colIndex[name] = i;
+    });
+
+    var out = [];
+    for (var r = 1; r < rows.length; r++) {
+      var raw = rows[r];
+      if (!raw || !raw.length) continue;
+      var obj = {};
+      var hasData = false;
+      Object.keys(colIndex).forEach(function (name) {
+        var val = colIndex[name] < raw.length ? String(raw[colIndex[name]] || '').trim() : '';
+        if (val) hasData = true;
+        obj[name] = val;
+      });
+      if (!hasData) continue;
+      if (obj.deployment_id) {
+        obj.deployment_id = _canonicalId_(obj.deployment_id);
+      }
+      out.push(obj);
+    }
+    return out;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {GoogleAppsScript.Spreadsheet.Sheet}
+   * @private
+   */
+  function _getOrCreateCsatInFlightSheet_(cfg) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetName = cfg.sheets.csatInFlight || 'CSAT_InFlight';
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      sheet.getRange(1, 1, 1, _CSAT_INFLIGHT_COLUMNS_.length)
+        .setValues([_CSAT_INFLIGHT_COLUMNS_]);
+      sheet.setFrozenRows(1);
+    }
+    return sheet;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function _readCsatInFlightRows_(cfg) {
+    var sheetName = cfg.sheets.csatInFlight || 'CSAT_InFlight';
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return [];
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return [];
+
+    var width = Math.max(_CSAT_INFLIGHT_COLUMNS_.length, sheet.getLastColumn());
+    var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    var headers = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (h) {
+      return String(h || '').trim();
+    });
+
+    return values.map(function (row) {
+      var obj = {};
+      for (var i = 0; i < headers.length; i++) {
+        if (headers[i]) obj[headers[i]] = row[i];
+      }
+      if (obj.deployment_id) obj.deployment_id = _canonicalId_(obj.deployment_id);
+      return obj;
+    });
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} rows
+   * @private
+   */
+  function _writeCsatInFlightSheet_(cfg, rows) {
+    var sheet = _getOrCreateCsatInFlightSheet_(cfg);
+    sheet.getRange(1, 1, 1, _CSAT_INFLIGHT_COLUMNS_.length)
+      .setValues([_CSAT_INFLIGHT_COLUMNS_]);
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+    }
+    if (!rows || !rows.length) return;
+
+    var matrix = rows.map(function (obj) {
+      return _CSAT_INFLIGHT_COLUMNS_.map(function (col) {
+        return obj[col] !== undefined && obj[col] !== null ? obj[col] : '';
+      });
+    });
+    sheet.getRange(2, 1, matrix.length, _CSAT_INFLIGHT_COLUMNS_.length).setValues(matrix);
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {string} csvText
+   * @private
+   */
+  function _backupCsatImport_(cfg, csvText) {
+    var tz = Session.getScriptTimeZone();
+    var dateKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var appId = cfg.appId || 'DHM';
+    var fileName = 'CSAT_Import_' + appId + '_' + dateKey + '.csv';
+    var folders = DriveApp.getFoldersByName('DHM_CSAT_Imports');
+    var folder = folders.hasNext()
+      ? folders.next()
+      : DriveApp.createFolder('DHM_CSAT_Imports');
+    folder.createFile(fileName, csvText, MimeType.CSV);
+    Logger.log('CoreData._backupCsatImport_: saved ' + fileName);
+  }
+
+  /**
+   * Filters parsed CSAT rows to deployments valid for the current app tenant.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} rows
+   * @return {Array<Object>}
+   * @private
+   */
+  /**
+   * Returns canonical deployment IDs valid for CSAT ingestion in this app.
+   * @param {AppConfig} cfg
+   * @return {Object<string, boolean>}
+   * @private
+   */
+  function _csatAllowedDeploymentIds_(cfg) {
+    var allowedIds = {};
+    if (cfg.appId === 'HC_DM') {
+      try {
+        readSfdcDeploymentsRaw_(cfg).forEach(function (r) {
+          if (r.overallStatus === 'Active' && r.deploymentId) {
+            allowedIds[_canonicalId_(r.deploymentId)] = true;
+          }
+        });
+      } catch (e) {
+        Logger.log('CoreData._csatAllowedDeploymentIds_: HC read failed: ' + e);
+      }
+    } else {
+      getAllEffectiveDeployments(cfg).forEach(function (r) {
+        if (r.deploymentId) allowedIds[_canonicalId_(r.deploymentId)] = true;
+      });
+    }
+    return allowedIds;
+  }
+
+  /**
+   * Filters parsed CSAT rows to deployments valid for the current app tenant.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} rows
+   * @return {Array<Object>}
+   * @private
+   */
+  function _filterCsatRowsByTenant_(cfg, rows) {
+    if (!rows || !rows.length) return [];
+    var allowedIds = _csatAllowedDeploymentIds_(cfg);
+    return rows.filter(function (row) {
+      var id = _canonicalId_(row.deployment_id);
+      return id && allowedIds[id];
+    });
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @private
+   */
+  function _setCsatLastImportAt_(cfg) {
+    var key = 'CSAT_LAST_IMPORT:' + (cfg.appId || 'DHM');
+    PropertiesService.getScriptProperties().setProperty(key, new Date().toISOString());
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {string} ISO timestamp or empty
+   * @private
+   */
+  function _getCsatLastImportAt_(cfg) {
+    var key = 'CSAT_LAST_IMPORT:' + (cfg.appId || 'DHM');
+    return PropertiesService.getScriptProperties().getProperty(key) || '';
+  }
+
+  /**
+   * @param {string} dateVal
+   * @return {number|null}
+   * @private
+   */
+  function _daysUntilDate_(dateVal) {
+    if (!dateVal) return null;
+    var d = (dateVal instanceof Date) ? dateVal : new Date(dateVal);
+    if (isNaN(d.getTime())) return null;
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    d.setHours(0, 0, 0, 0);
+    return Math.round((d.getTime() - today.getTime()) / 86400000);
+  }
+
+  /**
+   * @param {Object} row
+   * @return {Object}
+   * @private
+   */
+  function _normalizeCsatInFlightRowForUI_(row) {
+    var first = String(row.contact_first_name || '').trim();
+    var last  = String(row.contact_last_name || '').trim();
+    var name  = (first + ' ' + last).trim() || String(row.contact_email || '').trim();
+    var role  = String(row.contact_role || row.contact_title || '').trim();
+    var status = _normalizeCsatTrackingStatus_(row.survey_status);
+    var depId = row.deployment_id || row.deploymentId || row.id || '';
+    if (depId) depId = _canonicalId_(depId);
+    return {
+      deploymentId:   depId || '\u2014',
+      accountName:    row.account_name || row.accountName || row.customer ||
+                      row.Customer__r_Name || '\u2014',
+      deploymentName: row.deployment_name || '',
+      surveyType:     row.survey_type || row.surveyType || row.type || 'MDS',
+      contactName:    name,
+      contactEmail:   row.contact_email || '',
+      contactRole:    role,
+      contactDisplay: role ? (name + ' (' + role + ')') : name,
+      deliveryDirector: String(
+        row.delivery_director || row.deliveryDirector || row.dd || '\u2014'
+      ).trim(),
+      targetGoLive:   row.target_go_live || row.targetGoLive || row.mtp_date || '\u2014',
+      status:         status,
+      sentDate:       row.sent_date || row.sentDate || row.dispatch_date || '\u2014',
+      expiresInDays:  _daysUntilDate_(row.expires_date),
+      surveyLink:     row.survey_link || '',
+      bounceReason:   row.bounce_reason || '',
+      raw:            row
+    };
+  }
+
+  /**
+   * @param {Array<Object>} uiRows
+   * @return {{totalSent:number, openRatePct:number, completionRatePct:number, bouncedCount:number}}
+   * @private
+   */
+  function _buildCsatInFlightKPIs_(uiRows) {
+    var sent = (uiRows || []).length;
+    var opened = 0;
+    var completed = 0;
+    var bounced = 0;
+    (uiRows || []).forEach(function (r) {
+      var s = String(r.trackingStatus || '').toLowerCase();
+      if (s.indexOf('bounce') !== -1 || s.indexOf('undeliver') !== -1) {
+        bounced++;
+        return;
+      }
+      if (s.indexOf('complete') !== -1) {
+        completed++;
+        opened++;
+        return;
+      }
+      if (s.indexOf('open') !== -1) {
+        opened++;
+        return;
+      }
+    });
+    var denom = sent - bounced;
+    return {
+      totalSent:         sent,
+      openRatePct:       denom > 0 ? Math.round((opened / denom) * 1000) / 10 : 0,
+      completionRatePct: denom > 0 ? Math.round((completed / denom) * 1000) / 10 : 0,
+      bouncedCount:      bounced
+    };
+  }
+
+  /**
+   * Returns all deployment IDs from the SFDC_Deployments master sheet (Active + Complete).
+   * @param {AppConfig} config
+   * @return {Array<{id:string}>}
+   * @private
+   */
+  function getDeploymentMaster_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    try {
+      return readSfdcDeploymentsRaw_(cfg).map(function (r) {
+        return { id: r.deploymentId };
+      }).filter(function (d) { return d.id; });
+    } catch (e) {
+      Logger.log('CoreData.getDeploymentMaster_: read failed: ' + e);
+      return [];
+    }
+  }
+
+  /**
+   * V2.8: Parses and ingests a survey_normalized CSV export.
+   * Clears and overwrites CSAT_InFlight; backs up to Drive; invalidates caches.
+   *
+   * @param {AppConfig} config
+   * @param {string} csvText
+   * @return {{success:boolean, imported:number, discarded:number, totalInput:number, count:number, message:string}}
+   */
+  function uploadCsatInFlightCsvForUI(config, csvText) {
+    var cfg = CoreConfig.withDefaults(config);
+    var parsedRows = _parseCsatInFlightCsv_(csvText);
+    var allowedIds = _csatAllowedDeploymentIds_(cfg);
+
+    var matched = [];
+    parsedRows.forEach(function (row) {
+      var canonId = _canonicalId_(row.deployment_id);
+      if (!canonId || !allowedIds[canonId]) return;
+      matched.push({
+        deployment_id:      canonId,
+        account_name:       row.account_name || '\u2014',
+        deployment_name:    row.deployment_name || '',
+        survey_type:        row.survey_type || '',
+        tracking_status:    _normalizeCsatTrackingStatus_(row.tracking_status),
+        response_received:  row.response_received || '',
+        contact_name:       row.full_name || ((row.first_name || '') + ' ' + (row.last_name || '')).trim() || '\u2014',
+        contact_email:      row.contact_email || '',
+        contact_role:       row.contact_role || '',
+        engagement_manager: row.engagement_manager || '',
+        partner_name:       row.partner_name || '',
+        sent_date:          formatShortDate_(row.ts_email_sent),
+        opened_date:        formatShortDate_(row.ts_email_opened),
+        started_date:       formatShortDate_(row.ts_survey_started),
+        finished_date:      formatShortDate_(row.ts_survey_finished),
+        survey_expires:     formatShortDate_(row.survey_expires)
+      });
+    });
+
+    Logger.log('CSAT Ingestion [' + cfg.appId + ']: input=' + parsedRows.length +
+               ', matched=' + matched.length);
+    try {
+      _backupCsatImport_(cfg, csvText);
+    } catch (e) {
+      Logger.log('CSAT backup failed: ' + e);
+    }
+    _writeCsatInFlightSheet_(cfg, matched);
+    _setCsatLastImportAt_(cfg);
+    _clearCache(cfg);
+
+    return {
+      success: true,
+      imported: matched.length,
+      discarded: parsedRows.length - matched.length,
+      totalInput: parsedRows.length,
+      count: matched.length,
+      message: 'Ingested ' + matched.length + ' of ' + parsedRows.length + ' survey rows.'
+    };
+  }
+
+  /**
+   * Maps survey type labels to batch-view keys (MDS/PGL).
+   * @param {string} surveyType
+   * @return {string}
+   * @private
+   */
+  function _normalizeCsatSurveyTypeKey_(surveyType) {
+    var s = String(surveyType || '').trim().toUpperCase();
+    if (s === 'MGM' || s === 'MDS') return 'MDS';
+    if (s === 'PGL') return 'PGL';
+    return s;
+  }
+
+  /**
+   * Builds a lookup map from batch rows for enriching in-flight survey rows.
+   * @param {Object} upcomingBatches
+   * @return {Object<string, {targetGoLive:string, deliveryDirector:string}>}
+   * @private
+   */
+  function _buildCsatBatchLookup_(upcomingBatches) {
+    var lookup = {};
+    var groups = (upcomingBatches && upcomingBatches.groups) ? upcomingBatches.groups : [];
+    groups.forEach(function (g) {
+      (g.mdsRows || []).concat(g.pglRows || []).forEach(function (row) {
+        var depId = _canonicalId_(row.deploymentId);
+        var typeKey = _normalizeCsatSurveyTypeKey_(row.surveyType);
+        if (!depId || !typeKey) return;
+        var key = depId + '|' + typeKey;
+        lookup[key] = {
+          targetGoLive: row.targetDate || row.eventDate || '',
+          deliveryDirector: row.deliveryDirector || ''
+        };
+      });
+    });
+    return lookup;
+  }
+
+  /**
+   * Enriches in-flight UI rows with target go-live and DD from batch data.
+   * @param {Array<Object>} inFlightRows
+   * @param {Object} lookup
+   * @private
+   */
+  function _enrichCsatInFlightRows_(inFlightRows, lookup) {
+    (inFlightRows || []).forEach(function (row) {
+      var key = _canonicalId_(row.deploymentId) + '|' +
+        _normalizeCsatSurveyTypeKey_(row.surveyType);
+      var match = lookup[key];
+      if (match) {
+        if (match.targetGoLive) row.targetGoLive = match.targetGoLive;
+        var dd = String(row.deliveryDirector || '').trim();
+        if (match.deliveryDirector && (!dd || dd === '\u2014')) {
+          row.deliveryDirector = match.deliveryDirector;
+        }
+      }
+    });
+  }
+
+  /**
+   * Computes persistent CSAT header card metrics.
+   * @param {Array<Object>} inFlightRows
+   * @param {Object} upcomingBatches
+   * @param {{valid:Array, invalid:Array}} notificationValidation
+   * @return {{inFlightCount:number, upcomingBatchCount:number, coveragePct:number, notificationStatus:string, invalidRuleCount:number}}
+   * @private
+   */
+  function _buildCsatHeaderSummary_(inFlightRows, upcomingBatches, notificationValidation) {
+    var inFlightCount = (inFlightRows || []).length;
+    var batchRows = [];
+    var groups = (upcomingBatches && upcomingBatches.groups) ? upcomingBatches.groups : [];
+    groups.forEach(function (g) {
+      batchRows = batchRows.concat(g.mdsRows || [], g.pglRows || []);
+    });
+    var upcomingBatchCount = batchRows.length;
+
+    var inflightKeys = {};
+    (inFlightRows || []).forEach(function (r) {
+      var key = _canonicalId_(r.deploymentId) + '|' +
+        _normalizeCsatSurveyTypeKey_(r.surveyType);
+      if (key !== '|') inflightKeys[key] = true;
+    });
+    var covered = 0;
+    batchRows.forEach(function (r) {
+      var key = _canonicalId_(r.deploymentId) + '|' +
+        _normalizeCsatSurveyTypeKey_(r.surveyType);
+      if (inflightKeys[key]) covered++;
+    });
+    var coveragePct = upcomingBatchCount > 0
+      ? Math.round((covered / upcomingBatchCount) * 1000) / 10
+      : (inFlightCount > 0 ? 100 : 0);
+
+    var invalidCount = (notificationValidation && notificationValidation.invalid)
+      ? notificationValidation.invalid.length : 0;
+    var notificationStatus = invalidCount > 0
+      ? (invalidCount + ' invalid rule' + (invalidCount === 1 ? '' : 's'))
+      : 'All rules valid';
+
+    return {
+      inFlightCount: inFlightCount,
+      upcomingBatchCount: upcomingBatchCount,
+      coveragePct: coveragePct,
+      notificationStatus: notificationStatus,
+      invalidRuleCount: invalidCount
+    };
+  }
+
+  /**
+   * Returns true when a ReportDistributionLog row is a CSAT survey notification.
+   * @param {Object} row
+   * @return {boolean}
+   * @private
+   */
+  function _isCsatSurveyNotificationLogRow_(row) {
+    if (String(row.category || '').trim() === 'Survey Notification') return true;
+    var key = String(row.notificationKey || '').trim();
+    if (/^em_reminder_/.test(key) || key === 'dd_digest') return true;
+    return false;
+  }
+
+  /**
+   * Reads ReportDistributionLog rows filtered to CSAT survey notifications only.
+   * Excludes monthly report distribution rows.
+   *
+   * @param {AppConfig} config
+   * @return {{rows:Array<Object>, total:number}}
+   */
+  function getDistributionLogDataForUI(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    Logger.log('CoreData.getDistributionLogDataForUI: appId=' + cfg.appId);
+
+    CoreDistribute.initReportDistributionLog(cfg);
+    var sheetName = (cfg.report.distribution && cfg.report.distribution.logSheet) ||
+      'ReportDistributionLog';
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) return { rows: [], total: 0 };
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { rows: [], total: 0 };
+
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+      .map(function (h) { return String(h || '').trim(); });
+    var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+    var rows = [];
+    values.forEach(function (cells) {
+      var obj = {};
+      for (var i = 0; i < headers.length; i++) {
+        if (headers[i]) obj[headers[i]] = cells[i];
+      }
+      if (!_isCsatSurveyNotificationLogRow_(obj)) return;
+      if (cfg.appId && obj.appId && String(obj.appId) !== String(cfg.appId)) return;
+      rows.push(obj);
+    });
+
+    rows.sort(function (a, b) {
+      return String(b.timestamp || '').localeCompare(String(a.timestamp || ''));
+    });
+
+    return { rows: rows, total: rows.length };
+  }
+
+  /**
+   * V2.8: unified CSAT tab payload — in-flight surveys, upcoming batches, exceptions.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {number=} windowMonths
+   * @return {Object}
+   */
+  function getCsatTabDataForUI(config, viewModeOpts, windowMonths) {
+    var cfg = CoreConfig.withDefaults(config);
+    var horizonMonths = (windowMonths === 6) ? 6 : 3;
+    Logger.log('CoreData.getCsatTabDataForUI: appId=' + cfg.appId +
+               ', horizon=' + horizonMonths);
+
+    var masterDeps = getDeploymentMaster_(cfg) || [];
+    var totalMasterDeployments = masterDeps.length;
+
+    var rawRows = _readCsatInFlightRows_(cfg);
+    var inFlightRows = rawRows.map(function (r) {
+      return {
+        deploymentId:       r.deployment_id || '\u2014',
+        accountName:        r.account_name || '\u2014',
+        deploymentName:     r.deployment_name || '',
+        surveyType:         r.survey_type || '',
+        trackingStatus:     r.tracking_status || 'Sent',
+        responseReceived:   r.response_received || '',
+        contactName:        r.contact_name || '\u2014',
+        contactEmail:       r.contact_email || '',
+        contactRole:        r.contact_role || '',
+        engagementManager:  r.engagement_manager || '',
+        partner:            r.partner_name || '',
+        sentDate:           _formatUiDate_(r.sent_date),
+        openedDate:         _formatUiDate_(r.opened_date),
+        startedDate:        _formatUiDate_(r.started_date),
+        finishedDate:       _formatUiDate_(r.finished_date),
+        surveyExpires:      _formatUiDate_(r.survey_expires || r.target_go_live)
+      };
+    });
+
+    var upcomingBatches = getMdsPglBatchView(cfg, viewModeOpts, horizonMonths);
+
+    var distinctDepIds = {};
+    inFlightRows.forEach(function (row) {
+      var id = _canonicalId_(row.deploymentId);
+      if (id) distinctDepIds[id] = true;
+    });
+    var distinctCount = Object.keys(distinctDepIds).length;
+    var coveragePct = totalMasterDeployments > 0
+      ? Math.round((distinctCount / totalMasterDeployments) * 100)
+      : 0;
+    var kpis = _buildCsatInFlightKPIs_(inFlightRows);
+
+    var notificationValidation = { valid: [], invalid: [] };
+    var notificationRules = [];
+    try {
+      notificationValidation = CoreNotify.validateNotificationConfig(cfg);
+      notificationRules = notificationValidation.valid.concat(notificationValidation.invalid);
+    } catch (e) {
+      Logger.log('CoreData.getCsatTabDataForUI: notification validation failed: ' + e);
+    }
+
+    var headerSummary = _buildCsatHeaderSummary_(
+      inFlightRows, upcomingBatches, notificationValidation);
+    headerSummary.inFlightCount = inFlightRows.length;
+    headerSummary.coveragePct = coveragePct;
+
+    var notificationKeys = [];
+    try {
+      notificationKeys = CoreNotify.getNotificationKeysForMenu(cfg);
+    } catch (e) {
+      Logger.log('CoreData.getCsatTabDataForUI: notification keys failed: ' + e);
+    }
+
+    var importedAt = _getCsatLastImportAt_(cfg);
+    var freshnessStr = 'Qualtrics data freshness: ' +
+      (importedAt
+        ? Utilities.formatDate(new Date(importedAt), Session.getScriptTimeZone(), 'MMM d, yyyy, hh:mm a')
+        : 'no import yet');
+
+    try {
+      var _bytes = JSON.stringify({ rows: inFlightRows, upcomingBatches: upcomingBatches,
+        notificationRules: notificationRules }).length;
+      Logger.log('getCsatTabDataForUI OK: rows=' + inFlightRows.length +
+        ', batchGroups=' + (upcomingBatches && upcomingBatches.groups ? upcomingBatches.groups.length : 'MISSING') +
+        ', bytes=' + _bytes);
+    } catch (ser) {
+      Logger.log('getCsatTabDataForUI SERIALIZE FAIL: ' + ser);
+    }
+
+    return {
+      success:          true,
+      lastUpdatedText:  freshnessStr,
+      coveragePct:      coveragePct,
+      kpis:             kpis,
+      rows:             inFlightRows,
+      inFlightRows:     inFlightRows,
+      upcomingBatches:  upcomingBatches,
+      exceptions:       upcomingBatches.exceptions || [],
+      notificationKeys: notificationKeys,
+      notificationRules: notificationRules,
+      notificationValidation: notificationValidation,
+      headerSummary:    headerSummary,
+      horizonMonths:    horizonMonths,
+      asOf:             new Date().toISOString()
+    };
   }
 
   // ===========================================================================
@@ -4186,6 +4907,11 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     getMdsPglBatchView:          getMdsPglBatchView,
     _debugMdsPglBatchView:       _debugMdsPglBatchView_,
     _debugMdsPglExceptions:      _debugMdsPglExceptions_,
+
+    // V2.8: CSAT in-flight surveys + unified tab payload
+    uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,
+    getCsatTabDataForUI:         getCsatTabDataForUI,
+    getDistributionLogDataForUI: getDistributionLogDataForUI,
 
     // Overview Snapshot (C11b)
     getOverviewSnapshot:         getOverviewSnapshot,

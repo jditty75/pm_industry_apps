@@ -1793,7 +1793,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * V2.2: single Red/Yellow deployment card (filled badge, bold account, chip metadata).
+   * V2.5: compact Red/Yellow deployment card (thin accent, inline health chip, identity line).
    * @param {Object} row
    * @param {AppConfig} cfg
    * @return {string}
@@ -1801,7 +1801,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
    */
   function _renderRedYellowCardV2_(row, cfg) {
     var h = (row.health || '').toLowerCase();
-    var borderColor = h === 'red' ? '#F44336' : '#FBBC04';
+    var accentColor = h === 'red' ? '#F44336' : '#FBBC04';
     var badgeLabel = h === 'red' ? 'RED' : 'YELLOW';
     var ownerLabel = cfg.report.redYellowOwnerLabel || 'EM';
     var ownerVal = row.deliveryDirector || row.wdEngManager || '';
@@ -1816,7 +1816,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
     var CHIP =
       'display:inline-block; background-color:#f0f3f7; border:1px solid #e0e4ea; border-radius:3px; ' +
-      'padding:2px 7px; margin:2px 6px 2px 0; font-size:10px; color:#444444; ' +
+      'padding:1px 6px; margin:1px 4px 1px 0; font-size:9px; color:#444444; ' +
       'white-space:normal; word-wrap:break-word;';
     var CHIP_LABEL = 'color:#888888; font-weight:600; margin-right:2px;';
 
@@ -1830,34 +1830,37 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       );
     }
 
+    var healthChip =
+      '<span style="display:inline-block; background-color:' + accentColor + '; color:#ffffff; ' +
+      'font-size:9px; font-weight:bold; padding:1px 6px; border-radius:3px; ' +
+      'letter-spacing:0.3px; vertical-align:baseline;">' + badgeLabel + '</span>';
+
+    var accountName = CoreUtils.escapeHtml(row.accountName || '(No account)');
+    var dot = '<span style="color:#cccccc; margin:0 5px;">&middot;</span>';
+    var identityLine =
+      healthChip + dot +
+      '<span style="font-size:13px; font-weight:bold; color:#1a1a1a;">' + accountName + '</span>' +
+      (mtpStr ? dot + '<span style="font-size:11px; color:#666666;">' + CoreUtils.escapeHtml(mtpStr) + '</span>' : '');
+
     var metaChips = [];
     if (row.deploymentName) metaChips.push(chip('Deployment', row.deploymentName));
+    if (row.partner) metaChips.push(chip('Partner', row.partner));
+    if (ownerVal) metaChips.push(chip(ownerLabel, ownerVal));
     if (cfg.report.includeIndustryRedYellow && row.industry) {
       metaChips.push(chip('Industry', row.industry));
     }
-    if (row.partner) metaChips.push(chip('Partner', row.partner));
-    if (mtpStr) metaChips.push(chip('MTP', mtpStr));
-    if (ownerVal) metaChips.push(chip(ownerLabel, ownerVal));
-
-    var accountName = CoreUtils.escapeHtml(row.accountName || '(No account)');
 
     return (
-      '<div style="border:1px solid #cccccc; border-left:6px solid ' + borderColor + '; ' +
-      'border-radius:4px; margin-bottom:18px; font-family:Arial,sans-serif; overflow:hidden;">' +
-      '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse; width:100%;">' +
-      '<tr>' +
-      '<td style="background-color:' + borderColor + '; color:#ffffff; font-weight:bold; ' +
-      'font-size:11px; padding:7px 14px; width:1%; white-space:nowrap; vertical-align:top; ' +
-      'font-family:Arial,sans-serif; letter-spacing:0.5px;">' +
-      badgeLabel + '</td>' +
-      '<td style="padding:10px 14px 6px 14px; vertical-align:top; background-color:#ffffff;">' +
-      '<div style="font-size:15px; font-weight:bold; color:#1a1a1a; line-height:1.35;">' +
-      accountName + '</div></td></tr></table>' +
+      '<div style="border:1px solid #e0e4ea; border-left:4px solid ' + accentColor + '; ' +
+      'border-radius:3px; margin-bottom:10px; font-family:Arial,sans-serif; overflow:hidden; ' +
+      'background-color:#ffffff;">' +
+      '<div style="padding:8px 10px 4px 10px;">' +
+      '<div style="line-height:1.45; margin-bottom:3px;">' + identityLine + '</div>' +
       (metaChips.length
-        ? '<div style="padding:2px 14px 10px 14px; line-height:1.8; background-color:#ffffff;">' +
-          metaChips.join('') + '</div>'
+        ? '<div style="line-height:1.55;">' + metaChips.join('') + '</div>'
         : '') +
-      '<div style="border-top:1px solid #e0e4ea; background-color:#f5f7fa; padding:8px 14px; ' +
+      '</div>' +
+      '<div style="border-top:1px solid #e8ebef; background-color:#f5f7fa; padding:6px 10px; ' +
       'font-size:10px; line-height:1.55; color:#555555;">' +
       '<span style="font-weight:600; color:#888888;">Current Update:</span> ' +
       '<span style="white-space:normal; word-wrap:break-word;">' +
@@ -1902,40 +1905,83 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * N8 V2: builds date cell HTML for go-live rows (no colgroup hacks).
+   * V2.7: main Date cell for go-live rows (single-date or multi-date marker).
    * @param {Object} row
-   * @param {Object} effectiveByDeploymentId
    * @param {string} dateField 'recentDates' | 'upcomingDates'
-   * @return {string}
+   * @return {string} escaped HTML
    * @private
    */
-  function _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, dateField) {
+  function _renderGoLiveDateMainCellV2_(row, dateField) {
     var dates = row[dateField] || [];
-    var effective = effectiveByDeploymentId[row.deploymentId];
-    var parentMtp = (effective && effective.mtpDate) || '';
-
-    if (!dates.length) {
-      if (row.lastGoLiveDate) return CoreUtils.escapeHtml(_fmtReportDateV2_(row.lastGoLiveDate));
-      var single = row.nextGoLiveDate || row.mtpDate || '';
-      return CoreUtils.escapeHtml(_fmtReportDateV2_(single));
+    if (dates.length > 1) {
+      return CoreUtils.escapeHtml('Multiple dates \u2014 ' + dates.length + ' go-lives');
     }
     if (dates.length === 1) {
       return CoreUtils.escapeHtml(_fmtReportDateV2_(dates[0].date));
     }
-    var lines = dates.map(function (d) {
+    if (dateField === 'recentDates') {
+      if (row.lastGoLiveDate) return CoreUtils.escapeHtml(_fmtReportDateV2_(row.lastGoLiveDate));
+    } else {
+      var single = row.nextGoLiveDate || row.mtpDate || '';
+      return CoreUtils.escapeHtml(_fmtReportDateV2_(single));
+    }
+    return '';
+  }
+
+  /**
+   * V2.7: detail block for multi-date go-live rows (one line per wave).
+   * @param {Array<{date: string, products: Array<string>}>} dates
+   * @return {string}
+   * @private
+   */
+  function _renderGoLiveMultiDateDetailV2_(dates) {
+    return dates.map(function (d) {
       var dateStr = _fmtReportDateV2_(d.date);
-      var differs = d.date !== parentMtp;
       var hasProducts = d.products && d.products.length > 0;
-      if (differs && hasProducts) {
-        return CoreUtils.escapeHtml(dateStr + ' \u2014 ' + d.products.join(', '));
+      if (hasProducts) {
+        return '<strong>' + CoreUtils.escapeHtml(dateStr) + '</strong> \u2014 ' +
+          CoreUtils.escapeHtml(d.products.join(', '));
       }
-      return CoreUtils.escapeHtml(dateStr);
+      return '<strong>' + CoreUtils.escapeHtml(dateStr) + '</strong>';
+    }).join('<br>');
+  }
+
+  /**
+   * V2.6: report-only tighter window for upcoming go-lives (renderer-side filter).
+   * @param {Array<Object>} rows
+   * @param {number} windowDays
+   * @return {Array<Object>}
+   * @private
+   */
+  function _filterUpcomingGoLivesForReportV2_(rows, windowDays) {
+    if (!rows || !rows.length) return [];
+
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var windowEnd = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+
+    function inWindow_(dateStr) {
+      if (!dateStr) return false;
+      var d = new Date(dateStr);
+      return !isNaN(d.getTime()) && d >= now && d <= windowEnd;
+    }
+
+    return rows.filter(function (row) {
+      if (inWindow_(row.nextGoLiveDate)) return true;
+      return (row.upcomingDates || []).some(function (ud) { return inWindow_(ud.date); });
+    }).map(function (row) {
+      var filtered = (row.upcomingDates || []).filter(function (ud) { return inWindow_(ud.date); });
+      if (!filtered.length) return row;
+      var copy = {};
+      Object.keys(row).forEach(function (k) { copy[k] = row[k]; });
+      copy.upcomingDates = filtered;
+      return copy;
     });
-    return lines.join('<br>');
   }
 
   /**
    * V2.3: full-width go-lives table with wrapping text columns (inner HTML only).
+   * V2.7: multi-date rows render as main row + full-width detail row.
    * @param {Array<Object>} rows
    * @param {Object} effectiveByDeploymentId
    * @param {string} dateField 'recentDates' | 'upcomingDates'
@@ -1959,6 +2005,8 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       'border:1px solid #dddddd; padding:4px 6px; text-align:left; font-size:10px; vertical-align:top;';
     var TD_WRAP = TD_BASE + ' word-wrap:break-word; overflow-wrap:break-word;';
     var TD_DATE = TD_WRAP;
+    var TD_DETAIL =
+      TD_WRAP + ' background-color:#f0f3f7; color:#444444; line-height:1.5; padding:6px 8px;';
 
     var colgroupHtml =
       '<colgroup>' +
@@ -1968,26 +2016,39 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<col style="width:20%;">' +
       '</colgroup>';
 
-    var tbodyHtml = rows.map(function (row, ri) {
+    var tbodyParts = [];
+    rows.forEach(function (row, ri) {
       var bg = ri % 2 === 0 ? '#ffffff' : '#f7f7f7';
-      return '<tr>' +
+      var dates = row[dateField] || [];
+      var isMulti = dates.length > 1;
+
+      tbodyParts.push(
+        '<tr>' +
         '<td style="' + TD_DATE + ' background-color:' + bg + ';">' +
-        _renderGoLiveDateCellV2_(row, effectiveByDeploymentId, dateField) + '</td>' +
+        _renderGoLiveDateMainCellV2_(row, dateField) + '</td>' +
         '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
         CoreUtils.escapeHtml(row.accountName || '') + '</td>' +
         '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
         CoreUtils.escapeHtml(row.deploymentName || '') + '</td>' +
         '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
         CoreUtils.escapeHtml(row.partner || '') + '</td>' +
-        '</tr>';
-    }).join('');
+        '</tr>'
+      );
+
+      if (isMulti) {
+        tbodyParts.push(
+          '<tr><td colspan="4" style="' + TD_DETAIL + '">' +
+          _renderGoLiveMultiDateDetailV2_(dates) + '</td></tr>'
+        );
+      }
+    });
 
     return '<table style="' + TABLE_STYLE + '">' + colgroupHtml + '<thead><tr>' +
       '<th style="' + TH_STYLE + '">Date</th>' +
       '<th style="' + TH_STYLE + '">Account</th>' +
       '<th style="' + TH_STYLE + '">Deployment</th>' +
       '<th style="' + TH_STYLE + '">Partner</th>' +
-      '</tr></thead><tbody>' + tbodyHtml + '</tbody></table>';
+      '</tr></thead><tbody>' + tbodyParts.join('') + '</tbody></table>';
   }
 
   /**
@@ -1998,7 +2059,8 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
    */
   function _buildRecentGoLivesContentV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
-    var rows = CoreData.getRecentGoLives(cfg, null) || [];
+    var recentDays = cfg.report.recentWindowDays != null ? cfg.report.recentWindowDays : 30;
+    var rows = CoreData.getRecentGoLives(cfg, null, recentDays) || [];
     rows = rows.filter(function (r) { return !r.excludeFromReport; });
 
     var effectiveByDeploymentId = {};
@@ -2032,7 +2094,9 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
    */
   function _buildUpcomingGoLivesContentV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
+    var upcomingDays = cfg.report.upcomingWindowDays != null ? cfg.report.upcomingWindowDays : 60;
     var rows = CoreData.getUpcomingGoLives(cfg, null) || [];
+    rows = _filterUpcomingGoLivesForReportV2_(rows, upcomingDays);
     rows = rows.filter(function (r) { return !r.excludeFromReport; });
 
     var effectiveByDeploymentId = {};
@@ -2119,8 +2183,63 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
-   * N8 V2: Deployment Health Breakdown as compact KPI tiles (single row).
-   * V2.1: table layout + portfolio summary line.
+   * V2.8: direction-aware trend pill for health KPI hero cards (Gmail-safe).
+   * @param {string} status Green|Red|Yellow
+   * @param {number} delta  Signed count change (current − previous month)
+   * @return {string}
+   * @private
+   */
+  function _renderHealthTrendPill_(status, delta) {
+    if (!delta) {
+      return (
+        '<span style="display:inline-block;background-color:#999999;color:#ffffff;' +
+        'font-size:10px;font-weight:bold;padding:3px 10px;border-radius:12px;white-space:nowrap;">' +
+        '\u25CF 0</span>'
+      );
+    }
+    var arrow = delta > 0 ? '\u25B2' : '\u25BC';
+    var sign = delta > 0 ? '+' : '';
+    var bg;
+    if (status === 'Green') {
+      bg = delta > 0 ? '#4CAF50' : '#F44336';
+    } else {
+      bg = delta < 0 ? '#4CAF50' : '#F44336';
+    }
+    return (
+      '<span style="display:inline-block;background-color:' + bg + ';color:#ffffff;' +
+      'font-size:10px;font-weight:bold;padding:3px 10px;border-radius:12px;white-space:nowrap;">' +
+      CoreUtils.escapeHtml(arrow + ' ' + sign + delta) + '</span>'
+    );
+  }
+
+  /**
+   * V2.8: unified portfolio share bar beneath health hero cards.
+   * @param {Array<Object>} rows
+   * @param {number} totalActive
+   * @return {string}
+   * @private
+   */
+  function _renderHealthPortfolioShareBar_(rows, totalActive) {
+    if (!totalActive || !rows || !rows.length) return '';
+    var cells = rows.map(function (row) {
+      var w = (row.currentCount / totalActive) * 100;
+      var label = w >= 12 ? (Math.round(row.currentPct * 100) + '%') : '';
+      return (
+        '<td style="width:' + w + '%;background-color:' + CoreUtils.escapeHtml(row.color) +
+        ';text-align:center;font-size:10px;color:#ffffff;font-weight:bold;padding:6px 0;' +
+        'font-family:Arial,sans-serif;vertical-align:middle;">' +
+        CoreUtils.escapeHtml(label) + '</td>'
+      );
+    }).join('');
+    return (
+      '<table cellpadding="0" cellspacing="0" border="0" ' +
+      'style="width:100%;border-collapse:collapse;margin-top:10px;height:24px;"><tr>' +
+      cells + '</tr></table>'
+    );
+  }
+
+  /**
+   * N8 V2: Deployment Health Breakdown as Gmail-safe hero KPI cards.
    * @param {AppConfig} config
    * @return {string}
    * @private
@@ -2128,8 +2247,10 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   function renderHealthBreakdownSectionV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var result;
+    var healthHistory;
     try {
       result = CoreAnalytics.getHealthBreakdown(cfg);
+      healthHistory = CoreAnalytics.getHealthHistory(cfg);
     } catch (err) {
       Logger.log('CoreReport.renderHealthBreakdownSectionV2_: failed: ' + err);
       return wrapSectionV2_('Deployment Health Breakdown',
@@ -2140,30 +2261,6 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var colCount = result.rows.length || 1;
     var colWidth = Math.floor(100 / colCount) + '%';
 
-    var tilesHtml = result.rows.map(function (row) {
-      var pctStr = (row.currentPct * 100).toFixed(1) + '%';
-      return (
-        '<td style="width:' + colWidth + '; vertical-align:top; padding:4px;">' +
-        '<div style="border:1px solid #dddddd; border-radius:6px; padding:8px 10px; ' +
-        'border-top:3px solid ' + CoreUtils.escapeHtml(row.color) + '; ' +
-        'background-color:#ffffff; font-family:Arial,sans-serif; text-align:center;">' +
-        '<div style="font-size:9px; color:#666666; text-transform:uppercase; letter-spacing:0.4px;">' +
-        CoreUtils.escapeHtml(row.status) + '</div>' +
-        '<div style="font-size:22px; font-weight:bold; color:' + CoreUtils.escapeHtml(row.color) +
-        '; line-height:1.1; margin:2px 0;">' + CoreUtils.escapeHtml(String(row.currentCount)) + '</div>' +
-        '<div style="font-size:12px; color:#333333; font-weight:600;">' +
-        CoreUtils.escapeHtml(pctStr) + '</div>' +
-        '<div style="font-size:9px; color:#666666; margin-top:2px; line-height:1.3;">' +
-        'MoM: <span style="color:' +
-        (row.momTrend.polarity === 'good' ? '#4CAF50' : row.momTrend.polarity === 'bad' ? '#F44336' : '#999999') +
-        '; font-weight:bold;">' + CoreUtils.escapeHtml(row.momTrend.arrow + ' ' + row.momTrend.label) + '</span>' +
-        ' &middot; YTD: <span style="color:' +
-        (row.ytdTrend.polarity === 'good' ? '#4CAF50' : row.ytdTrend.polarity === 'bad' ? '#F44336' : '#999999') +
-        '; font-weight:bold;">' + CoreUtils.escapeHtml(row.ytdTrend.arrow + ' ' + row.ytdTrend.label) + '</span>' +
-        '</div></div></td>'
-      );
-    }).join('');
-
     var totalActive = result.dataIntegrity.reconciledTotal;
     if (totalActive === undefined || totalActive === null) {
       totalActive = result.rows.reduce(function (sum, row) {
@@ -2171,10 +2268,42 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       }, 0);
     }
 
+    var tilesHtml = result.rows.map(function (row) {
+      var series = (healthHistory && healthHistory[row.status])
+        ? healthHistory[row.status].slice()
+        : [];
+      if (series.length) {
+        series[series.length - 1] = row.currentCount;
+      } else {
+        series = [row.currentCount];
+      }
+      var delta = series.length >= 2
+        ? series[series.length - 1] - series[series.length - 2]
+        : 0;
+      var pillHtml = _renderHealthTrendPill_(row.status, delta);
+      var pctRound = Math.round(row.currentPct * 100);
+
+      return (
+        '<td style="width:' + colWidth + '; vertical-align:top; padding:4px;">' +
+        '<table cellpadding="0" cellspacing="0" border="0" ' +
+        'style="width:100%; border-collapse:collapse; border:1px solid #dddddd; ' +
+        'font-family:Arial,sans-serif;">' +
+        '<tr><td style="background-color:' + CoreUtils.escapeHtml(row.color) + '; color:#ffffff; ' +
+        'font-weight:bold; font-size:10px; text-transform:uppercase; padding:6px 8px; text-align:center;">' +
+        CoreUtils.escapeHtml(String(row.status).toUpperCase()) + '</td></tr>' +
+        '<tr><td style="padding:12px 10px; text-align:center; background-color:#ffffff;">' +
+        '<div style="font-size:36px; font-weight:bold; color:' + CoreUtils.escapeHtml(row.color) +
+        '; line-height:1;">' + CoreUtils.escapeHtml(String(row.currentCount)) + '</div>' +
+        '<div style="font-size:12px; color:#94A3B8; margin-top:4px;">of ' +
+        CoreUtils.escapeHtml(String(totalActive)) + ' active &middot; ' + pctRound + '%</div>' +
+        '<div style="margin:8px auto 0;">' + pillHtml + '</div></td></tr></table></td>'
+      );
+    }).join('');
+
     var innerHtml =
       '<table cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; margin-bottom:6px;">' +
       '<tr>' + tilesHtml + '</tr></table>' +
-      '<div style="font-size:11px; color:#666666; font-family:Arial,sans-serif; margin-bottom:4px;">' +
+      '<div style="font-size:11px; color:#666666; font-family:Arial,sans-serif; margin-top:8px;">' +
       'Portfolio: <strong style="color:#333333;">' + CoreUtils.escapeHtml(String(totalActive)) +
       '</strong> active deployments</div>';
 
@@ -2372,11 +2501,11 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<div style="background-color:#0f4c81; margin-bottom:24px; padding:18px 26px; ' +
       'display:flex; align-items:center; font-family:Arial,sans-serif;">' +
       '<div style="background-color:#ffffff; padding:10px 14px; border-radius:6px; margin-right:20px;">' +
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" width="80" height="80">' +
-      '<rect fill="#ffffff" x="0" y="0" width="1540" height="2000"/>' +
-      '<path fill="#0f2e66" d="M1221.5,1999.8h-179.3c-26.9,0-49-12.3-56.3-41.9l-216-760.4-216,760.6c-7.3,29.6-29.4,41.9-56.3,41.9h-179.3c-29.4,0-46.7-12.3-56.3-41.9C146.5,1637.3,68.1,1318.5,1.8,997.7c-7.3-32.3,7.3-54.4,41.5-54.4h159.7c29.4,0,49,14.8,54.2,41.9,41.5,227.3,90.9,461.5,157.2,691.5l191.4-691.5c7.3-27.1,26.9-41.9,56.3-41.9h216c29.4,0,49,14.8,56.3,41.9l191.4,691.5c66.3-229.4,115.7-464.2,157.2-691.5,4.8-27.1,24.6-41.9,54.2-41.9h159.7c34.2,0,49,22.3,41.5,54.4-66.3,320.9-144.7,639.6-260.1,960.4-10,29.6-27.1,41.7-56.5,41.7Z"/>' +
-      '<path fill="#fc5b05" d="M375.1,408.1c105.5-105.7,245.7-163.7,395-163.9,149.1,0,289.2,58,394.4,163.3,54.8,54.8,96.6,118.9,124.3,188.7,6.3,16.1,22.1,26.7,39.4,26.7h168.7c28.2,0,49-27.1,40.9-54-37.7-124.9-105.7-239.2-200.4-334.1C1185.9,83.6,984.5,0,770.3,0S354.2,83.6,202.6,235.4C107.7,330.3,39.8,444.6,2.4,569.1c-8.1,26.9,12.7,54,40.9,54h168.7c17.3,0,33-10.6,39.4-26.7,27.5-69.7,69.2-133.7,123.7-188.3Z"/>' +
-      '</svg></div>' +
+      (cfg.report.headerLogoUrl
+        ? '<img src="' + CoreUtils.escapeHtml(cfg.report.headerLogoUrl) + '" alt="Workday" ' +
+          'width="40" height="40" style="display:block;border:0;outline:none;text-decoration:none;" />'
+        : '') +
+      '</div>' +
       '<div><div style="color:#ffffff; font-size:20px; font-weight:bold;">' +
       CoreUtils.escapeHtml(title) + '</div>' +
       '<div style="color:#c9d9f0; font-size:12px; margin-top:4px;">Monthly Report \u2013 ' +

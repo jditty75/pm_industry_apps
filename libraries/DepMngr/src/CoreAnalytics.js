@@ -661,6 +661,31 @@ var CoreAnalytics = (function () {
     Logger.log('_validatePhase3b: === End ===');
   }
 
+  /**
+   * V2.8: returns trailing 12-month health count history from snapshots.
+   * Used by CoreReport KPI sparklines.
+   *
+   * @param {AppConfig} config
+   * @return {{ months: string[], Green: number[], Red: number[], Yellow: number[] }}
+   */
+  function getHealthHistory(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var snapData = readHealthSnapshots_(cfg);
+    var sortedMonths = Object.keys(snapData).sort();
+    var last12 = sortedMonths.length > 12
+      ? sortedMonths.slice(sortedMonths.length - 12)
+      : sortedMonths.slice();
+
+    var history = { months: last12, Green: [], Red: [], Yellow: [] };
+    last12.forEach(function (ym) {
+      var snap = snapData[ym] || {};
+      history.Green.push(snap.Green ? snap.Green.count : 0);
+      history.Red.push(snap.Red ? snap.Red.count : 0);
+      history.Yellow.push(snap.Yellow ? snap.Yellow.count : 0);
+    });
+    return history;
+  }
+
   // --- EXPORTS ---------------------------------------------------------------
 
   return {
@@ -671,6 +696,7 @@ var CoreAnalytics = (function () {
 
     // Phase 3b: Code-side breakdown functions
     getHealthBreakdown:   getHealthBreakdown,
+    getHealthHistory:     getHealthHistory,
     getPartnerBreakdown:  getPartnerBreakdown,
     getApproachBreakdown: getApproachBreakdown,
     _validatePhase3b:     _validatePhase3b

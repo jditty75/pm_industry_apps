@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>HC Wellness Leadership Agenda</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#f5f5f7;font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;color:#222222;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f5f5f7;">
+      <tr>
+        <td align="center" style="padding:16px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid #1d4ed8;">
+            <!-- Header -->
+            <tr>
+              <td style="background-color:#0066cc;padding:20px 24px;color:#ffffff;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                  <tr>
+                    <td style="font-size:20px;font-weight:600;padding-bottom:4px;">
+                      HC Wellness Leadership Agenda
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="font-size:13px;opacity:0.9;line-height:1.35;">
+                      A review of deployments, accounts, budgets, and investments that require leadership team review and collaboration
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="font-size:12px;padding-top:6px;opacity:0.85;">
+                      <?= meetingDate ?>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <? if (intro) { ?>
+            <!-- Intro -->
+            <tr>
+              <td style="padding:16px 24px 8px 24px;font-size:14px;line-height:1.5;color:#374151;">
+                <?= intro ?>
+              </td>
+            </tr>
+            <? } ?>
+
+            <!-- KPI strip -->
+            <tr>
+              <td style="padding:8px 24px 16px 24px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f9fafb;border:1px solid #e5e7eb;">
+                  <tr>
+                    <td width="25%" align="center" style="padding:12px 8px;border-right:1px solid #e5e7eb;">
+                      <div style="font-size:22px;font-weight:600;color:#1d4ed8;line-height:1.2;"><?= kpi.depRed ?></div>
+                      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-top:2px;"><?= kpiLabels.redDep ?></div>
+                    </td>
+                    <td width="25%" align="center" style="padding:12px 8px;border-right:1px solid #e5e7eb;">
+                      <div style="font-size:22px;font-weight:600;color:#1d4ed8;line-height:1.2;"><?= kpi.depYellow ?></div>
+                      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-top:2px;"><?= kpiLabels.yellowDep ?></div>
+                    </td>
+                    <td width="25%" align="center" style="padding:12px 8px;border-right:1px solid #e5e7eb;">
+                      <div style="font-size:22px;font-weight:600;color:#1d4ed8;line-height:1.2;"><?= kpi.csatUnfav ?></div>
+                      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-top:2px;"><?= kpiLabels.unfavCsat ?></div>
+                    </td>
+                    <td width="25%" align="center" style="padding:12px 8px;">
+                      <div style="font-size:22px;font-weight:600;color:#1d4ed8;line-height:1.2;"><?= kpi.csatNeutral ?></div>
+                      <div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-top:2px;"><?= kpiLabels.neutralCsat ?></div>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Agenda groups -->
+            <tr>
+              <td style="padding:0 24px 20px 24px;">
+                <? if (groups && groups.length) {
+                     for (var g = 0; g < groups.length; g++) {
+                       var group = groups[g];
+                ?>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:16px;">
+                  <tr>
+                    <td style="background-color:#1d4ed8;color:#ffffff;padding:10px 14px;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:0.02em;">
+                      <?= group.label ?> (<?= group.items.length ?>)
+                    </td>
+                  </tr>
+                  <? for (var i = 0; i < group.items.length; i++) {
+                       var item = group.items[i];
+                  ?>
+                  <tr>
+                    <td style="padding:10px 0 0 0;">
+                      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f9fafb;border:1px solid #e5e7eb;">
+                        <tr>
+                          <td style="padding:12px 14px;">
+                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                              <tr>
+                                <td style="font-size:15px;font-weight:600;color:#111827;padding-bottom:6px;">
+                                  <?= item.account || 'Agenda Item' ?>
+                                  <? if (item.healthStatus) { ?>
+                                  <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500;<?= item.healthChipStyle ?>"><?= item.healthStatus ?></span>
+                                  <? } ?>
+                                </td>
+                              </tr>
+                              <? if (item.lead) { ?>
+                              <tr>
+                                <td style="font-size:12px;color:#4b5563;padding-bottom:6px;">
+                                  <strong style="color:#374151;">Lead:</strong> <?= item.lead ?>
+                                </td>
+                              </tr>
+                              <? } ?>
+                              <? if (item.currentState) { ?>
+                              <tr>
+                                <td style="padding:4px 0;">
+                                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#ffffff;border:1px solid #e5e7eb;">
+                                    <tr>
+                                      <td style="padding:8px 9px;">
+                                        <div style="font-size:11px;font-weight:600;color:#4b5563;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;">Current State</div>
+                                        <div style="font-size:12px;color:#374151;line-height:1.4;white-space:pre-wrap;"><?= item.currentState ?></div>
+                                      </td>
+                                    </tr>
+                                  </table>
+                                </td>
+                              </tr>
+                              <? } ?>
+                              <? if (item.desiredOutcome) { ?>
+                              <tr>
+                                <td style="padding:4px 0;">
+                                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#ffffff;border:1px solid #e5e7eb;">
+                                    <tr>
+                                      <td style="padding:8px 9px;">
+                                        <div style="font-size:11px;font-weight:600;color:#4b5563;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;">Desired Outcome</div>
+                                        <div style="font-size:12px;color:#374151;line-height:1.4;white-space:pre-wrap;"><?= item.desiredOutcome ?></div>
+                                      </td>
+                                    </tr>
+                                  </table>
+                                </td>
+                              </tr>
+                              <? } ?>
+                              <? if (item.futureState) { ?>
+                              <tr>
+                                <td style="padding:4px 0;">
+                                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#ffffff;border:1px solid #e5e7eb;">
+                                    <tr>
+                                      <td style="padding:8px 9px;">
+                                        <div style="font-size:11px;font-weight:600;color:#4b5563;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;">Future State</div>
+                                        <div style="font-size:12px;color:#374151;line-height:1.4;white-space:pre-wrap;"><?= item.futureState ?></div>
+                                      </td>
+                                    </tr>
+                                  </table>
+                                </td>
+                              </tr>
+                              <? } ?>
+                            </table>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                  <? } ?>
+                </table>
+                <?   }
+                   } else { ?>
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                  <tr>
+                    <td align="center" style="padding:40px 24px;color:#6b7280;font-size:14px;">
+                      <strong>No agenda items</strong><br>
+                      Add items to the agenda to populate this email.
+                    </td>
+                  </tr>
+                </table>
+                <? } ?>
+              </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+              <td style="padding:10px 24px 14px 24px;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280;text-align:right;">
+                Generated on <?= generatedAt ?><br>
+                HC Wellness Solution
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

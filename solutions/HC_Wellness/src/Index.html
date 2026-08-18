@@ -3,6 +3,7 @@
   <head>
     <base target="_top">
     <meta charset="UTF-8">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
     <style>
       :root {
         --bg: #f5f5f7;
@@ -104,6 +105,76 @@
         flex-wrap: wrap;
         gap: 6px;
         margin-bottom: 10px;
+      }
+      .stale-banner {
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 10px 14px;
+        margin-bottom: 10px;
+        border-radius: var(--radius-md);
+        border: 1px solid #fde68a;
+        background: #fffbeb;
+        color: #92400e;
+        font-size: 0.85rem;
+      }
+      .stale-banner strong {
+        color: #78350f;
+      }
+      .stale-banner-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .meeting-status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .meeting-status-open { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+      .meeting-status-agenda_sent { background: #ecfdf3; color: #15803d; border: 1px solid #bbf7d0; }
+      .meeting-status-closed { background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; }
+      .admin-dates {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+        margin: 12px 0;
+      }
+      .admin-dates .field label {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .admin-dates .field input {
+        width: 100%;
+        padding: 6px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border-subtle);
+        font-size: 0.85rem;
+      }
+      .admin-dates .field input:disabled {
+        background: #f3f4f6;
+        color: #6b7280;
+      }
+      .admin-meta {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        line-height: 1.5;
+        margin-bottom: 10px;
+      }
+      .admin-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 12px;
       }
       .summary-bar {
         display: flex;
@@ -418,6 +489,59 @@
         padding: 4px 8px;
         border-radius: 999px;
       }
+      #reorderList {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .reorder-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        margin-bottom: 6px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #ffffff;
+        cursor: grab;
+      }
+      .reorder-row:active {
+        cursor: grabbing;
+      }
+      .reorder-handle {
+        color: #9ca3af;
+        font-size: 1rem;
+        user-select: none;
+      }
+      .reorder-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .reorder-title {
+        font-size: 0.85rem;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .reorder-meta {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+      .reorder-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .reorder-actions button {
+        padding: 2px 6px;
+        font-size: 0.7rem;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        background: #f9fafb;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -476,11 +600,23 @@
         </div>
       </header>
 
+      <div id="staleBanner" class="stale-banner">
+        <div>
+          <strong>Stale meeting:</strong>
+          Meeting Date <span id="staleMeetingDate"></span> was more than
+          <span id="staleMeetingDays"></span> days ago and has not been closed.
+          Close and archive before starting the next cycle.
+        </div>
+        <div class="stale-banner-actions">
+          <button class="btn btn-primary" onclick="confirmCloseMeeting()">Close &amp; Archive</button>
+        </div>
+      </div>
+
       <div class="main-actions">
         <button class="btn btn-primary" onclick="buildPreview()">Preview Agenda</button>
         <button class="btn btn-secondary" onclick="saveAll()">Save Selections &amp; Agenda</button>
-        <button class="btn btn-ghost" onclick="exportAsHtml()">Export as HTML</button>
         <button class="btn btn-secondary" onclick="openManualModal()">Add Manual Item</button>
+        <button class="btn btn-ghost" onclick="openAdminPanel()">Admin</button>
       </div>
 
       <div id="summaryBar" class="summary-bar" style="display:none;">
@@ -648,12 +784,66 @@
             <div class="modal">
               <h3>Healthcare Wellness Leadership Agenda Preview</h3>
               <div class="modal-subtitle">
-                Review the assembled Healthcare Wellness Leadership agenda
-                as it will appear in HTML / PDF.
+                Review the assembled agenda as it will appear in the Gmail email.
               </div>
               <iframe id="previewFrameModal"></iframe>
               <div class="modal-footer">
                 <button class="btn btn-primary" onclick="closePreviewModal()">Close</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Admin Modal -->
+          <div id="adminModalBackdrop" class="modal-backdrop">
+            <div class="modal" style="max-width:640px;">
+              <h3>Meeting Admin</h3>
+              <div class="modal-subtitle">
+                Manage meeting dates, send communications, reorder, and close the cycle.
+              </div>
+              <div class="admin-meta">
+                <span id="adminStatusPill" class="meeting-status-pill meeting-status-open">OPEN</span>
+                <div id="adminSuggestedStep" style="margin-top:8px;"></div>
+                <div id="adminSentMeta" style="margin-top:6px;font-size:0.78rem;"></div>
+              </div>
+              <div class="admin-dates">
+                <div class="field">
+                  <label for="adminMeetingDate">Meeting Date</label>
+                  <input type="date" id="adminMeetingDate">
+                </div>
+                <div class="field">
+                  <label for="adminReminderDate">Reminder Date</label>
+                  <input type="date" id="adminReminderDate">
+                </div>
+                <div class="field">
+                  <label for="adminDeliveryDate">Delivery Date</label>
+                  <input type="date" id="adminDeliveryDate">
+                </div>
+              </div>
+              <div class="admin-actions">
+                <button class="btn btn-secondary" onclick="saveAdminDates()">Save Dates</button>
+                <button class="btn btn-secondary" onclick="openReorderPanel()">Reorder Agenda</button>
+                <button class="btn btn-secondary" onclick="sendAgenda()">Send Agenda</button>
+                <button class="btn btn-secondary" onclick="sendReminder()">Send Reminder</button>
+                <button class="btn btn-primary" onclick="confirmCloseMeeting()">Close Meeting</button>
+              </div>
+              <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeAdminPanel()">Close</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reorder Modal -->
+          <div id="reorderModalBackdrop" class="modal-backdrop">
+            <div class="modal">
+              <h3>Reorder Agenda</h3>
+              <div class="modal-subtitle">
+                Drag items to set the global agenda order, or use the arrow buttons.
+                Order is saved to the Agenda sheet.
+              </div>
+              <ul id="reorderList"></ul>
+              <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeReorderPanel()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveReorder()">Save Order</button>
               </div>
             </div>
           </div>
@@ -683,6 +873,140 @@
           let wowModalFromCheckbox = false;
 
           let currentAgendaTab = 'DEPLOYMENT';
+          let reorderSortable = null;
+          let reorderItems = [];
+          let meetingState = null;
+
+          function toInputDate(value) {
+            if (!value) return '';
+            const d = new Date(value);
+            if (isNaN(d.getTime())) return String(value).slice(0, 10);
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return d.getFullYear() + '-' + mm + '-' + dd;
+          }
+
+          function loadMeetingState() {
+            google.script.run
+              .withSuccessHandler(state => {
+                meetingState = state || {};
+                refreshMeetingStateUI();
+              })
+              .withFailureHandler(err => {
+                console.error('loadMeetingState:', err);
+              })
+              .getMeetingState();
+          }
+
+          function refreshMeetingStateUI() {
+            if (!meetingState) return;
+
+            const banner = document.getElementById('staleBanner');
+            const showStale = !!meetingState.staleMeeting && !!meetingState.meetingDate;
+            banner.style.display = showStale ? 'flex' : 'none';
+            if (showStale) {
+              document.getElementById('staleMeetingDate').textContent = meetingState.meetingDate;
+              document.getElementById('staleMeetingDays').textContent = meetingState.staleMeetingDays || 10;
+            }
+
+            const status = (meetingState.status || 'OPEN').toUpperCase();
+            const pill = document.getElementById('adminStatusPill');
+            if (pill) {
+              pill.textContent = status;
+              pill.className = 'meeting-status-pill meeting-status-' + status.toLowerCase();
+            }
+
+            const stepEl = document.getElementById('adminSuggestedStep');
+            if (stepEl) {
+              stepEl.textContent = meetingState.suggestedNextStep || '';
+            }
+
+            const sentMeta = document.getElementById('adminSentMeta');
+            if (sentMeta) {
+              const parts = [];
+              if (meetingState.agendaSentAt) parts.push('Agenda sent: ' + meetingState.agendaSentAt);
+              if (meetingState.reminderSentAt) parts.push('Reminder sent: ' + meetingState.reminderSentAt);
+              sentMeta.textContent = parts.join(' · ');
+            }
+
+            const meetingInput = document.getElementById('adminMeetingDate');
+            if (meetingInput) {
+              meetingInput.value = toInputDate(meetingState.meetingDate);
+              meetingInput.disabled = !!meetingState.meetingDateLocked;
+            }
+            const reminderInput = document.getElementById('adminReminderDate');
+            if (reminderInput) {
+              reminderInput.value = toInputDate(meetingState.reminderDate);
+            }
+            const deliveryInput = document.getElementById('adminDeliveryDate');
+            if (deliveryInput) {
+              deliveryInput.value = toInputDate(meetingState.deliveryDate);
+            }
+          }
+
+          function openAdminPanel() {
+            loadMeetingState();
+            document.getElementById('adminModalBackdrop').style.display = 'flex';
+          }
+
+          function closeAdminPanel() {
+            document.getElementById('adminModalBackdrop').style.display = 'none';
+          }
+
+          function saveAdminDates() {
+            const payload = {
+              meetingDate: document.getElementById('adminMeetingDate').value,
+              reminderDate: document.getElementById('adminReminderDate').value,
+              deliveryDate: document.getElementById('adminDeliveryDate').value
+            };
+
+            google.script.run
+              .withSuccessHandler(state => {
+                meetingState = state;
+                refreshMeetingStateUI();
+                alert('Meeting dates saved.');
+              })
+              .withFailureHandler(err => {
+                alert('Error saving dates: ' + err.message);
+              })
+              .saveMeetingDates(payload);
+          }
+
+          function confirmCloseMeeting() {
+            google.script.run
+              .withSuccessHandler(preview => {
+                const msg =
+                  'Archive Meeting Date ' + preview.meetingDate + ' (' + preview.itemCount + ' agenda items)?\n\n' +
+                  'This is irreversible: the Agenda and both Selections sheets will be cleared after archiving.';
+                if (!confirm(msg)) return;
+
+                google.script.run
+                  .withSuccessHandler(res => {
+                    alert('Meeting closed. Archived ' + res.itemCount + ' items for ' + res.meetingDate + '.');
+                    closeAdminPanel();
+                    loadMeetingState();
+                    deploymentSelections = [];
+                    csatSelections = [];
+                    manualItems = [];
+                    qualtrixSelections = [];
+                    wowSelections = [];
+                    renderDeploymentList();
+                    renderCsatList();
+                    renderManualItems();
+                    renderQualtrixList();
+                    renderWowTabs();
+                    updateSummary();
+                  })
+                  .withFailureHandler(err => {
+                    alert('Error closing meeting: ' + err.message);
+                  })
+                  .closeMeetingAndArchive();
+              })
+              .withFailureHandler(err => {
+                alert('Error loading close preview: ' + err.message);
+              })
+              .getCloseMeetingPreview();
+          }
 
           function setAgendaTab(tab) {
             currentAgendaTab = tab;
@@ -863,6 +1187,7 @@
                 document.getElementById('summaryBar').style.display = 'flex';
 
                 setAgendaTab('DEPLOYMENT');
+                loadMeetingState();
               })
               .withFailureHandler(err => {
                 document.getElementById('loading').textContent =
@@ -2373,85 +2698,6 @@ ${existing.futureState || ''}</textarea>
             };
           }
 
-          // Build agenda items for preview/export (grouping)
-          function buildAgendaItemsFromPayload(payload) {
-            const agendaItems = [];
-
-            // Deployments
-            (payload.deploymentSelections || []).forEach(sel => {
-              agendaItems.push({
-                source: 'DEPLOYMENT',
-                id: sel.id || '',
-                account: sel.account || '',
-                lead: sel.lead || '',
-                currentState: sel.currentState || '',
-                desiredOutcome: sel.desiredOutcome || '',
-                futureState: sel.futureState || '',
-                healthStatus: sel.healthStatus || ''
-              });
-            });
-
-            // CSAT
-            (payload.csatSelections || []).forEach(sel => {
-              const status = sel.healthStatus || sel.csatIndicator || '';
-              agendaItems.push({
-                source: 'CSAT',
-                id: sel.id || '',
-                account: sel.account || '',
-                lead: sel.lead || '',
-                currentState: sel.currentState || '',
-                desiredOutcome: sel.desiredOutcome || '',
-                futureState: sel.futureState || '',
-                healthStatus: status
-              });
-            });
-
-            // Manual (use topicSource to group with real topic)
-            (payload.manualItems || []).forEach(m => {
-              const topicSource = m.topicSource || 'MANUAL';
-              agendaItems.push({
-                source: topicSource,
-                id: m.id || '',
-                account: m.account || '',
-                lead: m.lead || '',
-                currentState: m.currentState || '',
-                desiredOutcome: m.desiredOutcome || '',
-                futureState: m.futureState || '',
-                healthStatus: ''
-              });
-            });
-
-            // Qualtrix
-            (payload.qualtrixSelections || []).forEach(sel => {
-              agendaItems.push({
-                source: 'QUALTRIX',
-                id: sel.id || '',
-                account: sel.account || '',
-                lead: sel.lead || '',
-                currentState: sel.currentState || '',
-                desiredOutcome: sel.desiredOutcome || '',
-                futureState: sel.futureState || '',
-                healthStatus: sel.healthStatus || ''
-              });
-            });
-
-            // Budget / EAC (WoW)
-            (payload.wowSelections || []).forEach(sel => {
-              agendaItems.push({
-                source: 'BUDGET_EAC',
-                id: sel.id || '',
-                account: sel.project || '',
-                lead: sel.lead || '',
-                currentState: sel.currentState || '',
-                desiredOutcome: sel.desiredOutcome || '',
-                futureState: sel.futureState || '',
-                healthStatus: sel.healthStatus || ''
-              });
-            });
-
-            return agendaItems;
-          }
-
           function openPreviewModal(html) {
             const frame = document.getElementById('previewFrameModal');
             frame.srcdoc = html;
@@ -2470,7 +2716,7 @@ ${existing.futureState || ''}</textarea>
               .withFailureHandler(err => {
                 alert('Error building agenda preview: ' + err.message);
               })
-              .buildAgendaPreviewHtmlFromSheet();
+              .buildAgendaEmailHtml_();
           }
 
           function saveAll() {
@@ -2492,17 +2738,154 @@ ${existing.futureState || ''}</textarea>
               .saveSelectionsAndAgenda(payload);
           }
 
-          function exportAsHtml() {
+          function sendAgenda() {
             google.script.run
-              .withSuccessHandler(html => {
-                const w = window.open();
-                w.document.write(html);
-                w.document.close();
+              .withSuccessHandler(count => {
+                if (!confirm('Send to ' + count + ' recipients via BCC?')) return;
+                google.script.run
+                  .withSuccessHandler(res => {
+                    alert('Agenda email sent to ' + res.recipientCount + ' recipients.');
+                    loadMeetingState();
+                  })
+                  .withFailureHandler(err => {
+                    alert('Error sending agenda email: ' + err.message);
+                  })
+                  .sendAgendaEmail();
               })
               .withFailureHandler(err => {
-                alert('Error exporting HTML: ' + err.message);
+                alert('Error checking recipients: ' + err.message);
               })
-              .buildAgendaPreviewHtmlFromSheet();
+              .getRecipientCount();
+          }
+
+          function sendReminder() {
+            google.script.run
+              .withSuccessHandler(count => {
+                if (!confirm('Send reminder to ' + count + ' recipients via BCC?')) return;
+                google.script.run
+                  .withSuccessHandler(res => {
+                    alert('Reminder email sent to ' + res.recipientCount + ' recipients.');
+                    loadMeetingState();
+                  })
+                  .withFailureHandler(err => {
+                    alert('Error sending reminder email: ' + err.message);
+                  })
+                  .sendAgendaReminderEmail();
+              })
+              .withFailureHandler(err => {
+                alert('Error checking recipients: ' + err.message);
+              })
+              .getRecipientCount();
+          }
+
+          function renderReorderList() {
+            const list = document.getElementById('reorderList');
+            list.innerHTML = '';
+
+            reorderItems.forEach((item, idx) => {
+              const li = document.createElement('li');
+              li.className = 'reorder-row';
+              li.dataset.source = item.source || '';
+              li.dataset.id = item.id || '';
+              li.innerHTML = `
+                <span class="reorder-handle" title="Drag to reorder">&#9776;</span>
+                <div class="reorder-info">
+                  <div class="reorder-title">${item.account || '(no account)'}</div>
+                  <div class="reorder-meta">${item.groupLabel || item.group || ''}</div>
+                </div>
+                <div class="reorder-actions">
+                  <button type="button" onclick="moveRowByElement(this, -1)" title="Move up">&#8593;</button>
+                  <button type="button" onclick="moveRowByElement(this, 1)" title="Move down">&#8595;</button>
+                </div>
+              `;
+              list.appendChild(li);
+            });
+
+            if (reorderSortable) {
+              reorderSortable.destroy();
+              reorderSortable = null;
+            }
+            if (typeof Sortable !== 'undefined') {
+              reorderSortable = Sortable.create(list, {
+                animation: 150,
+                handle: '.reorder-handle',
+                onEnd: function () {
+                  syncReorderItemsFromDom();
+                }
+              });
+            }
+          }
+
+          function syncReorderItemsFromDom() {
+            const rows = document.querySelectorAll('#reorderList .reorder-row');
+            const next = [];
+            rows.forEach(row => {
+              const source = row.dataset.source || '';
+              const id = row.dataset.id || '';
+              const found = reorderItems.find(
+                r => r.source === source && r.id === id
+              );
+              if (found) next.push(found);
+            });
+            reorderItems = next;
+          }
+
+          function openReorderPanel() {
+            google.script.run
+              .withSuccessHandler(data => {
+                reorderItems = (data || []).slice();
+                if (!reorderItems.length) {
+                  alert('No agenda items to reorder. Add items to the Agenda sheet first.');
+                  return;
+                }
+                renderReorderList();
+                document.getElementById('reorderModalBackdrop').style.display = 'flex';
+              })
+              .withFailureHandler(err => {
+                alert('Error loading agenda items: ' + err.message);
+              })
+              .getReorderAgendaData();
+          }
+
+          function closeReorderPanel() {
+            if (reorderSortable) {
+              reorderSortable.destroy();
+              reorderSortable = null;
+            }
+            document.getElementById('reorderModalBackdrop').style.display = 'none';
+          }
+
+          function moveRowByElement(el, delta) {
+            const row = el.closest('.reorder-row');
+            const rows = Array.from(document.querySelectorAll('#reorderList .reorder-row'));
+            const idx = rows.indexOf(row);
+            moveRow(idx, delta);
+          }
+
+          function moveRow(idx, delta) {
+            const newIdx = idx + delta;
+            if (newIdx < 0 || newIdx >= reorderItems.length) return;
+            const item = reorderItems.splice(idx, 1)[0];
+            reorderItems.splice(newIdx, 0, item);
+            renderReorderList();
+          }
+
+          function saveReorder() {
+            syncReorderItemsFromDom();
+            const orderedKeys = reorderItems.map(r => ({
+              source: r.source || '',
+              id: r.id || ''
+            }));
+
+            google.script.run
+              .withSuccessHandler(res => {
+                alert('Agenda order saved (' + res.updated + ' items).');
+                closeReorderPanel();
+              })
+              .withFailureHandler(err => {
+                alert('Error saving agenda order: ' + err.message);
+              })
+              .reorderAgenda(orderedKeys);
           }
 
           window.onload = init;

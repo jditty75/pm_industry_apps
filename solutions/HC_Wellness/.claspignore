@@ -1,0 +1,10 @@
+.git/**
+.gitignore
+.cursorrules
+node_modules/**
+.vscode/**
+package.json
+package-lock.json
+VERSIONS.md
+README.md
+*.md

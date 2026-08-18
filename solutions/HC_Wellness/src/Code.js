@@ -1,8 +1,12 @@
-function onOpen() {
+﻿function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
   ui.createMenu('Healthcare Wellness Tools')
     .addItem('Export WPS Deployment Health HTML', 'exportWpsDeploymentHealthHtml')
+    .addItem('Send Agenda (Gmail)', 'sendAgendaEmail')
+    .addItem('Send Agenda Reminder', 'sendAgendaReminderEmail')
+    .addSeparator()
+    .addItem('Close Meeting', 'closeMeetingFromMenu')
     .addToUi();
 }
 
@@ -89,14 +93,6 @@ function getAgendaItemsOrdered_() {
 }
 
 /**
- * Build agenda HTML using the Agenda sheet's Agenda Order.
- */
-function buildAgendaPreviewHtmlFromSheet() {
-  const items = getAgendaItemsOrdered_();
-  return generateAgendaHtml(items);
-}
-
-/**
  * Generic helper: returns rows as array of objects keyed by header row.
  */
 function getSheetData_(sheetName) {
@@ -159,6 +155,427 @@ function getSetting_(key) {
     }
   }
   return '';
+}
+
+/**
+ * Write or update a key/value setting on the Settings sheet.
+ * @param {string} key
+ * @param {string} value
+ */
+function setSetting_(key, value) {
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getSheetByName('Settings');
+  if (!sheet) throw new Error('Settings sheet not found');
+
+  var values = sheet.getDataRange().getValues();
+  var keyStr = String(key).trim();
+  var valStr = value == null ? '' : String(value);
+
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i][0]).trim() === keyStr) {
+      sheet.getRange(i + 1, 2).setValue(valStr);
+      return;
+    }
+  }
+
+  sheet.appendRow([keyStr, valStr]);
+}
+
+/**
+ * Build a lookup map from sheet rows keyed by Id column.
+ * @param {Array<Object>} rows
+ * @param {string} idCol
+ * @return {Object<string, Object>}
+ */
+function buildIdLookup_(rows, idCol) {
+  var lookup = {};
+  (rows || []).forEach(function (r) {
+    var id = String(r[idCol] || '');
+    if (id) lookup[id] = r;
+  });
+  return lookup;
+}
+
+/**
+ * Default label for agenda items no longer in the live DEPLOYMENT/CSAT feed.
+ * @return {string}
+ */
+function getResolvedChipLabel_() {
+  return getSetting_('Resolved Chip Label') || 'Improved â€” Now Green';
+}
+
+/**
+ * Apply read-time live overlay for DEPLOYMENT/CSAT agenda items.
+ * Preserves Lead, Current State, Desired Outcome, Future State from snapshot.
+ * @param {Array<Object>} items
+ * @return {Array<Object>}
+ */
+function applyLiveOverlayToAgendaItems_(items) {
+  var depLookup = buildIdLookup_(getSheetData_('Deployments_SOQL'), 'Id');
+  var csatLookup = buildIdLookup_(getSheetData_('CSAT_SOQL'), 'Id');
+  var resolvedLabel = getResolvedChipLabel_();
+
+  return (items || []).map(function (item) {
+    var copy = {
+      agendaOrder: item.agendaOrder,
+      source: item.source,
+      account: item.account,
+      id: item.id,
+      lead: item.lead,
+      currentState: item.currentState,
+      desiredOutcome: item.desiredOutcome,
+      futureState: item.futureState,
+      healthStatus: item.healthStatus,
+      user: item.user,
+      resolved: false
+    };
+
+    var src = String(item.source || '').toUpperCase();
+    var id = String(item.id || '');
+
+    if (src === 'DEPLOYMENT') {
+      var dep = depLookup[id];
+      if (dep) {
+        copy.healthStatus = String(dep['Overall_Health__c'] || '');
+        var acct = dep['Customer_name__c'] || item.account || '';
+        var partner = String(dep['Deployment_Partner_Name__c'] || '').trim();
+        var summary = String(dep['Deployment_Summary__c'] || '').trim();
+        if (partner) copy.partner = partner;
+        if (summary) copy.sourceSummary = summary;
+        copy.account = partner
+          ? (acct ? acct + ' \u00b7 ' + partner : partner)
+          : acct;
+      } else {
+        copy.healthStatus = resolvedLabel;
+        copy.resolved = true;
+      }
+    } else if (src === 'CSAT') {
+      var csat = csatLookup[id];
+      if (csat) {
+        copy.healthStatus = String(csat['Overall_Health_Status__c'] || '');
+        copy.account = csat['Account__r.Name'] || item.account || '';
+        var csatSummary = String(
+          csat['Summary_of_Issues__c'] || csat['Wellness_Update__c'] || ''
+        ).trim();
+        if (csatSummary) copy.sourceSummary = csatSummary;
+      } else {
+        copy.healthStatus = resolvedLabel;
+        copy.resolved = true;
+      }
+    }
+
+    return copy;
+  });
+}
+
+/**
+ * Suggested next step for the meeting lifecycle state machine.
+ * @param {string} status
+ * @param {string} meetingDate
+ * @param {string} agendaSentAt
+ * @param {string} reminderSentAt
+ * @return {string}
+ */
+function getSuggestedNextStep_(status, meetingDate, agendaSentAt, reminderSentAt) {
+  var s = String(status || 'OPEN').toUpperCase();
+  if (s === 'CLOSED') {
+    return 'Set the next Meeting Date in Admin to start a new cycle.';
+  }
+  if (!meetingDate) {
+    return 'Set the Meeting Date in Admin.';
+  }
+  if (s === 'OPEN' && !agendaSentAt) {
+    return 'Build the agenda, then send it from Admin when ready.';
+  }
+  if (s === 'AGENDA_SENT' || agendaSentAt) {
+    return 'After the meeting, close and archive from Admin.';
+  }
+  if (!reminderSentAt) {
+    return 'Send a reminder from Admin if submissions are still needed.';
+  }
+  return 'Review agenda items and send the agenda when ready.';
+}
+
+/**
+ * Return meeting lifecycle state for the admin panel and stale nudge.
+ * @return {Object}
+ */
+function getMeetingState() {
+  var status = getSetting_('Meeting Status') || 'OPEN';
+  var meetingDate = getSetting_('Meeting Date');
+  var reminderDate = getSetting_('Reminder Date');
+  var deliveryDate = getSetting_('Delivery Date');
+  var reminderSentAt = getSetting_('Reminder Sent At');
+  var agendaSentAt = getSetting_('Agenda Sent At');
+  var staleDays = parseInt(getSetting_('Stale Meeting Days') || '10', 10);
+  if (isNaN(staleDays) || staleDays < 0) staleDays = 10;
+
+  var staleMeeting = false;
+  if (String(status).toUpperCase() !== 'CLOSED' && meetingDate) {
+    var md = new Date(meetingDate);
+    if (!isNaN(md.getTime())) {
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+      md.setHours(0, 0, 0, 0);
+      var diffDays = (today.getTime() - md.getTime()) / (1000 * 60 * 60 * 24);
+      staleMeeting = diffDays > staleDays;
+    }
+  }
+
+  var meetingDateLocked = !!(meetingDate && String(status).toUpperCase() !== 'CLOSED');
+
+  return {
+    status: String(status).toUpperCase() || 'OPEN',
+    meetingDate: meetingDate,
+    reminderDate: reminderDate,
+    deliveryDate: deliveryDate,
+    reminderSentAt: reminderSentAt,
+    agendaSentAt: agendaSentAt,
+    staleMeeting: staleMeeting,
+    meetingDateLocked: meetingDateLocked,
+    suggestedNextStep: getSuggestedNextStep_(status, meetingDate, agendaSentAt, reminderSentAt),
+    staleMeetingDays: staleDays
+  };
+}
+
+/**
+ * Persist editable meeting dates from the admin panel.
+ * @param {{meetingDate?:string,reminderDate?:string,deliveryDate?:string}} payload
+ * @return {Object}
+ */
+function saveMeetingDates(payload) {
+  if (!payload) throw new Error('Missing payload');
+
+  var state = getMeetingState();
+  var nextMeetingDate = payload.meetingDate !== undefined
+    ? String(payload.meetingDate || '').trim()
+    : state.meetingDate;
+
+  if (payload.meetingDate !== undefined) {
+    if (state.meetingDateLocked && nextMeetingDate !== state.meetingDate) {
+      throw new Error('Meeting Date is locked until the meeting is closed.');
+    }
+
+    if (nextMeetingDate && String(state.status).toUpperCase() === 'CLOSED') {
+      setSetting_('Meeting Status', 'OPEN');
+      setSetting_('Agenda Sent At', '');
+      setSetting_('Reminder Sent At', '');
+      setSetting_('Closeout Reminder Sent At', '');
+    }
+
+    setSetting_('Meeting Date', nextMeetingDate);
+  }
+
+  if (payload.reminderDate !== undefined) {
+    setSetting_('Reminder Date', String(payload.reminderDate || '').trim());
+  }
+  if (payload.deliveryDate !== undefined) {
+    setSetting_('Delivery Date', String(payload.deliveryDate || '').trim());
+  }
+
+  return getMeetingState();
+}
+
+/**
+ * Whether a Meeting Date already exists in Agenda Archive.
+ * @param {string} meetingDate
+ * @return {boolean}
+ */
+function isMeetingDateArchived_(meetingDate) {
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getSheetByName('Agenda Archive');
+  if (!sheet || sheet.getLastRow() < 2) return false;
+
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var meetingIdx = headers.indexOf('Meeting Date');
+  if (meetingIdx < 0) meetingIdx = 1;
+
+  var target = String(meetingDate || '').trim();
+  for (var i = 1; i < values.length; i++) {
+    var cell = values[i][meetingIdx];
+    var cellStr = cell instanceof Date
+      ? Utilities.formatDate(cell, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      : String(cell || '').trim();
+    if (cellStr === target) return true;
+  }
+  return false;
+}
+
+/**
+ * Append rows to an archive sheet and verify the write succeeded.
+ * @param {string} sheetName
+ * @param {Array<Array<*>>} rows
+ */
+function appendAndVerifyArchive_(sheetName, rows) {
+  if (!rows || !rows.length) return;
+
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error(sheetName + ' sheet not found. Create it before closing a meeting.');
+  }
+
+  var before = sheet.getLastRow();
+  var numRows = rows.length;
+  var numCols = rows[0].length;
+  sheet.getRange(before + 1, 1, numRows, numCols).setValues(rows);
+  SpreadsheetApp.flush();
+
+  if (sheet.getLastRow() !== before + numRows) {
+    throw new Error('Archive write verification failed for ' + sheetName + '. Clear aborted.');
+  }
+}
+
+/**
+ * Clear a sheet to headers only (row 1 preserved).
+ * @param {string} sheetName
+ */
+function clearSheetToHeaders_(sheetName) {
+  var ss = SpreadsheetApp.getActive();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('Sheet not found: ' + sheetName);
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow > 1 && lastCol > 0) {
+    sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+  }
+}
+
+/**
+ * Preview data for close-meeting confirmation dialogs.
+ * @return {{meetingDate:string,itemCount:number}}
+ */
+function getCloseMeetingPreview() {
+  var meetingDate = getSetting_('Meeting Date');
+  var items = applyLiveOverlayToAgendaItems_(getAgendaItemsOrdered_());
+  return {
+    meetingDate: meetingDate || '(not set)',
+    itemCount: items.length
+  };
+}
+
+/**
+ * Archive the current meeting, verify writes, then clear working sheets.
+ * @return {{success:boolean,meetingDate:string,itemCount:number}}
+ */
+function closeMeetingAndArchive() {
+  var meetingDate = getSetting_('Meeting Date');
+  if (!meetingDate) {
+    throw new Error('Meeting Date is not set. Set it in Admin before closing.');
+  }
+
+  if (isMeetingDateArchived_(meetingDate)) {
+    throw new Error(
+      'Meeting Date ' + meetingDate + ' has already been archived. Close aborted.'
+    );
+  }
+
+  var items = applyLiveOverlayToAgendaItems_(getAgendaItemsOrdered_());
+  var kpis = getAgendaKpis_();
+  var archivedDate = new Date();
+
+  var agendaArchiveRows = items.map(function (item) {
+    return [
+      archivedDate,
+      meetingDate,
+      item.agendaOrder || '',
+      item.source || '',
+      item.account || '',
+      item.id || '',
+      item.lead || '',
+      item.currentState || '',
+      item.desiredOutcome || '',
+      item.futureState || '',
+      item.healthStatus || '',
+      item.user || ''
+    ];
+  });
+
+  if (agendaArchiveRows.length) {
+    appendAndVerifyArchive_('Agenda Archive', agendaArchiveRows);
+  }
+
+  appendAndVerifyArchive_('KPI Archive', [[
+    meetingDate,
+    kpis.depRed,
+    kpis.depYellow,
+    kpis.csatUnfav,
+    kpis.csatNeutral,
+    archivedDate
+  ]]);
+
+  clearSheetToHeaders_('Agenda');
+  clearSheetToHeaders_('Deployment Selections');
+  clearSheetToHeaders_('CSAT Selections');
+
+  setSetting_('Meeting Status', 'CLOSED');
+  setSetting_('Agenda Sent At', '');
+  setSetting_('Reminder Sent At', '');
+
+  Logger.log('closeMeetingAndArchive: archived ' + items.length + ' items for ' + meetingDate);
+
+  return {
+    success: true,
+    meetingDate: meetingDate,
+    itemCount: items.length
+  };
+}
+
+/**
+ * Close meeting from the spreadsheet menu with confirmation.
+ */
+function closeMeetingFromMenu() {
+  var preview = getCloseMeetingPreview();
+  if (!preview.meetingDate || preview.meetingDate === '(not set)') {
+    SpreadsheetApp.getUi().alert('Meeting Date is not set. Set it in the web app Admin panel first.');
+    return;
+  }
+
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert(
+    'Close Meeting',
+    'Archive Meeting Date ' + preview.meetingDate + ' (' + preview.itemCount + ' agenda items)?\n\n' +
+    'This is irreversible: agenda and selection sheets will be cleared after archiving.',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) return;
+
+  try {
+    var result = closeMeetingAndArchive();
+    ui.alert(
+      'Meeting closed.',
+      'Archived ' + result.itemCount + ' items for ' + result.meetingDate + '.',
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    Logger.log('closeMeetingFromMenu: ' + e.message);
+    ui.alert('Close failed: ' + e.message);
+  }
+}
+
+/**
+ * Daily trigger: send closeout email once per stale cycle.
+ */
+function checkStaleMeetingDaily_() {
+  var status = String(getSetting_('Meeting Status') || 'OPEN').toUpperCase();
+  if (status === 'CLOSED') return;
+
+  var meetingDate = getSetting_('Meeting Date');
+  if (!meetingDate) return;
+
+  var state = getMeetingState();
+  if (!state.staleMeeting) return;
+
+  if (getSetting_('Closeout Reminder Sent At')) return;
+
+  sendMeetingCloseoutReminder();
+  setSetting_(
+    'Closeout Reminder Sent At',
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss')
+  );
 }
 
 /**
@@ -691,6 +1108,91 @@ function removeAgendaItem(source, id) {
 }
 
 /**
+ * Return agenda items for the reorder panel, sorted by five-group order.
+ * @return {Array<{source:string,id:string,account:string,group:string,groupLabel:string}>}
+ */
+function getReorderAgendaData() {
+  const items = getAgendaItemsOrdered_();
+
+  return items.map(item => {
+    const group = classifyEmailGroup_(item);
+    return {
+      source: item.source || '',
+      id: item.id || '',
+      account: item.account || '',
+      group: group,
+      groupLabel: EMAIL_GROUP_LABELS_[group] || group
+    };
+  });
+}
+
+/**
+ * Reorder agenda items globally across groups.
+ * @param {Array<{source:string,id:string}>} orderedKeys
+ * @return {{updated:number}}
+ */
+function reorderAgenda(orderedKeys) {
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName('Agenda');
+  if (!sheet) throw new Error('Agenda sheet not found');
+
+  const data = sheet.getDataRange().getValues();
+  if (!data || data.length < 2) return { updated: 0 };
+
+  const headers = data[0];
+  const orderIdx = headers.indexOf('Agenda Order');
+  const sourceIdx = headers.indexOf('Source');
+  const idIdx = headers.indexOf('ID');
+  if (orderIdx < 0 || sourceIdx < 0 || idIdx < 0) {
+    throw new Error('Agenda sheet missing required columns');
+  }
+
+  const rowMap = {};
+  for (let i = 1; i < data.length; i++) {
+    const src = String(data[i][sourceIdx] || '').toUpperCase();
+    const id = String(data[i][idIdx] || '');
+    rowMap[src + '::' + id] = i;
+  }
+
+  const used = {};
+  const newOrder = [];
+
+  (orderedKeys || []).forEach(k => {
+    const src = String(k.source || '').toUpperCase();
+    const id = String(k.id || '');
+    const key = src + '::' + id;
+    if (rowMap.hasOwnProperty(key) && !used[key]) {
+      newOrder.push(rowMap[key]);
+      used[key] = true;
+    }
+  });
+
+  for (let i = 1; i < data.length; i++) {
+    const src = String(data[i][sourceIdx] || '').toUpperCase();
+    const id = String(data[i][idIdx] || '');
+    const key = src + '::' + id;
+    if (!used[key]) {
+      newOrder.push(i);
+      used[key] = true;
+    }
+  }
+
+  const numRows = data.length - 1;
+  const orderCol = orderIdx + 1;
+  const orderValues = [];
+  for (let i = 0; i < numRows; i++) {
+    orderValues.push([0]);
+  }
+
+  newOrder.forEach((rowIdx, idx) => {
+    orderValues[rowIdx - 1][0] = idx + 1;
+  });
+
+  sheet.getRange(2, orderCol, numRows, 1).setValues(orderValues);
+  return { updated: newOrder.length };
+}
+
+/**
  * Renumber Agenda Order column sequentially (1..n).
  */
 function renumberAgenda_() {
@@ -709,696 +1211,11 @@ function renumberAgenda_() {
   sheet.getRange(2, 1, numRows, 1).setValues(orders);
 }
 
-/**
- * Classify an agenda item into one of three render buckets:
- *   'DEPLOYMENT' — source is DEPLOYMENT and id does NOT start with MANUAL-
- *   'CSAT'       — source is CSAT and id does NOT start with MANUAL-
- *   'MANUAL'     — everything else (MANUAL- prefix IDs, QUALTRIX, BUDGET_EAC, MANUAL source, etc.)
- */
-function classifyAgendaItem_(item) {
-  var id = String(item.id || '');
-  var src = String(item.source || '').toUpperCase();
-  if (id.indexOf('MANUAL-') === 0) return 'MANUAL';
-  if (src === 'DEPLOYMENT') return 'DEPLOYMENT';
-  if (src === 'CSAT') return 'CSAT';
-  return 'MANUAL';
-}
-
-/**
- * Generate full HTML for the agenda preview/export.
- * (Unchanged from your working version except for grouping logic if you add it.)
- */
-function generateAgendaHtml(agendaItems) {
-  const meetingDate = Utilities.formatDate(
-    new Date(),
-    Session.getScriptTimeZone(),
-    'EEEE, MMMM dd, yyyy'
-  );
-
-  const deploymentItems = agendaItems.filter(
-    item => classifyAgendaItem_(item) === 'DEPLOYMENT'
-  );
-  const csatItems = agendaItems.filter(
-    item => classifyAgendaItem_(item) === 'CSAT'
-  );
-  const manualItems = agendaItems.filter(
-    item => classifyAgendaItem_(item) === 'MANUAL'
-  );
-
-  let html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body {
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background-color: #f5f5f7;
-        padding: 16px;
-        color: #222;
-      }
-      .container {
-        max-width: 900px;
-        margin: 0 auto;
-        background: #ffffff;
-        border-radius: 12px;
-        border: 1px solid #1d4ed8;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.12);
-        overflow: hidden;
-      }
-      .header {
-        background: linear-gradient(135deg, #0066cc 0%, #004999 100%);
-        color: #ffffff;
-        padding: 20px 24px;
-      }
-      .header-inner {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-      }
-      .header-logo { flex: 0 0 auto; }
-      .header-main { flex: 1 1 auto; min-width: 0; }
-      .header-title {
-        font-size: 20px;
-        font-weight: 600;
-        margin-bottom: 4px;
-      }
-      .header-subtitle {
-        font-size: 13px;
-        opacity: 0.9;
-        max-width: 620px;
-        line-height: 1.35;
-      }
-      .header-date {
-        font-size: 12px;
-        opacity: 0.85;
-        margin-top: 6px;
-      }
-      .summary {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        padding: 12px 24px 16px 24px;
-        border-bottom: 1px solid #e5e7eb;
-        background-color: #f9fafb;
-      }
-      .summary-item { min-width: 120px; }
-      .summary-number {
-        font-size: 22px;
-        font-weight: 600;
-        color: #1d4ed8;
-        line-height: 1.2;
-      }
-      .summary-label {
-        font-size: 11px;
-        color: #6b7280;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-top: 2px;
-      }
-      .content {
-        padding: 20px 24px 24px 24px;
-      }
-      .section { margin-bottom: 24px; }
-      .section:last-child { margin-bottom: 0; }
-      .section-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 10px 14px;
-        margin: 0 -14px 12px -14px;
-        background-color: #1d4ed8;
-        color: #ffffff;
-      }
-      .section-header-left {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .section-icon {
-        width: 22px;
-        height: 22px;
-        border-radius: 999px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        background: rgba(15, 23, 42, 0.18);
-      }
-      .section-title {
-        font-size: 14px;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
-      }
-      .section-count {
-        font-size: 11px;
-        font-weight: 500;
-        padding: 2px 8px;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.7);
-        background: rgba(15, 23, 42, 0.12);
-        white-space: nowrap;
-      }
-      .agenda-item {
-        background: #f9fafb;
-        border-radius: 6px;
-        border: 1px solid #e5e7eb;
-        padding: 12px 14px;
-        margin-bottom: 10px;
-      }
-      .agenda-item:last-child { margin-bottom: 0; }
-      .item-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        margin-bottom: 6px;
-        gap: 8px;
-      }
-      .account-name {
-        font-size: 15px;
-        font-weight: 600;
-        color: #111827;
-        flex: 1;
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .item-number {
-        font-size: 12px;
-        font-weight: 600;
-        color: #4b5563;
-      }
-      .item-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-bottom: 8px;
-        font-size: 12px;
-        color: #4b5563;
-      }
-      .meta-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-      }
-      .meta-label {
-        font-weight: 500;
-        color: #374151;
-      }
-      .status-badge {
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-weight: 500;
-        font-size: 11px;
-        border: 1px solid transparent;
-      }
-      .badge-deployment {
-        background-color: #eff6ff;
-        color: #1d4ed8;
-        border-color: #bfdbfe;
-      }
-      .badge-csat {
-        background-color: #fffbeb;
-        color: #b45309;
-        border-color: #fde68a;
-      }
-      .badge-unfavorable {
-        background-color: #fef2f2;
-        color: #b91c1c;
-        border-color: #fecaca;
-      }
-      .badge-neutral {
-        background-color: #fefce8;
-        color: #92400e;
-        border-color: #facc15;
-      }
-      .badge-favorable {
-        background-color: #ecfdf3;
-        color: #15803d;
-        border-color: #bbf7d0;
-      }
-      .badge-high-risk {
-        background-color: #b91c1c;
-        color: #ffffff;
-        font-weight: 700;
-        border-color: #b91c1c;
-      }
-      .item-details { display: grid; gap: 6px; }
-      .detail-row {
-        background: #ffffff;
-        border-radius: 4px;
-        padding: 8px 9px;
-        border: 1px solid #e5e7eb;
-      }
-      .detail-label {
-        font-size: 11px;
-        font-weight: 600;
-        color: #4b5563;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: 2px;
-      }
-      .detail-text {
-        font-size: 12px;
-        color: #374151;
-        line-height: 1.4;
-        white-space: pre-wrap;
-      }
-      .empty-state {
-        text-align: center;
-        padding: 40px 24px;
-        color: #6b7280;
-        font-size: 14px;
-      }
-      .empty-state-icon {
-        font-size: 32px;
-        margin-bottom: 8px;
-        opacity: 0.5;
-      }
-      .footer {
-        background: #ffffff;
-        padding: 10px 24px 14px 24px;
-        border-top: 1px solid #e5e7eb;
-        font-size: 11px;
-        color: #6b7280;
-        text-align: right;
-      }
-      .footer-main {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 4px;
-      }
-      .print-button {
-        background: #1d4ed8;
-        color: #ffffff;
-        border: none;
-        padding: 6px 12px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 500;
-        cursor: pointer;
-      }
-      .print-button:hover { background: #1e40af; }
-      @media print {
-
-        /* ---- Page setup ---- */
-        @page {
-          size: Letter;
-          margin: 0.45in 0.5in;
-        }
-
-        html, body {
-          background: #ffffff !important;
-        }
-        body {
-          padding: 0;
-          font-size: 10px;
-          color: #111827;
-        }
-
-        /* ---- Container: kill the blue border that bleeds across pages ---- */
-        .container {
-          box-shadow: none !important;
-          border: none !important;
-          border-radius: 0 !important;
-          max-width: 100% !important;
-          margin: 0 !important;
-          overflow: visible !important;
-        }
-
-        /* ---- Hide UI chrome ---- */
-        .print-button,
-        .footer-main .print-button {
-          display: none !important;
-        }
-
-        /* ---- Header: condensed, page 1 only ---- */
-        .header {
-          padding: 10px 14px !important;
-          background: #1d4ed8 !important;
-          color: #ffffff !important;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-        .header-title {
-          font-size: 16px !important;
-          margin-bottom: 2px !important;
-        }
-        .header-subtitle {
-          font-size: 10.5px !important;
-          line-height: 1.3 !important;
-        }
-        .header-date {
-          font-size: 10px !important;
-          margin-top: 3px !important;
-        }
-        .header-logo svg {
-          width: 30px !important;
-          height: 30px !important;
-        }
-
-        /* ---- Summary bar: condensed, page 1 only ---- */
-        .summary {
-          padding: 8px 14px !important;
-        }
-        .summary-number { font-size: 16px !important; }
-        .summary-label  { font-size: 9px  !important; }
-
-        /* ---- Content padding ---- */
-        .content { padding: 10px 14px 14px 14px !important; }
-
-        /* ---- Section header: prevent orphan headers, tighten ---- */
-        .section {
-          margin-bottom: 12px !important;
-        }
-        .section-header {
-          padding: 6px 10px !important;
-          margin: 0 -10px 8px -10px !important;
-          background: #1d4ed8 !important;
-          color: #ffffff !important;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-          break-after: avoid;
-          page-break-after: avoid;
-        }
-        .section-title { font-size: 11px !important; }
-        .section-count { font-size: 9px !important; padding: 1px 6px !important; }
-        .section-icon  { width: 18px !important; height: 18px !important; font-size: 11px !important; }
-
-        /* ---- New page per section (except the very first) ---- */
-        .section + .section {
-          break-before: page;
-          page-break-before: always;
-        }
-
-        /* ---- Agenda items: condensed executive layout ---- */
-        .agenda-item {
-          background: #ffffff !important;
-          border: 1px solid #d1d5db !important;
-          padding: 6px 9px !important;
-          margin-bottom: 6px !important;
-          break-inside: auto;
-          page-break-inside: auto;
-        }
-        .item-header { margin-bottom: 4px !important; }
-        .account-name { font-size: 12px !important; }
-        .item-number  { font-size: 10px !important; }
-
-        .item-meta {
-          gap: 6px !important;
-          margin-bottom: 5px !important;
-          font-size: 9.5px !important;
-        }
-
-        /* In print, the section header already labels the category.
-           Hide the per-item source badge to save vertical space. */
-        .item-meta .badge-deployment,
-        .item-meta .badge-csat {
-          display: none !important;
-        }
-
-        /* ---- Detail rows: tighten and forbid mid-row breaks ---- */
-        .item-details { gap: 3px !important; }
-        .detail-row {
-          background: #ffffff !important;
-          border: 1px solid #e5e7eb !important;
-          padding: 4px 7px !important;
-          break-inside: avoid;
-          page-break-inside: avoid;
-        }
-        .detail-label {
-          font-size: 8.5px !important;
-          margin-bottom: 1px !important;
-        }
-        .detail-text {
-          font-size: 10px !important;
-          line-height: 1.35 !important;
-        }
-
-        /* Keep status pills colored in print */
-        .status-badge {
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-
-        /* ---- Footer ---- */
-        .footer {
-          border-top: 1px solid #e5e7eb !important;
-          padding: 6px 14px 8px 14px !important;
-          font-size: 8.5px !important;
-          break-before: avoid;
-          page-break-before: avoid;
-        }
-
-        /* Belt-and-suspenders: ensure no element repeats blue borders
-           across pages */
-        * {
-          box-shadow: none !important;
-        }
-      }
-    </style>
-    </head>
-    <body>
-    <div class="container">
-        <div class="header page-1-only">
-          <div class="header-inner">
-          <div class="header-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" width="40" height="40">
-              <defs>
-                <style>
-                  .cls-0 { fill: #ffffff; }
-                  .cls-1 { fill: #0f2e66; }
-                  .cls-2 { fill: #fc5b05; }
-                </style>
-              </defs>
-              <g>
-                <g id="Layer_1">
-                  <rect class="cls-0" x="0" y="0" width="1540" height="2000" />
-                  <path class="cls-1" d="M1221.5,1999.8h-179.3c-26.9,0-49-12.3-56.3-41.9l-216-760.4-216,760.6c-7.3,29.6-29.4,41.9-56.3,41.9h-179.3c-29.4,0-46.7-12.3-56.3-41.9C146.5,1637.3,68.1,1318.5,1.8,997.7c-7.3-32.3,7.3-54.4,41.5-54.4h159.7c29.4,0,49,14.8,54.2,41.9c41.5,227.3,90.9,461.5,157.2,691.5l191.4-691.5c7.3-27.1,26.9-41.9,56.3-41.9h216c29.4,0,49,14.8,56.3,41.9l191.4,691.5c66.3-229.4,115.7-464.2,157.2-691.5c4.8-27.1,24.6-41.9,54.2-41.9h159.7c34.2,0,49,22.3,41.5,54.4c-66.3,320.9-144.7,639.6-260.1,960.4c-10,29.6-27.1,41.7-56.5,41.7Z"/>
-                  <path class="cls-2" d="M375.1,408.1c105.5-105.7,245.7-163.7,395-163.9c149.1,0,289.2,58,394.4,163.3c54.8,54.8,96.6,118.9,124.3,188.7c6.3,16.1,22.1,26.7,39.4,26.7h168.7c28.2,0,49-27.1,40.9-54c-37.7-124.9-105.7-239.2-200.4-334.1C1185.9,83.6,984.5,0,770.3,0S354.2,83.6,202.6,235.4C107.7,330.3,39.8,444.6,2.4,569.1c-8.1,26.9,12.7,54,40.9,54h168.7c17.3,0,33-10.6,39.4-26.7C302.7,526.7,344.4,462.7,398.9,408.1Z"/>
-                </g>
-              </g>
-            </svg>
-          </div>
-          <div class="header-main">
-            <div class="header-title">HC Wellness Meeting Agenda</div>
-            <div class="header-subtitle">
-              A review of deployments, accounts, budgets, and investments that require leadership team review and collaboration
-            </div>
-            <div class="header-date">${meetingDate}</div>
-          </div>
-        </div>
-      </div>
-        <div class="summary page-1-only">
-          <div class="summary-item">
-            <div class="summary-number">${agendaItems.length}</div>
-            <div class="summary-label">Total Items</div>
-          </div>
-        <div class="summary-item">
-          <div class="summary-number">${deploymentItems.length}</div>
-          <div class="summary-label">Deployments</div>
-        </div>
-        <div class="summary-item">
-          <div class="summary-number">${csatItems.length}</div>
-          <div class="summary-label">CSAT Issues</div>
-        </div>
-        <div class="summary-item">
-          <div class="summary-number">${manualItems.length}</div>
-          <div class="summary-label">Additional / Manual</div>
-        </div>
-      </div>
-      <div class="content">
-  `;
-
-  if (deploymentItems.length > 0) {
-    html += `
-      <div class="section">
-        <div class="section-header">
-          <div class="section-header-left">
-            <div class="section-icon">🚀</div>
-            <div class="section-title">Deployment Reviews</div>
-          </div>
-          <div class="section-count">${deploymentItems.length} items</div>
-        </div>
-    `;
-    deploymentItems.forEach((item, i) => {
-      html += generateAgendaItemHtml(item, i + 1, 'deployment');
-    });
-    html += `</div>`;
-  }
-
-  if (csatItems.length > 0) {
-    html += `
-      <div class="section">
-        <div class="section-header">
-          <div class="section-header-left">
-            <div class="section-icon"></div>
-            <div class="section-title">Customer Satisfaction Reviews</div>
-          </div>
-          <div class="section-count">${csatItems.length} items</div>
-        </div>
-    `;
-    csatItems.forEach((item, i) => {
-      html += generateAgendaItemHtml(item, i + 1, 'csat');
-    });
-    html += `</div>`;
-  }
-
-  if (manualItems.length > 0) {
-    html += `
-      <div class="section">
-        <div class="section-header">
-          <div class="section-header-left">
-            <div class="section-icon">📝</div>
-            <div class="section-title">Additional / Manual Topics</div>
-          </div>
-          <div class="section-count">${manualItems.length} items</div>
-        </div>
-    `;
-    manualItems.forEach((item, i) => {
-      html += generateAgendaItemHtml(item, i + 1, 'manual');
-    });
-    html += `</div>`;
-  }
-
-  if (agendaItems.length === 0) {
-    html += `
-      <div class="empty-state">
-        <div class="empty-state-icon">📋</div>
-        <div><strong>No agenda items</strong></div>
-        <div>Add Deployment, CSAT, or Additional / Manual topics to populate the agenda.</div>
-      </div>
-    `;
-  }
-
-  html += `
-      </div>
-      <div class="footer">
-        <div class="footer-main">
-          <button class="print-button" onclick="window.print()">Print</button>
-          <div>Generated on ${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss z')}</div>
-        </div>
-        <div>HC Wellness Solution • ${Session.getActiveUser().getEmail()}</div>
-      </div>
-    </div>
-    </body>
-    </html>
-  `;
-
-  return html;
-}
-
-/**
- * Render a single agenda item as HTML.
- */
-function generateAgendaItemHtml(item, number, type) {
-  var account = item.account || '';
-  var lead = item.lead || '';
-  var user = item.user || '';
-  var health = item.healthStatus || '';
-
-  var html = '<div class="agenda-item">';
-
-  html += '<div class="item-header">';
-  html += '<div class="account-name">' + escapeHtml_(account) + '</div>';
-  html += '<div class="item-number">#' + number + '</div>';
-  html += '</div>';
-
-  html += '<div class="item-meta">';
-
-  if (lead) {
-    html += '<div class="meta-item"><span class="meta-label">Lead:</span><span>' +
-      escapeHtml_(lead) + '</span></div>';
-  }
-
-  if (user) {
-    html += '<div class="meta-item"><span class="meta-label">Submitted by:</span><span>' +
-      escapeHtml_(user) + '</span></div>';
-  }
-
-  var srcLabel;
-  var srcClass;
-  if (type === 'deployment') {
-    srcLabel = 'Deployment';
-    srcClass = 'badge-deployment';
-  } else if (type === 'csat') {
-    srcLabel = 'CSAT';
-    srcClass = 'badge-csat';
-  } else if (type === 'manual') {
-    var rawSrc = String(item.source || '').toUpperCase();
-    var topicLabelMap = {
-      'DEPLOYMENT': 'Deployment',
-      'CSAT': 'CSAT',
-      'QUALTRIX': 'Qualtrics',
-      'BUDGET_EAC': 'Budget / EAC',
-      'MANUAL': 'Manual'
-    };
-    var topicLabel = topicLabelMap[rawSrc] || (item.source || 'Manual');
-    srcLabel = (rawSrc === 'MANUAL') ? 'Manual' : (topicLabel + ' (Manual)');
-    srcClass = 'badge-neutral';
-  } else {
-    srcLabel = item.source || 'Item';
-    srcClass = 'badge-neutral';
-  }
-
-  html += '<div class="meta-item"><span class="status-badge ' + srcClass + '">' +
-    escapeHtml_(srcLabel) + '</span></div>';
-
-  if (health) {
-    var hClass;
-    var hUpper = String(health).toUpperCase();
-    if (hUpper === 'UNFAVORABLE' || hUpper === 'RED') {
-      hClass = 'badge-unfavorable';
-    } else if (hUpper === 'FAVORABLE' || hUpper === 'GREEN') {
-      hClass = 'badge-favorable';
-    } else {
-      hClass = 'badge-neutral';
-    }
-    html += '<div class="meta-item"><span class="status-badge ' + hClass + '">' +
-      escapeHtml_(health) + '</span></div>';
-  }
-
-  if (type === 'csat' && String(item.highRiskFlag || '').toLowerCase() === 'true') {
-    html += '<div class="meta-item"><span class="status-badge badge-high-risk">HIGH RISK</span></div>';
-  }
-
-  html += '</div>';
-
-  html += '<div class="item-details">';
-  if (item.currentState) {
-    html += '<div class="detail-row">' +
-      '<div class="detail-label">Current State</div>' +
-      '<div class="detail-text">' + escapeHtml_(item.currentState) + '</div>' +
-      '</div>';
-  }
-
-  if (item.desiredOutcome) {
-    html += '<div class="detail-row">' +
-      '<div class="detail-label">Desired Outcome</div>' +
-      '<div class="detail-text">' + escapeHtml_(item.desiredOutcome) + '</div>' +
-      '</div>';
-  }
-
-  if (item.futureState) {
-    html += '<div class="detail-row">' +
-      '<div class="detail-label">Future State</div>' +
-      '<div class="detail-text">' + escapeHtml_(item.futureState) + '</div>' +
-      '</div>';
-  }
-
-  html += '</div>';
-  html += '</div>';
-
-  return html;
-}
 
 /**
  * Simple HTML escaper.
+ * @param {*} value
+ * @return {string}
  */
 function escapeHtml_(value) {
   if (value == null) return '';
@@ -1408,14 +1225,6 @@ function escapeHtml_(value) {
     .replace(/>/g, '&gt;')
     .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#039;');
-}
-
-/**
- * "PDF" export helper: return HTML and let browser print->PDF.
- */
-function exportAgendaPdf(agendaItems) {
-  const html = generateAgendaHtml(agendaItems);
-  return html;
 }
 
 /**

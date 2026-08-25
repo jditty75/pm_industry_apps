@@ -39,16 +39,16 @@ function getActiveDeploymentsData() {
   return CoreLib.CoreData.getActiveDeployments(APP_CONFIG);
 }
 
-function getAllDeploymentsForUI(viewModeOpts) {
-  return CoreLib.CoreData.getAllDeployments(APP_CONFIG, viewModeOpts);
+function getAllDeploymentsForUI(viewModeOpts, productOpts) {
+  return CoreLib.CoreData.getAllDeployments(APP_CONFIG, viewModeOpts, productOpts);
 }
 
-function getRecentGoLivesData(viewModeOpts) {
-  return CoreLib.CoreData.getRecentGoLives(APP_CONFIG, viewModeOpts || {});
+function getRecentGoLivesData(viewModeOpts, productOpts) {
+  return CoreLib.CoreData.getRecentGoLives(APP_CONFIG, viewModeOpts || {}, undefined, productOpts);
 }
 
-function getUpcomingGoLivesData(viewModeOpts) {
-  return CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, viewModeOpts);
+function getUpcomingGoLivesData(viewModeOpts, productOpts) {
+  return CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, viewModeOpts, productOpts);
 }
 
 /**
@@ -70,12 +70,13 @@ function getMdsPglBatchViewForUI(viewModeOpts, windowMonths) {
  * @param {Object=} viewModeOpts
  * @param {number=} windowMonths  3 or 6. Default 3.
  */
-function getCsatTabDataForUI(viewModeOpts, windowMonths) {
+function getCsatTabDataForUI(viewModeOpts, windowMonths, productOpts) {
   var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
   return CoreLib.CoreData.getCsatTabDataForUI(
     cfg,
     viewModeOpts,
-    (windowMonths === 6) ? 6 : 3
+    (windowMonths === 6) ? 6 : 3,
+    productOpts
   );
 }
 
@@ -294,8 +295,8 @@ function initReportDistributionLog() {
 // PORTFOLIO HEALTH
 // ============================================================================
 
-function getPortfolioHealthData() {
-  return CoreLib.CorePortfolioHealth.getSnapshot(APP_CONFIG);
+function getPortfolioHealthData(viewModeOpts, productOpts) {
+  return CoreLib.CorePortfolioHealth.getSnapshot(APP_CONFIG, viewModeOpts, productOpts);
 }
 
 /**
@@ -322,8 +323,8 @@ function updateGoLivesOverride(accountName, overrideData, notes) {
 // MANAGE OVERRIDES
 // ============================================================================
 
-function getAllActiveOverridesForUI(viewModeOpts) {
-  return CoreLib.CoreData.getAllActiveOverrides(APP_CONFIG, viewModeOpts);
+function getAllActiveOverridesForUI(viewModeOpts, productOpts) {
+  return CoreLib.CoreData.getAllActiveOverrides(APP_CONFIG, viewModeOpts, productOpts);
 }
 
 function getOverrideAuditLogForUI(opts) {
@@ -518,8 +519,8 @@ function getGoLivesForNotablePicker() {
  *
  * @return {Object}
  */
-function getOverviewData() {
-  return CoreLib.CoreData.getOverviewSnapshot(APP_CONFIG);
+function getOverviewData(viewModeOpts, productOpts) {
+  return CoreLib.CoreData.getOverviewSnapshot(APP_CONFIG, viewModeOpts, productOpts);
 }
 
 function _getOverviewData_legacy_() {

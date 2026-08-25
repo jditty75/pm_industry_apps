@@ -602,6 +602,18 @@ var CoreConfig = (function () {
     if (cfg.ui.personalization.showFullPortfolioIndicator === undefined)
       cfg.ui.personalization.showFullPortfolioIndicator = true;
 
+    cfg.ui.productFilter = cfg.ui.productFilter || {};
+    if (cfg.ui.productFilter.enabled === undefined)
+      cfg.ui.productFilter.enabled = false;
+    if (!Array.isArray(cfg.ui.productFilter.areas))
+      cfg.ui.productFilter.areas = [];
+    if (!Array.isArray(cfg.ui.productFilter.affectsTabs))
+      cfg.ui.productFilter.affectsTabs = ['deployments', 'golives', 'csat', 'portfolio', 'overview'];
+    if (!cfg.ui.productFilter.defaultProduct)
+      cfg.ui.productFilter.defaultProduct = 'all';
+    if (typeof cfg.ui.productFilter.aliases !== 'object' || cfg.ui.productFilter.aliases === null)
+      cfg.ui.productFilter.aliases = {};
+
     // -------------------------------------------------------------------------
     // Trends (T1)
     // -------------------------------------------------------------------------

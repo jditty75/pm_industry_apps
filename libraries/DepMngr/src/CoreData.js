@@ -1105,9 +1105,10 @@ function _sfdcDataVersion_(cfg) {
   // PUBLIC: ACTIVE DEPLOYMENTS
   // ===========================================================================
 
-  function getActiveDeployments(config, viewModeOpts) {
+  function getActiveDeployments(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var allEffective = getAllEffectiveDeployments(cfg);
+    var pa = (productOpts && productOpts.product) || 'all';
 
     var redYellow = allEffective
       .filter(function (r) {
@@ -1123,6 +1124,7 @@ function _sfdcDataVersion_(cfg) {
       });
 
     redYellow = filterDeploymentsByStudent_(redYellow, 'exclude', cfg);
+    redYellow = filterDeploymentsByProduct_(redYellow, pa, cfg);
     return applyViewModeFilter_(cfg, redYellow, viewModeOpts);
   }
 
@@ -1143,8 +1145,9 @@ function _sfdcDataVersion_(cfg) {
    * inside getAllEffectiveDeployments() (including D1's ddContacts / ddFromContacts)
    * automatically flows through to the WebApp Deployments tab.
    */
-  function getAllDeployments(config, viewModeOpts) {
+  function getAllDeployments(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
 
     // Base effective view — includes SFDC-vs-legacy fallback, Active-only filter,
     // meta application, overrides application, and D1 ddContacts/ddFromContacts.
@@ -1171,6 +1174,7 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from the Deployments tab view (HENP only).
     enriched = filterDeploymentsByStudent_(enriched, 'exclude', cfg);
+    enriched = filterDeploymentsByProduct_(enriched, pa, cfg);
 
     // Health-rank sort: Red -> Yellow -> Green -> other; tiebreak by accountName.
     var sorted = enriched.sort(function (a, b) {
@@ -1205,8 +1209,9 @@ function _sfdcDataVersion_(cfg) {
    *   mtpDate is set to nextGoLiveDate for backward compatibility with callers
    *   that still use row.mtpDate.
    */
-  function getUpcomingGoLives(config, viewModeOpts) {
+  function getUpcomingGoLives(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
 
     // Get the effective view of all deployments (post-meta + post-overrides).
     var allEffective = getAllEffectiveDeployments(cfg);
@@ -1336,6 +1341,7 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from non-Student surfaces (HENP only).
     results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+    results = filterDeploymentsByProduct_(results, pa, cfg);
 
     Logger.log('CoreData.getUpcomingGoLives: ' + results.length + ' upcoming rows ' +
                '(pass1=' + Object.keys(seenDeploymentIds).length + ', ' +
@@ -1382,8 +1388,9 @@ function _sfdcDataVersion_(cfg) {
    *                                       for the Notable picker). Absent/null/0 → today's behavior.
    * @return {Array<Object>}
    */
-  function getRecentGoLives(config, viewModeOpts, windowDaysOverride) {
+  function getRecentGoLives(config, viewModeOpts, windowDaysOverride, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
 
     // Recent window: positive windowDaysOverride wins; otherwise fall back to config / 60-day default.
     var recentWindowDays =
@@ -1475,6 +1482,7 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from non-Student surfaces (HENP only).
     results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+    results = filterDeploymentsByProduct_(results, pa, cfg);
 
     Logger.log('CoreData.getRecentGoLives: ' + results.length +
                ' deployments with in-window go-live dates (last ' +
@@ -1834,8 +1842,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    *     classification: 'Monthly' | 'Structural'
    *   }
    */
-  function getAllActiveOverrides(config, viewModeOpts) {
+  function getAllActiveOverrides(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
     var out = [];
 
     var depMap = getDeploymentOverridesMap_(cfg);
@@ -1903,6 +1912,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       return tb - ta;
     });
 
+    out = filterDeploymentsByProduct_(out, pa, cfg);
     return applyViewModeFilter_(cfg, out, viewModeOpts);
   }
 
@@ -2804,7 +2814,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    *   exceptions: Array
    * }}
    */
-  function getMdsPglBatchView(config, viewModeOpts, windowMonths) {
+  function getMdsPglBatchView(config, viewModeOpts, windowMonths, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var horizonMonths = (windowMonths === 6) ? 6 : 3;
 
@@ -2813,7 +2823,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     if (_cache.mdsPglBatchView[t1Key]) {
       Logger.log('CoreData.getMdsPglBatchView: tier 1 hit for window=' + horizonMonths);
       var cached1 = _cache.mdsPglBatchView[t1Key];
-      return _applyViewModeFilterToPayload_(cfg, cached1, viewModeOpts, horizonMonths);
+      return _applyViewModeFilterToPayload_(cfg, cached1, viewModeOpts, horizonMonths, productOpts);
     }
 
     // Tier 2 (_PerfCache) check.
@@ -2822,7 +2832,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     if (cached2) {
       Logger.log('CoreData.getMdsPglBatchView: tier 2 hit for window=' + horizonMonths);
       _cache.mdsPglBatchView[t1Key] = cached2;
-      return _applyViewModeFilterToPayload_(cfg, cached2, viewModeOpts, horizonMonths);
+      return _applyViewModeFilterToPayload_(cfg, cached2, viewModeOpts, horizonMonths, productOpts);
     }
 
     // ── Build ──────────────────────────────────────────────────────────────
@@ -2981,24 +2991,33 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     Logger.log('CoreData.getMdsPglBatchView: built ' + groups.length + ' month groups, ' +
                allRows.length + ' total rows, ' + exceptions.length + ' exceptions.');
 
-    return _applyViewModeFilterToPayload_(cfg, payload, viewModeOpts, horizonMonths);
+    return _applyViewModeFilterToPayload_(cfg, payload, viewModeOpts, horizonMonths, productOpts);
   }
 
   /**
-   * Applies viewMode filtering to a cached batch-view payload.
+   * Applies product + viewMode filtering to a cached batch-view payload.
    * Returns a shallow copy of the payload with filtered row arrays.
    * @private
    */
-  function _applyViewModeFilterToPayload_(cfg, payload, viewModeOpts, horizonMonths) {
-    if (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') {
+  function _applyViewModeFilterToPayload_(cfg, payload, viewModeOpts, horizonMonths, productOpts) {
+    var pa = (productOpts && productOpts.product) || 'all';
+    var needsProduct = cfg.ui && cfg.ui.productFilter && cfg.ui.productFilter.enabled === true &&
+      pa && pa !== 'all';
+    var needsViewMode = viewModeOpts && viewModeOpts.viewMode && viewModeOpts.viewMode !== 'all';
+
+    if (!needsProduct && !needsViewMode) {
       return payload;
     }
 
     // Deep-copy groups and filter rows within each group.
     var filteredGroups = payload.groups.map(function (g) {
-      // We need to apply the filter to the combined row pool, then re-split.
       var combined = g.mdsRows.concat(g.pglRows);
-      var filtered = applyViewModeFilter_(cfg, combined, viewModeOpts);
+      if (needsProduct) {
+        combined = filterDeploymentsByProduct_(combined, pa, cfg);
+      }
+      var filtered = needsViewMode
+        ? applyViewModeFilter_(cfg, combined, viewModeOpts)
+        : combined;
       return {
         yearMonth:  g.yearMonth,
         monthLabel: g.monthLabel,
@@ -3704,7 +3723,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @param {number=} windowMonths
    * @return {Object}
    */
-  function getCsatTabDataForUI(config, viewModeOpts, windowMonths) {
+  function getCsatTabDataForUI(config, viewModeOpts, windowMonths, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var horizonMonths = (windowMonths === 6) ? 6 : 3;
     Logger.log('CoreData.getCsatTabDataForUI: appId=' + cfg.appId +
@@ -3735,7 +3754,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       };
     });
 
-    var upcomingBatches = getMdsPglBatchView(cfg, viewModeOpts, horizonMonths);
+    var upcomingBatches = getMdsPglBatchView(cfg, viewModeOpts, horizonMonths, productOpts);
 
     var distinctDepIds = {};
     inFlightRows.forEach(function (row) {
@@ -4165,13 +4184,15 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @return {Object}
    * @private
    */
-  function _computeOverviewSnapshot_(cfg) {
+  function _computeOverviewSnapshot_(cfg, viewModeOpts, productOpts) {
     var tz = Session.getScriptTimeZone();
     var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var pa = (productOpts && productOpts.product) || 'all';
 
     var allRows = readSfdcDeploymentsRaw_(cfg);
     // S1: exclude Student deployments from Overview tab (HENP only).
     allRows = filterDeploymentsByStudent_(allRows, 'exclude', cfg);
+    allRows = filterDeploymentsByProduct_(allRows, pa, cfg);
     var activeRows = allRows.filter(function(r) { return r.overallStatus === 'Active'; });
 
     // TOTALS
@@ -4208,7 +4229,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // and partner overrides — matching exactly what the Go Lives tab's upcoming view shows.
     var upcomingGoLivesPayload = [];
     try {
-      upcomingGoLivesPayload = getUpcomingGoLives(cfg, null) || [];
+      upcomingGoLivesPayload = getUpcomingGoLives(cfg, viewModeOpts, productOpts) || [];
     } catch (err) {
       Logger.log('_computeOverviewSnapshot_: getUpcomingGoLives threw — upcoming card will render empty. Error: ' + err);
     }
@@ -4274,21 +4295,28 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @param {AppConfig} config
    * @return {Object}
    */
-  function getOverviewSnapshot(config) {
+  function getOverviewSnapshot(config, viewModeOpts, productOpts) {
     var cfg      = CoreConfig.withDefaults(config);
+    var pa       = (productOpts && productOpts.product) || 'all';
+    var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
+      (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
     var cacheKey = _perfKey_(cfg, 'overviewData:v2');
 
-    if (_cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
+    if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
 
-    var cached = _perfCacheRead_(cacheKey);
-    if (cached !== null) {
-      _cache.overviewSnapshot = cached;
-      return cached;
+    if (useCache) {
+      var cached = _perfCacheRead_(cacheKey);
+      if (cached !== null) {
+        _cache.overviewSnapshot = cached;
+        return cached;
+      }
     }
 
-    var payload = _computeOverviewSnapshot_(cfg);
-    _cache.overviewSnapshot = payload;
-    _perfCacheWrite_(cacheKey, payload);
+    var payload = _computeOverviewSnapshot_(cfg, viewModeOpts, productOpts);
+    if (useCache) {
+      _cache.overviewSnapshot = payload;
+      _perfCacheWrite_(cacheKey, payload);
+    }
     Logger.log('CoreData.getOverviewSnapshot(' + cfg.appId + '): computed fresh snapshot. totalActive=' +
                (payload.totals && payload.totals.totalActive));
     return payload;
@@ -4407,6 +4435,35 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       return rows.filter(function (r) { return !!studentIds[r.deploymentId]; });
     }
     return rows.filter(function (r) { return !studentIds[r.deploymentId]; });
+  }
+
+  /**
+   * Filters deployment-shaped rows to those whose product-functions include the
+   * selected Product_Area__c. No-op when the feature is disabled or productArea is
+   * falsy/'all' (the gate + safety guarantee, mirroring filterDeploymentsByStudent_).
+   * @param {Array<Object>} rows  rows with a deploymentId field
+   * @param {string} productArea  raw Product_Area__c value, or 'all'/'' for no filter
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   */
+  function filterDeploymentsByProduct_(rows, productArea, cfg) {
+    if (!cfg || !cfg.ui || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true) return rows;
+    if (!productArea || productArea === 'all') return rows;
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+
+    var allowed = {};
+    try {
+      var pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
+      pfRows.forEach(function (pf) {
+        if (String(pf.productArea || '').trim() === productArea && pf.deploymentFk) {
+          allowed[_canonicalId_(pf.deploymentFk)] = true;
+        }
+      });
+    } catch (e) {
+      Logger.log('filterDeploymentsByProduct_: PF read failed: ' + e);
+      return rows;
+    }
+    return rows.filter(function (r) { return allowed[_canonicalId_(r.deploymentId)]; });
   }
 
   /**
@@ -4929,6 +4986,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     // S1: Student data layer
     filterDeploymentsByStudent_: filterDeploymentsByStudent_,
+    filterDeploymentsByProduct_: filterDeploymentsByProduct_,
     buildStudentTabData_:        buildStudentTabData_,
     saveStudentDeploymentFields: saveStudentDeploymentFields,
 

@@ -177,6 +177,7 @@ function _CoreUI_Markup_buildHeader_(ui) {
   lines.push(
     '  <div class="header-right hidden" id="header-right">',
     '    <div id="header-mode-control"></div>',
+    '    <div class="header-product hidden" id="header-product-control"></div>',
     '  </div>',
     '</div>'
   );

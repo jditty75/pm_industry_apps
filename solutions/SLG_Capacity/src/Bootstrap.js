@@ -20,6 +20,7 @@ function bootstrap() {
   getOrCreateSheet_(ALLOC_NORM,   ALLOC_HEADERS);
   getOrCreateSheet_(OPPS_NORM,    OPP_HEADERS);
   getOrCreateSheet_(ASSIGNMENTS,  ASSIGN_HEADERS);
+  getOrCreateSheet_(CAPACITY_ADJUSTMENTS_SHEET, ADJUSTMENT_HEADERS);
   getOrCreateSheet_(SCENARIOS,    SCENARIO_HEADERS);
   getOrCreateSheet_(CFG_ICP,      ICP_HEADERS);
   getOrCreateSheet_(CFG_ROLES,    ROLE_HEADERS);
@@ -37,6 +38,9 @@ function bootstrap() {
   // Doc B: Capacity Adjustments Audit tabs
   getOrCreateSheet_(CAPACITY_ADJUSTMENTS_AUDIT_SHEET,         CAPACITY_ADJUSTMENT_AUDIT_HEADERS);
   getOrCreateSheet_(CAPACITY_ADJUSTMENTS_AUDIT_ARCHIVE_SHEET, CAPACITY_ADJUSTMENT_AUDIT_HEADERS);
+
+  // WFM.25: Opportunity_Assignments Audit tab
+  getOrCreateSheet_(ASSIGNMENTS_AUDIT_SHEET, ASSIGNMENT_AUDIT_HEADERS);
 
   // Seed Config_Overridable_Fields if empty
   if (readTable_(CFG_OVERRIDABLE_FIELDS).length === 0) {
@@ -110,6 +114,28 @@ function bootstrap() {
     Object.keys(newSettingsDefaults).forEach(function (k) {
       if (existingKeys[k]) return;
       appendRow_(CFG_SETTINGS, { key: k, value: newSettingsDefaults[k] }, ['key', 'value']);
+    });
+
+    const wfm25UtilDefaults = {
+      util_band_cold_max: '0.85',
+      util_band_ontarget_max: '1.05',
+      util_band_warm_max: '1.15',
+      util_glyph_fire: 'fire',
+      util_glyph_cold: 'cold',
+      util_glyph_enabled: 'true'
+    };
+    Object.keys(wfm25UtilDefaults).forEach(function (k) {
+      if (existingKeys[k]) return;
+      appendRow_(CFG_SETTINGS, { key: k, value: wfm25UtilDefaults[k] }, ['key', 'value']);
+    });
+
+    const wp20DiscrepancyDefaults = {
+      discrepancy_tolerance_hours: '2',
+      discrepancy_tolerance_pct:   '0.05'
+    };
+    Object.keys(wp20DiscrepancyDefaults).forEach(function (k) {
+      if (existingKeys[k]) return;
+      appendRow_(CFG_SETTINGS, { key: k, value: wp20DiscrepancyDefaults[k] }, ['key', 'value']);
     });
   }
 

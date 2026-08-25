@@ -1,0 +1,190 @@
+<!-- CapacityCanvas.html — WFM.25 aggregate column (direct flex child of .wfm25-capacity-body).
+     Included via <?!= include('CapacityCanvas'); ?> in Index.html.
+     Contains: tab bar, #wfm25CapacityPrimary / #aggregateContent, utilization panels.
+     All behavior is wired in JavaScript.html (initWFM25_). -->
+
+<div id="capacityCanvas" class="wfm25-capacity-canvas wfm25-capacity-primary">
+
+  <!-- ── Tab bar + Group-by toggle (right-aligned) ── -->
+  <div class="wfm25-tab-bar">
+    <div class="wfm25-tabs" role="tablist" aria-label="Capacity views">
+      <button class="wfm25-tab active" data-wfm25-tab="utilization"
+              role="tab" aria-selected="true" id="wfm25TabUtilization">Utilization</button>
+      <button class="wfm25-tab" data-wfm25-tab="hours-budget"
+              role="tab" aria-selected="false" id="wfm25TabHoursCapacity">Hours &amp; Capacity</button>
+      <button class="wfm25-tab" data-wfm25-tab="mix-trend"
+              role="tab" aria-selected="false" id="wfm25TabMixTrend">Mix &amp; Trend</button>
+      <button class="wfm25-tab" data-wfm25-tab="specialty-demand"
+              role="tab" aria-selected="false" id="wfm25TabSpecialtyDemand"
+              aria-controls="wfm25PanelSpecialtyDemand">Specialty Demand</button>
+    </div>
+    <div class="wfm25-tab-bar-controls">
+      <div class="wfm25-groupby wfm25-scope" aria-label="Scope">
+        <span class="wfm25-groupby-label">Scope:</span>
+        <button type="button" class="wfm25-groupby-btn active" data-wfm25-scope="all"
+                aria-pressed="true">All SLG</button>
+        <button type="button" class="wfm25-groupby-btn" data-wfm25-scope="myTeam"
+                aria-pressed="false">My Team</button>
+      </div>
+      <div class="wfm25-groupby" aria-label="Group by">
+        <span class="wfm25-groupby-label">Group by:</span>
+        <button class="wfm25-groupby-btn active" data-wfm25-groupby="team"
+                aria-pressed="true">Team</button>
+        <!-- Role grouping deferred to Stage 6; hidden from Stage 4 VP deck -->
+        <button class="wfm25-groupby-btn wfm25-groupby-deferred" data-wfm25-groupby="role"
+                hidden aria-hidden="true" tabindex="-1">Role</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Aggregate scroll region ── -->
+  <div id="wfm25CapacityPrimary" class="wfm25-capacity-inner">
+    <div id="aggregateContent" class="wfm25-aggregate-content">
+
+      <!-- ─ Utilization panel (active by default) ─ -->
+      <div class="wfm25-tab-panel" id="wfm25PanelUtilization"
+           data-wfm25-panel="utilization">
+        <div class="wfm25-util-loading" id="wfm25UtilLoading" role="status" aria-live="polite">
+          <div class="wfm25-panel-loading wfm25-util-loading-inner">
+            <div class="explorer-loading-spinner" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="wfm25-util-content" id="wfm25UtilContent" hidden>
+          <div class="wfm25-chrome-card wfm25-util-chrome-card">
+          <div class="wfm25-collapse-host" id="wfm25UtilBannerCollapse">
+            <div class="wfm25-collapse-inner">
+              <div class="wfm25-util-banner" id="wfm25UtilAllocationBanner">
+                <div class="wfm25-util-banner-grid" id="wfm25UtilBannerGrid"></div>
+                <p class="wfm25-util-banner-caption muted">Current quarter</p>
+              </div>
+              <div class="wfm25-util-filter-chip-wrap" id="wfm25UtilFilterChipWrap" hidden>
+                <button type="button" class="wfm25-util-filter-chip" id="wfm25UtilFilterChip"
+                        aria-label="Clear allocation filter"></button>
+              </div>
+            </div>
+          </div>
+          <div class="table-wrap wfm25-motion-drill" id="wfm25UtilWrap">
+            <table class="wfm25-util-table wfm25-table" id="wfm25UtilTable">
+              <thead>
+                <tr id="wfm25UtilHeaderRow">
+                  <th class="wfm25-team-col">Team</th>
+                  <!-- quarter header <th> cells injected by renderWFM25UtilTable_() -->
+                </tr>
+              </thead>
+              <tbody id="wfm25UtilBody"></tbody>
+            </table>
+          </div>
+          </div><!-- /.wfm25-util-chrome-card -->
+        </div>
+      </div>
+
+      <!-- ─ Hours & Capacity panel ─ -->
+      <div class="wfm25-tab-panel" id="wfm25PanelHoursBudget"
+           data-wfm25-panel="hours-budget" hidden>
+        <div class="wfm25-chrome-card">
+        <div class="wfm25-hours-capacity-banner" id="wfm25HoursCapacityBanner">
+          <div class="wfm25-hours-capacity-banner-grid" id="wfm25HoursCapacityBannerGrid"></div>
+          <p class="wfm25-hours-capacity-banner-caption muted">Current quarter, whole org</p>
+        </div>
+        <div class="table-wrap wfm25-hours-capacity-wrap" id="wfm25HoursCapacityWrap">
+          <table class="wfm25-hours-capacity-table wfm25-table" id="wfm25HoursCapacityTable"
+                 aria-label="Hours and capacity by team">
+            <thead>
+              <tr id="wfm25HoursCapacityHeaderRow">
+                <th class="wfm25-team-col">Team</th>
+                <!-- quarter header cells injected by renderWFM25HoursCapacityTable_() -->
+              </tr>
+            </thead>
+            <tbody id="wfm25HoursCapacityBody">
+              <tr>
+                <td colspan="5" class="muted" style="padding:14px">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        </div><!-- /.wfm25-chrome-card -->
+      </div>
+
+      <!-- ─ Mix & Trend panel ─ -->
+      <div class="wfm25-tab-panel" id="wfm25PanelMixTrend"
+           data-wfm25-panel="mix-trend" hidden>
+        <div class="wfm25-mix-trend-root" id="wfm25MixTrendRoot">
+          <div class="wfm25-mix-trend-card wfm25-card">
+            <div class="wfm25-mix-trend-banner" id="wfm25MixTrendBanner" hidden>
+              <div class="wfm25-mix-trend-banner-grid" id="wfm25MixTrendBannerGrid"></div>
+              <p class="wfm25-mix-trend-banner-caption muted">Across all historical actual quarters</p>
+            </div>
+            <div class="wfm25-mix-trend-chart-section" id="wfm25MixTrendChartWrap">
+              <div class="wfm25-mix-trend-loading muted" id="wfm25MixTrendLoading">Loading…</div>
+              <div class="wfm25-mix-trend-chart" id="wfm25MixTrendChart" hidden></div>
+            </div>
+            <div class="wfm25-mix-trend-detail" id="wfm25MixTrendDetail" hidden>
+              <div class="wfm25-mix-trend-detail-panels">
+                <div class="wfm25-mix-trend-detail-left" id="wfm25MixTrendDetailLeft"></div>
+                <div class="wfm25-mix-trend-detail-right" id="wfm25MixTrendDetailRight" hidden></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─ Specialty Demand panel ─ -->
+      <div class="wfm25-tab-panel" id="wfm25PanelSpecialtyDemand"
+           data-wfm25-panel="specialty-demand" hidden>
+        <div class="wfm25-specialty-demand-root">
+          <div class="wfm25-specialty-demand-loading" id="wfm25SpecialtyDemandLoading"
+               role="status" aria-live="polite" hidden>
+            <div class="wfm25-panel-loading">
+              <div class="explorer-loading-spinner" aria-hidden="true"></div>
+            </div>
+          </div>
+
+          <div class="wfm25-specialty-demand-empty muted" id="wfm25SpecialtyDemandEmpty" hidden>
+            No specialty demand data available yet.
+          </div>
+
+          <div class="wfm25-specialty-demand-layout" id="wfm25SpecialtyDemandLayout" hidden>
+            <!-- Card A: metrics banner -->
+            <div class="wfm25-chrome-card wfm25-specialty-demand-banner-card"
+                 id="wfm25SpecialtyDemandBannerCard">
+              <div class="wfm25-specialty-demand-banner" id="wfm25SpecialtyDemandBanner"
+                   aria-label="Specialty demand summary metrics"></div>
+            </div>
+
+            <!-- Card B: 3-column matrix (Historical Avg | Previous | Current) -->
+            <div class="wfm25-chrome-card wfm25-specialty-demand-matrix-card">
+              <div class="wfm25-specialty-demand-matrix-head">
+                <h3 class="wfm25-specialty-demand-matrix-title">Demand by Practice</h3>
+                <div class="wfm25-specialty-demand-unit-toggle seg seg-sm" role="group"
+                     aria-label="Display unit" id="wfm25SpecialtyDemandUnitToggle">
+                  <button type="button" data-wfm25-sd-unit="hours"
+                          aria-pressed="true">Hours</button>
+                  <button type="button" data-wfm25-sd-unit="share"
+                          aria-pressed="false">Share %</button>
+                  <button type="button" data-wfm25-sd-unit="qoq"
+                          aria-pressed="false">QoQ %</button>
+                </div>
+              </div>
+              <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyDemandWrap">
+                <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyDemandTable"
+                       aria-label="Team-grouped specialty demand matrix">
+                  <thead id="wfm25SpecialtyDemandThead">
+                    <tr id="wfm25SpecialtyDemandHeaderRow">
+                      <th class="wfm25-specialty-demand-col-label" scope="col">Practice / Team</th>
+                      <!-- column header cells injected by renderWFM25SpecialtyDemand_() -->
+                    </tr>
+                  </thead>
+                  <tbody id="wfm25SpecialtyDemandBody"></tbody>
+                </table>
+              </div>
+              <p class="wfm25-specialty-demand-matrix-caption muted" id="wfm25SpecialtyDemandCaption"
+                 hidden>Current quarter fills in as it progresses</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /#aggregateContent -->
+  </div><!-- /#wfm25CapacityPrimary -->
+
+</div><!-- /#capacityCanvas -->

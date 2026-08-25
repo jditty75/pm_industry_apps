@@ -128,6 +128,28 @@ function weekKey_(d) {
 }
 
 /**
+ * Parse a canonical week_key ('YYYY-MM-DD') back to week_start Date.
+ * @param {string} wk
+ * @return {Date|null}
+ */
+function _weekStartFromWeekKey_(wk) {
+  var parts = String(wk || '').trim().split('-');
+  if (parts.length !== 3) return null;
+  var ws = weekStart_(new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+  return (ws instanceof Date && !isNaN(ws.getTime())) ? ws : null;
+}
+
+/**
+ * Work-day fiscal quarter key from canonical week_key ('YYYY-MM-DD' Saturday anchor).
+ * @param {string} wk
+ * @return {string}
+ */
+function fiscalQuarterKeyFromWeekKey_(wk) {
+  var ws = _weekStartFromWeekKey_(wk);
+  return ws ? fiscalQuarterKeyFromWeekStart_(ws) : '';
+}
+
+/**
  * Enumerate 7-day-step week starts from weekStart_(start) through
  * weekStart_(end) inclusive, anchored on start's own day-of-week (NOT
  * snapped to Monday -- matches weekStart_'s as-is semantics).
@@ -191,6 +213,31 @@ function fiscalQuarterKey_(d) {
   const fy = fiscalYear_(d);
   const q = fiscalQuarter_(d);
   return 'FY' + String(fy % 100).padStart(2, '0') + '-' + q;
+}
+
+/**
+ * Friday anchor for work-day fiscal quarter assignment from a Saturday week_start.
+ * Matches transform fiscal_quarter_from_weekend (week-ending Saturday minus 1 day).
+ * Mon–Fri of the week belong to the quarter of this Friday, not the Saturday.
+ * @param {Date|string|number} weekStart Saturday anchor (week-ending date)
+ * @return {Date|null}
+ */
+function fiscalQuarterWorkdayAnchor_(weekStart) {
+  var ws = weekStart_(weekStart);
+  if (!(ws instanceof Date) || isNaN(ws.getTime())) return null;
+  return new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() - 1);
+}
+
+/**
+ * Work-day fiscal quarter key for a week anchored on Saturday week_start.
+ * Do NOT use fiscalQuarterKey_(week_start) directly — that keys off the Saturday
+ * calendar month and mis-assigns seam weeks (e.g. 08/01 → FY27-Q2 via 07/31 Friday).
+ * @param {Date|string|number} weekStart Saturday anchor
+ * @return {string}
+ */
+function fiscalQuarterKeyFromWeekStart_(weekStart) {
+  var anchor = fiscalQuarterWorkdayAnchor_(weekStart);
+  return anchor ? fiscalQuarterKey_(anchor) : '';
 }
 
 /**
@@ -510,7 +557,8 @@ function invalidateAllCaches_() {
     'Config_Resource_Type', 'Config_ResourceType_Map',
     'Config_Ingest_Filters',
     CAPACITY_ADJUSTMENTS_AUDIT_SHEET,       // Doc B: adjustment audit log
-    CAPACITY_ADJUSTMENTS_AUDIT_ARCHIVE_SHEET
+    CAPACITY_ADJUSTMENTS_AUDIT_ARCHIVE_SHEET,
+    ASSIGNMENTS_AUDIT_SHEET                 // WFM.25: assignment audit log
   ];
   keys.forEach(function (k) { invalidateCache_(k); });
 
@@ -790,6 +838,186 @@ function resolveOwnersForRow_(row, rtRichMap, practiceMgrMap) {
   // branch before this fallback.
   var fallback = String((row && row.manager_org) || '');
   return fallback ? [fallback] : [];
+}
+
+// ============================================================
+// Feature F: Custom weekly distribution (week_key-keyed JSON)
+// ============================================================
+
+/**
+ * Parse custom_weekly_json (string or object) to a plain week_key map.
+ * @param {*} raw
+ * @return {Object|null}
+ */
+function parseCustomWeeklyJson_(raw) {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  try {
+    var parsed = JSON.parse(String(raw));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch (e) { /* fall through */ }
+  return null;
+}
+
+/**
+ * Canonical Saturday week_key floor for editable custom weeks (today).
+ * @return {string}
+ */
+function _currentEditableWeekKey_() {
+  return weekKey_(new Date());
+}
+
+/**
+ * Editable week_key set: visible fiscal window (current + next quarter)
+ * intersect weeks on/after the current week.
+ * @param {{weeks:Array}} [calendar]
+ * @return {Object<string, boolean>}
+ */
+function _customWeeklyEditableWeekKeySet_(calendar) {
+  calendar = calendar || readCalendar_();
+  var visible = (typeof _deriveVisibleWeeksFiscal_ === 'function')
+    ? _deriveVisibleWeeksFiscal_(calendar.weeks || [])
+    : (calendar.weeks || []);
+  var floor = _currentEditableWeekKey_();
+  var set = {};
+  visible.forEach(function (w) {
+    var wk = String(w.week_key || weekKey_(w.week_start));
+    if (wk >= floor) set[wk] = true;
+  });
+  return set;
+}
+
+/**
+ * Expand filtered calendar weeks using week_key-keyed custom JSON.
+ * Weeks absent from JSON resolve to 0; non-zero JSON keys outside the
+ * expansion window are logged and ignored (WFM.12 grain-mismatch guard).
+ * @param {Array} weeks filtered Config_Calendar weeks
+ * @param {Object} customJson parsed week_key -> hours map
+ * @param {string} valueField 'hours' | 'hours_reduction'
+ * @param {string} logPrefix
+ * @return {Array}
+ */
+function expandWeeksFromCustomJson_(weeks, customJson, valueField, logPrefix) {
+  var weekKeySet = {};
+  (weeks || []).forEach(function (w) { weekKeySet[w.week_key] = true; });
+  Object.keys(customJson || {}).forEach(function (k) {
+    if (!weekKeySet[k] && Math.abs(Number(customJson[k]) || 0) > 0.0001) {
+      Logger.log((logPrefix || 'expandWeeksFromCustomJson_') +
+        ': client/grain-mismatch — custom_weekly_json key "' + k +
+        '" not in expansion window; ignoring (WFM.12 guard).');
+    }
+  });
+  return (weeks || []).map(function (w) {
+    var row = {
+      week_start: w.week_start,
+      week_key: w.week_key
+    };
+    row[valueField] = Number(customJson[w.week_key]) || 0;
+    return row;
+  });
+}
+
+/**
+ * Gate custom weekly distribution payloads before save/preview/projection.
+ * distribution === 'Custom' iff custom_weekly_json is non-empty.
+ * @param {Object} opts
+ * @param {string} opts.distribution
+ * @param {*} opts.custom_weekly_json
+ * @param {number} [opts.expectedTotal] positive assignment total or adjustment magnitude
+ * @param {number} [opts.signedTotal] signed adjustment total (positive=reduce, negative=add)
+ * @param {boolean} [opts.isAdjustment]
+ * @param {string} [opts.direction] 'add' | 'reduce'
+ * @param {string} [opts.label]
+ */
+function validateCustomWeeklyDistribution_(opts) {
+  opts = opts || {};
+  var label = String(opts.label || 'Record');
+  var dist = String(opts.distribution || 'Even');
+  var parsed = parseCustomWeeklyJson_(opts.custom_weekly_json);
+  var hasJson = parsed && Object.keys(parsed).length > 0;
+
+  if (dist === 'Custom' && !hasJson) {
+    throw new Error(label + ': distribution is Custom but custom_weekly_json is empty.');
+  }
+  if (dist !== 'Custom' && hasJson) {
+    throw new Error(label + ': custom_weekly_json requires distribution Custom.');
+  }
+  if (dist !== 'Custom') return;
+
+  var calendar = readCalendar_();
+  var byWeekKey = calendar.byWeekKey || {};
+  var editable = _customWeeklyEditableWeekKeySet_(calendar);
+  var floor = _currentEditableWeekKey_();
+  var curQ = fiscalQuarterKey_(new Date());
+  var dateKeyRe = /^\d{4}-\d{2}-\d{2}$/;
+  var sum = 0;
+  Object.keys(parsed).forEach(function (k) { sum += Number(parsed[k]) || 0; });
+
+  if (opts.isAdjustment) {
+    var signedExpected = (opts.signedTotal !== undefined && opts.signedTotal !== null)
+      ? Number(opts.signedTotal)
+      : ((opts.direction === 'add')
+        ? -Math.abs(Number(opts.expectedTotal) || 0)
+        : Math.abs(Number(opts.expectedTotal) || 0));
+    if (Math.abs(sum - signedExpected) > 0.1) {
+      throw new Error(label + ': custom weekly hours sum (' +
+        (Math.round(sum * 10) / 10) + 'h) must equal total (' +
+        (Math.round(signedExpected * 10) / 10) + 'h).');
+    }
+  } else if (Math.abs(sum - (Number(opts.expectedTotal) || 0)) > 0.1) {
+    throw new Error(label + ': custom weekly hours sum (' +
+      (Math.round(sum * 10) / 10) + 'h) must equal estimated hours (' +
+      (Math.round((Number(opts.expectedTotal) || 0) * 10) / 10) + 'h).');
+  }
+
+  Object.keys(parsed).forEach(function (key) {
+    var hrs = Number(parsed[key]) || 0;
+    if (!hrs) return;
+
+    if (!dateKeyRe.test(key)) {
+      throw new Error(label + ': custom_weekly_json key "' + key +
+        '" is not a week_key (YYYY-MM-DD). Month-keyed keys are rejected.');
+    }
+
+    var ws = _weekStartFromWeekKey_(key);
+    if (!ws || ws.getDay() !== 6) {
+      throw new Error(label + ': custom_weekly_json key "' + key +
+        '" is not a Saturday week_key in Config_Calendar.');
+    }
+
+    if (!byWeekKey[key]) {
+      throw new Error(label + ': custom_weekly_json key "' + key +
+        '" is not in Config_Calendar.');
+    }
+
+    if (!editable[key]) {
+      if (key < floor) {
+        throw new Error(label + ': custom_weekly_json has hours on locked week ' + key + '.');
+      }
+      throw new Error(label + ': custom_weekly_json key "' + key + '" is outside the editable window.');
+    }
+
+    if (opts.isAdjustment && opts.direction === 'reduce' && fiscalQuarterKey_(ws) === curQ) {
+      throw new Error(label + ': reductions cannot be placed on current-quarter weeks (' + key + ').');
+    }
+  });
+}
+
+/**
+ * Normalize custom_weekly_json for sheet persistence.
+ * @param {Object} row
+ * @param {string} distribution
+ */
+function _normalizeCustomWeeklyJsonField_(row, distribution) {
+  if (String(distribution || 'Even') !== 'Custom') {
+    row.custom_weekly_json = '';
+    return;
+  }
+  if (row.custom_weekly_json && typeof row.custom_weekly_json === 'object') {
+    row.custom_weekly_json = JSON.stringify(row.custom_weekly_json);
+  } else {
+    row.custom_weekly_json = String(row.custom_weekly_json || '');
+  }
 }
 
 // ============================================================

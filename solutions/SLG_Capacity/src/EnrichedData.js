@@ -353,25 +353,111 @@ function getResourceIndex_() {
 }
 
 /**
- * Actuals keyed for blend: { employee_id: { week_key: actual_icp_hours } }.
- * Cached on the config-version stamp like the other enriched getters.
+ * Aggregate Actuals_Normalized rows (worker×week×project grain) to worker×week
+ * totals. Sums actual_icp_hours — never overwrites when multiple project rows
+ * share the same worker and week. week_key is canonicalized from week_start.
+ * @param {Array<Object>} rows
+ * @return {{byEmployeeId: Object<string, Object<string, number>>,
+ *           byResourceName: Object<string, Object<string, number>>}}
+ * @private
  */
-function getActualsByWorkerWeek_() {
+function _aggregateActualIcHoursByWorkerWeek_(rows) {
+  var byEmployeeId = {};
+  var byResourceName = {};
+  (rows || []).forEach(function (r) {
+    var wk = '';
+    if (r.week_start) {
+      try { wk = weekKey_(r.week_start); } catch (e) { wk = ''; }
+    }
+    if (!wk && r.week_key) wk = String(r.week_key).trim();
+    if (!wk) return;
+    var hrs = Number(r.actual_icp_hours) || 0;
+    var eid = String(r.employee_id || '').trim();
+    var name = String(r.resource_name || '').trim();
+    if (eid) {
+      if (!byEmployeeId[eid]) byEmployeeId[eid] = {};
+      byEmployeeId[eid][wk] = (byEmployeeId[eid][wk] || 0) + hrs;
+    }
+    if (name) {
+      if (!byResourceName[name]) byResourceName[name] = {};
+      byResourceName[name][wk] = (byResourceName[name][wk] || 0) + hrs;
+    }
+  });
+  return { byEmployeeId: byEmployeeId, byResourceName: byResourceName };
+}
+
+/**
+ * Resolve per-week actual ICP hours for a forecast worker row.
+ * Prefers employee_id join; falls back to resource_name.
+ * @param {{employeeId?:string, resource?:string}} worker
+ * @param {Object<string, Object<string, number>>} byEmployeeId
+ * @param {Object<string, Object<string, number>>} byResourceName
+ * @return {Object<string, number>}
+ */
+function _workerWeeklyActualsMap_(worker, byEmployeeId, byResourceName) {
+  byEmployeeId = byEmployeeId || {};
+  byResourceName = byResourceName || {};
+  var eid = String((worker && worker.employeeId) || '').trim();
+  var name = String((worker && worker.resource) || '').trim();
+  if (eid && byEmployeeId[eid]) return byEmployeeId[eid];
+  if (name && byResourceName[name]) return byResourceName[name];
+  return {};
+}
+
+/**
+ * Cached Actuals_Normalized aggregates for blend-at-read (multi-row-per-week safe).
+ * @return {{byEmployeeId: Object<string, Object<string, number>>,
+ *           byResourceName: Object<string, Object<string, number>>}}
+ */
+function getActualsAggregated_() {
   var version = _getEnrichedCacheVersion_();
-  var cacheKey = 'enriched:actuals:v1:' + version;
+  var cacheKey = 'enriched:actuals:v2:' + version;
   var cached = _enrichedCacheRead_(cacheKey);
   if (cached) return cached;
   var rows = cachedRead_(ACTUALS_NORM);
-  var map = {};
-  rows.forEach(function (r) {
-    var eid = String(r.employee_id || '').trim();
-    var wk = r.week_key ? String(r.week_key) : (r.week_start ? weekKey_(r.week_start) : '');
-    if (!eid || !wk) return;
-    if (!map[eid]) map[eid] = {};
-    map[eid][wk] = (map[eid][wk] || 0) + (Number(r.actual_icp_hours) || 0);
+  var agg = _aggregateActualIcHoursByWorkerWeek_(rows);
+  _enrichedCacheWrite_(cacheKey, agg);
+  return agg;
+}
+
+/**
+ * Actuals keyed for blend: { employee_id: { week_key: actual_icp_hours } }.
+ * Sums all project rows per worker×week. Cached on the config-version stamp.
+ * @return {Object<string, Object<string, number>>}
+ */
+function getActualsByWorkerWeek_() {
+  return getActualsAggregated_().byEmployeeId;
+}
+
+/**
+ * Distinct canonical week_keys from Actuals_Normalized aggregate for one fiscal quarter.
+ * Uses getActualsAggregated_() — does not re-read or re-group raw sheet rows.
+ * Quarter assignment uses fiscalQuarterKeyFromWeekStart_ (Saturday week_start − 1 day).
+ * @param {string} quarterKey e.g. 'FY27-Q3'
+ * @return {string[]} sorted ascending (ISO week_key order)
+ */
+function getActualWeekKeysForQuarter_(quarterKey) {
+  quarterKey = String(quarterKey || '').trim();
+  if (!quarterKey) return [];
+  var agg = getActualsAggregated_();
+  var keySet = {};
+  [agg.byEmployeeId, agg.byResourceName].forEach(function (byWorker) {
+    if (!byWorker) return;
+    Object.keys(byWorker).forEach(function (workerKey) {
+      Object.keys(byWorker[workerKey] || {}).forEach(function (wk) {
+        keySet[String(wk)] = true;
+      });
+    });
   });
-  _enrichedCacheWrite_(cacheKey, map);
-  return map;
+  var out = [];
+  Object.keys(keySet).forEach(function (wk) {
+    var ws = _weekStartFromWeekKey_(wk);
+    if (!ws) return;
+    if (fiscalQuarterKeyFromWeekStart_(ws) !== quarterKey) return;
+    out.push(wk);
+  });
+  out.sort();
+  return out;
 }
 
 /**

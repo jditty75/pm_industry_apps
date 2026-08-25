@@ -1,0 +1,29 @@
+<!-- WorkerPanel.html — WFM.25 Stage 2 right-side worker detail panel.
+     Direct flex sibling of #capacityCanvas in Index.html. Wired in JavaScript.html. -->
+
+<aside class="wfm25-worker-panel" id="wfm25WorkerPanel" hidden aria-label="Worker detail">
+  <header class="wfm25-worker-panel-header">
+    <button type="button" class="btn-ghost wfm25-worker-panel-close" id="wfm25WorkerPanelClose"
+            aria-label="Close worker panel">← Back</button>
+    <div class="wfm25-worker-panel-identity">
+      <div class="wfm25-worker-panel-name-row">
+        <h2 class="wfm25-worker-panel-name" id="wfm25WorkerPanelName">—</h2>
+        <span class="wfm25-discrepancy-chip" id="wfm25DiscrepancyChip" hidden></span>
+      </div>
+      <div class="wfm25-worker-panel-meta muted" id="wfm25WorkerPanelMeta"></div>
+    </div>
+    <button type="button" class="btn-primary wfm25-adjust-hours-btn" id="wfm25AdjustHoursBtn"
+            hidden
+            title="Add or reduce forecast hours. Reductions apply to forward quarters only; current-quarter actuals cannot be reduced.">Adjust hours</button>
+  </header>
+
+  <div class="wfm25-worker-quarter-strip" id="wfm25WorkerQuarterStrip" hidden></div>
+
+  <div class="wfm25-worker-panel-body" id="wfm25WorkerPanelBody">
+    <div class="muted" style="padding:16px">Select a worker to view detail.</div>
+  </div>
+
+  <footer class="wfm25-worker-panel-footer" id="wfm25WorkerPanelFooter" hidden>
+    <span class="wfm25-pending-indicator muted" id="wfm25PendingIndicator">0 pending</span>
+  </footer>
+</aside>

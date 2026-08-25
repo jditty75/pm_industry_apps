@@ -1,0 +1,114 @@
+<!-- AdminCanvas.html — WFM.25 Admin surface (data sources, upload, overrides).
+     Included via <?!= include('AdminCanvas'); ?> in Index.html.
+     Consolidated upload behavior is wired in JavaScript.html (existing WFM.21 handlers). -->
+
+<div id="adminCanvas" class="wfm25-admin-canvas" hidden>
+
+  <div class="wfm25-admin-header">
+    <button type="button" class="btn-ghost wfm25-back-btn" id="wfm25BackToCapacityBtn">
+      ← Back to Capacity
+    </button>
+    <h1 class="wfm25-admin-title">Admin</h1>
+  </div>
+
+  <!-- Data Sources (freshness detail behind header badge) -->
+  <div id="wfm25AdminDataSourcesSection" class="card wfm25-admin-card wfm25-chrome-card wfm25-admin-data-sources-card">
+    <div class="card-header">
+      <div class="card-title">Data Sources</div>
+    </div>
+    <div id="wfm25AdminDataSourcesBody" class="wfm25-admin-data-sources-body muted">
+      Loading data freshness…
+    </div>
+  </div>
+
+  <div class="card wfm25-admin-card wfm25-chrome-card">
+    <div class="card-header">
+      <div class="card-title">Upload Consolidated WoW Workbook</div>
+    </div>
+    <div class="upload-zone" id="consolidatedUploadZone">
+      <input type="file" id="consolidatedFile" accept=".xlsx" hidden>
+      <div class="upload-hint">
+        <div class="upload-title">Drop .xlsx here or click to browse</div>
+        <div class="muted">Single workbook ingest for forecast, actuals, utilization, and history.</div>
+        <div class="consolidated-sheet-list muted">
+          Required tabs:
+          <code>Forecast_Staged</code>,
+          <code>Actuals_Current_Normalized</code>,
+          <code>Utilization_Normalized</code>,
+          <code>History_Normalized</code>,
+          <code>_manifest</code>
+        </div>
+      </div>
+      <button type="button" class="btn-primary" id="consolidatedBrowseBtn">Choose file</button>
+    </div>
+    <div id="consolidatedUploadStatus" class="status" hidden></div>
+    <div id="consolidatedUploadResult" class="consolidated-upload-result" hidden></div>
+  </div>
+
+  <div class="wfm25-admin-refresh-log" id="wfm25AdminRefreshLogWrap">
+    <button type="button" class="wfm25-admin-refresh-log-toggle btn-ghost"
+            id="wfm25AdminRefreshLogToggle" aria-expanded="false">
+      Recent uploads <span class="wfm25-admin-refresh-chev" aria-hidden="true">▾</span>
+    </button>
+    <ul id="wfm25AdminRefreshLogBody" class="wfm25-admin-refresh-log-list" hidden></ul>
+  </div>
+
+  <!-- Overrides — Deployments & Pipeline (view + delete + CSV) -->
+  <div class="card wfm25-admin-card wfm25-chrome-card wfm25-admin-overrides-card">
+    <div class="card-header">
+      <div class="card-title">Overrides — Deployments &amp; Pipeline</div>
+    </div>
+    <div class="wfm25-admin-ov-hygiene" id="wfm25AdminOvHygiene" aria-live="polite">
+      <span id="wfm25AdminOvHygieneText" class="muted">Loading overrides…</span>
+      <button type="button" class="wfm25-admin-ov-review-btn btn-ghost" id="wfm25AdminOvReviewBtn" hidden>
+        Review stale
+      </button>
+    </div>
+    <div class="wfm25-admin-ov-actions">
+      <button type="button" class="btn-ghost" id="wfm25AdminOvExportBtn">Export CSV</button>
+      <button type="button" class="btn-ghost" id="wfm25AdminOvImportBtn">Import CSV</button>
+      <input type="file" id="wfm25AdminOvImportFile" accept=".csv,text/csv" hidden>
+    </div>
+    <div class="wfm25-admin-ov-table-wrap">
+      <table class="wfm25-admin-ov-table" aria-label="Active overrides for Deployments and Pipeline">
+        <thead>
+          <tr>
+            <th>source</th>
+            <th>record_id</th>
+            <th>field</th>
+            <th>override_value</th>
+            <th>expires_at</th>
+            <th><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody id="wfm25AdminOvTableBody">
+          <tr><td colspan="6" class="muted wfm25-admin-ov-empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- On Leave — roster + editable return dates -->
+  <div class="card wfm25-admin-card wfm25-chrome-card wfm25-admin-onleave-card">
+    <div class="card-header">
+      <div class="card-title" id="wfm25AdminOnLeaveTitle">On Leave</div>
+    </div>
+    <div class="wfm25-admin-onleave-table-wrap">
+      <table class="wfm25-admin-onleave-table" aria-label="Workers on leave">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Team</th>
+            <th>Manager</th>
+            <th>Source</th>
+            <th>Return Date</th>
+          </tr>
+        </thead>
+        <tbody id="wfm25AdminOnLeaveTableBody">
+          <tr><td colspan="5" class="muted wfm25-admin-onleave-empty">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /#adminCanvas -->

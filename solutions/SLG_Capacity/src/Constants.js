@@ -30,15 +30,86 @@ const CFG_SETTINGS = 'Config_Settings';         // key/value settings
 //   fiscal_year_start_month -- 1-indexed calendar month the fiscal year
 //                               starts in (2 = February; keep in sync with
 //                               FISCAL_YEAR_START_MONTH above)
+//   alloc_over_ratio        -- ratio-to-target at/above which a worker is
+//                               over-allocated in the Utilization banner
+//                               (default 1.10)
+//   alloc_under_ratio       -- ratio-to-target below which a worker is
+//                               under-allocated in the Utilization banner
+//                               (default 0.85)
+//   util_band_cold_max         -- WFM.25 unified util color scale (default 0.85)
+//   util_band_ontarget_max     -- (default 1.05)
+//   util_band_warm_max         -- (default 1.15)
+//   util_glyph_fire            -- exception glyph key when util > warm_max (default fire)
+//   util_glyph_cold            -- exception glyph key when util < cold_max (default cold)
+//   util_glyph_enabled         -- master on/off for exception glyphs (default true)
+//   util_color_cold_bg         -- WFM.25 unified util band palette (hex)
+//   util_color_cold_fg         -- (default #0a3d7c / #ffffff)
+//   util_color_ontarget_bg     -- (default #c8e6c9 / #1b5e20)
+//   util_color_ontarget_fg
+//   util_color_warm_bg         -- (default #E76F1C / #ffffff)
+//   util_color_warm_fg
+//   util_color_hot_bg          -- fire band palette (default #D6371E / #ffffff)
+//   util_color_hot_fg
+//   discrepancy_tolerance_hours -- WP2.0 feature E: hours tolerance for
+//                                  current-quarter weekly vs reconciled actual (default 2)
+//   discrepancy_tolerance_pct   -- WP2.0 feature E: pct tolerance (default 0.05)
 // Existing keys (planning_window_months, etc.) are unchanged.
+
+/** Config_Settings keys + fallbacks for WFM.25 unified utilization color bands. */
+const UTIL_BAND_SETTING_KEYS = {
+  coldMax: 'util_band_cold_max',
+  ontargetMax: 'util_band_ontarget_max',
+  warmMax: 'util_band_warm_max'
+};
+const UTIL_BAND_DEFAULTS = {
+  coldMax: 0.85,
+  ontargetMax: 1.05,
+  warmMax: 1.15
+};
+
+/** Config_Settings keys + hex fallbacks for WFM.25 unified utilization band colors. */
+const UTIL_COLOR_SETTING_KEYS = {
+  coldBg: 'util_color_cold_bg',
+  coldFg: 'util_color_cold_fg',
+  ontargetBg: 'util_color_ontarget_bg',
+  ontargetFg: 'util_color_ontarget_fg',
+  warmBg: 'util_color_warm_bg',
+  warmFg: 'util_color_warm_fg',
+  hotBg: 'util_color_hot_bg',
+  hotFg: 'util_color_hot_fg'
+};
+const UTIL_COLOR_DEFAULTS = {
+  coldBg: '#0a3d7c',
+  coldFg: '#ffffff',
+  ontargetBg: '#c8e6c9',
+  ontargetFg: '#1b5e20',
+  warmBg: '#E76F1C',
+  warmFg: '#ffffff',
+  hotBg: '#D6371E',
+  hotFg: '#ffffff'
+};
+
+/** Config_Settings keys + fallbacks for WFM.25 exception glyphs (read-only). */
+const UTIL_GLYPH_SETTING_KEYS = {
+  fire: 'util_glyph_fire',
+  cold: 'util_glyph_cold',
+  enabled: 'util_glyph_enabled'
+};
+const UTIL_GLYPH_DEFAULTS = {
+  fire: 'fire',
+  cold: 'cold',
+  enabled: 'true'
+};
 const CFG_GENERIC = 'Generic_Resources';        // generic (dummy) resources
 const CFG_PRACTICE_MGRS = 'Config_Practice_Managers'; // practice -> manager ownership
 const CFG_WORKER_ROLE_OVERRIDES = 'Config_Worker_Role_Overrides'; // per-worker ICP role override (applied at ingest time)
 const CFG_WORKER_EXCLUSIONS = 'Config_Worker_Exclusions'; // SLG worker/manager exclusion list -- WFM-FIX.3: code-maintained
 // source: 'manual' | 'rule:manager' | 'rule:on_leave'  (comma-join if multiple, e.g. 'rule:manager,rule:on_leave')
 // override: '' | 'include' | 'exclude'   (human-owned; always wins over rules and active)
+// return_date / modified_by / modified_at — WFM.25 app-owned return-date field (human-owned; preserved on re-ingest)
 const WORKER_EXCLUSION_HEADERS = [
-  'worker_name', 'manager_org', 'reason', 'active', 'source', 'override'
+  'worker_name', 'manager_org', 'reason', 'active', 'source', 'override',
+  'return_date', 'modified_by', 'modified_at'
 ];
 const CFG_HOLIDAYS = 'Config_Holidays'; // WFM.15: company holiday calendar; reduces ICP available hours
 
@@ -77,9 +148,11 @@ const ALLOC_HEADERS = [
   'week_key',               // string -- 'YYYY-MM-DD' of week_start; canonical, sortable
   'hours',                  // number -- forecast hours for that week
   'source_row',
-  'on_leave'                // WFM-FIX.3: 'Yes' | '' -- PSA "(On Leave)" name-tag stamp,
+  'on_leave',               // WFM-FIX.3: 'Yes' | '' -- PSA "(On Leave)" name-tag stamp,
                              // written for every row regardless of exclusion. See
                              // _deriveOnLeave_ (Ingest.gs) and reconcileWorkerExclusions_.
+  'specialty_practice'      // WFM.25 Pass 3A: raw PSA Specialty Practice (verbatim passthrough;
+                             // separate from resolved `team` column)
 ];
 
 const ACTUALS_NORM = 'Actuals_Normalized';
@@ -88,7 +161,9 @@ const ACTUALS_HEADERS = [
   'resource_name', // Worker (display/fallback only)
   'week_start',    // Date, Saturday anchor (matches Allocations_Normalized)
   'week_key',      // canonical 'YYYY-MM-DD' string of week_start (weekKey_)
-  'actual_icp_hours', // number — the actual ICP hours for that worker×week
+  'project',       // WP2.0: project dimension from Actuals_Current_Normalized
+  'project_role_category', // WP2.0: role category from Actuals_Current_Normalized
+  'actual_icp_hours', // number — the actual ICP hours for that worker×week×project
   'source_row'     // number — source row index (diagnostics)
 ];
 
@@ -105,9 +180,28 @@ const ACTUALS_SUMMARY_HEADERS = [
 const CFG_UTIL_QUARTERLY = 'Utilization_Quarterly';
 const UTIL_QUARTERLY_HEADERS = ['employee_id','resource_name','fiscal_quarter',
     'target_hours','util_rate_wkly','qtd_actual_icp','qtd_icp_plus_forecast','source_sheet'];
+const XORG_FORECAST_AGGREGATE = 'Xorg_Forecast_Aggregate';
+const XORG_FORECAST_AGGREGATE_HEADERS = [
+  'worker_group',
+  'region',
+  'fiscal_quarter',
+  'forecast_hours'
+];
+
 const ACTUALS_HISTORY = 'Actuals_History';
-const ACTUALS_HISTORY_HEADERS = ['employee_id','resource_name','worker_class',
-    'fiscal_quarter','project','project_role_category','worked_hours'];
+const ACTUALS_HISTORY_HEADERS = [
+  'employee_id',
+  'resource_name',
+  'worker_class',
+  'workday_region_as_of_date_worked',
+  'fiscal_quarter',
+  'project',
+  'project_role_category',
+  'icp_hours',
+  'non_icp_hours',
+  'specialty_practice',       // WFM.25 Pass 3A: from History_Normalized
+  'sub_specialty_practice'    // WFM.25 Pass 3A: from History_Normalized
+];
 const CONSOLIDATED_REQUIRED_SHEETS = ['Forecast_Staged','Actuals_Current_Normalized',
     'Utilization_Normalized','History_Normalized','_manifest'];
 const UNSTAFFED_DEMAND_SHEET = 'Unstaffed_Demand';
@@ -141,7 +235,9 @@ const ASSIGN_HEADERS = [
   'start_date','end_date','estimated_hours','distribution',
   'custom_monthly_json','status','scenario_id','notes',
   'created_by','created_at','modified_by','modified_at',
-  'resource_type','team_label'
+  'resource_type','team_label',
+  'project_id_type','project_id','project_label',
+  'custom_weekly_json'   // Feature F: LIVE week_key-keyed {"YYYY-MM-DD": hours}
 ];
 
 const SCENARIO_HEADERS = [
@@ -294,13 +390,12 @@ const DEFAULT_ALIASES = [
 ];
 
 const ALLOC_TYPES   = ['Billable','Internal','Education','PTO_Holiday','Unassigned'];
-// Allowed distribution modes. 'Custom' removed in WFM.12 (weekly-forecast-
-// migration): client collected month-keyed custom_monthly_json while the
-// weekly expansion functions look up week_key, silently zeroing every week.
-// Returns later as its own week-grid feature. custom_monthly_json /
-// custom_weekly_json columns remain in the schema, dormant and unwritten,
-// for that future feature to reuse.
-const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded'];
+// Allowed distribution modes. Feature F restores 'Custom' as week_key-keyed
+// custom_weekly_json ({"YYYY-MM-DD": hours} where every key is a Saturday
+// week_key matching Config_Calendar). custom_monthly_json stays dormant/
+// deprecated (month-keyed; caused WFM.12 silent zeroing when paired with
+// week_key expansion).
+const DISTRIBUTIONS = ['Even','Front-loaded','Back-loaded','Custom'];
 const ASSIGN_STATUSES = ['Modeled','Committed','Archived'];
 
 // --- Drop 6: Capacity Adjustments schema ---
@@ -323,7 +418,8 @@ const ADJUSTMENT_HEADERS = [
   'created_by',
   'created_at',
   'modified_by',
-  'modified_at'
+  'modified_at',
+  'custom_weekly_json'        // Feature F: LIVE week_key-keyed signed hours
 ];
 
 // --- Doc B: Capacity Adjustments Audit schema ---
@@ -335,10 +431,27 @@ const CAPACITY_ADJUSTMENT_AUDIT_HEADERS = [
   'audit_id',
   'timestamp',
   'actor',
-  'action',              // 'create' | 'update' | 'commit' | 'archive' | 'delete'
+  'action',              // 'create' | 'update' | 'commit' | 'archive' | 'void' | 'delete'
   'adjustment_id',
   'resource_name',
   'deployment_id',
+  'before_json',
+  'after_json',
+  'notes'
+];
+
+// --- WFM.25: Opportunity_Assignments Audit schema ---
+
+const ASSIGNMENTS_AUDIT_SHEET = 'Opportunity_Assignments_Audit';
+const ASSIGNMENTS_AUDIT_ARCHIVE_SHEET = 'Opportunity_Assignments_Audit_Archive';
+
+const ASSIGNMENT_AUDIT_HEADERS = [
+  'audit_id',
+  'timestamp',
+  'actor',
+  'action',              // 'create' | 'update' | 'commit' | 'archive' | 'void'
+  'assignment_id',
+  'resource_name',
   'before_json',
   'after_json',
   'notes'

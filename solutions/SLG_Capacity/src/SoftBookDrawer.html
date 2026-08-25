@@ -1,0 +1,66 @@
+<!-- SoftBookDrawer.html — WFM.25 Stage 2 soft-booking overlay drawer.
+     Included from Index.html (fixed overlay, outside flex split). Wired in JavaScript.html. -->
+
+<div class="wfm25-softbook-overlay" id="wfm25SoftBookOverlay" hidden>
+  <div class="wfm25-softbook-backdrop" id="wfm25SoftBookBackdrop"></div>
+  <div class="wfm25-softbook-drawer" role="dialog" aria-labelledby="wfm25SoftBookTitle">
+    <header class="wfm25-softbook-header">
+      <h3 class="wfm25-softbook-title" id="wfm25SoftBookTitle">Adjust hours</h3>
+      <button type="button" class="icon-btn" id="wfm25SoftBookClose" aria-label="Close">✕</button>
+    </header>
+    <div class="wfm25-softbook-body">
+      <div id="wfm25SbFillFields" class="wfm25-sb-fill-fields" hidden>
+        <label class="field-label">Project / opportunity</label>
+        <input type="text" class="input" id="wfm25SbProject" readonly>
+        <input type="hidden" id="wfm25SbOpportunityId">
+        <label class="field-label">Skill context</label>
+        <div class="wfm25-sb-skill-context muted" id="wfm25SbSkillContext">—</div>
+        <label class="field-label">Scenario</label>
+        <select class="input" id="wfm25SbScenario">
+          <option value="">— No scenario —</option>
+        </select>
+      </div>
+      <div id="wfm25SbProjectFields" class="wfm25-sb-project-fields">
+        <label class="field-label" for="wfm25SbProjectFilter">Project</label>
+        <input type="text" class="input" id="wfm25SbProjectFilter" placeholder="Filter projects…" autocomplete="off">
+        <div class="wfm25-sb-project-list" id="wfm25SbProjectList" role="listbox"
+             aria-label="Select project"></div>
+        <input type="hidden" id="wfm25SbProjectIdentity">
+      </div>
+      <label class="field-label" id="wfm25SbWorkerLabel">Worker</label>
+      <input type="text" class="input" id="wfm25SbWorker" readonly>
+      <div class="wfm25-sb-worker-picker" id="wfm25SbWorkerPicker" hidden></div>
+      <div class="wfm25-adjust-direction" role="group" aria-label="Adjustment direction">
+        <button type="button" class="btn-toggle on" id="wfm25SbDirAdd" data-direction="add"
+                aria-pressed="true">Add</button>
+        <button type="button" class="btn-toggle" id="wfm25SbDirReduce" data-direction="reduce"
+                aria-pressed="false">Reduce</button>
+      </div>
+      <label class="field-label">Start date</label>
+      <input type="date" class="input" id="wfm25SbStart">
+      <label class="field-label">End date</label>
+      <input type="date" class="input" id="wfm25SbEnd">
+      <label class="field-label">Total hours</label>
+      <input type="number" class="input" id="wfm25SbHours" min="1" step="1" placeholder="e.g. 40">
+      <label class="field-label">Distribution</label>
+      <div class="seg seg-sm wfm25-sb-distribution" id="wfm25SbDistribution" role="group"
+           aria-label="Distribution">
+        <button type="button" class="on" data-val="Even">Even</button>
+        <button type="button" data-val="Front-loaded">Front</button>
+        <button type="button" data-val="Back-loaded">Back</button>
+        <button type="button" data-val="Custom">Custom by week</button>
+      </div>
+      <div id="wfm25SbWeeklyPreviewWrap" class="wfm25-sb-weekly-wrap" hidden>
+        <label class="field-label">Custom weekly hours</label>
+        <div class="wfm25-sb-weekly-preview custom-weekly-mount" id="wfm25SbWeeklyPreview"></div>
+      </div>
+      <p class="muted wfm25-reduce-note" id="wfm25SbReduceNote" hidden>
+        Reductions apply to forward-quarter forecast hours only. Current-quarter actuals cannot be reduced.
+      </p>
+    </div>
+    <footer class="wfm25-softbook-actions">
+      <button type="button" class="btn-ghost" id="wfm25SbCancel">Cancel</button>
+      <button type="button" class="btn-primary" id="wfm25SbAdd">Add to draft</button>
+    </footer>
+  </div>
+</div>

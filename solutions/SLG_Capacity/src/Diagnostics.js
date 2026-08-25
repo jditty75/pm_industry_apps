@@ -1,9 +1,9 @@
-// ============================================================
-// Diagnostics.gs — investigative tools for administrators
+﻿// ============================================================
+// Diagnostics.gs â€” investigative tools for administrators
 //
 // All functions here are intended to be run from the Apps Script
-// editor (function dropdown → Run), not from the web app UI.
-// They write to Logger.log so View → Logs shows the output.
+// editor (function dropdown â†’ Run), not from the web app UI.
+// They write to Logger.log so View â†’ Logs shows the output.
 //
 // Organized by concern:
 //   1. Config & data hygiene
@@ -17,7 +17,7 @@
 
 
 // ============================================================
-// Admin guard — all _dbg_ functions call this first.
+// Admin guard â€” all _dbg_ functions call this first.
 // ============================================================
 
 /**
@@ -26,17 +26,19 @@
  * Authorization sources (any match grants access):
  *   1. Spreadsheet owner (works on personal Drive, fails on Shared Drives
  *      because Shared Drive files have no individual owner)
- *   2. Config_Settings.admin_emails (comma-separated list — works
+ *   2. Config_Settings.admin_emails (comma-separated list â€” works
  *      everywhere, recommended for Shared Drive setups)
  *
  * The dual-path check mirrors the production access gate in
  * AccessControl.gs::isAuthorized_ which uses the same admin_emails setting.
+ * 
+ * This will make clasp force the push.  Another one
  */
 function _dbg_requireAdmin_() {
   try {
     const userEmail = Session.getActiveUser().getEmail();
     if (!userEmail) {
-      throw new Error('Could not resolve active user — re-authorize the script.');
+      throw new Error('Could not resolve active user â€” re-authorize the script.');
     }
     const userLc = String(userEmail).toLowerCase().trim();
 
@@ -80,7 +82,7 @@ function _dbg_requireAdmin_() {
 // ============================================================
 
 /**
- * Dump the full Config_Resource_Type map (resource_type → team_label).
+ * Dump the full Config_Resource_Type map (resource_type â†’ team_label).
  * Run when you want to verify the mapping is being read correctly.
  */
 function _dbg_debugConfigResourceType() {
@@ -127,9 +129,9 @@ function _dbg_debugWhyUnclassified() {
  * These workers fall into "Unclassified" in the Headcount Gap KPI,
  * which is visible in the UI as a warn-tinted row. Use this diagnostic
  * to identify what to fix:
- *   - Worker has no ICP_role → either fix in PSA at ingest, or
+ *   - Worker has no ICP_role â†’ either fix in PSA at ingest, or
  *     exclude via Config_Worker_Exclusions.
- *   - Worker has ICP_role but it's not in Config_Roles → add the role
+ *   - Worker has ICP_role but it's not in Config_Roles â†’ add the role
  *     with appropriate team_label in Config_Roles.
  *
  * Output: per-worker line with name, ICP_role (if any), worker_class,
@@ -151,8 +153,8 @@ function _dbg_debugUnclassifiedSlgWorkers() {
     : new Set();
 
   const rows = readTable_(ALLOC_NORM);
-  const blankRole = {};       // resource_name → { class, mgr, hours, monthsSeen }
-  const unmappedRole = {};    // resource_name → { role, class, mgr, hours, monthsSeen }
+  const blankRole = {};       // resource_name â†’ { class, mgr, hours, monthsSeen }
+  const unmappedRole = {};    // resource_name â†’ { role, class, mgr, hours, monthsSeen }
 
   function _trackInto_(map, key, info, hours, mk) {
     if (!map[key]) {
@@ -217,7 +219,7 @@ function _dbg_debugUnclassifiedSlgWorkers() {
   const blankList = Object.values(blankRole).sort((a, b) => b.totalHours - a.totalHours);
   Logger.log('  Count: ' + blankList.length);
   if (blankList.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     blankList.forEach(w => {
       Logger.log(
@@ -235,7 +237,7 @@ function _dbg_debugUnclassifiedSlgWorkers() {
   const unmappedList = Object.values(unmappedRole).sort((a, b) => b.totalHours - a.totalHours);
   Logger.log('  Count: ' + unmappedList.length);
   if (unmappedList.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     // Roll up by ICP_role for the summary
     const byRole = {};
@@ -274,18 +276,18 @@ function _dbg_debugUnclassifiedSlgWorkers() {
  *
  * Three categories surfaced:
  *
- *   A. MISMATCH — worker has ICP, ICP-team differs from manager-team.
+ *   A. MISMATCH â€” worker has ICP, ICP-team differs from manager-team.
  *      True override candidates (the Phil Dessaigne pattern).
  *
- *   B. UNCLASSIFIED — worker under SLG manager, blank or unmapped ICP.
+ *   B. UNCLASSIFIED â€” worker under SLG manager, blank or unmapped ICP.
  *      Bench/data hygiene; investigate the ingest classifier or
  *      add to Config_Worker_Exclusions. NOT an override case.
  *
- *   C. ALREADY OVERRIDDEN — worker in Config_Worker_Role_Overrides.
+ *   C. ALREADY OVERRIDDEN â€” worker in Config_Worker_Role_Overrides.
  *      Informational; confirms overrides are in effect.
  *
  * Excludes workers who are themselves SLG managers (managers don't
- * get ICP roles by design — their Job Profile is "M4 Sr Manager...").
+ * get ICP roles by design â€” their Job Profile is "M4 Sr Manager...").
  *
  * Manager team is derived from the data: each manager's "team" is the
  * dominant team_label among their reports, using >= 70% threshold on
@@ -361,7 +363,7 @@ function _dbg_debugSlgWorkerTeamMismatches() {
       if (t !== 'Unclassified') classified += counts[t];
     });
     if (classified === 0) {
-      managerTeam[mgr] = 'Mixed';  // all reports unclassified — can't infer
+      managerTeam[mgr] = 'Mixed';  // all reports unclassified â€” can't infer
       return;
     }
     let bestTeam = null, bestCount = 0;
@@ -412,11 +414,11 @@ function _dbg_debugSlgWorkerTeamMismatches() {
 
   Logger.log('');
   Logger.log('============================================================');
-  Logger.log('CATEGORY A — TRUE OVERRIDE CANDIDATES (mismatch, no override yet)');
+  Logger.log('CATEGORY A â€” TRUE OVERRIDE CANDIDATES (mismatch, no override yet)');
   Logger.log('============================================================');
   Logger.log('Count: ' + catA.length);
   if (catA.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     catA.forEach(function (c) {
       Logger.log(
@@ -436,11 +438,11 @@ function _dbg_debugSlgWorkerTeamMismatches() {
 
   Logger.log('');
   Logger.log('============================================================');
-  Logger.log('CATEGORY B — UNCLASSIFIED (bench/data hygiene, not override)');
+  Logger.log('CATEGORY B â€” UNCLASSIFIED (bench/data hygiene, not override)');
   Logger.log('============================================================');
   Logger.log('Count: ' + catB.length);
   if (catB.length === 0) {
-    Logger.log('  (none — clean)');
+    Logger.log('  (none â€” clean)');
   } else {
     catB.forEach(function (c) {
       Logger.log(
@@ -460,7 +462,7 @@ function _dbg_debugSlgWorkerTeamMismatches() {
 
   Logger.log('');
   Logger.log('============================================================');
-  Logger.log('CATEGORY C — ALREADY OVERRIDDEN (informational)');
+  Logger.log('CATEGORY C â€” ALREADY OVERRIDDEN (informational)');
   Logger.log('============================================================');
   Logger.log('Count: ' + catC.length);
   if (catC.length === 0) {
@@ -513,7 +515,7 @@ function _dbg_debugReportingSummaryReconciliation() {
 }
 
 /**
- * weekly-forecast-migration §6.6 reconciliation diagnostic #1: sum a
+ * weekly-forecast-migration Â§6.6 reconciliation diagnostic #1: sum a
  * sample worker's weekly hours straight from Allocations_Normalized, then
  * separately roll every one of that worker's rows through
  * splitWeekAcrossMonths_ and re-sum across all resulting month buckets.
@@ -560,12 +562,12 @@ function _dbg_reconcileWeekToMonthSplit(resourceName) {
   Logger.log('Weekly total hours:   ' + weeklyTotal.toFixed(4));
   Logger.log('Monthly total hours:  ' + monthlyTotal.toFixed(4) + '  (sum of splitWeekAcrossMonths_ output)');
   Logger.log('Difference:            ' + diff.toFixed(6));
-  Logger.log('RECONCILE: ' + (diff < 0.01 ? 'OK — totals match' : 'MISMATCH — investigate splitWeekAcrossMonths_'));
+  Logger.log('RECONCILE: ' + (diff < 0.01 ? 'OK â€” totals match' : 'MISMATCH â€” investigate splitWeekAcrossMonths_'));
   Logger.log('Per-month breakdown: ' + JSON.stringify(byMonth));
 }
 
 /**
- * weekly-forecast-migration §6.6 reconciliation diagnostic #2: run
+ * weekly-forecast-migration Â§6.6 reconciliation diagnostic #2: run
  * detectWeekColumns_ against the CURRENT PSA/STAFF_SHEET header row and
  * confirm (a) the expected week count is found (27 in the spec's sample
  * export) and (b) "Total Hours" is excluded. Run this against the live
@@ -597,7 +599,7 @@ function _dbg_verifyWeekColumnDetection() {
   Logger.log('Last week:   ' + (detection.weeks.length ? weekKey_(detection.weeks[detection.weeks.length - 1].weekStart) : '(none)'));
   Logger.log('Contiguity warnings: ' + detection.warnings.length);
   detection.warnings.forEach(function (w) { Logger.log('  - ' + w); });
-  Logger.log('RESULT: ' + (detection.weeks.length > 0 && (!hasTotalHoursCol || totalHoursExcluded) ? 'OK' : 'FAILED — see above'));
+  Logger.log('RESULT: ' + (detection.weeks.length > 0 && (!hasTotalHoursCol || totalHoursExcluded) ? 'OK' : 'FAILED â€” see above'));
 }
 
 
@@ -934,7 +936,7 @@ function _dbg_debugTeamResolveForBucket() {
 function _dbg_debugP4AssignmentEnrichment() {
   _dbg_requireAdmin_();
   // Simulate what saveAssignment_ would do for the enrichment portion only.
-  // Does NOT call appendRow_ or updateRow_ — read-only.
+  // Does NOT call appendRow_ or updateRow_ â€” read-only.
   function dryEnrich_(resourceType) {
     var a = { resource_type: resourceType };
     var teamLabel = 'Unclassified';
@@ -1071,7 +1073,7 @@ function _dbg_debugCompareResourceDetailPaths() {
       '  [' + i + '] ' +
       'A: ' + a.monthKey + ' s=' + a.scenario + ' | ' +
       'B: ' + b.monthKey + ' s=' + b.scenario +
-      (a.scenario !== b.scenario ? ' ← MISMATCH' : '')
+      (a.scenario !== b.scenario ? ' â† MISMATCH' : '')
     );
   }
 }
@@ -1234,7 +1236,7 @@ function _dbg_enrichedCacheStats() {
 
 /**
  * Drop 5 performance test. Run after clasp push to validate warm/cold ratio.
- * Goal: warm-call total time ≤ 30% of cold-call total time.
+ * Goal: warm-call total time â‰¤ 30% of cold-call total time.
  * Add output to commit message Perf notes: section.
  */
 function _test_drop5_endpoints() {
@@ -1274,7 +1276,7 @@ function _test_drop5_endpoints() {
   const coldTotal = t3 - t0;
   const warmTotal = t7 - t4;
   const ratio = coldTotal > 0 ? (warmTotal / coldTotal) : 1;
-  Logger.log('Warm/cold ratio:                ' + (ratio * 100).toFixed(1) + '%  (goal ≤ 30%)');
+  Logger.log('Warm/cold ratio:                ' + (ratio * 100).toFixed(1) + '%  (goal â‰¤ 30%)');
   Logger.log('Goal met:                       ' + (ratio <= 0.30 ? 'YES' : 'NO'));
 
   Logger.log('Sanity: cold kpis.headcount = ' + ((coldDash.kpis || {}).headcount || '(none)'));
@@ -1292,7 +1294,7 @@ function _test_drop5_endpoints() {
  * verifying the math after committing a scenario.
  *
  * Run from the Apps Script editor: set scenarioId to your scenario's UUID.
- * Results appear in View → Logs.
+ * Results appear in View â†’ Logs.
  *
  * @param {string} scenarioId
  */
@@ -1395,9 +1397,9 @@ function _test_phase8_ingest_filter_logic() {
     ['Delivery', 'PD', 'Government']    // should pass
   ];
   // Stub the alias map and filter rules so we don't touch real config
-  // ... (full test scaffolding deferred — verify by running existing
+  // ... (full test scaffolding deferred â€” verify by running existing
   // Phase 5 PSA upload diagnostics instead)
-  Logger.log('Phase 8 test stub — exercise by re-running Phase 5 diagnostics');
+  Logger.log('Phase 8 test stub â€” exercise by re-running Phase 5 diagnostics');
 }
 
 function _dbg_findParseError() {
@@ -1588,13 +1590,19 @@ function _dbg_migrateWorkerExclusions() {
       reason: String(r.reason || '').trim(),
       active: 'Yes',
       source: '',   // re-derived below, discarding whatever was stored before
-      override: ovr
+      override: ovr,
+      return_date: r.return_date || '',
+      modified_by: r.modified_by || '',
+      modified_at: r.modified_at || ''
     };
   });
 
   function ensureRow(k, name) {
     if (!out[k]) {
-      out[k] = { worker_name: name, manager_org: '', reason: '', active: 'Yes', source: '', override: '' };
+      out[k] = {
+        worker_name: name, manager_org: '', reason: '', active: 'Yes', source: '', override: '',
+        return_date: '', modified_by: '', modified_at: ''
+      };
     }
     return out[k];
   }
@@ -1667,7 +1675,7 @@ function _dbg_verifyFastDateParity() {
  * once and lets the [PERF] logs fire (computeUtilization's _p.mark calls,
  * plus the getEnrichedAllocations_/getEnrichedAssignments_/getResourceIndex_
  * cache-hit/cold-rebuild logs). Run from the editor; read View -> Logs.
- * Strip this instrumentation once the real fix ships (see WFM-PERF.1 §6).
+ * Strip this instrumentation once the real fix ships (see WFM-PERF.1 Â§6).
  */
 function _dbg_profileDashboardCold() {
   _dbg_requireAdmin_();
@@ -1679,17 +1687,17 @@ function _dbg_profileDashboardCold() {
 }
 
 // ============================================================
-// WFM.15 — Productive Utilization Model reconciliation.
+// WFM.15 â€” Productive Utilization Model reconciliation.
 // MANDATORY GATE: do not ship WFM.15 unless both cases below report OK.
 // ============================================================
 
 /**
- * WFM.15 §7 MANDATORY GATE. Reproduces the spec's two worked examples
+ * WFM.15 Â§7 MANDATORY GATE. Reproduces the spec's two worked examples
  * EXACTLY against the live icpTargetFor_/holidayHoursForWeek_ formulas,
  * then logs the Headcount Gap capacity-FTE shift (legacy monthly roleCap
  * vs. the new weekly raw-capacity model) per team so the move is
  * explainable, not silent. Run from the editor; read View -> Logs.
- * If either case fails, DO NOT SHIP -- see WFM.15 §8 escalation.
+ * If either case fails, DO NOT SHIP -- see WFM.15 Â§8 escalation.
  */
 function _dbg_reconcileWFM15() {
   _dbg_requireAdmin_();
@@ -1727,7 +1735,7 @@ function _dbg_reconcileWFM15() {
       Math.abs(icpUtil - 0.9375) < 1e-9 &&
       Math.abs(icpTarget - 0.61) < 1e-9 &&
       Math.abs(ratioToTarget - 1.537) < 0.001;
-    Logger.log(ok ? '  Case A: OK' : '  Case A: FAILED — DO NOT SHIP');
+    Logger.log(ok ? '  Case A: OK' : '  Case A: FAILED â€” DO NOT SHIP');
     if (!ok) failures++;
   })();
 
@@ -1759,7 +1767,7 @@ function _dbg_reconcileWFM15() {
 
     const icpAvailable = rawCap - targetHrs; // expect 24
     Logger.log('  week_key=' + targetWeek.week_key);
-    Logger.log('  holidayHours=' + targetHrs + ' (expect 16 — proves holidayHoursForWeek_ sums multiple holidays)');
+    Logger.log('  holidayHours=' + targetHrs + ' (expect 16 â€” proves holidayHoursForWeek_ sums multiple holidays)');
     Logger.log('  icpAvailable=' + icpAvailable + ' (expect 24)');
 
     const ok = (targetHrs === 16) && Math.abs(icpAvailable - 24) < 1e-9;
@@ -1784,10 +1792,10 @@ function _dbg_reconcileWFM15() {
       Logger.log('  productiveDemand=' + productiveDemand.toFixed(2) + 'h -> icpUtil = ' +
         productiveDemand.toFixed(2) + ' / ' + icpAvailable + ' = ' + (icpUtil * 100).toFixed(2) + '%');
     } else {
-      Logger.log('  No worker has non-PTO allocation hours in this week — cannot spot-check a real worker.');
+      Logger.log('  No worker has non-PTO allocation hours in this week â€” cannot spot-check a real worker.');
     }
 
-    Logger.log(ok ? '  Case B: OK' : '  Case B: FAILED — DO NOT SHIP');
+    Logger.log(ok ? '  Case B: OK' : '  Case B: FAILED â€” DO NOT SHIP');
     if (!ok) failures++;
   })();
 
@@ -1826,13 +1834,13 @@ function _dbg_reconcileWFM15() {
           (afterFte - beforeFte).toFixed(2) + ' FTE)');
       });
     } catch (e) {
-      Logger.log('  (live per-team pull failed, non-fatal — the flat conversionFactor above still holds: ' + e + ')');
+      Logger.log('  (live per-team pull failed, non-fatal â€” the flat conversionFactor above still holds: ' + e + ')');
     }
   })();
 
   Logger.log(failures === 0
     ? '_dbg_reconcileWFM15: ALL CASES OK'
-    : '_dbg_reconcileWFM15: ' + failures + ' CASE(S) FAILED — DO NOT SHIP');
+    : '_dbg_reconcileWFM15: ' + failures + ' CASE(S) FAILED â€” DO NOT SHIP');
 }
 /**
  * Phase 0 gate: verify every non-excluded SLG worker got an employee_id
@@ -1854,7 +1862,7 @@ function _dbg_verifyEmployeeIds() {
     var w = byWorker[nm];
     var isSlg = (w.wc === 'SLG_Real' || w.wc === 'SLG_Generic');
     if (!isSlg) return;
-    // Skip excluded workers (managers/on-leave) — they need no join.
+    // Skip excluded workers (managers/on-leave) â€” they need no join.
     var key = (typeof _exclusionKey_ === 'function') ? _exclusionKey_(nm) : nm.toLowerCase();
     if (excluded.has(key)) return;
     total++;
@@ -1862,15 +1870,15 @@ function _dbg_verifyEmployeeIds() {
   });
   Logger.log('_dbg_verifyEmployeeIds: ' + withId + ' / ' + total + ' non-excluded SLG workers have an employee_id');
   if (blanks.length) {
-    Logger.log('  BLANKS (' + blanks.length + ') — investigate: ' + JSON.stringify(blanks));
-    Logger.log('  RESULT: FAILED — these will not join to actuals in Phase 1');
+    Logger.log('  BLANKS (' + blanks.length + ') â€” investigate: ' + JSON.stringify(blanks));
+    Logger.log('  RESULT: FAILED â€” these will not join to actuals in Phase 1');
   } else {
-    Logger.log('  RESULT: OK — every non-excluded SLG worker has an employee_id');
+    Logger.log('  RESULT: OK â€” every non-excluded SLG worker has an employee_id');
   }
 }
 
 /**
- * WFM.16 §9 MANDATORY GATE. Proves ingest reconcile, join, blend precedence,
+ * WFM.16 Â§9 MANDATORY GATE. Proves ingest reconcile, join, blend precedence,
  * seam correctness, and forecast data retention. Run from the editor;
  * read View -> Logs. Do not ship if any check fails.
  */
@@ -1945,11 +1953,15 @@ function _dbg_reconcileActualsBlend() {
   // 3) Blend precedence: actual wins when both actual and forecast exist.
   try {
     var forecast = computeWeeklyForecast_({ workerScope: 'All' });
-    var actualsMap = (typeof getActualsByWorkerWeek_ === 'function') ? getActualsByWorkerWeek_() : {};
+    var actualsAgg = (typeof getActualsAggregated_ === 'function')
+      ? getActualsAggregated_() : { byEmployeeId: {}, byResourceName: {} };
     var blendChecked = false;
     forecast.workers.forEach(function (w) {
-      if (!w.employeeId || !w.blendedWeekly || !actualsMap[w.employeeId]) return;
-      var wActuals = actualsMap[w.employeeId];
+      if (!w.blendedWeekly) return;
+      var wActuals = (typeof _workerWeeklyActualsMap_ === 'function')
+        ? _workerWeeklyActualsMap_(w, actualsAgg.byEmployeeId, actualsAgg.byResourceName)
+        : (actualsAgg.byEmployeeId[w.employeeId] || {});
+      if (!Object.keys(wActuals).length) return;
       Object.keys(wActuals).forEach(function (wk) {
         if (!w.workerWeekly[wk]) return;
         var cell = w.blendedWeekly[wk];
@@ -2029,14 +2041,14 @@ function _dbg_reconcileActualsBlend() {
 
   if (failures.length) {
     failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
-    Logger.log('_dbg_reconcileActualsBlend: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+    Logger.log('_dbg_reconcileActualsBlend: ' + failures.length + ' CHECK(S) FAILED â€” DO NOT SHIP');
   } else {
     Logger.log('_dbg_reconcileActualsBlend: ALL CHECKS OK');
   }
 }
 
 // ============================================================
-// WFM.17 — Quarterly scorecard + dashboard KPI reconciliation.
+// WFM.17 â€” Quarterly scorecard + dashboard KPI reconciliation.
 // MANDATORY GATE: do not ship WFM.17 unless ALL CHECKS OK.
 // ============================================================
 
@@ -2062,33 +2074,81 @@ function _dbg_reconcileWFM17() {
     failures.push('January 2027 holidays missing from Config_Holidays');
   }
 
-  // ---- Target reconciliation: Consulting P3–P5 (Aidan) ----
-  (function consultingTargets() {
-    Logger.log('=== WFM.17 Consulting P3–P5 target reconciliation (Aidan profile) ===');
+  // ---- WoW forward-target re-anchor (WFM.24 D5) ----
+  (function wowForwardTargetReanchor() {
+    Logger.log('=== WFM.17 WoW forward-target re-anchor (WFM.24 D5) ===');
+    Logger.log('  audit oldâ†’new Consulting: FY27-Q3 388.08â†’369.60, FY27-Q4 357.28â†’369.60');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var curQ = fiscalQuarterKey_(new Date());
+    var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) { return qk !== curQ; });
+    var TARGET_TOL = 0.02;
+
+    function checkWorkerForward_(workerName) {
+      var wRow = (scorecard.workers || []).find(function (w) { return w.worker === workerName; });
+      if (!wRow || !wRow.employeeId) {
+        failures.push('WoW re-anchor: ' + workerName + ' not found in scorecard');
+        return;
+      }
+      futureKeys.forEach(function (qk) {
+        var q = (wRow.quarters || []).find(function (qq) { return qq.quarterKey === qk; });
+        if (!q) return;
+        var wow = quarterTargetFromWoW_(wRow.employeeId, qk);
+        if (wow != null) {
+          var ok = Math.abs(q.targetHours - wow) < TARGET_TOL;
+          Logger.log('  ' + workerName + ' ' + qk + ': scorecard target=' +
+            q.targetHours.toFixed(2) + ' WoW=' + wow.toFixed(2) + (ok ? ' OK' : ' FAILED'));
+          if (!ok) {
+            failures.push(workerName + ' ' + qk + ' targetHours=' + q.targetHours +
+              ' expect WoW=' + wow);
+          }
+        } else {
+          var okFb = Math.abs(q.targetHours - q.appTargetHours) < TARGET_TOL;
+          Logger.log('  ' + workerName + ' ' + qk + ': no WoW row â€” formula fallback=' +
+            q.targetHours.toFixed(2) + ' appTarget=' + q.appTargetHours.toFixed(2) +
+            (okFb ? ' OK' : ' FAILED'));
+          if (!okFb) {
+            failures.push(workerName + ' ' + qk + ' formula fallback mismatch');
+          }
+        }
+      });
+    }
+
+    checkWorkerForward_('Aidan Votaw');
+    var p6 = (scorecard.workers || []).find(function (w) {
+      return String(w.level || '') === 'P6' || /P6/i.test(String(w.icpRole || ''));
+    });
+    if (p6) {
+      checkWorkerForward_(p6.worker);
+    } else {
+      Logger.log('  P6 sample worker not found â€” skip');
+    }
+  })();
+
+  // ---- Target reconciliation: Consulting P3â€“P5 (Aidan) ----
+  (function consultingFormulaFallback() {
+    Logger.log('=== WFM.17 Consulting formula fallback (quarterTargetHoursFor_) ===');
     var expected = { 'FY27-Q2': 375.76, 'FY27-Q3': 388.08, 'FY27-Q4': 357.28 };
-    var staleQ4 = 369.6;
     Object.keys(expected).forEach(function (qk) {
       var got = quarterTargetHoursFor_('CS_FUNC', 'P4 Consulting', qk, holidays, settings);
       var exp = expected[qk];
       var ok = Math.abs(got - exp) < 0.02;
-      Logger.log('  ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
-      if (!ok) failures.push('Consulting target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
-      if (qk === 'FY27-Q4') {
-        Logger.log('  FY27-Q4 stale workbook target=' + staleQ4 + ' (expected difference — Jan 2027 holidays applied)');
-      }
+      Logger.log('  ' + qk + ': formula=' + got.toFixed(2) + ' (fallback reference=' + exp.toFixed(2) + ')' +
+        (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('Consulting formula fallback ' + qk + ': got ' + got.toFixed(2));
     });
   })();
 
-  // ---- Target reconciliation: P6 (Larry / Phil profile) ----
-  (function p6Targets() {
-    Logger.log('=== WFM.17 P6 target reconciliation ===');
+  // ---- Target reconciliation: P6 (Larry / Phil profile) formula fallback ----
+  (function p6FormulaFallback() {
+    Logger.log('=== WFM.17 P6 formula fallback (quarterTargetHoursFor_) ===');
     var expected = { 'FY27-Q2': 297.68, 'FY27-Q3': 307.44, 'FY27-Q4': 283.04 };
     Object.keys(expected).forEach(function (qk) {
       var got = quarterTargetHoursFor_('EM', 'P6 Delivery Consultant', qk, holidays, settings);
       var exp = expected[qk];
       var ok = Math.abs(got - exp) < 0.02;
-      Logger.log('  ' + qk + ': got=' + got.toFixed(2) + ' expect=' + exp.toFixed(2) + (ok ? ' OK' : ' FAILED'));
-      if (!ok) failures.push('P6 target ' + qk + ': got ' + got.toFixed(2) + ' expect ' + exp);
+      Logger.log('  ' + qk + ': formula=' + got.toFixed(2) + ' (fallback reference=' + exp.toFixed(2) + ')' +
+        (ok ? ' OK' : ' FAILED'));
+      if (!ok) failures.push('P6 formula fallback ' + qk + ': got ' + got.toFixed(2));
     });
   })();
 
@@ -2101,7 +2161,7 @@ function _dbg_reconcileWFM17() {
         Number(r.bonus_target_billable_hours_eoq) > 0;
     });
     if (!sample) {
-      Logger.log('  SKIPPED — no worker with qtd_icp_plus_forecast + bonus target in Actuals_Worker_Summary');
+      Logger.log('  SKIPPED â€” no worker with qtd_icp_plus_forecast + bonus target in Actuals_Worker_Summary');
       return;
     }
     var prod = Number(sample.qtd_icp_plus_forecast_hours);
@@ -2138,7 +2198,7 @@ function _dbg_reconcileWFM17() {
     var curQ = fiscalQuarterKey_(new Date());
     var futureKeys = (scorecard.quarterKeys || []).filter(function (qk) { return qk !== curQ; });
     if (!futureKeys.length) {
-      Logger.log('  SKIPPED — no future quarters');
+      Logger.log('  SKIPPED â€” no future quarters');
       return;
     }
     var fk = futureKeys[0];
@@ -2147,7 +2207,7 @@ function _dbg_reconcileWFM17() {
       return q && q.productiveHours > 0 && q.source === 'forecast';
     });
     if (!sample) {
-      Logger.log('  SKIPPED — no worker with forecast productive hours in ' + fk);
+      Logger.log('  SKIPPED â€” no worker with forecast productive hours in ' + fk);
       return;
     }
     var q = sample.quarters.find(function (qq) { return qq.quarterKey === fk; });
@@ -2171,6 +2231,7 @@ function _dbg_reconcileWFM17() {
     var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
     (scorecard.quarterKeys || []).forEach(function (qk, qi) {
       var sumProd = 0, sumIcpAvail = 0, sumRawCap = 0, sumTarget = 0;
+      var sumUtilProd = 0, sumUtilTarget = 0;
       (scorecard.workers || []).forEach(function (w) {
         var q = w.quarters[qi];
         if (!q) return;
@@ -2178,11 +2239,16 @@ function _dbg_reconcileWFM17() {
         sumIcpAvail += q.icpAvailableHours;
         sumRawCap += q.rawCapacityHours;
         sumTarget += q.targetHours;
+        if (q.targetHours > 0) {
+          sumUtilProd += q.productiveHours;
+          sumUtilTarget += q.targetHours;
+        }
       });
       var team = scorecard.teamSummary[qi];
-      var icpOk = Math.abs(team.icpUtil - (sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0)) < 1e-9;
+      var expectedIcp = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : 0;
+      var icpOk = Math.abs(team.icpUtil - expectedIcp) < 1e-9;
       var finOk = Math.abs(team.financeUtil - (sumRawCap > 0 ? sumProd / sumRawCap : 0)) < 1e-9;
-      var bonusOk = Math.abs(team.bonusAttainment - (sumTarget > 0 ? sumProd / sumTarget : 0)) < 1e-9;
+      var bonusOk = Math.abs(team.bonusAttainment - expectedIcp) < 1e-9;
       Logger.log('  ' + qk + ': team icp=' + (team.icpUtil * 100).toFixed(2) + '%' +
         ' finance=' + (team.financeUtil * 100).toFixed(2) + '%' +
         ' bonus=' + (team.bonusAttainment * 100).toFixed(2) + '%' +
@@ -2231,7 +2297,7 @@ function _dbg_reconcileWFM17() {
         JSON.stringify(blankIds.slice(0, 5)));
       failures.push(blankIds.length + ' worker(s) with blank Employee ID');
     } else {
-      Logger.log('  No non-excluded worker has blank Employee ID — OK');
+      Logger.log('  No non-excluded worker has blank Employee ID â€” OK');
     }
     if (blankRoles.length) {
       Logger.log('  Workers with blank ICP role (fallback target warning): ' +
@@ -2239,9 +2305,34 @@ function _dbg_reconcileWFM17() {
     }
   })();
 
+  // ---- Utilization quarterly window (3 UTIL sheets) ----
+  (function utilQuarterWindow() {
+    Logger.log('=== WFM.17 Utilization quarterly window ===');
+    var utilRows = [];
+    try {
+      utilRows = cachedRead_(CFG_UTIL_QUARTERLY);
+    } catch (e) {
+      utilRows = [];
+    }
+    var quarterSet = {};
+    utilRows.forEach(function (r) {
+      var fq = String(r.fiscal_quarter || '').trim();
+      if (fq) quarterSet[fq] = true;
+    });
+    var quartersSorted = Object.keys(quarterSet).sort();
+    var count = quartersSorted.length;
+    Logger.log('  distinct fiscal_quarter values (' + count + '): ' + quartersSorted.join(', '));
+    if (count !== 3) {
+      failures.push('Utilization: exactly 3 fiscal quarters expected, found ' + count +
+        (quartersSorted.length ? ' (' + quartersSorted.join(', ') + ')' : ''));
+    } else {
+      Logger.log('  exactly 3 UTIL quarters — OK');
+    }
+  })();
+
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM17: ALL CHECKS OK'
-    : '_dbg_reconcileWFM17: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+    : '_dbg_reconcileWFM17: ' + failures.length + ' CHECK(S) FAILED â€” DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
 }
 
@@ -2378,23 +2469,38 @@ function _dbg_reconcileWFM18() {
       Logger.log('  ' + workerName + ' quarter cells checked');
     });
 
-    // Aidan current-quarter attainment anchor (87.63%)
+    // Aidan current-quarter attainment anchor â€” was hard-coded 87.63%; now
+    // self-computed from Actuals_Worker_Summary (qtd_icp_plus_forecast_hours /
+    // bonus_target_billable_hours_eoq) so the gate survives data refresh.
+    var ATTAIN_TOL = 0.001;
+    var aidanSc = (scorecard.workers || []).find(function (w) { return w.worker === 'Aidan Votaw'; });
     var aidanV2 = api_getResourceDetailV2(Object.assign({ resource: 'Aidan Votaw' }, baseParams));
-    if (aidanV2.found) {
-      var aidanCur = (aidanV2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
-      if (!aidanCur) {
-        failures.push('Aidan current quarter missing from V2');
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    if (!aidanSc || !aidanV2.found) {
+      failures.push('Aidan Votaw not found for attainment anchor');
+    } else {
+      var aidanCurSc = (aidanSc.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      var summary = actualsSummary[String(aidanSc.employeeId || '').trim()];
+      if (!aidanCurSc) {
+        failures.push('Aidan current quarter missing from scorecard');
+      } else if (!summary || !Number(summary.qtd_icp_plus_forecast_hours) ||
+          !Number(summary.bonus_target_billable_hours_eoq)) {
+        failures.push('Aidan actuals summary missing for current-quarter anchor');
       } else {
-        var aidanPct = aidanCur.bonusAttainment * 100;
-        var aidanOk = Math.abs(aidanPct - 87.63) <= TOL;
-        Logger.log('  Aidan current-quarter attainment=' + aidanPct.toFixed(2) + '% (expect 87.63%)' +
+        var expectedAttainment = Number(summary.qtd_icp_plus_forecast_hours) /
+          Number(summary.bonus_target_billable_hours_eoq);
+        var aidanPct = aidanCurSc.bonusAttainment * 100;
+        var expectedPct = expectedAttainment * 100;
+        var aidanOk = Math.abs(aidanCurSc.bonusAttainment - expectedAttainment) <= ATTAIN_TOL;
+        Logger.log('  Aidan current-quarter attainment=' + aidanPct.toFixed(2) +
+          '% (self-computed expect=' + expectedPct.toFixed(2) + '%)' +
           (aidanOk ? ' OK' : ' FAILED'));
         if (!aidanOk) {
-          failures.push('Aidan current-quarter attainment: got ' + aidanPct.toFixed(2) + '% expect 87.63%');
+          failures.push('Aidan current-quarter attainment: scorecard=' + aidanPct.toFixed(2) +
+            '% expected=' + expectedPct.toFixed(2) + '%');
         }
       }
-    } else {
-      failures.push('Aidan Votaw not found in V2 for attainment anchor');
     }
 
     // FY27 target anchors: Consulting (Aidan profile) and P6
@@ -2568,6 +2674,3764 @@ function _dbg_reconcileWFM18() {
 
   Logger.log(failures.length === 0
     ? '_dbg_reconcileWFM18: ALL CHECKS OK'
-    : '_dbg_reconcileWFM18: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+    : '_dbg_reconcileWFM18: ' + failures.length + ' CHECK(S) FAILED â€” DO NOT SHIP');
   failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}
+// ============================================================
+// WFM.23 ΓÇö Soft booking projection reconciliation (Stage 1).
+// MANDATORY GATE: checks 1, 2, 3, 4, 5.
+// ============================================================
+
+/**
+ * WFM.23 check 4 cleanup ΓÇö delete test assignments by id.
+ * @param {string[]} ids
+ */
+function _dbg_wfm23DeleteAssignmentsByIds_(ids) {
+  if (!ids || !ids.length) return;
+  var idSet = {};
+  ids.forEach(function (id) {
+    if (id) idSet[String(id)] = true;
+  });
+  if (!Object.keys(idSet).length) return;
+  var kept = readTable_(ASSIGNMENTS).filter(function (r) {
+    return !idSet[String(r.assignment_id || '')];
+  });
+  writeTable_(ASSIGNMENTS, ASSIGN_HEADERS, kept.map(function (r) {
+    return ASSIGN_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  }));
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+}
+
+/**
+ * WFM.25 reduction gate cleanup — delete test capacity adjustments by id.
+ * @param {string[]} ids
+ */
+function _dbg_wfm25DeleteAdjustmentsByIds_(ids) {
+  if (!ids || !ids.length) return;
+  var idSet = {};
+  ids.forEach(function (id) {
+    if (id) idSet[String(id)] = true;
+  });
+  if (!Object.keys(idSet).length) return;
+  ids.forEach(function (id) {
+    if (id && typeof deleteCapacityAdjustment_ === 'function') {
+      try { deleteCapacityAdjustment_(String(id)); } catch (e) { /* best effort */ }
+    }
+  });
+  invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+}
+
+/**
+ * WFM.23 check 4 cleanup ΓÇö delete a test scenario by id.
+ * @param {string} scenarioId
+ */
+function _dbg_wfm23DeleteScenarioById_(scenarioId) {
+  if (!scenarioId) return;
+  var kept = readTable_(SCENARIOS).filter(function (r) {
+    return String(r.scenario_id) !== String(scenarioId);
+  });
+  writeTable_(SCENARIOS, SCENARIO_HEADERS, kept.map(function (r) {
+    return SCENARIO_HEADERS.map(function (h) { return r[h] !== undefined ? r[h] : ''; });
+  }));
+  invalidateCache_(SCENARIOS);
+}
+
+/**
+ * Demand-affecting assignment fields for WFM.23 check 4 parity.
+ * @param {Object} row
+ * @return {Object}
+ */
+function _dbg_wfm23DemandFields_(row) {
+  return {
+    resource_name: String(row.resource_name || ''),
+    start_date: String(row.start_date || '').slice(0, 10),
+    end_date: String(row.end_date || '').slice(0, 10),
+    estimated_hours: Number(row.estimated_hours) || 0,
+    distribution: String(row.distribution || 'Even'),
+    status: String(row.status || 'Modeled')
+  };
+}
+
+/**
+ * Stable weekly-expansion signature for parity checks.
+ * @param {Object} assignRow
+ * @param {Object} calendar
+ * @return {string}
+ */
+function _dbg_wfm23WeeklySignature_(assignRow, calendar) {
+  var weeks = expandAssignmentToWeekly_(assignRow, calendar) || [];
+  return weeks.map(function (w) {
+    return String(w.week_key || '') + ':' + (Number(w.hours) || 0).toFixed(4);
+  }).sort().join('|');
+}
+
+/**
+ * Compare two demand-field snapshots (near-equal on hours).
+ * @param {Object} a
+ * @param {Object} b
+ * @param {number} tol
+ * @return {boolean}
+ */
+function _dbg_wfm23DemandFieldsEqual_(a, b, tol) {
+  tol = tol || 0.01;
+  if (String(a.resource_name) !== String(b.resource_name)) return false;
+  if (String(a.start_date) !== String(b.start_date)) return false;
+  if (String(a.end_date) !== String(b.end_date)) return false;
+  if (String(a.distribution) !== String(b.distribution)) return false;
+  if (String(a.status) !== String(b.status)) return false;
+  return Math.abs(Number(a.estimated_hours) - Number(b.estimated_hours)) <= tol;
+}
+
+/**
+ * Runtime-pick a Director-scoped worker via api_projectSoftBookings baseline.
+ * Shared by WFM.23 gate checks 2 and 3.
+ * @param {Object} baseParams
+ * @return {{params:Object, worker:Object, mgrName:string}|null}
+ */
+function _dbg_wfm23PickDirectorScopeWorker_(baseParams) {
+  var mgrRows = readConfigSlgManagers_();
+  var descendants = buildManagerDescendants_(mgrRows);
+  var mgrName = '';
+  mgrRows.some(function (r) {
+    if ((descendants[r.manager_name] || []).length >= 1) {
+      mgrName = r.manager_name;
+      return true;
+    }
+    return false;
+  });
+  if (!mgrName) return null;
+  var params = Object.assign({}, baseParams, {
+    teams: [mgrName],
+    includeMyManagers: true
+  });
+  var baselineOnly = api_projectSoftBookings(params, []);
+  var workers = baselineOnly.baseline.worker || [];
+  if (!workers.length) return null;
+  return { params: params, worker: workers[0], mgrName: mgrName };
+}
+
+/**
+ * WFM.23 Stage 1 gate. Self-computing checks; prints ALL CHECKS OK only
+ * when every check passes. Run api_flushCaches first (check 5 does).
+ */
+function _dbg_reconcileWFM23() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.01;
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function deepEqualProjection_(a, b, path) {
+    path = path || '';
+    if (a === b) return true;
+    if (a == null || b == null) return a === b;
+    if (typeof a !== typeof b) return false;
+    if (typeof a !== 'object') return near_(a, b);
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b) || a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) {
+        if (!deepEqualProjection_(a[i], b[i], path + '[' + i + ']')) return false;
+      }
+      return true;
+    }
+    var keysA = Object.keys(a).sort();
+    var keysB = Object.keys(b).sort();
+    if (keysA.length !== keysB.length) return false;
+    for (var k = 0; k < keysA.length; k++) {
+      if (keysA[k] !== keysB[k]) return false;
+      if (!deepEqualProjection_(a[keysA[k]], b[keysB[k]], path + '.' + keysA[k])) return false;
+    }
+    return true;
+  }
+
+  function snapshotAssignments_() {
+    var rows = [];
+    try { rows = cachedRead_(ASSIGNMENTS); } catch (e) { rows = []; }
+    return JSON.stringify(rows.map(function (r) {
+      return {
+        assignment_id: String(r.assignment_id || ''),
+        resource_name: String(r.resource_name || ''),
+        status: String(r.status || ''),
+        estimated_hours: Number(r.estimated_hours) || 0,
+        start_date: r.start_date ? String(r.start_date) : '',
+        end_date: r.end_date ? String(r.end_date) : ''
+      };
+    }).sort(function (a, b) {
+      return String(a.assignment_id).localeCompare(String(b.assignment_id));
+    }));
+  }
+
+  function snapshotAllocations_() {
+    var rows = [];
+    try { rows = cachedRead_(ALLOC_NORM); } catch (e) { rows = []; }
+    return JSON.stringify(rows.map(function (r) {
+      return {
+        resource_name: String(r.resource_name || ''),
+        week_key: String(r.week_key || ''),
+        hours: Number(r.hours) || 0,
+        allocation_type: String(r.allocation_type || '')
+      };
+    }).sort(function (a, b) {
+      return String(a.resource_name + a.week_key).localeCompare(String(b.resource_name + b.week_key));
+    }));
+  }
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+
+  // ---- Check 1: empty-overlay neutrality ----
+  (function checkNeutrality() {
+    Logger.log('=== WFM.23 Check 1: empty-overlay neutrality ===');
+    var ref = api_getReference();
+    var resources = ref.resources || [];
+    var mgrRows = readConfigSlgManagers_();
+    var descendants = buildManagerDescendants_(mgrRows);
+    var mgrName = '';
+    mgrRows.some(function (r) {
+      if ((descendants[r.manager_name] || []).length >= 1) {
+        mgrName = r.manager_name;
+        return true;
+      }
+      return false;
+    });
+    var params = Object.assign({}, baseParams, {
+      teams: mgrName ? [mgrName] : null,
+      includeMyManagers: true
+    });
+    var result = api_projectSoftBookings(params, []);
+    if (!deepEqualProjection_(result.baseline, result.projected, 'root')) {
+      failures.push('Empty overlay: projected !== baseline');
+      Logger.log('  FAILED: projected !== baseline');
+      return;
+    }
+    var sampleWorkers = (result.baseline.worker || []).slice(0, 3);
+    if (!sampleWorkers.length && resources.length) {
+      Logger.log('  SKIPPED sample workers (no workers in scoped projection)');
+    } else {
+      sampleWorkers.forEach(function (w) {
+        var pw = (result.projected.worker || []).find(function (x) {
+          return x.resourceName === w.resourceName;
+        });
+        if (!pw || !deepEqualProjection_(w, pw, w.resourceName)) {
+          failures.push('Neutrality worker mismatch: ' + w.resourceName);
+        }
+      });
+    }
+    if (!deepEqualProjection_(result.baseline.team, result.projected.team, 'team')) {
+      failures.push('Empty overlay: team projected !== baseline');
+    }
+    if (!deepEqualProjection_(result.baseline.orgTeams, result.projected.orgTeams, 'orgTeams')) {
+      failures.push('Empty overlay: orgTeams projected !== baseline');
+    }
+    // Weekly cell neutrality (empty overlay): self-compute for a sample worker
+    var weeklySample = (result.baseline.worker || [])[0];
+    if (weeklySample && weeklySample.resourceName &&
+        typeof _aggregateSoftBookingProjection_ === 'function' &&
+        typeof _deriveVisibleWeeksFiscal_ === 'function') {
+      var weeklyNames = {};
+      weeklyNames[weeklySample.resourceName] = true;
+      var fc = computeWeeklyForecast_({
+        viewMode: params.viewMode,
+        scenarioId: params.scenarioId,
+        teams: params.teams,
+        teamLabel: params.teamLabel,
+        workerScope: params.workerScope,
+        includeMyManagers: params.includeMyManagers,
+        includeTimeOff: params.includeTimeOff
+      });
+      var vw = _deriveVisibleWeeksFiscal_(fc.weeks);
+      var qKeys = _quarterKeysForSoftBookings_([]);
+      var hol = readHolidays_();
+      var act = (typeof getActualsSummaryByEmployee_ === 'function')
+        ? getActualsSummaryByEmployee_() : {};
+      var curQ = fiscalQuarterKey_(new Date());
+      var baseAgg = _aggregateSoftBookingProjection_(
+        fc, qKeys, hol, act, curQ, null, weeklyNames, vw);
+      var projAgg = _aggregateSoftBookingProjection_(
+        fc, qKeys, hol, act, curQ, null, weeklyNames, vw);
+      var bw = (baseAgg.worker || []).find(function (x) {
+        return x.resourceName === weeklySample.resourceName;
+      });
+      var pw = (projAgg.worker || []).find(function (x) {
+        return x.resourceName === weeklySample.resourceName;
+      });
+      if (!bw || !pw || !bw.weeks || !pw.weeks ||
+          !deepEqualProjection_(bw.weeks, pw.weeks, weeklySample.resourceName + '.weeks')) {
+        failures.push('Empty overlay weekly neutrality: ' + weeklySample.resourceName);
+        Logger.log('  FAILED: weekly neutrality for ' + weeklySample.resourceName);
+      } else {
+        Logger.log('  Weekly neutrality OK for ' + weeklySample.resourceName +
+          ' (' + bw.weeks.length + ' weeks)');
+      }
+    }
+    Logger.log(failures.length ? '  Check 1: FAILED' : '  Check 1: OK');
+  })();
+
+  // ---- Check 2: baseline untouched (nothing persisted) ----
+  (function checkBaselineUntouched() {
+    Logger.log('=== WFM.23 Check 2: baseline untouched ===');
+    var beforeAssign = snapshotAssignments_();
+    var beforeAlloc = snapshotAllocations_();
+
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 2: no Director-scope worker found for projection call');
+      return;
+    }
+    var worker = picked.worker;
+    var params = picked.params;
+
+    var futureQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      if (futureQk) return;
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start > today) futureQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 2: no future fiscal quarter found');
+      return;
+    }
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var booking = {
+      employee_id: String(worker.employeeId),
+      resource_name: String(worker.resourceName),
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: 25
+    };
+    api_projectSoftBookings(params, [booking]);
+
+    var afterAssign = snapshotAssignments_();
+    var afterAlloc = snapshotAllocations_();
+    if (beforeAssign !== afterAssign) {
+      failures.push('Check 2: Opportunity_Assignments changed after projection');
+    }
+    if (beforeAlloc !== afterAlloc) {
+      failures.push('Check 2: Allocations_Normalized changed after projection');
+    }
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 2') === 0; })
+      ? '  Check 2: FAILED' : '  Check 2: OK');
+  })();
+
+  // ---- Check 3: injection correctness (self-computing expected N) ----
+  (function checkInjection() {
+    Logger.log('=== WFM.23 Check 3: injection correctness ===');
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 3: no Director with descendants / in-scope workers found');
+      return;
+    }
+    var params = picked.params;
+    var targetWorker = picked.worker;
+    Logger.log('  Director scope: ' + picked.mgrName + ' worker: ' + targetWorker.resourceName);
+
+    var baselineOnly = api_projectSoftBookings(params, []);
+    var futureQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      if (futureQk) return;
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start > today) futureQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 3: no future fiscal quarter found');
+      return;
+    }
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var N = 40;
+    var booking = {
+      employee_id: targetWorker.employeeId,
+      resource_name: targetWorker.resourceName,
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: N
+    };
+
+    var calendar = readCalendar_();
+    var assignShape = {
+      resource_name: booking.resource_name,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: N,
+      distribution: 'Even',
+      status: 'Modeled'
+    };
+    var expectedN = 0;
+    expandAssignmentToWeekly_(assignShape, calendar).forEach(function (w) {
+      if (fiscalQuarterKey_(w.week_start) === futureQk) {
+        expectedN += Number(w.hours) || 0;
+      }
+    });
+    if (expectedN <= 0) {
+      failures.push('Check 3: expectedN recomputed as 0 for quarter ' + futureQk);
+      return;
+    }
+
+    var projected = api_projectSoftBookings(params, [booking]);
+    var baseW = (baselineOnly.baseline.worker || []).find(function (w) {
+      return w.resourceName === targetWorker.resourceName;
+    });
+    var projW = (projected.projected.worker || []).find(function (w) {
+      return w.resourceName === targetWorker.resourceName;
+    });
+    if (!baseW || !projW) {
+      failures.push('Check 3: worker row missing for ' + targetWorker.resourceName);
+      return;
+    }
+    var baseQ = (baseW.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+    var projQ = (projW.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+    if (!baseQ || !projQ) {
+      failures.push('Check 3: quarter cell missing for ' + futureQk);
+      return;
+    }
+    var delta = Number(projQ.productiveHours) - Number(baseQ.productiveHours);
+    if (!near_(delta, expectedN)) {
+      failures.push('Check 3: worker productiveHours delta=' + delta.toFixed(4) +
+        ' expected=' + expectedN.toFixed(4));
+    } else {
+      Logger.log('  worker ' + targetWorker.resourceName + ' delta=' + delta.toFixed(2) +
+        ' expected=' + expectedN.toFixed(2) + ' OK');
+    }
+
+    var baseTeamQ = (baselineOnly.baseline.team.quarters || []).find(function (q) {
+      return q.quarterKey === futureQk;
+    });
+    var projTeamQ = (projected.projected.team.quarters || []).find(function (q) {
+      return q.quarterKey === futureQk;
+    });
+    if (baseTeamQ && projTeamQ) {
+      var teamDelta = Number(projTeamQ.productiveHours) - Number(baseTeamQ.productiveHours);
+      if (!near_(teamDelta, expectedN)) {
+        failures.push('Check 3: team productiveHours delta=' + teamDelta.toFixed(4) +
+          ' expected=' + expectedN.toFixed(4));
+      } else {
+        Logger.log('  team aggregate delta=' + teamDelta.toFixed(2) + ' OK');
+      }
+    }
+
+    var teamLabel = targetWorker.teamLabel;
+    var baseOrg = (baselineOnly.baseline.orgTeams || []).find(function (o) {
+      return o.teamLabel === teamLabel;
+    });
+    var projOrg = (projected.projected.orgTeams || []).find(function (o) {
+      return o.teamLabel === teamLabel;
+    });
+    if (baseOrg && projOrg) {
+      var baseOrgQ = (baseOrg.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+      var projOrgQ = (projOrg.quarters || []).find(function (q) { return q.quarterKey === futureQk; });
+      if (baseOrgQ && projOrgQ) {
+        var orgDelta = Number(projOrgQ.productiveHours) - Number(baseOrgQ.productiveHours);
+        if (!near_(orgDelta, expectedN)) {
+          failures.push('Check 3: org-team ' + teamLabel + ' delta=' + orgDelta.toFixed(4) +
+            ' expected=' + expectedN.toFixed(4));
+        } else {
+          Logger.log('  org-team ' + teamLabel + ' delta=' + orgDelta.toFixed(2) + ' OK');
+        }
+      }
+    }
+  })();
+
+  // ---- Check 4: commit parity (api_commitSoftBookings → Committed, in committed view) ----
+  (function checkCommitParity() {
+    Logger.log('=== WFM.23 Check 4: commit parity (Committed two-state) ===');
+    var idsToDelete = [];
+    var scenarioIdsToDelete = [];
+    var assignCountBefore = readTable_(ASSIGNMENTS).length;
+
+    var picked = _dbg_wfm23PickDirectorScopeWorker_(baseParams);
+    if (!picked) {
+      failures.push('Check 4: no Director-scope worker found');
+      Logger.log('  Check 4: FAILED (no worker)');
+      return;
+    }
+
+    var baselineOnly = api_projectSoftBookings(picked.params, []);
+    var workers = baselineOnly.baseline.worker || [];
+    if (!workers.length) {
+      failures.push('Check 4: no Director-scope workers in baseline');
+      Logger.log('  Check 4: FAILED (no workers)');
+      return;
+    }
+
+    function resolveRt_(w) {
+      return _resolveBookingResourceType_({
+        resource_name: String(w.resourceName || ''),
+        employee_id: String(w.employeeId || '')
+      });
+    }
+
+    var worker = null;
+    var resourceType = '';
+    workers.some(function (w) {
+      var rt = resolveRt_(w);
+      if (rt) {
+        worker = w;
+        resourceType = rt;
+        return true;
+      }
+      return false;
+    });
+    if (!worker) {
+      worker = workers[0];
+      resourceType = resolveRt_(worker);
+    }
+    Logger.log('  parity worker: ' + worker.resourceName +
+      ' rt=' + (resourceType || '(blank)'));
+
+    var futureQk = null;
+    var labelQk = null;
+    var blankQk = null;
+    var today = new Date();
+    rollingQuarterKeys_(8).forEach(function (qk) {
+      var bounds = fiscalQuarterBounds_(qk);
+      if (bounds.start <= today) return;
+      if (!futureQk) futureQk = qk;
+      else if (!labelQk && qk !== futureQk) labelQk = qk;
+      else if (!blankQk && qk !== futureQk && qk !== labelQk) blankQk = qk;
+    });
+    if (!futureQk) {
+      failures.push('Check 4: no future fiscal quarter found');
+      return;
+    }
+    if (!labelQk) labelQk = futureQk;
+    if (!blankQk) blankQk = labelQk;
+
+    var bounds = fiscalQuarterBounds_(futureQk);
+    var labelBounds = fiscalQuarterBounds_(labelQk);
+    var blankBounds = fiscalQuarterBounds_(blankQk);
+    var startIso = _toIso_(bounds.start);
+    var endIso = _toIso_(bounds.end);
+    var labelStartIso = _toIso_(labelBounds.start);
+    var labelEndIso = _toIso_(labelBounds.end);
+    var blankStartIso = _toIso_(blankBounds.start);
+    var blankEndIso = _toIso_(blankBounds.end);
+    var totalHours = 33;
+    var labelHours = 17;
+    var blankHours = 11;
+    var calendar = readCalendar_();
+
+    function sumForecastProductiveQuarter_(forecastParams, workerName, quarterKey) {
+      var forecast = computeWeeklyForecast_(forecastParams);
+      var w = (forecast.workers || []).find(function (x) {
+        return x.resource === workerName;
+      });
+      if (!w) return { found: false, sum: 0 };
+      return {
+        found: true,
+        sum: sumForecastProductiveForQuarter_(w, quarterKey, forecast.weeks)
+      };
+    }
+
+    var preResult = sumForecastProductiveQuarter_(picked.params, worker.resourceName, futureQk);
+    var preCommitProductive = preResult.sum;
+
+    var directPayload = {
+      opportunity_id: '',
+      resource_name: String(worker.resourceName),
+      resource_type: resourceType,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: totalHours,
+      distribution: 'Even',
+      status: 'Committed',
+      scenario_id: '',
+      notes: ''
+    };
+
+  // Omit resource_type — server must resolve from resource index (real soft-book path).
+    var booking = {
+      employee_id: String(worker.employeeId || ''),
+      resource_name: String(worker.resourceName),
+      start_date: startIso,
+      end_date: endIso,
+      total_hours: totalHours,
+      what: { type: 'opportunity', opportunity_id: '' }
+    };
+
+    var apiResult = api_commitSoftBookings('', [booking]);
+    var apiId = apiResult.committed[0] && apiResult.committed[0].assignment_id;
+    if (!apiId) {
+      failures.push('Check 4: api_commitSoftBookings returned no assignment_id');
+    } else {
+      idsToDelete.push(String(apiId));
+    }
+
+    invalidateCache_(ASSIGNMENTS);
+    var apiRow = readTable_(ASSIGNMENTS).find(function (r) {
+      return String(r.assignment_id) === String(apiId);
+    });
+    if (!apiRow) {
+      failures.push('Check 4: api-created assignment row not found');
+    } else {
+      if (String(apiRow.status || '') !== 'Committed') {
+        failures.push('Check 4: api-created row status not Committed (got ' + apiRow.status + ')');
+      } else {
+        Logger.log('  opportunity-path status=Committed OK');
+      }
+      var expectedFields = _dbg_wfm23DemandFields_(directPayload);
+      var apiFields = _dbg_wfm23DemandFields_(apiRow);
+      if (!_dbg_wfm23DemandFieldsEqual_(expectedFields, apiFields, TOL)) {
+        failures.push('Check 4: demand fields mismatch api vs expected — ' +
+          JSON.stringify({ expected: expectedFields, api: apiFields }));
+      } else {
+        Logger.log('  opportunity-path demand fields OK');
+      }
+      var expectedWeekly = _dbg_wfm23WeeklySignature_(directPayload, calendar);
+      var apiWeekly = _dbg_wfm23WeeklySignature_(apiRow, calendar);
+      if (expectedWeekly !== apiWeekly) {
+        failures.push('Check 4: weekly expansion mismatch api vs direct payload');
+      } else {
+        Logger.log('  opportunity-path weekly expansion OK');
+      }
+      if (!resourceType) {
+        if (String(apiRow.team_label || '') !== 'Unclassified') {
+          failures.push('Check 4: blank-resource_type team_label expected Unclassified got ' +
+            apiRow.team_label);
+        }
+        if (String(apiRow.role || '').trim() !== '') {
+          failures.push('Check 4: blank-resource_type role expected blank got ' + apiRow.role);
+        }
+        if (String(apiRow.team_label || '') === 'Unclassified' &&
+            String(apiRow.role || '').trim() === '') {
+          Logger.log('  primary blank-resource_type Unclassified/role-blank OK');
+        }
+      }
+
+      invalidateCache_(ASSIGNMENTS);
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+      var postResult = sumForecastProductiveQuarter_(picked.params, worker.resourceName, futureQk);
+      var postProductive = postResult.sum;
+      Logger.log('  Check 4 diag futureQk=' + futureQk);
+      Logger.log('  Check 4 diag preCommit found=' + preResult.found +
+        ' postCommit found=' + postResult.found);
+      Logger.log('  Check 4 diag preCommitProductive=' + preCommitProductive +
+        ' postProductive=' + postProductive);
+      var committedHoursDelta = postProductive - preCommitProductive;
+      var expectedCommittedHours = 0;
+      expandAssignmentToWeekly_(directPayload, calendar).forEach(function (w) {
+        if (fiscalQuarterKey_(w.week_start) === futureQk) {
+          expectedCommittedHours += Number(w.hours) || 0;
+        }
+      });
+      if (!near_(committedHoursDelta, expectedCommittedHours)) {
+        failures.push('Check 4: committed view productiveHours delta=' +
+          committedHoursDelta.toFixed(4) + ' expected=' + expectedCommittedHours.toFixed(4));
+      } else {
+        Logger.log('  committed view productiveHours delta=' + committedHoursDelta.toFixed(2) +
+          ' expected=' + expectedCommittedHours.toFixed(2) + ' OK');
+      }
+    }
+
+    var directSaved = saveAssignment_(directPayload);
+    if (directSaved && directSaved.assignment_id) {
+      idsToDelete.push(String(directSaved.assignment_id));
+    }
+
+    var labelBooking = {
+      employee_id: String(worker.employeeId || ''),
+      resource_name: String(worker.resourceName),
+      start_date: labelStartIso,
+      end_date: labelEndIso,
+      total_hours: labelHours,
+      what: { type: 'label', label: '_dbg_wfm23_label_test' }
+    };
+    var labelResult = api_commitSoftBookings('', [labelBooking]);
+    var labelId = labelResult.committed[0] && labelResult.committed[0].assignment_id;
+    if (!labelId) {
+      failures.push('Check 4: label-only commit returned no assignment_id');
+    } else {
+      idsToDelete.push(String(labelId));
+      invalidateCache_(ASSIGNMENTS);
+      var labelRow = readTable_(ASSIGNMENTS).find(function (r) {
+        return String(r.assignment_id) === String(labelId);
+      });
+      if (!labelRow) {
+        failures.push('Check 4: label-only assignment row not found');
+      } else {
+        if (String(labelRow.status || '') !== 'Committed') {
+          failures.push('Check 4: label-only row status not Committed');
+        }
+        if (String(labelRow.opportunity_id || '').trim() !== '') {
+          failures.push('Check 4: label-only row has non-blank opportunity_id');
+        }
+        if (String(labelRow.notes || '').indexOf('Soft-book label: ') !== 0) {
+          failures.push('Check 4: label-only notes missing Soft-book label: prefix');
+        } else {
+          Logger.log('  label-only status/opportunity_id/notes OK');
+        }
+        var labelShape = {
+          resource_name: labelRow.resource_name,
+          start_date: labelRow.start_date,
+          end_date: labelRow.end_date,
+          estimated_hours: labelHours,
+          distribution: 'Even',
+          status: 'Committed'
+        };
+        var labelWeekly = _dbg_wfm23WeeklySignature_(labelRow, calendar);
+        var labelExpectedWeekly = _dbg_wfm23WeeklySignature_(labelShape, calendar);
+        if (labelWeekly !== labelExpectedWeekly) {
+          failures.push('Check 4: label-only weekly expansion mismatch');
+        } else {
+          Logger.log('  label-only weekly expansion OK');
+        }
+      }
+    }
+
+    if (resourceType) {
+      Logger.log('  forced blank-resource_type commit (synthetic worker)');
+      var forcedBlankBooking = {
+        employee_id: '',
+        resource_name: '_dbg_wfm23_forced_blank_rt',
+        start_date: blankStartIso,
+        end_date: blankEndIso,
+        total_hours: blankHours,
+        what: { type: 'opportunity', opportunity_id: '' }
+      };
+      var forcedResult = api_commitSoftBookings('', [forcedBlankBooking]);
+      var forcedId = forcedResult.committed[0] && forcedResult.committed[0].assignment_id;
+      if (!forcedId) {
+        failures.push('Check 4: forced blank-resource_type commit returned no assignment_id');
+      } else {
+        idsToDelete.push(String(forcedId));
+        invalidateCache_(ASSIGNMENTS);
+        var forcedRow = readTable_(ASSIGNMENTS).find(function (r) {
+          return String(r.assignment_id) === String(forcedId);
+        });
+        if (!forcedRow) {
+          failures.push('Check 4: forced blank-resource_type assignment row not found');
+        } else {
+          if (String(forcedRow.status || '') !== 'Committed') {
+            failures.push('Check 4: forced blank-resource_type row status not Committed');
+          }
+          if (String(forcedRow.team_label || '') !== 'Unclassified') {
+            failures.push('Check 4: forced blank-resource_type team_label expected Unclassified got ' +
+              forcedRow.team_label);
+          }
+          if (String(forcedRow.role || '').trim() !== '') {
+            failures.push('Check 4: forced blank-resource_type role expected blank got ' +
+              forcedRow.role);
+          }
+          var forcedShape = {
+            resource_name: forcedRow.resource_name,
+            start_date: forcedRow.start_date,
+            end_date: forcedRow.end_date,
+            estimated_hours: blankHours,
+            distribution: 'Even',
+            status: 'Committed'
+          };
+          var forcedWeekly = _dbg_wfm23WeeklySignature_(forcedRow, calendar);
+          var forcedExpectedWeekly = _dbg_wfm23WeeklySignature_(forcedShape, calendar);
+          if (forcedWeekly !== forcedExpectedWeekly) {
+            failures.push('Check 4: forced blank-resource_type weekly expansion mismatch');
+          } else if (String(forcedRow.team_label || '') === 'Unclassified' &&
+              String(forcedRow.role || '').trim() === '') {
+            Logger.log('  forced blank-resource_type Unclassified/role-blank weekly OK');
+          }
+        }
+      }
+    }
+
+    var uniqueIds = [];
+    idsToDelete.forEach(function (id) {
+      if (id && uniqueIds.indexOf(id) < 0) uniqueIds.push(id);
+    });
+    _dbg_wfm23DeleteAssignmentsByIds_(uniqueIds);
+    scenarioIdsToDelete.forEach(function (sid) { _dbg_wfm23DeleteScenarioById_(sid); });
+    invalidateCache_(ASSIGNMENTS);
+
+    var assignCountAfter = readTable_(ASSIGNMENTS).length;
+    if (assignCountBefore !== assignCountAfter) {
+      failures.push('Check 4: Opportunity_Assignments row count ' + assignCountBefore +
+        ' before vs ' + assignCountAfter + ' after cleanup');
+      Logger.log('  CLEANUP FAILED: row count changed');
+    } else {
+      Logger.log('  cleanup OK — row count unchanged (' + assignCountBefore + ')');
+    }
+
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 4') === 0; })
+      ? '  Check 4: FAILED' : '  Check 4: OK');
+  })();
+
+  // ---- Check 6: current-quarter icpUtil cross-path (detailV2 / projection / scorecard) ----
+  (function checkCurQUtilCrossPath() {
+    Logger.log('=== WFM.23 Check 6: current-quarter A/B/C cross-verify + committed parity ===');
+    var params = {
+      viewMode: 'Committed',
+      workerScope: 'All',
+      includeTimeOff: false
+    };
+    var curQ = fiscalQuarterKey_(new Date());
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    var calendar = readCalendar_();
+    var assignCountBefore = readTable_(ASSIGNMENTS).length;
+    var idsToDelete = [];
+
+    function readPaths_(workerName, employeeId) {
+      var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
+      var qA = (v2.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      var projection = api_projectSoftBookings(params, []);
+      var baseWorker = (projection.baseline.worker || []).find(function (w) {
+        return w.resourceName === workerName || String(w.employeeId || '') === employeeId;
+      });
+      var qB = baseWorker ? (baseWorker.quarters || []).find(function (q) {
+        return q.quarterKey === curQ;
+      }) : null;
+      var scorecard = computeQuarterlyScorecard_(params);
+      var scWorker = (scorecard.workers || []).find(function (w) {
+        return w.worker === workerName || String(w.employeeId || '') === employeeId;
+      });
+      var qC = scWorker ? (scWorker.quarters || []).find(function (q) {
+        return q.quarterKey === curQ;
+      }) : null;
+      return { qA: qA, qB: qB, qC: qC };
+    }
+
+    function assertParity_(paths, label) {
+      var utilA = paths.qA ? Number(paths.qA.icpUtil) : NaN;
+      var utilB = paths.qB ? Number(paths.qB.icpUtil) : NaN;
+      var utilC = paths.qC ? Number(paths.qC.icpUtil) : NaN;
+      var prodA = paths.qA ? Number(paths.qA.productiveHours) : NaN;
+      var prodB = paths.qB ? Number(paths.qB.productiveHours) : NaN;
+      var prodC = paths.qC ? Number(paths.qC.productiveHours) : NaN;
+
+      Logger.log('  ' + label + ' Path A icpUtil=' + (isNaN(utilA) ? 'n/a' : utilA.toFixed(6)) +
+        ' productiveHours=' + (isNaN(prodA) ? 'n/a' : prodA.toFixed(4)));
+      Logger.log('  ' + label + ' Path B icpUtil=' + (isNaN(utilB) ? 'n/a' : utilB.toFixed(6)) +
+        ' productiveHours=' + (isNaN(prodB) ? 'n/a' : prodB.toFixed(4)));
+      Logger.log('  ' + label + ' Path C icpUtil=' + (isNaN(utilC) ? 'n/a' : utilC.toFixed(6)) +
+        ' productiveHours=' + (isNaN(prodC) ? 'n/a' : prodC.toFixed(4)));
+
+      if (isNaN(utilA) || isNaN(utilB) || isNaN(utilC) ||
+          isNaN(prodA) || isNaN(prodB) || isNaN(prodC)) {
+        failures.push('Check 6 (' + label + '): missing current-quarter values');
+        return false;
+      }
+      if (!near_(utilA, utilB) || !near_(utilA, utilC) || !near_(utilB, utilC)) {
+        failures.push('Check 6 (' + label + '): icpUtil diverges A=' + utilA.toFixed(6) +
+          ' B=' + utilB.toFixed(6) + ' C=' + utilC.toFixed(6));
+        return false;
+      }
+      if (!near_(prodA, prodB) || !near_(prodA, prodC) || !near_(prodB, prodC)) {
+        failures.push('Check 6 (' + label + '): productiveHours diverges A=' + prodA.toFixed(4) +
+          ' B=' + prodB.toFixed(4) + ' C=' + prodC.toFixed(4));
+        return false;
+      }
+      Logger.log('  ' + label + ': OK (A==B==C within ' + TOL + ')');
+      return true;
+    }
+
+    var forecast = computeWeeklyForecast_(params);
+    var workerPick = null;
+    (forecast.workers || []).some(function (w) {
+      var eid = String(w.employeeId || '');
+      var summary = eid ? actualsSummary[eid] : null;
+      if (summary && summary.qtd_icp_plus_forecast_hours > 0 &&
+          summary.bonus_target_billable_hours_eoq > 0) {
+        workerPick = w;
+        return true;
+      }
+      return false;
+    });
+    if (!workerPick) {
+      Logger.log('  SKIPPED: no worker with D8 bonus summary found');
+      return;
+    }
+    var workerName = String(workerPick.resource || '');
+    var employeeId = String(workerPick.employeeId || '');
+    Logger.log('  sample worker: ' + workerName + ' (' + employeeId + ') curQ=' + curQ);
+
+    var beforePaths = readPaths_(workerName, employeeId);
+    if (!assertParity_(beforePaths, 'before')) {
+      Logger.log('  Check 6: FAILED (before parity)');
+      return;
+    }
+
+    var bounds = fiscalQuarterBounds_(curQ);
+    var commitHours = 22;
+    var booking = {
+      employee_id: employeeId,
+      resource_name: workerName,
+      start_date: _toIso_(bounds.start),
+      end_date: _toIso_(bounds.end),
+      total_hours: commitHours,
+      what: { type: 'opportunity', opportunity_id: '' }
+    };
+    var commitShape = {
+      resource_name: workerName,
+      start_date: bounds.start,
+      end_date: bounds.end,
+      estimated_hours: commitHours,
+      distribution: 'Even',
+      status: 'Committed'
+    };
+    var expectedAdded = 0;
+    expandAssignmentToWeekly_(commitShape, calendar).forEach(function (w) {
+      if (fiscalQuarterKey_(w.week_start) === curQ) {
+        expectedAdded += Number(w.hours) || 0;
+      }
+    });
+    if (expectedAdded <= 0) {
+      failures.push('Check 6: expectedAdded recomputed as 0 for current quarter ' + curQ);
+      Logger.log('  Check 6: FAILED (expectedAdded=0)');
+      return;
+    }
+
+    var commitResult = api_commitSoftBookings('', [booking]);
+    var commitId = commitResult.committed[0] && commitResult.committed[0].assignment_id;
+    if (!commitId) {
+      failures.push('Check 6: api_commitSoftBookings returned no assignment_id');
+      Logger.log('  Check 6: FAILED (no assignment_id)');
+      return;
+    }
+    idsToDelete.push(String(commitId));
+    invalidateCache_(ASSIGNMENTS);
+    if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+
+    var afterPaths = readPaths_(workerName, employeeId);
+    var prodDeltaA = Number(afterPaths.qA.productiveHours) - Number(beforePaths.qA.productiveHours);
+    var prodDeltaB = Number(afterPaths.qB.productiveHours) - Number(beforePaths.qB.productiveHours);
+    var prodDeltaC = Number(afterPaths.qC.productiveHours) - Number(beforePaths.qC.productiveHours);
+    Logger.log('  after commit productiveHours delta A=' + prodDeltaA.toFixed(4) +
+      ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+      ' expected=' + expectedAdded.toFixed(4));
+
+    if (!near_(prodDeltaA, expectedAdded) || !near_(prodDeltaB, expectedAdded) ||
+        !near_(prodDeltaC, expectedAdded)) {
+      failures.push('Check 6 (after): productiveHours delta A=' + prodDeltaA.toFixed(4) +
+        ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+        ' expected=' + expectedAdded.toFixed(4));
+    }
+    if (!assertParity_(afterPaths, 'after')) {
+      Logger.log('  Check 6: FAILED (after parity)');
+    }
+
+    _dbg_wfm23DeleteAssignmentsByIds_(idsToDelete);
+    invalidateCache_(ASSIGNMENTS);
+    if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+    var assignCountAfter = readTable_(ASSIGNMENTS).length;
+    if (assignCountBefore !== assignCountAfter) {
+      failures.push('Check 6: Opportunity_Assignments row count ' + assignCountBefore +
+        ' before vs ' + assignCountAfter + ' after cleanup');
+      Logger.log('  CLEANUP FAILED: row count changed');
+    } else {
+      Logger.log('  cleanup OK — row count unchanged (' + assignCountBefore + ')');
+    }
+
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 6') === 0; })
+      ? '  Check 6: FAILED' : '  Check 6: OK');
+  })();
+
+  // ---- Check 7: reduction scoped to forward quarters (WFM.25 item 3) ----
+  (function checkReductionReconciliation() {
+    Logger.log('=== WFM.25 Check 7: forward-quarter reductions only; current quarter non-reducible ===');
+    var params = {
+      viewMode: 'Committed',
+      workerScope: 'All',
+      includeTimeOff: false
+    };
+    var curQ = fiscalQuarterKey_(new Date());
+    var calendar = readCalendar_();
+    var forecast = computeWeeklyForecast_(params);
+    var weeks = forecast.weeks || [];
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    var adjCountBefore = readTable_(CAPACITY_ADJUSTMENTS_SHEET).length;
+    var windowKeys = scorecardWindowKeys_();
+    var forwardKeys = [];
+    var pastCurQ = false;
+    windowKeys.forEach(function (qk) {
+      if (qk === curQ) { pastCurQ = true; return; }
+      if (pastCurQ) forwardKeys.push(qk);
+    });
+
+    function forecastRemainingQuarter_(worker, quarterKey) {
+      return forecastRemainingProductiveForQuarter_(worker, quarterKey, weeks);
+    }
+
+    /** Fresh committed baseline before each sub-case snapshot (avoids Check 6 stale L1 cache). */
+    function flushBaselineCaches_() {
+      if (typeof api_flushCaches === 'function') api_flushCaches();
+      if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+        invalidateSoftBookingBaselineCache_();
+      }
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+    }
+
+    function clampSnapForWorker_(worker) {
+      return {
+        employeeId: worker.employeeId,
+        productiveWeekly: Object.assign({}, worker.productiveWeekly || {}),
+        workerWeekly: Object.assign({}, worker.workerWeekly || {}),
+        projects: JSON.parse(JSON.stringify(worker.projects || {})),
+        blendedWeekly: JSON.parse(JSON.stringify(worker.blendedWeekly || {}))
+      };
+    }
+
+    function expectedReduced_(worker, reduceHours, quarterKey) {
+      var bounds = fiscalQuarterBounds_(quarterKey);
+      var commitShape = {
+        resource_name: String(worker.resource || ''),
+        start_date: bounds.start,
+        end_date: bounds.end,
+        hours_reduction: reduceHours,
+        distribution: 'Even',
+        direction: 'reduce'
+      };
+      var clamped = expandClampedAdjustmentWeekly_(
+        clampSnapForWorker_(worker), commitShape, calendar, false);
+      var total = 0;
+      clamped.weeks.forEach(function (w) {
+        if (fiscalQuarterKey_(w.week_start) !== quarterKey) return;
+        total += Number(w.hours_reduction) || 0;
+      });
+      return total;
+    }
+
+    function readPaths_(workerName, employeeId, quarterKey) {
+      quarterKey = quarterKey || curQ;
+      var v2 = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
+      var qA = (v2.quarters || []).find(function (q) { return q.quarterKey === quarterKey; });
+      var projection = api_projectSoftBookings(params, []);
+      var baseWorker = (projection.baseline.worker || []).find(function (w) {
+        return w.resourceName === workerName || String(w.employeeId || '') === employeeId;
+      });
+      var qB = baseWorker ? (baseWorker.quarters || []).find(function (q) {
+        return q.quarterKey === quarterKey;
+      }) : null;
+      var scorecard = computeQuarterlyScorecard_(params);
+      var scWorker = (scorecard.workers || []).find(function (w) {
+        return w.worker === workerName || String(w.employeeId || '') === employeeId;
+      });
+      var qC = scWorker ? (scWorker.quarters || []).find(function (q) {
+        return q.quarterKey === quarterKey;
+      }) : null;
+      return { qA: qA, qB: qB, qC: qC };
+    }
+
+    function assertParity_(paths, label) {
+      var utilA = paths.qA ? Number(paths.qA.icpUtil) : NaN;
+      var utilB = paths.qB ? Number(paths.qB.icpUtil) : NaN;
+      var utilC = paths.qC ? Number(paths.qC.icpUtil) : NaN;
+      var prodA = paths.qA ? Number(paths.qA.productiveHours) : NaN;
+      var prodB = paths.qB ? Number(paths.qB.productiveHours) : NaN;
+      var prodC = paths.qC ? Number(paths.qC.productiveHours) : NaN;
+      if (isNaN(utilA) || isNaN(utilB) || isNaN(utilC) ||
+          isNaN(prodA) || isNaN(prodB) || isNaN(prodC)) {
+        failures.push('Check 7 (' + label + '): missing quarter values');
+        return false;
+      }
+      if (!near_(utilA, utilB) || !near_(utilA, utilC) || !near_(utilB, utilC)) {
+        failures.push('Check 7 (' + label + '): icpUtil diverges A=' + utilA.toFixed(6) +
+          ' B=' + utilB.toFixed(6) + ' C=' + utilC.toFixed(6));
+        return false;
+      }
+      if (!near_(prodA, prodB) || !near_(prodA, prodC) || !near_(prodB, prodC)) {
+        failures.push('Check 7 (' + label + '): productiveHours diverges A=' + prodA.toFixed(4) +
+          ' B=' + prodB.toFixed(4) + ' C=' + prodC.toFixed(4));
+        return false;
+      }
+      Logger.log('  ' + label + ': OK (A==B==C within ' + TOL + ')');
+      return true;
+    }
+
+    function makeBooking_(worker, quarterKey, reduceHours) {
+      var bounds = fiscalQuarterBounds_(quarterKey);
+      return {
+        employee_id: String(worker.employeeId || ''),
+        resource_name: String(worker.resource || ''),
+        start_date: _toIso_(bounds.start),
+        end_date: _toIso_(bounds.end),
+        total_hours: reduceHours,
+        direction: 'reduce',
+        what: { type: 'label', label: 'WFM25 Check 7 test' }
+      };
+    }
+
+    function runReductionCase_(label, worker, quarterKey, reduceHours, expectZeroEffect) {
+      var workerName = String(worker.resource || '');
+      var employeeId = String(worker.employeeId || '');
+      var forecastRemaining = forecastRemainingQuarter_(worker, quarterKey);
+      var expectedApplied = expectZeroEffect ? 0 : expectedReduced_(worker, reduceHours, quarterKey);
+
+      Logger.log('  --- ' + label + ': ' + workerName + ' ' + quarterKey +
+        ' draft=' + reduceHours + 'h forecastRemaining=' + forecastRemaining.toFixed(4) +
+        ' expectedApplied=' + expectedApplied.toFixed(4) +
+        (expectZeroEffect ? ' (current quarter non-reducible)' : '') + ' ---');
+
+      if (expectZeroEffect && Math.abs(expectedApplied) > 0.001) {
+        failures.push('Check 7 (' + label + '): current-quarter expectedApplied should be 0, got ' +
+          expectedApplied.toFixed(4));
+      }
+
+      flushBaselineCaches_();
+      var beforePaths = readPaths_(workerName, employeeId, quarterKey);
+      var beforeUtil = beforePaths.qA ? Number(beforePaths.qA.icpUtil) : NaN;
+      var beforeProd = beforePaths.qA ? Number(beforePaths.qA.productiveHours) : NaN;
+
+      var preview = api_projectSoftBookings(params, [makeBooking_(worker, quarterKey, reduceHours)]);
+      var previewWorker = (preview.projected.worker || []).find(function (w) {
+        return w.resourceName === workerName;
+      });
+      var previewQ = previewWorker ? (previewWorker.quarters || []).find(function (q) {
+        return q.quarterKey === quarterKey;
+      }) : null;
+      var previewUtil = previewQ ? Number(previewQ.icpUtil) : NaN;
+      if (isNaN(previewUtil)) {
+        failures.push('Check 7 (' + label + '): preview projected icpUtil missing');
+        return;
+      }
+
+      (previewWorker && previewWorker.weeks ? previewWorker.weeks : []).forEach(function (wk) {
+        if (Number(wk.hours) < -0.001) {
+          failures.push('Check 7 (' + label + '): preview week ' + wk.weekKey +
+            ' hours below zero: ' + wk.hours);
+        }
+      });
+
+      if (expectZeroEffect || expectedApplied <= 0.001) {
+        if (!near_(previewUtil, beforeUtil)) {
+          failures.push('Check 7 (' + label + '): zero-effect preview util ' +
+            previewUtil.toFixed(6) + ' != baseline ' + beforeUtil.toFixed(6));
+        }
+      }
+
+      var commitResult = api_commitSoftBookings('', [makeBooking_(worker, quarterKey, reduceHours)]);
+      var commitId = commitResult.committed[0] && commitResult.committed[0].adjustment_id;
+      if (!commitId) {
+        failures.push('Check 7 (' + label + '): api_commitSoftBookings returned no adjustment_id');
+        return;
+      }
+      var caseIds = [String(commitId)];
+      invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+
+      var committedBaseline = api_projectSoftBookings(params, []);
+      var committedWorker = (committedBaseline.baseline.worker || []).find(function (w) {
+        return w.resourceName === workerName;
+      });
+      var committedQ = committedWorker ? (committedWorker.quarters || []).find(function (q) {
+        return q.quarterKey === quarterKey;
+      }) : null;
+      var committedUtil = committedQ ? Number(committedQ.icpUtil) : NaN;
+      if (!near_(previewUtil, committedUtil)) {
+        failures.push('Check 7 (' + label + '): preview util ' + previewUtil.toFixed(6) +
+          ' != committed baseline util ' + committedUtil.toFixed(6));
+      }
+
+      var afterPaths = readPaths_(workerName, employeeId, quarterKey);
+      if (!assertParity_(afterPaths, label + ' after')) {
+        Logger.log('  Check 7 (' + label + '): FAILED (after parity)');
+      }
+
+      var prodDeltaA = Number(afterPaths.qA.productiveHours) - Number(beforePaths.qA.productiveHours);
+      var prodDeltaB = Number(afterPaths.qB.productiveHours) - Number(beforePaths.qB.productiveHours);
+      var prodDeltaC = Number(afterPaths.qC.productiveHours) - Number(beforePaths.qC.productiveHours);
+      var expectedDelta = expectZeroEffect ? 0 : -expectedApplied;
+      Logger.log('  ' + label + ' productiveHours delta A=' + prodDeltaA.toFixed(4) +
+        ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+        ' expected=' + expectedDelta.toFixed(4));
+
+      if (!near_(prodDeltaA, expectedDelta) || !near_(prodDeltaB, expectedDelta) ||
+          !near_(prodDeltaC, expectedDelta)) {
+        failures.push('Check 7 (' + label + ' after): productiveHours delta A=' +
+          prodDeltaA.toFixed(4) + ' B=' + prodDeltaB.toFixed(4) + ' C=' + prodDeltaC.toFixed(4) +
+          ' expected=' + expectedDelta.toFixed(4));
+      }
+
+      if (expectZeroEffect) {
+        if (!near_(afterPaths.qA.icpUtil, beforeUtil) || !near_(afterPaths.qB.icpUtil, beforeUtil) ||
+            !near_(afterPaths.qC.icpUtil, beforeUtil)) {
+          failures.push('Check 7 (' + label + '): current-quarter util changed after reduction');
+        }
+        if (!near_(Number(afterPaths.qA.productiveHours), beforeProd)) {
+          failures.push('Check 7 (' + label + '): current-quarter productiveHours changed');
+        }
+      }
+
+      var v2After = api_getResourceDetailV2(Object.assign({ resource: workerName }, params));
+      (v2After.weeks || []).forEach(function (wk) {
+        if (!wk.isActual && Number(wk.hours) < -0.001) {
+          failures.push('Check 7 (' + label + '): committed week ' + wk.weekKey +
+            ' hours below zero: ' + wk.hours);
+        }
+      });
+
+      _dbg_wfm25DeleteAdjustmentsByIds_(caseIds);
+      invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+      if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+        invalidateSoftBookingBaselineCache_();
+      }
+    }
+
+    // Sub-case 7a: current quarter is non-reducible (D8 summary worker).
+    var d8Worker = null;
+    (forecast.workers || []).some(function (w) {
+      var summary = w.employeeId ? actualsSummary[w.employeeId] : null;
+      if (!summary || !(summary.qtd_icp_plus_forecast_hours > 0) ||
+          !(summary.bonus_target_billable_hours_eoq > 0)) return false;
+      d8Worker = w;
+      return true;
+    });
+    if (!d8Worker) {
+      Logger.log('  SKIPPED sub-case 7a: no worker with current-quarter D8 summary');
+    } else {
+      Logger.log('  sub-case 7a worker: ' + d8Worker.resource + ' curQ=' + curQ);
+      runReductionCase_('7a current-quarter', d8Worker, curQ, 18, true);
+    }
+
+    // Sub-case 7b: forward-quarter reduction (under- and over-draft).
+    var forecastPick = null;
+    var forecastQk = null;
+    forwardKeys.some(function (qk) {
+      return (forecast.workers || []).some(function (w) {
+        var remaining = forecastRemainingQuarter_(w, qk);
+        if (remaining >= 10) {
+          forecastPick = w;
+          forecastQk = qk;
+          return true;
+        }
+        return false;
+      });
+    });
+    if (!forecastPick) {
+      Logger.log('SKIPPED: no forward forecast-remaining worker (checked ' +
+        forwardKeys.join(', ') + ')');
+    } else {
+      var remainingHrs = forecastRemainingQuarter_(forecastPick, forecastQk);
+      Logger.log('  sub-case 7b worker: ' + forecastPick.resource + ' quarter=' + forecastQk +
+        ' forecastRemaining=' + remainingHrs.toFixed(4));
+      var underDraft = Math.max(1, Math.min(8, Math.floor(remainingHrs * 0.4)));
+      runReductionCase_('7b under-draft', forecastPick, forecastQk, underDraft, false);
+      forecast = computeWeeklyForecast_(params);
+      forecastPick = (forecast.workers || []).find(function (w) {
+        return String(w.resource || '') === String(forecastPick.resource || '');
+      }) || forecastPick;
+      remainingHrs = forecastRemainingQuarter_(forecastPick, forecastQk);
+      var overDraft = Math.ceil(remainingHrs + 12);
+      runReductionCase_('7b over-draft', forecastPick, forecastQk, overDraft, false);
+    }
+
+    var adjCountAfter = readTable_(CAPACITY_ADJUSTMENTS_SHEET).length;
+    if (adjCountBefore !== adjCountAfter) {
+      failures.push('Check 7: Capacity_Adjustments row count ' + adjCountBefore +
+        ' before vs ' + adjCountAfter + ' after cleanup');
+      Logger.log('  CLEANUP FAILED: adjustment row count changed');
+    } else {
+      Logger.log('  cleanup OK — row count unchanged (' + adjCountBefore + ')');
+    }
+
+    Logger.log(failures.some(function (f) { return f.indexOf('Check 7') === 0; })
+      ? '  Check 7: FAILED' : '  Check 7: OK');
+  })();
+
+  // ---- Check 5: no regression (WFM.15 / 17 / 18) ----
+  (function checkNoRegression() {
+    Logger.log('=== WFM.23 Check 5: no regression ===');
+    if (typeof api_flushCaches === 'function') api_flushCaches();
+
+    function runGate_(fn, okToken) {
+      var before = Logger.getLog() || '';
+      try {
+        fn();
+      } catch (e) {
+        failures.push('Check 5: ' + fn.name + ' threw ΓÇö ' + e);
+        return false;
+      }
+      var after = Logger.getLog() || '';
+      var slice = after.slice(before.length);
+      if (slice.indexOf(okToken) < 0) {
+        failures.push('Check 5: ' + fn.name + ' did not print ' + okToken);
+        return false;
+      }
+      return true;
+    }
+
+    var ok15 = runGate_(_dbg_reconcileWFM15, '_dbg_reconcileWFM15: ALL CASES OK');
+    var ok17 = runGate_(_dbg_reconcileWFM17, '_dbg_reconcileWFM17: ALL CHECKS OK');
+    var ok18 = runGate_(_dbg_reconcileWFM18, '_dbg_reconcileWFM18: ALL CHECKS OK');
+    Logger.log('  WFM.15=' + (ok15 ? 'OK' : 'FAIL') +
+      ' WFM.17=' + (ok17 ? 'OK' : 'FAIL') +
+      ' WFM.18=' + (ok18 ? 'OK' : 'FAIL'));
+  })();
+
+  Logger.log('WFM.25 two-state: commit writes Committed; gates re-anchored — committed baseline includes committed soft-bookings.');
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM23: ALL CHECKS OK'
+    : '_dbg_reconcileWFM23: ' + failures.length + ' CHECK(S) FAILED ΓÇö DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}
+
+/**
+ * WFM.23: verify CacheService L2 baseline cache ΓÇö two back-to-back
+ * api_projectSoftBookings calls with identical filters should log
+ * baselineCache=hit on the second call.
+ */
+function _dbg_wfm23BaselineCacheCheck() {
+  _dbg_requireAdmin_();
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  var params = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+  var mgrRows = readConfigSlgManagers_();
+  var descendants = buildManagerDescendants_(mgrRows);
+  mgrRows.some(function (r) {
+    if ((descendants[r.manager_name] || []).length >= 1) {
+      params.teams = [r.manager_name];
+      params.includeMyManagers = true;
+      return true;
+    }
+    return false;
+  });
+
+  Logger.log('=== WFM.23 baseline CacheService L2 check ===');
+  var before = Logger.getLog() || '';
+  api_projectSoftBookings(params, []);
+  var mid = Logger.getLog() || '';
+  var firstSlice = mid.slice(before.length);
+  var firstHit = firstSlice.indexOf('baselineCache=hit') >= 0;
+
+  api_projectSoftBookings(params, []);
+  var after = Logger.getLog() || '';
+  var secondSlice = after.slice(mid.length);
+  var secondHit = secondSlice.indexOf('baselineCache=hit') >= 0;
+
+  Logger.log('  call 1 baselineCache=' + (firstHit ? 'hit' : 'miss'));
+  Logger.log('  call 2 baselineCache=' + (secondHit ? 'hit' : 'miss') +
+    (secondHit ? ' OK' : ' FAILED ΓÇö expected hit on warm L2'));
+  if (!secondHit) {
+    Logger.log('_dbg_wfm23BaselineCacheCheck: FAILED');
+    return;
+  }
+  Logger.log('_dbg_wfm23BaselineCacheCheck: OK');
+}
+
+/**
+ * WFM.23 investigation: trace Lauren Vannini Explorer FY27-Q2 scorecard cell
+ * and City of PHX Modeled assignment visibility (Logger.log only).
+ */
+function _dbg_traceLaurenExplorer() {
+  _dbg_requireAdmin_();
+  var WORKER = 'Lauren Vannini';
+  var TRACE_Q = 'FY27-Q2';
+  var curQ = fiscalQuarterKey_(new Date());
+
+  Logger.log('=== _dbg_traceLaurenExplorer: ' + WORKER + ' ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' currentFiscalQuarter=' + curQ);
+
+  // ---- 1. Actuals_Worker_Summary row ----
+  Logger.log('--- 1. Actuals_Worker_Summary ---');
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+  var info = resIndex[WORKER] || {};
+  var employeeId = String(info.employee_id || '').trim();
+  var summary = employeeId ? actualsSummary[employeeId] : null;
+  if (!summary) {
+    Object.keys(actualsSummary).some(function (eid) {
+      if (String(actualsSummary[eid].resource_name || '') === WORKER) {
+        summary = actualsSummary[eid];
+        employeeId = eid;
+        return true;
+      }
+      return false;
+    });
+  }
+  if (!summary) {
+    Logger.log('  NOT FOUND ΓÇö employee_id from resource index=' + (employeeId || '(blank)'));
+  } else {
+    Logger.log('  employee_id=' + summary.employee_id);
+    Logger.log('  resource_name=' + summary.resource_name);
+    Logger.log('  qtd_actual_icp_hours=' + summary.qtd_actual_icp_hours);
+    Logger.log('  qtd_icp_plus_forecast_hours=' + summary.qtd_icp_plus_forecast_hours);
+    Logger.log('  bonus_target_billable_hours_eoq=' + summary.bonus_target_billable_hours_eoq);
+  }
+
+  // ---- 2. quarterWorkdaySummary_ for FY27-Q2 ----
+  var holidays = readHolidays_();
+  var wd = quarterWorkdaySummary_(TRACE_Q, holidays);
+  Logger.log('--- 2. quarterWorkdaySummary_(' + TRACE_Q + ') ---');
+  Logger.log('  workdays=' + wd.workdays);
+  Logger.log('  holidayHours=' + wd.holidayHours);
+  Logger.log('  icpAvailableHours=' + wd.icpAvailableHours);
+  Logger.log('  rawCapacityHours=' + wd.rawCapacityHours);
+
+  // ---- 3. Current-quarter scorecard cell (buildWorkerQuarters_ path) ----
+  Logger.log('--- 3. buildWorkerQuarters_ scorecard cell (' + TRACE_Q + ') ---');
+  var settings = readSettings_();
+  var forecastParams = { viewMode: 'Committed', workerScope: 'SLG', includeTimeOff: false };
+  var forecast = computeWeeklyForecast_(forecastParams);
+  var worker = (forecast.workers || []).find(function (w) { return w.resource === WORKER; });
+  if (!worker) {
+    Logger.log('  worker NOT FOUND in computeWeeklyForecast_ (Committed/SLG)');
+  } else {
+    Logger.log('  employeeId=' + worker.employeeId + ' icpRole=' + worker.icpRole +
+      ' jobProfile=' + worker.jobProfile + ' icpTarget=' + worker.icpTarget);
+    var quarters = buildWorkerQuarters_(
+      worker, [TRACE_Q], forecast.weeks, holidays, actualsSummary, settings, curQ);
+    var cell = quarters[0];
+    if (!cell) {
+      Logger.log('  quarter cell missing');
+    } else {
+      Logger.log('  source=' + cell.source);
+      Logger.log('  productiveHours=' + cell.productiveHours);
+      Logger.log('  denominator (icpAvailableHours)=' + cell.icpAvailableHours);
+      Logger.log('  icpUtil=' + (cell.icpUtil * 100).toFixed(4) + '%');
+      Logger.log('  arithmetic: ' + cell.productiveHours + ' / ' + cell.icpAvailableHours +
+        ' = ' + cell.icpUtil.toFixed(6) + ' (' + (cell.icpUtil * 100).toFixed(2) + '%)');
+      Logger.log('  targetHours=' + cell.targetHours + ' appTargetHours=' + cell.appTargetHours);
+      Logger.log('  bonusAttainment=' + (cell.bonusAttainment * 100).toFixed(4) + '%');
+      Logger.log('  financeUtil=' + (cell.financeUtil * 100).toFixed(4) + '%');
+      if (cell.isCurrentQuarter && summary) {
+        Logger.log('  current-quarter inputs: qtd_icp_plus_forecast_hours=' +
+          summary.qtd_icp_plus_forecast_hours + ' (numerator when source=actuals_plus_forecast)');
+      }
+    }
+  }
+
+  // ---- Locate City of PHX assignment ----
+  Logger.log('--- 4. Assignment + forecast visibility (Committed vs Scenario) ---');
+  var assigns = cachedRead_(ASSIGNMENTS);
+  var phxAssign = null;
+  assigns.forEach(function (a) {
+    if (String(a.resource_name || '') !== WORKER) return;
+    var startIso = String(a.start_date || '').slice(0, 10);
+    var notes = String(a.notes || '');
+    var opp = String(a.opportunity_id || '');
+    if (Number(a.estimated_hours) === 32 && startIso === '2026-09-28') {
+      phxAssign = a;
+    } else if (notes.indexOf('PHX') >= 0 || opp.indexOf('PHX') >= 0) {
+      if (!phxAssign) phxAssign = a;
+    }
+  });
+  if (!phxAssign) {
+    Logger.log('  City of PHX assignment NOT FOUND ΓÇö listing all ' + WORKER + ' assignments:');
+    assigns.filter(function (a) { return String(a.resource_name) === WORKER; }).forEach(function (a) {
+      Logger.log('    id=' + a.assignment_id + ' status=' + a.status +
+        ' hours=' + a.estimated_hours +
+        ' ' + String(a.start_date || '').slice(0, 10) + 'ΓåÆ' + String(a.end_date || '').slice(0, 10) +
+        ' opp=' + a.opportunity_id + ' notes=' + a.notes);
+    });
+  } else {
+    Logger.log('  assignment_id=' + phxAssign.assignment_id);
+    Logger.log('  status=' + phxAssign.status);
+    Logger.log('  estimated_hours=' + phxAssign.estimated_hours);
+    Logger.log('  start_date=' + String(phxAssign.start_date || '').slice(0, 10));
+    Logger.log('  end_date=' + String(phxAssign.end_date || '').slice(0, 10));
+    Logger.log('  opportunity_id=' + phxAssign.opportunity_id);
+    Logger.log('  scenario_id=' + phxAssign.scenario_id);
+    Logger.log('  notes=' + phxAssign.notes);
+  }
+
+  var calendar = readCalendar_();
+  var weekQkMap = {};
+  (calendar.weeks || []).forEach(function (wk) {
+    weekQkMap[wk.week_key] = fiscalQuarterKey_(wk.week_start);
+  });
+
+  function assignmentIncludedInView_(assign, viewMode, scenarioId) {
+    if (!assign) return false;
+    var isCommitted = (assign.status === 'Committed');
+    var isModeled = (assign.status === 'Modeled');
+    return isCommitted ||
+      (viewMode === 'Scenario' && isModeled &&
+       (!scenarioId || String(assign.scenario_id || '') === String(scenarioId || '')));
+  }
+
+  function traceForecastMode_(viewMode) {
+    Logger.log('  --- viewMode=' + viewMode + ' ---');
+    var included = assignmentIncludedInView_(phxAssign, viewMode, '');
+    Logger.log('    PHX assignment included by filter logic: ' + included +
+      ' (status=' + (phxAssign ? phxAssign.status : 'n/a') + ')');
+    var fc = computeWeeklyForecast_({
+      viewMode: viewMode,
+      workerScope: 'SLG',
+      includeTimeOff: false
+    });
+    var w = (fc.workers || []).find(function (x) { return x.resource === WORKER; });
+    if (!w) {
+      Logger.log('    worker not in forecast');
+      return;
+    }
+    var assignHoursByWeek = {};
+    var assignHoursByQuarter = {};
+    var totalAssign = 0;
+    Object.keys(w.projects || {}).forEach(function (proj) {
+      if (proj.indexOf('Assignment') !== 0) return;
+      Object.keys(w.projects[proj]).forEach(function (wk) {
+        var h = Number(w.projects[proj][wk]) || 0;
+        if (!h) return;
+        assignHoursByWeek[wk] = (assignHoursByWeek[wk] || 0) + h;
+        totalAssign += h;
+        var qk = weekQkMap[wk] || '(unknown)';
+        assignHoursByQuarter[qk] = (assignHoursByQuarter[qk] || 0) + h;
+      });
+    });
+    Logger.log('    total Assignment project hours across all weeks: ' + totalAssign.toFixed(4));
+    if (phxAssign && included) {
+      var expanded = expandAssignmentToWeekly_(phxAssign, calendar) || [];
+      var phxTotal = 0;
+      var phxByQuarter = {};
+      expanded.forEach(function (ew) {
+        var wk = String(ew.week_key || '');
+        var h = Number(ew.hours) || 0;
+        phxTotal += h;
+        var qk = weekQkMap[wk] || fiscalQuarterKey_(wk);
+        phxByQuarter[qk] = (phxByQuarter[qk] || 0) + h;
+        var inForecast = Number(assignHoursByWeek[wk] || 0);
+        Logger.log('      week ' + wk + ' q=' + qk + ' expanded=' + h.toFixed(4) +
+          ' in-forecast-assign=' + inForecast.toFixed(4));
+      });
+      Logger.log('    PHX expandAssignmentToWeekly_ total=' + phxTotal.toFixed(4));
+      Object.keys(phxByQuarter).sort().forEach(function (qk) {
+        Logger.log('      quarter ' + qk + ': ' + phxByQuarter[qk].toFixed(4) + 'h');
+      });
+    } else if (phxAssign) {
+      Logger.log('    PHX assignment excluded ΓÇö no weekly hours expected in this viewMode');
+    }
+    if (Object.keys(assignHoursByQuarter).length) {
+      Logger.log('    all assignment hours by fiscal quarter:');
+      Object.keys(assignHoursByQuarter).sort().forEach(function (qk) {
+        Logger.log('      ' + qk + ': ' + assignHoursByQuarter[qk].toFixed(4) + 'h');
+      });
+    }
+    var visibleWeeks = (typeof _deriveVisibleWeeksFiscal_ === 'function')
+      ? _deriveVisibleWeeksFiscal_(fc.weeks) : [];
+    var visibleKeys = {};
+    visibleWeeks.forEach(function (vw) { visibleKeys[vw.week_key] = true; });
+    var visibleAssign = 0;
+    Object.keys(assignHoursByWeek).forEach(function (wk) {
+      if (visibleKeys[wk]) visibleAssign += assignHoursByWeek[wk];
+    });
+    Logger.log('    Explorer strip scope: ' + curQ + ' + nextQ (' + visibleWeeks.length + ' weeks)');
+    Logger.log('    assignment hours in visible strip window: ' + visibleAssign.toFixed(4));
+  }
+
+  traceForecastMode_('Committed');
+  traceForecastMode_('Scenario');
+
+  // ---- 5. expandAssignmentToWeekly_ raw output ----
+  Logger.log('--- 5. expandAssignmentToWeekly_ (PHX assignment) ---');
+  if (!phxAssign) {
+    Logger.log('  skipped ΓÇö assignment not found');
+  } else {
+    var weeks = expandAssignmentToWeekly_(phxAssign, calendar) || [];
+    var sum = 0;
+    weeks.forEach(function (w) {
+      var h = Number(w.hours) || 0;
+      sum += h;
+      var qk = weekQkMap[w.week_key] || fiscalQuarterKey_(w.week_start || w.week_key);
+      Logger.log('  ' + w.week_key + ' ΓåÆ ' + h.toFixed(4) + 'h  (' + qk + ')');
+    });
+    Logger.log('  total expanded hours: ' + sum.toFixed(4) +
+      ' (sheet estimated_hours=' + phxAssign.estimated_hours + ')');
+    if (weeks.length) {
+      var firstQk = weekQkMap[weeks[0].week_key] || '?';
+      var lastQk = weekQkMap[weeks[weeks.length - 1].week_key] || '?';
+      Logger.log('  fiscal quarter span: ' + firstQk + ' ΓåÆ ' + lastQk);
+    }
+  }
+
+  Logger.log('=== _dbg_traceLaurenExplorer: DONE ===');
+}
+
+/**
+ * WFM.24 Stage 1 discovery: surface real WoW Utilization_Quarterly targets vs
+ * formula anchors and probe D8 current-quarter ICP-util scale pairing (read-only).
+ */
+function _dbg_traceWoWTargets() {
+  _dbg_requireAdmin_();
+  var AIDAN = 'Aidan Votaw';
+  var TRACE_Q = 'FY27-Q2';
+  var curQ = fiscalQuarterKey_(new Date());
+
+  Logger.log('=== _dbg_traceWoWTargets ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' currentFiscalQuarter=' + curQ);
+
+  var wowRows = cachedRead_(CFG_UTIL_QUARTERLY);
+  var holidays = readHolidays_();
+  var settings = readSettings_();
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+
+  function printWowRow_(r) {
+    Logger.log('    employee_id=' + r.employee_id +
+      ' resource_name=' + r.resource_name +
+      ' fiscal_quarter=' + r.fiscal_quarter +
+      ' target_hours=' + r.target_hours +
+      ' util_rate_wkly=' + r.util_rate_wkly +
+      ' qtd_actual_icp=' + r.qtd_actual_icp +
+      ' qtd_icp_plus_forecast=' + r.qtd_icp_plus_forecast +
+      ' source_sheet=' + r.source_sheet);
+  }
+
+  function profileForWorker_(name, fallbackIcp, fallbackProfile) {
+    var info = resIndex[name] || {};
+    return {
+      icpRole: String(info.icp || fallbackIcp || ''),
+      jobProfile: String(info.job_profile || fallbackProfile || '')
+    };
+  }
+
+  function findP6Worker_() {
+    var hit = '';
+    wowRows.some(function (r) {
+      var nm = String(r.resource_name || '');
+      if (/P6/i.test(nm) || /P6 Delivery/i.test(String(r.source_sheet || ''))) {
+        hit = nm;
+        return true;
+      }
+      return false;
+    });
+    if (hit) return hit;
+    Object.keys(resIndex).some(function (name) {
+      var jp = String(resIndex[name].job_profile || '');
+      if (/P6 Delivery Consultant/i.test(jp)) {
+        hit = name;
+        return true;
+      }
+      return false;
+    });
+    if (hit) return hit;
+    Object.keys(resIndex).some(function (name) {
+      if (/^P6$/i.test(String(resIndex[name].icp || '')) ||
+          /P6/i.test(String(resIndex[name].job_profile || ''))) {
+        hit = name;
+        return true;
+      }
+      return false;
+    });
+    return hit;
+  }
+
+  var p6Worker = findP6Worker_();
+  var anchorWorkers = [AIDAN];
+  if (p6Worker && anchorWorkers.indexOf(p6Worker) < 0) anchorWorkers.push(p6Worker);
+
+  // ---- 1. Raw Utilization_Quarterly rows for anchor profiles ----
+  Logger.log('--- 1. Utilization_Quarterly rows (anchor profiles) ---');
+  anchorWorkers.forEach(function (workerName) {
+    var prof = workerName === AIDAN
+      ? profileForWorker_(workerName, 'CS_FUNC', 'P4 Consulting')
+      : profileForWorker_(workerName, 'EM', 'P6 Delivery Consultant');
+    Logger.log('  ' + workerName + ' (formula profile: icp=' + prof.icpRole +
+      ' jobProfile=' + prof.jobProfile + ')');
+    var rows = wowRows.filter(function (r) {
+      return String(r.resource_name || '') === workerName;
+    }).sort(function (a, b) {
+      return String(a.fiscal_quarter).localeCompare(String(b.fiscal_quarter));
+    });
+    if (!rows.length) {
+      Logger.log('    (no Utilization_Quarterly rows)');
+      return;
+    }
+    rows.forEach(printWowRow_);
+  });
+
+  // ---- 2. Formula vs WoW side-by-side (re-anchor pairs) ----
+  Logger.log('--- 2. Formula vs WoW target_hours (re-anchor pairs) ---');
+  anchorWorkers.forEach(function (workerName) {
+    var prof = workerName === AIDAN
+      ? profileForWorker_(workerName, 'CS_FUNC', 'P4 Consulting')
+      : profileForWorker_(workerName, 'EM', 'P6 Delivery Consultant');
+    var rows = wowRows.filter(function (r) {
+      return String(r.resource_name || '') === workerName;
+    });
+    if (!rows.length) {
+      Logger.log('  ' + workerName + ': no WoW rows ΓÇö skip');
+      return;
+    }
+    rows.forEach(function (r) {
+      var qk = String(r.fiscal_quarter || '').trim();
+      var wowTarget = Number(r.target_hours) || 0;
+      var formulaTarget = quarterTargetHoursFor_(
+        prof.icpRole, prof.jobProfile, qk, holidays, settings);
+      var delta = wowTarget - formulaTarget;
+      Logger.log('  ' + workerName + ' ' + qk +
+        ': formula=' + formulaTarget.toFixed(2) +
+        ' WoW=' + wowTarget.toFixed(2) +
+        ' delta(WoW-formula)=' + delta.toFixed(2));
+    });
+  });
+
+  // ---- 3. Aidan FY27-Q2 D8 units probe ----
+  Logger.log('--- 3. Aidan ' + TRACE_Q + ' D8 ICP-util scale probe ---');
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var aidanInfo = resIndex[AIDAN] || {};
+  var aidanEid = String(aidanInfo.employee_id || '').trim();
+  var aidanSummary = aidanEid ? actualsSummary[aidanEid] : null;
+  if (!aidanSummary) {
+    Object.keys(actualsSummary).some(function (eid) {
+      if (String(actualsSummary[eid].resource_name || '') === AIDAN) {
+        aidanSummary = actualsSummary[eid];
+        aidanEid = eid;
+        return true;
+      }
+      return false;
+    });
+  }
+  var aidanWowQ2 = wowRows.find(function (r) {
+    return String(r.resource_name || '') === AIDAN &&
+      String(r.fiscal_quarter || '').trim() === TRACE_Q;
+  });
+  var wd = quarterWorkdaySummary_(TRACE_Q, holidays);
+  var qtdPlus = aidanSummary ? Number(aidanSummary.qtd_icp_plus_forecast_hours) || 0 : 0;
+  var bonusTarget = aidanSummary ? Number(aidanSummary.bonus_target_billable_hours_eoq) || 0 : 0;
+  var wowTarget = aidanWowQ2 ? Number(aidanWowQ2.target_hours) || 0 : 0;
+  var wowQtd = aidanWowQ2 ? Number(aidanWowQ2.qtd_icp_plus_forecast) || 0 : 0;
+  var icpAvail = Number(wd.icpAvailableHours) || 0;
+
+  Logger.log('  Actuals_Worker_Summary qtd_icp_plus_forecast_hours=' + qtdPlus);
+  Logger.log('  Utilization_Quarterly qtd_icp_plus_forecast=' + wowQtd);
+  Logger.log('  Utilization_Quarterly target_hours (WoW)=' + wowTarget);
+  Logger.log('  Actuals_Worker_Summary bonus_target_billable_hours_eoq=' + bonusTarget);
+  Logger.log('  quarterWorkdaySummary_(' + TRACE_Q + ').icpAvailableHours=' + icpAvail);
+
+  function printRatio_(label, num, den) {
+    var pct = den > 0 ? (num / den) * 100 : 0;
+    Logger.log('  ' + label + ': ' + num.toFixed(2) + ' / ' + den.toFixed(2) +
+      ' = ' + (den > 0 ? (num / den).toFixed(6) : 'n/a') +
+      ' (' + pct.toFixed(2) + '%)');
+  }
+
+  printRatio_('qtd_icp_plus_forecast / icpAvailableHours (current D8 path)',
+    qtdPlus, icpAvail);
+  printRatio_('qtd_icp_plus_forecast / WoW target_hours',
+    qtdPlus, wowTarget);
+  printRatio_('qtd_icp_plus_forecast / bonus_target_billable_hours_eoq',
+    qtdPlus, bonusTarget);
+  if (wowQtd > 0 && wowQtd !== qtdPlus) {
+    printRatio_('Utilization_Quarterly qtd_icp_plus_forecast / icpAvailableHours',
+      wowQtd, icpAvail);
+    printRatio_('Utilization_Quarterly qtd_icp_plus_forecast / WoW target_hours',
+      wowQtd, wowTarget);
+  }
+
+  // ---- 4. WoW coverage window ----
+  Logger.log('--- 4. Utilization_Quarterly coverage window ---');
+  Logger.log('  total rows=' + wowRows.length);
+  var quarterSet = {};
+  wowRows.forEach(function (r) {
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq) return;
+    quarterSet[fq] = (quarterSet[fq] || 0) + 1;
+  });
+  var quartersSorted = Object.keys(quarterSet).sort();
+  Logger.log('  distinct fiscal_quarter values (' + quartersSorted.length + '): ' +
+    quartersSorted.join(', '));
+  quartersSorted.forEach(function (qk) {
+    Logger.log('    ' + qk + ': ' + quarterSet[qk] + ' rows');
+  });
+
+  Logger.log('=== _dbg_traceWoWTargets: DONE ===');
+}
+
+// ============================================================
+// WFM.24 mandatory gate: WoW target sourcing + D8 scale unification.
+// MANDATORY GATE: do not ship WFM.24 unless ALL CHECKS OK.
+// ============================================================
+
+/**
+ * WFM.24 Stage 1 mandatory gate. Self-computing checks for WoW-first targets,
+ * D8 current-quarter ICP-util scale, and no regression on WFM.15/17/18/23.
+ */
+function _dbg_reconcileWFM24() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.01;
+  var curQ = fiscalQuarterKey_(new Date());
+  var curBounds = fiscalQuarterBounds_(curQ);
+  var prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
+  var prevQ = fiscalQuarterKey_(prevDay);
+  var expectedWindowKeys = [prevQ].concat(rollingQuarterKeys_(2));
+  var forwardKeys = expectedWindowKeys.slice(2);
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function runGate_(fn, okToken) {
+    var before = Logger.getLog() || '';
+    try {
+      fn();
+    } catch (e) {
+      failures.push('Regression: ' + fn.name + ' threw ΓÇö ' + e);
+      return false;
+    }
+    var after = Logger.getLog() || '';
+    var slice = after.slice(before.length);
+    if (slice.indexOf(okToken) < 0) {
+      failures.push('Regression: ' + fn.name + ' did not print ' + okToken);
+      return false;
+    }
+    return true;
+  }
+
+  // ---- Check 0: scorecard window = previous / current / next ----
+  (function scorecardWindow() {
+    Logger.log('=== WFM.24 Check 0: scorecard window ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var keys = scorecard.quarterKeys || [];
+    if (keys.length !== expectedWindowKeys.length) {
+      failures.push('Window: expected ' + expectedWindowKeys.length + ' keys, got ' + keys.length);
+      return;
+    }
+    for (var wi = 0; wi < expectedWindowKeys.length; wi++) {
+      if (keys[wi] !== expectedWindowKeys[wi]) {
+        failures.push('Window: keys[' + wi + ']=' + keys[wi] + ' expect ' + expectedWindowKeys[wi]);
+      }
+    }
+    var prevTeam = scorecard.teamSummary && scorecard.teamSummary[0];
+    if (!prevTeam || prevTeam.quarterKey !== prevQ) {
+      failures.push('Window: first column=' + (prevTeam && prevTeam.quarterKey) + ' expect previous=' + prevQ);
+    } else if (prevTeam.isCurrentQuarter) {
+      failures.push('Window: previous quarter flagged isCurrentQuarter');
+    }
+    var curTeam = (scorecard.teamSummary || []).find(function (t) { return t.quarterKey === curQ; });
+    if (!curTeam) {
+      failures.push('Window: current quarter missing from teamSummary');
+    } else if (!curTeam.isCurrentQuarter) {
+      failures.push('Window: current quarter not flagged isCurrentQuarter');
+    }
+    var sampleWorker = (scorecard.workers || [])[0];
+    if (sampleWorker && sampleWorker.quarters && sampleWorker.quarters.length) {
+      var prevCell = sampleWorker.quarters[0];
+      if (prevCell.quarterKey !== prevQ) {
+        failures.push('Window: worker first quarter=' + prevCell.quarterKey + ' expect ' + prevQ);
+      } else if (prevCell.isCurrentQuarter) {
+        failures.push('Window: worker previous quarter flagged isCurrentQuarter');
+      }
+      var curCell = (sampleWorker.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      if (!curCell) {
+        failures.push('Window: worker current quarter missing');
+      } else if (!curCell.isCurrentQuarter) {
+        failures.push('Window: worker current quarter not flagged isCurrentQuarter');
+      }
+    }
+    Logger.log('  window=' + keys.join(', ') +
+      ' prevNotCurrent=' + (prevTeam && !prevTeam.isCurrentQuarter ? 'OK' : 'FAIL') +
+      ' curIsCurrent=' + (curTeam && curTeam.isCurrentQuarter ? 'OK' : 'FAIL'));
+  })();
+
+  // ---- Check A: WoW target sourcing (D5) ----
+  (function wowTargetSourcing() {
+    Logger.log('=== WFM.24 Check A: WoW target sourcing ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var futureKeys = forwardKeys;
+
+    var withWow = null;
+    (scorecard.workers || []).some(function (w) {
+      if (!w.employeeId) return false;
+      for (var i = 0; i < futureKeys.length; i++) {
+        var qk = futureKeys[i];
+        var wow = quarterTargetFromWoW_(w.employeeId, qk);
+        if (wow != null && wow > 0) {
+          withWow = { worker: w, qk: qk, wow: wow };
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!withWow) {
+      failures.push('WoW sourcing: no worker with forward WoW target found');
+      return;
+    }
+    var qWow = (withWow.worker.quarters || []).find(function (qq) {
+      return qq.quarterKey === withWow.qk;
+    });
+    if (!qWow) {
+      failures.push('WoW sourcing: quarter cell missing for ' + withWow.worker.worker);
+      return;
+    }
+    if (!near_(qWow.targetHours, withWow.wow)) {
+      failures.push('WoW sourcing: ' + withWow.worker.worker + ' ' + withWow.qk +
+        ' targetHours=' + qWow.targetHours + ' expect WoW=' + withWow.wow);
+    } else {
+      Logger.log('  worker with WoW row: ' + withWow.worker.worker + ' ' + withWow.qk +
+        ' targetHours=' + qWow.targetHours.toFixed(2) + ' == WoW OK');
+    }
+
+    var withoutWow = null;
+    (scorecard.workers || []).some(function (w) {
+      if (!w.employeeId) return false;
+      for (var i = 0; i < futureKeys.length; i++) {
+        var qk2 = futureKeys[i];
+        if (quarterTargetFromWoW_(w.employeeId, qk2) != null) continue;
+        var qCell = (w.quarters || []).find(function (qq) { return qq.quarterKey === qk2; });
+        if (!qCell || qCell.source !== 'forecast') continue;
+        withoutWow = { worker: w, qk: qk2, q: qCell };
+        return true;
+      }
+      return false;
+    });
+    if (!withoutWow) {
+      Logger.log('  formula-fallback sample: SKIPPED (all forward quarters have WoW rows)');
+      return;
+    }
+    if (!near_(withoutWow.q.targetHours, withoutWow.q.appTargetHours)) {
+      failures.push('WoW sourcing fallback: ' + withoutWow.worker.worker + ' ' + withoutWow.qk +
+        ' targetHours=' + withoutWow.q.targetHours + ' expect formula=' + withoutWow.q.appTargetHours);
+    } else {
+      Logger.log('  worker without WoW row: ' + withoutWow.worker.worker + ' ' + withoutWow.qk +
+        ' targetHours=' + withoutWow.q.targetHours.toFixed(2) + ' == formula OK');
+    }
+  })();
+
+  // ---- Check B1: D8 current-quarter ICP-util scale unification (aligned) ----
+  (function d8CurrentQuarterScale() {
+    Logger.log('=== WFM.24 Check B1: D8 current-quarter ICP-util scale (aligned) ===');
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'All' });
+    var probes = ['Lauren Vannini', 'Aidan Votaw'];
+
+    probes.forEach(function (name) {
+      var wRow = (scorecard.workers || []).find(function (w) { return w.worker === name; });
+      if (!wRow || !wRow.employeeId) {
+        Logger.log('  ' + name + ': not in scorecard ΓÇö skip');
+        return;
+      }
+      var summary = actualsSummary[String(wRow.employeeId).trim()];
+      if (!summary || !Number(summary.qtd_icp_plus_forecast_hours)) {
+        Logger.log('  ' + name + ': no qtd_icp_plus_forecast ΓÇö skip');
+        return;
+      }
+      var qtd = Number(summary.qtd_icp_plus_forecast_hours);
+      var curCell = (wRow.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+      if (!curCell) {
+        failures.push('D8: ' + name + ' current quarter missing');
+        return;
+      }
+      // D8.1: same-scale invariant. The numerator (qtd_icp_plus_forecast) is
+      // bonus-scale, so the denominator MUST be the same-row bonus target ΓÇö
+      // making icpUtil == bonusAttainment. Self-computed, not hard-coded.
+      var den = Number(summary.bonus_target_billable_hours_eoq) || 0;
+      if (!den) {
+        failures.push('D8: ' + name + ' no bonus-scale denominator');
+        return;
+      }
+      var expectedIcp = qtd / den;
+      var icpOk = near_(curCell.icpUtil, expectedIcp);
+      var bonusOk = near_(curCell.icpUtil, curCell.bonusAttainment);
+      Logger.log('  ' + name + ': qtd=' + qtd.toFixed(2) + ' bonus_den=' + den.toFixed(2) +
+        ' icpUtil=' + (curCell.icpUtil * 100).toFixed(2) + '%' +
+        ' bonusAtt=' + (curCell.bonusAttainment * 100).toFixed(2) + '%' +
+        ' expected=' + (expectedIcp * 100).toFixed(2) + '%' +
+        (icpOk && bonusOk ? ' OK' : ' FAILED'));
+      if (!icpOk) {
+        failures.push('D8: ' + name + ' icpUtil=' + curCell.icpUtil +
+          ' expect qtd/bonus=' + expectedIcp);
+      }
+      if (!bonusOk) {
+        failures.push('D8: ' + name + ' icpUtil != bonusAttainment');
+      }
+    });
+  })();
+
+  // ---- Check B2: D8 staleness / rollover guard (calendar ahead of WoW) ----
+  (function d8RolloverGuard() {
+    Logger.log('=== WFM.24 Check B2: D8 staleness / rollover guard ===');
+    var SANE_CAP = 1.5; // >150% from a bonus-÷-ICP scale mismatch is garbage.
+    var settings = readSettings_();
+    var holidays = readHolidays_();
+    var forecast = computeWeeklyForecast_({ workerScope: 'All' });
+    var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+    var weeks = forecast.weeks || [];
+
+    // Pick a worker that has current-quarter actuals (qtd + bonus target) so the
+    // actuals path is exercised on both the aligned and rolled-over calendars.
+    var probe = null;
+    (forecast.workers || []).some(function (w) {
+      if (!w.employeeId) return false;
+      var s = actualsSummary[String(w.employeeId).trim()];
+      if (s && Number(s.qtd_icp_plus_forecast_hours) > 0 &&
+          Number(s.bonus_target_billable_hours_eoq) > 0) {
+        probe = w;
+        return true;
+      }
+      return false;
+    });
+    if (!probe) {
+      Logger.log('  no worker with current-quarter actuals ΓÇö SKIP');
+      return;
+    }
+    var pSummary = actualsSummary[String(probe.employeeId).trim()];
+
+    // Derive one fiscal quarter AHEAD of the WoW snapshot's current quarter
+    // (== calendar curQ on aligned data). No mutation, no hard-coded keys.
+    var bounds = fiscalQuarterBounds_(curQ);
+    var aheadStart = new Date(bounds.end.getFullYear(), bounds.end.getMonth() + 1, 1);
+    var aheadQ = fiscalQuarterKey_(aheadStart);
+
+    // --- B2a: same-scale pairing survives a rollover (no garbage) ---
+    // Force buildWorkerQuarters_ to treat aheadQ as the current quarter while
+    // the summary still describes the WoW snapshot's (earlier) current quarter.
+    var rolled = buildWorkerQuarters_(probe, [curQ, aheadQ], weeks, holidays,
+      actualsSummary, settings, aheadQ);
+    var aheadCell = rolled.find(function (q) { return q.quarterKey === aheadQ; });
+    if (!aheadCell) {
+      failures.push('D8 rollover: ahead-quarter cell missing for ' + probe.resource);
+      return;
+    }
+    var wowAheadTarget = quarterTargetFromWoW_(probe.employeeId, aheadQ);
+    var hasBonusScaleTarget = (wowAheadTarget != null && wowAheadTarget > 0);
+    // Stale by design: no bonus-scale WoW target for the calendar-current qk,
+    // yet qtd actuals exist (they describe an earlier quarter than qk).
+    var expectStaleA = (!hasBonusScaleTarget) &&
+      (aheadCell.source === 'actuals_plus_forecast');
+
+    if (!(aheadCell.icpUtil <= SANE_CAP)) {
+      failures.push('D8 rollover: ' + probe.resource + ' ' + aheadQ +
+        ' icpUtil=' + (aheadCell.icpUtil * 100).toFixed(2) +
+        '% exceeds sane cap ' + (SANE_CAP * 100).toFixed(0) +
+        '% (bonus-over-ICP scale-mismatch garbage)');
+    }
+    if (aheadCell.source === 'actuals_plus_forecast') {
+      // Same-scale invariant must still hold on rolled-over data.
+      if (!near_(aheadCell.icpUtil, aheadCell.bonusAttainment)) {
+        failures.push('D8 rollover: ' + probe.resource + ' ' + aheadQ +
+          ' icpUtil != bonusAttainment on rolled-over data');
+      }
+      if (aheadCell.stale !== expectStaleA) {
+        failures.push('D8 rollover: ' + probe.resource + ' ' + aheadQ +
+          ' stale=' + aheadCell.stale + ' expect ' + expectStaleA);
+      }
+    }
+    Logger.log('  B2a ' + probe.resource + ' rolled curQ=' + aheadQ +
+      ' source=' + aheadCell.source +
+      ' icpUtil=' + (aheadCell.icpUtil * 100).toFixed(2) + '%' +
+      ' bonusAtt=' + (aheadCell.bonusAttainment * 100).toFixed(2) + '%' +
+      ' stale=' + aheadCell.stale +
+      ' <=cap ' + (aheadCell.icpUtil <= SANE_CAP ? 'OK' : 'FAIL'));
+
+    // --- B2b: forecast fallback when no same-scale bonus target exists ---
+    // Simulate a worker whose current-quarter actuals lack a usable bonus
+    // target (bonus_target_billable_hours_eoq == 0). Clone the summary map so
+    // no persistent data is mutated. WFM.25: forecast path uses target_hours.
+    var clonedSummary = {};
+    Object.keys(actualsSummary).forEach(function (k) {
+      clonedSummary[k] = actualsSummary[k];
+    });
+    var noBonus = {};
+    Object.keys(pSummary).forEach(function (k) { noBonus[k] = pSummary[k]; });
+    noBonus.bonus_target_billable_hours_eoq = 0;
+    clonedSummary[String(probe.employeeId).trim()] = noBonus;
+
+    var fb = buildWorkerQuarters_(probe, [curQ], weeks, holidays,
+      clonedSummary, settings, curQ);
+    var fbCell = fb.find(function (q) { return q.quarterKey === curQ; });
+    if (!fbCell) {
+      failures.push('D8 rollover: forecast-fallback cell missing for ' + probe.resource);
+      return;
+    }
+    var fcHours = sumForecastProductiveForQuarter_(probe, curQ, weeks);
+    var fbTarget = quarterTargetFromWoW_(probe.employeeId, curQ);
+    if (fbTarget == null) fbTarget = fbCell.targetHours;
+    var expFbIcp = fbTarget > 0 ? fcHours / fbTarget : null;
+    if (fbCell.source !== 'forecast') {
+      failures.push('D8 rollover: ' + probe.resource + ' no-bonus-target source=' +
+        fbCell.source + ' expect forecast');
+    }
+    if (expFbIcp != null && !near_(fbCell.icpUtil, expFbIcp)) {
+      failures.push('D8 rollover: ' + probe.resource + ' forecast icpUtil=' +
+        fbCell.icpUtil + ' expect forecast/target=' + expFbIcp);
+    }
+    if (fbCell.icpUtil != null && !(fbCell.icpUtil <= SANE_CAP)) {
+      failures.push('D8 rollover: ' + probe.resource + ' forecast icpUtil=' +
+        (fbCell.icpUtil * 100).toFixed(2) + '% exceeds sane cap');
+    }
+    if (fbCell.stale !== false) {
+      failures.push('D8 rollover: ' + probe.resource +
+        ' forecast-path stale=' + fbCell.stale + ' expect false');
+    }
+    Logger.log('  B2b ' + probe.resource + ' no-bonus-target source=' + fbCell.source +
+      ' icpUtil=' + (fbCell.icpUtil != null ? (fbCell.icpUtil * 100).toFixed(2) + '%' : 'null') +
+      ' expect=' + (expFbIcp != null ? (expFbIcp * 100).toFixed(2) + '%' : 'null') +
+      ' stale=' + fbCell.stale +
+      ((fbCell.source === 'forecast' && (expFbIcp == null || near_(fbCell.icpUtil, expFbIcp)) &&
+        (fbCell.icpUtil == null || fbCell.icpUtil <= SANE_CAP) && fbCell.stale === false) ? ' OK' : ' FAILED'));
+  })();
+
+  // ---- Check C: no regression ----
+  (function noRegression() {
+    Logger.log('=== WFM.24 Check C: no regression ===');
+    var ok15 = runGate_(_dbg_reconcileWFM15, '_dbg_reconcileWFM15: ALL CASES OK');
+    var ok17 = runGate_(_dbg_reconcileWFM17, '_dbg_reconcileWFM17: ALL CHECKS OK');
+    var ok18 = runGate_(_dbg_reconcileWFM18, '_dbg_reconcileWFM18: ALL CHECKS OK');
+    var ok23 = true;
+    if (typeof _dbg_reconcileWFM23 === 'function') {
+      ok23 = runGate_(_dbg_reconcileWFM23, '_dbg_reconcileWFM23: ALL CHECKS OK');
+    } else {
+      Logger.log('  WFM.23 gate not present on branch ΓÇö SKIPPED');
+    }
+    Logger.log('  WFM.15=' + (ok15 ? 'OK' : 'FAIL') +
+      ' WFM.17=' + (ok17 ? 'OK' : 'FAIL') +
+      ' WFM.18=' + (ok18 ? 'OK' : 'FAIL') +
+      ' WFM.23=' + (ok23 ? 'OK' : 'SKIP'));
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM24: ALL CHECKS OK'
+    : '_dbg_reconcileWFM24: ' + failures.length + ' CHECK(S) FAILED ΓÇö DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}
+
+/**
+ * WFM.25 Stage 4 gate: Hours & Capacity parity, Mix & Trend history reconciliation.
+ * Read-only; does not mutate production data.
+ */
+function _dbg_reconcileWFM25Stage4() {
+  _dbg_requireAdmin_();
+  var failures = [];
+  var TOL = 0.05;
+  var HIST_TOL = 0.1;
+
+  function near_(a, b, tol) {
+    return Math.abs(Number(a) - Number(b)) <= (tol || TOL);
+  }
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+
+  // ---- Check 1: Hours & Capacity utilization matches scorecard team aggregation ----
+  (function hoursCapacityParity() {
+    Logger.log('=== WFM.25 Stage 4 Check 1: Hours & Capacity utilization parity ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'SLG' });
+    var utilAgg = (function aggregateUtil_(data) {
+      var quarterKeys = data.quarterKeys || [];
+      var teamMap = {};
+      (data.workers || []).forEach(function (w) {
+        var tl = w.teamLabel || 'Unknown';
+        if (!teamMap[tl]) teamMap[tl] = [];
+        teamMap[tl].push(w);
+      });
+      var out = {};
+      Object.keys(teamMap).forEach(function (tl) {
+        out[tl] = quarterKeys.map(function (qk, qi) {
+          var sumUtilProd = 0;
+          var sumUtilTarget = 0;
+          teamMap[tl].forEach(function (w) {
+            var q = (w.quarters || [])[qi];
+            if (!q || !(Number(q.targetHours) > 0)) return;
+            sumUtilProd += Number(q.productiveHours) || 0;
+            sumUtilTarget += Number(q.targetHours) || 0;
+          });
+          return sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
+        });
+      });
+      return out;
+    })(scorecard);
+
+    Object.keys(utilAgg).forEach(function (tl) {
+      utilAgg[tl].forEach(function (util, qi) {
+        var sumUtilProd = 0;
+        var sumUtilTarget = 0;
+        (scorecard.workers || []).forEach(function (w) {
+          if ((w.teamLabel || 'Unknown') !== tl) return;
+          var q = (w.quarters || [])[qi];
+          if (!q || !(Number(q.targetHours) > 0)) return;
+          sumUtilProd += Number(q.productiveHours) || 0;
+          sumUtilTarget += Number(q.targetHours) || 0;
+        });
+        var hcUtil = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
+        if (util != null && hcUtil != null && !near_(util, hcUtil, 0.0001)) {
+          failures.push('HoursCapacity: team=' + tl + ' qIdx=' + qi +
+            ' util=' + util + ' hcUtil=' + hcUtil);
+        }
+      });
+    });
+    Logger.log('  team-quarter parity checks: ' +
+      (failures.length ? 'see failures' : 'OK'));
+  })();
+
+  // ---- Check 2: Team planned/capacity sum to org totals ----
+  (function orgTotals() {
+    Logger.log('=== WFM.25 Stage 4 Check 2: org hour totals ===');
+    var scorecard = computeQuarterlyScorecard_({ workerScope: 'SLG' });
+    var qKeys = scorecard.quarterKeys || [];
+    qKeys.forEach(function (qk, qi) {
+      var orgProd = 0;
+      var orgAvail = 0;
+      (scorecard.workers || []).forEach(function (w) {
+        var q = (w.quarters || [])[qi];
+        if (!q) return;
+        orgProd += Number(q.productiveHours) || 0;
+        orgAvail += Number(q.icpAvailableHours) || 0;
+      });
+      var teamProd = 0;
+      var teamAvail = 0;
+      var teamMap = {};
+      (scorecard.workers || []).forEach(function (w) {
+        var tl = w.teamLabel || 'Unknown';
+        teamMap[tl] = true;
+      });
+      Object.keys(teamMap).forEach(function (tl) {
+        (scorecard.workers || []).forEach(function (w) {
+          if ((w.teamLabel || 'Unknown') !== tl) return;
+          var q = (w.quarters || [])[qi];
+          if (!q) return;
+          teamProd += Number(q.productiveHours) || 0;
+          teamAvail += Number(q.icpAvailableHours) || 0;
+        });
+      });
+      if (!near_(orgProd, teamProd, 0.01)) {
+        failures.push('OrgTotal: ' + qk + ' planned org=' + orgProd + ' teamSum=' + teamProd);
+      }
+      if (!near_(orgAvail, teamAvail, 0.01)) {
+        failures.push('OrgTotal: ' + qk + ' capacity org=' + orgAvail + ' teamSum=' + teamAvail);
+      }
+    });
+    Logger.log('  org vs team sums: ' + (failures.length ? 'see failures' : 'OK'));
+  })();
+
+  // ---- Check 3–5: Mix & Trend history self-reconciliation (rolling window) ----
+  (function historyReconcile() {
+    Logger.log('=== WFM.25 Stage 4 Check 3–5: Mix & Trend history ===');
+    var history = getWorkerTypeHistory_({});
+    var reportedGrand = Number(history.grandTotal) || 0;
+
+    // Check 3: recomputed grand total from Actuals_History == reported grandTotal
+    var recomputedGrand = 0;
+    try {
+      (readTable_(ACTUALS_HISTORY) || []).forEach(function (r) {
+        var fq = String(r.fiscal_quarter || '').trim();
+        if (!fq) return;
+        var hrs = Number(r.icp_hours) || 0;
+        if (!hrs) return;
+        var displayClass = historyDisplayClass_(r.worker_class);
+        if (!displayClass) return;
+        recomputedGrand += hrs;
+      });
+    } catch (e) {
+      failures.push('History actuals read failed: ' + e);
+    }
+    if (!near_(recomputedGrand, reportedGrand, HIST_TOL)) {
+      failures.push('History grand total mismatch: recomputed=' + recomputedGrand +
+        ' reported=' + reportedGrand);
+    }
+
+    // Check 4: sum of per-quarter totals == grandTotal
+    var quarterSum = 0;
+    (history.fiscalQuarters || []).forEach(function (fq) {
+      quarterSum += Number((history.quarterTotals || {})[fq]) || 0;
+    });
+    if (!near_(quarterSum, reportedGrand, HIST_TOL)) {
+      failures.push('History quarter sum=' + quarterSum + ' grandTotal=' + reportedGrand);
+    }
+
+    // Check 5: per-quarter class + region breakdowns reconcile
+    (history.fiscalQuarters || []).forEach(function (fq) {
+      var total = Number((history.quarterTotals || {})[fq]) || 0;
+      var classes = (history.quarterClasses || {})[fq] || {};
+      var slgHours = Number(classes['SLG']) || 0;
+      var workdayRegionsHours = Number(classes['Workday Regions']) || 0;
+      var contractorHours = Number(classes['Contractor']) || 0;
+      var classSum = slgHours + workdayRegionsHours + contractorHours;
+      if (!near_(total, classSum, HIST_TOL)) {
+        failures.push('History class sum: ' + fq + ' total=' + total + ' classSum=' + classSum);
+      }
+
+      var regions = (history.quarterRegions || {})[fq] || {};
+      var regionSum = 0;
+      Object.keys(regions).forEach(function (rk) {
+        regionSum += Number(regions[rk]) || 0;
+      });
+      if (!near_(workdayRegionsHours, regionSum, HIST_TOL)) {
+        failures.push('History region sum: ' + fq + ' workdayRegionsHours=' + workdayRegionsHours +
+          ' regionSum=' + regionSum);
+      }
+    });
+
+    Logger.log('  grandTotal=' + reportedGrand +
+      ' quarters=' + (history.fiscalQuarters || []).length);
+  })();
+
+  // ---- Check 6: Xorg forecast aggregate self-reconciliation ----
+  (function xorgForecastReconcile() {
+    Logger.log('=== WFM.25 Stage 4 Check 6: Xorg forecast aggregate ===');
+    var xorg = getXorgForecast_({});
+    var forwardKeys = xorg.forwardQuarterKeys || [];
+    var sheetRows = readTable_(XORG_FORECAST_AGGREGATE) || [];
+    var sheetSum = 0;
+    sheetRows.forEach(function (r) {
+      var fq = String(r.fiscal_quarter || '').trim();
+      if (forwardKeys.indexOf(fq) < 0) return;
+      sheetSum += Number(r.forecast_hours) || 0;
+    });
+    var apiSum = 0;
+    (xorg.rows || []).forEach(function (row) {
+      apiSum += Number(row.forecastHours) || 0;
+    });
+    if (!near_(sheetSum, apiSum, HIST_TOL)) {
+      failures.push('Xorg forecast: sheetSum=' + sheetSum + ' apiSum=' + apiSum);
+    }
+
+    forwardKeys.forEach(function (qk) {
+      var groupSum = 0;
+      var groups = xorg.byGroupQuarter || {};
+      Object.keys(groups).forEach(function (gk) {
+        groupSum += Number(groups[gk][qk]) || 0;
+      });
+      var rowSum = 0;
+      (xorg.rows || []).forEach(function (row) {
+        if (row.fiscalQuarter === qk) rowSum += Number(row.forecastHours) || 0;
+      });
+      if (!near_(groupSum, rowSum, HIST_TOL)) {
+        failures.push('Xorg forecast: ' + qk + ' groupSum=' + groupSum + ' rowSum=' + rowSum);
+      }
+
+      var wdHours = Number((groups['Workday Regions'] || {})[qk]) || 0;
+      var regionSum = 0;
+      var regions = (xorg.regionByQuarter || {})[qk] || {};
+      Object.keys(regions).forEach(function (rk) {
+        regionSum += Number(regions[rk]) || 0;
+      });
+      if (wdHours > 0 && !near_(wdHours, regionSum, HIST_TOL)) {
+        failures.push('Xorg forecast regions: ' + qk + ' wdHours=' + wdHours +
+          ' regionSum=' + regionSum);
+      }
+    });
+
+    Logger.log('  forwardQuarters=' + forwardKeys.join(',') +
+      ' rows=' + (xorg.rows || []).length + ' sheetSum=' + sheetSum);
+  })();
+
+  Logger.log(failures.length === 0
+    ? '_dbg_reconcileWFM25Stage4: ALL CHECKS OK'
+    : '_dbg_reconcileWFM25Stage4: ' + failures.length + ' CHECK(S) FAILED — DO NOT SHIP');
+  failures.forEach(function (f) { Logger.log('  FAIL: ' + f); });
+}
+
+/**
+ * WFM.25 worker-row utilization validation: FY27-Q3 anchor workers must match
+ * Utilization_Quarterly qtd_icp_plus_forecast / target_hours via buildWorkerQuarters_.
+ * Logger.log only; does not mutate data.
+ */
+function _dbg_wfm25WorkerUtilValidation_() {
+  _dbg_requireAdmin_();
+  var TRACE_Q = 'FY27-Q3';
+  var curQ = fiscalQuarterKey_(new Date());
+  var cases = [
+    { name: 'Bhoomi Shah', pct: 106 },
+    { name: 'Chris Collins', pct: 94 },
+    { name: 'Syed Salehin', pct: 95 }
+  ];
+  var settings = readSettings_();
+  var holidays = readHolidays_();
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var forecast = computeWeeklyForecast_({ viewMode: 'Committed', workerScope: 'SLG', includeTimeOff: false });
+  var failures = [];
+
+  Logger.log('=== WFM.25 worker-row util validation (' + TRACE_Q + ', curQ=' + curQ + ') ===');
+  cases.forEach(function (c) {
+    var worker = (forecast.workers || []).find(function (w) { return w.resource === c.name; });
+    if (!worker) {
+      Logger.log('  ' + c.name + ': worker NOT FOUND');
+      failures.push(c.name + ' not in forecast scope');
+      return;
+    }
+    var wowNum = quarterForecastIcpFromWoW_(worker.employeeId, TRACE_Q);
+    var wowDen = quarterTargetFromWoW_(worker.employeeId, TRACE_Q);
+    var quarters = buildWorkerQuarters_(
+      worker, [TRACE_Q], forecast.weeks, holidays, actualsSummary, settings, curQ);
+    var cell = quarters[0];
+    var gotPct = cell && cell.icpUtil != null ? Math.round(cell.icpUtil * 100) : null;
+    var expUtil = (wowNum != null && wowDen > 0) ? wowNum / wowDen : null;
+    var ok = gotPct === c.pct;
+    Logger.log('  ' + c.name + ': WoW ' + wowNum + '/' + wowDen +
+      ' => ' + (expUtil != null ? (expUtil * 100).toFixed(1) + '%' : 'n/a') +
+      ' | cell icpUtil=' + (cell ? (cell.icpUtil * 100).toFixed(1) + '%' : 'n/a') +
+      ' (expect ' + c.pct + '%)' + (ok ? ' OK' : ' FAIL'));
+    Logger.log('    source=' + (cell ? cell.source : 'n/a') +
+      ' productiveHours=' + (cell ? cell.productiveHours : 'n/a') +
+      ' targetHours=' + (cell ? cell.targetHours : 'n/a'));
+    if (!ok) failures.push(c.name + ' FY27-Q3 util expected ' + c.pct + '% got ' + gotPct + '%');
+  });
+
+  Logger.log(failures.length === 0
+    ? '_dbg_wfm25WorkerUtilValidation_: ALL OK'
+    : '_dbg_wfm25WorkerUtilValidation_: ' + failures.length + ' FAIL(S)');
+}
+
+/**
+ * WFM.25 investigation: trace inverted worker icpUtil delta on first soft-book
+ * add vs second add. Logger.log only; does not persist or mutate production data.
+ */
+function _dbg_traceWFM25ProjectionDelta() {
+  _dbg_requireAdmin_();
+
+  var PREFERRED_WORKER = 'Al Romulo';
+  var BOOKING_HOURS = 100;
+  var curQ = fiscalQuarterKey_(new Date());
+  var curBounds = fiscalQuarterBounds_(curQ);
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'SLG',
+    includeTimeOff: false
+  };
+
+  function pct_(v) {
+    return (Number(v) * 100).toFixed(2) + '%';
+  }
+
+  function findQuarterCell_(bucket, level, key, qk) {
+    if (!bucket) return null;
+    if (level === 'worker') {
+      var w = (bucket.worker || []).find(function (x) {
+        return x.resourceName === key;
+      });
+      if (!w) return null;
+      return (w.quarters || []).find(function (q) { return q.quarterKey === qk; }) || null;
+    }
+    if (level === 'team') {
+      return ((bucket.team && bucket.team.quarters) || []).find(function (q) {
+        return q.quarterKey === qk;
+      }) || null;
+    }
+    return null;
+  }
+
+  function logUtilBlock_(label, result, workerName, qk) {
+    Logger.log('  --- ' + label + ' (quarter ' + qk + ') ---');
+    ['WORKER', 'TEAM'].forEach(function (lvl) {
+      var level = lvl === 'WORKER' ? 'worker' : 'team';
+      var key = lvl === 'WORKER' ? workerName : null;
+      var baseCell = findQuarterCell_(result.baseline, level, key, qk);
+      var projCell = findQuarterCell_(result.projected, level, key, qk);
+      if (!baseCell || !projCell) {
+        Logger.log('  ' + lvl + ': (missing baseline or projected cell)');
+        return;
+      }
+      var utilDelta = Number(projCell.icpUtil) - Number(baseCell.icpUtil);
+      var prodDelta = Number(projCell.productiveHours) - Number(baseCell.productiveHours);
+      var arrow = utilDelta > 0.0001 ? '\u2191' : (utilDelta < -0.0001 ? '\u2193' : '\u2192');
+      Logger.log('  ' + lvl + ':');
+      Logger.log('    baseline  icpUtil=' + pct_(baseCell.icpUtil) +
+        '  num(productiveHours)=' + Number(baseCell.productiveHours).toFixed(4) +
+        '  den(icpAvailableHours)=' + Number(baseCell.icpAvailableHours).toFixed(4));
+      Logger.log('    projected icpUtil=' + pct_(projCell.icpUtil) +
+        '  num(productiveHours)=' + Number(projCell.productiveHours).toFixed(4) +
+        '  den(icpAvailableHours)=' + Number(projCell.icpAvailableHours).toFixed(4));
+      Logger.log('    delta     icpUtil=' + pct_(utilDelta) + ' (' + arrow + ')' +
+        '  productiveHours=' + (prodDelta >= 0 ? '+' : '') + prodDelta.toFixed(4));
+    });
+  }
+
+  function logFullWorkerQuarter_(result, workerName, qk) {
+    var baseW = (result.baseline.worker || []).find(function (w) {
+      return w.resourceName === workerName;
+    });
+    var projW = (result.projected.worker || []).find(function (w) {
+      return w.resourceName === workerName;
+    });
+    if (!baseW || !projW) {
+      Logger.log('  FULL worker object: row missing for ' + workerName);
+      return;
+    }
+    var baseQ = (baseW.quarters || []).find(function (q) { return q.quarterKey === qk; });
+    var projQ = (projW.quarters || []).find(function (q) { return q.quarterKey === qk; });
+    if (!baseQ || !projQ) {
+      Logger.log('  FULL worker object: quarter cell missing for ' + qk);
+      return;
+    }
+    Logger.log('  baseline.worker quarter (all numeric fields):');
+    Object.keys(baseQ).sort().forEach(function (k) {
+      if (typeof baseQ[k] === 'number') {
+        Logger.log('    ' + k + '=' + baseQ[k]);
+      }
+    });
+    Logger.log('  projected.worker quarter (all numeric fields):');
+    Object.keys(projQ).sort().forEach(function (k) {
+      if (typeof projQ[k] === 'number') {
+        Logger.log('    ' + k + '=' + projQ[k]);
+      }
+    });
+    var prodDelta = Number(projQ.productiveHours) - Number(baseQ.productiveHours);
+    Logger.log('  productiveHours delta=' + (prodDelta >= 0 ? '+' : '') + prodDelta.toFixed(4) +
+      ' (booking total_hours=' + BOOKING_HOURS + ')');
+    var utilDelta = Number(projQ.icpUtil) - Number(baseQ.icpUtil);
+    Logger.log('  icpUtil delta=' + pct_(utilDelta) +
+      (prodDelta > 0 && utilDelta < 0 ? ' *** INVERTED: hours up, util down ***' : ''));
+  }
+
+  function buildDirectorParams_() {
+    var mgrRows = readConfigSlgManagers_();
+    var descendants = buildManagerDescendants_(mgrRows);
+    var scopes = [];
+    mgrRows.forEach(function (r) {
+      if ((descendants[r.manager_name] || []).length >= 1) {
+        scopes.push({
+          mgrName: r.manager_name,
+          params: Object.assign({}, baseParams, {
+            teams: [r.manager_name],
+            includeMyManagers: true
+          })
+        });
+      }
+    });
+    return scopes;
+  }
+
+  function pickTargetWorker_(scopes) {
+    var preferred = null;
+    var bestOver = null;
+    scopes.forEach(function (scope) {
+      var result = api_projectSoftBookings(scope.params, []);
+      var workers = result.baseline.worker || [];
+      workers.forEach(function (w) {
+        var q = (w.quarters || []).find(function (qq) { return qq.quarterKey === curQ; });
+        if (!q) return;
+        if (w.resourceName === PREFERRED_WORKER) {
+          preferred = { worker: w, params: scope.params, mgrName: scope.mgrName, baseline: result };
+        }
+        if (q.icpUtil > 1.0) {
+          if (!bestOver || q.icpUtil > bestOver.icpUtil) {
+            bestOver = {
+              worker: w,
+              params: scope.params,
+              mgrName: scope.mgrName,
+              baseline: result,
+              icpUtil: q.icpUtil
+            };
+          }
+        }
+      });
+    });
+    if (preferred) {
+      var pq = (preferred.worker.quarters || []).find(function (qq) { return qq.quarterKey === curQ; });
+      if (pq && pq.icpUtil <= 1.0) {
+        Logger.log('  NOTE: ' + PREFERRED_WORKER + ' baseline icpUtil=' + pct_(pq.icpUtil) +
+          ' (not >100%); using preferred worker anyway');
+      }
+      return preferred;
+    }
+    return bestOver;
+  }
+
+  Logger.log('=== _dbg_traceWFM25ProjectionDelta ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' currentFiscalQuarter=' + curQ);
+  Logger.log('  booking window: ' + _toIso_(curBounds.start) + ' .. ' + _toIso_(curBounds.end) +
+    ' total_hours=' + BOOKING_HOURS + ' per booking');
+
+  var scopes = buildDirectorParams_();
+  if (!scopes.length) {
+    Logger.log('  ABORT: no Director scope with descendants found');
+    Logger.log('=== _dbg_traceWFM25ProjectionDelta: DONE ===');
+    return;
+  }
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  var picked = pickTargetWorker_(scopes);
+  if (!picked) {
+    Logger.log('  ABORT: no over-utilized worker (icpUtil>100%) in any Director scope; ' +
+      PREFERRED_WORKER + ' not found');
+    Logger.log('=== _dbg_traceWFM25ProjectionDelta: DONE ===');
+    return;
+  }
+
+  var targetWorker = picked.worker;
+  var params = picked.params;
+  var workerName = targetWorker.resourceName;
+  var baseQ = (targetWorker.quarters || []).find(function (q) { return q.quarterKey === curQ; });
+
+  Logger.log('--- STEP 1: target worker ---');
+  Logger.log('  employee_id=' + targetWorker.employeeId);
+  Logger.log('  resource_name=' + workerName);
+  Logger.log('  team=' + targetWorker.teamLabel);
+  Logger.log('  director_scope=' + picked.mgrName);
+  Logger.log('  current_quarter=' + curQ);
+  Logger.log('  baseline_icpUtil=' + (baseQ ? pct_(baseQ.icpUtil) : '(missing)'));
+
+  var booking1 = {
+    employee_id: String(targetWorker.employeeId),
+    resource_name: workerName,
+    start_date: _toIso_(curBounds.start),
+    end_date: _toIso_(curBounds.end),
+    total_hours: BOOKING_HOURS
+  };
+  var booking2 = {
+    employee_id: String(targetWorker.employeeId),
+    resource_name: workerName,
+    start_date: _toIso_(curBounds.start),
+    end_date: _toIso_(curBounds.end),
+    total_hours: BOOKING_HOURS
+  };
+
+  Logger.log('--- STEP 2/3: FIRST add (cold cache, 1 booking) ---');
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  var resultFirst = api_projectSoftBookings(params, [booking1]);
+  logUtilBlock_('FIRST add', resultFirst, workerName, curQ);
+
+  Logger.log('--- STEP 5: FULL baseline vs projected worker quarter (FIRST add) ---');
+  logFullWorkerQuarter_(resultFirst, workerName, curQ);
+
+  Logger.log('--- STEP 4: SECOND add [flush-between] ---');
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  api_projectSoftBookings(params, [booking1]);
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  var resultSecondFlush = api_projectSoftBookings(params, [booking1, booking2]);
+  logUtilBlock_('SECOND add (2 bookings)', resultSecondFlush, workerName, curQ);
+
+  Logger.log('--- STEP 4: SECOND add [no-flush-between] ---');
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  api_projectSoftBookings(params, [booking1]);
+  var resultSecondWarm = api_projectSoftBookings(params, [booking1, booking2]);
+  logUtilBlock_('SECOND add warm-cache (2 bookings)', resultSecondWarm, workerName, curQ);
+
+  var firstWorkerDelta = (function () {
+    var b = findQuarterCell_(resultFirst.baseline, 'worker', workerName, curQ);
+    var p = findQuarterCell_(resultFirst.projected, 'worker', workerName, curQ);
+    return b && p ? Number(p.icpUtil) - Number(b.icpUtil) : null;
+  })();
+  var secondFlushWorkerDelta = (function () {
+    var b = findQuarterCell_(resultSecondFlush.baseline, 'worker', workerName, curQ);
+    var p = findQuarterCell_(resultSecondFlush.projected, 'worker', workerName, curQ);
+    return b && p ? Number(p.icpUtil) - Number(b.icpUtil) : null;
+  })();
+  var secondWarmWorkerDelta = (function () {
+    var b = findQuarterCell_(resultSecondWarm.baseline, 'worker', workerName, curQ);
+    var p = findQuarterCell_(resultSecondWarm.projected, 'worker', workerName, curQ);
+    return b && p ? Number(p.icpUtil) - Number(b.icpUtil) : null;
+  })();
+
+  Logger.log('--- SUMMARY: worker icpUtil delta sign ---');
+  Logger.log('  FIRST add:        ' + (firstWorkerDelta == null ? 'n/a' :
+    pct_(firstWorkerDelta) + (firstWorkerDelta < 0 ? ' (NEGATIVE)' : ' (non-negative)')));
+  Logger.log('  SECOND flush:     ' + (secondFlushWorkerDelta == null ? 'n/a' :
+    pct_(secondFlushWorkerDelta) + (secondFlushWorkerDelta < 0 ? ' (NEGATIVE)' : ' (non-negative)')));
+  Logger.log('  SECOND no-flush:  ' + (secondWarmWorkerDelta == null ? 'n/a' :
+    pct_(secondWarmWorkerDelta) + (secondWarmWorkerDelta < 0 ? ' (NEGATIVE)' : ' (non-negative)')));
+  if (firstWorkerDelta != null && secondFlushWorkerDelta != null &&
+      firstWorkerDelta < 0 && secondFlushWorkerDelta > 0) {
+    Logger.log('  PATTERN MATCH: first-add worker delta negative, second-add positive (flush-between)');
+  }
+  if (firstWorkerDelta != null && secondWarmWorkerDelta != null &&
+      firstWorkerDelta < 0 && secondWarmWorkerDelta > 0) {
+    Logger.log('  PATTERN MATCH: first-add worker delta negative, second-add positive (no-flush-between)');
+  }
+
+  Logger.log('=== _dbg_traceWFM25ProjectionDelta: DONE ===');
+}
+
+/**
+ * Trace whether a committed assignment is included in computeWeeklyForecast_
+ * under workerScope:'All' vs Director-scoped params. Logger only; writes one
+ * temp assignment then deletes it (same self-clean pattern as WFM.23 check 4).
+ */
+function _dbg_traceCommittedInclusion() {
+  _dbg_requireAdmin_();
+
+  var WORKER = 'Al Romulo';
+  var EMPLOYEE_ID = '13945';
+  var TRACE_Q = 'FY27-Q4';
+  var TEMP_HOURS = 100;
+  var TOL = 0.5;
+
+  Logger.log('=== _dbg_traceCommittedInclusion: ' + WORKER + ' (' + TRACE_Q + ') ===');
+
+  // ---- 1. Resource index metadata ----
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+  var info = resIndex[WORKER] || {};
+  if (String(info.employee_id || '').trim() !== EMPLOYEE_ID) {
+    Object.keys(resIndex).some(function (nm) {
+      if (String(resIndex[nm].employee_id || '').trim() === EMPLOYEE_ID) {
+        WORKER = nm;
+        info = resIndex[nm];
+        return true;
+      }
+      return false;
+    });
+  }
+  Logger.log('--- 1. Resource index ---');
+  Logger.log('  resource_name=' + WORKER);
+  Logger.log('  employee_id=' + (info.employee_id || '(blank)'));
+  Logger.log('  resource_type=' + (info.resource_type || '(blank)'));
+  Logger.log('  worker_class=' + (info.worker_class || '(blank)'));
+  Logger.log('  manager_org=' + (info.manager_org || '(blank)'));
+
+  function resolveDirectorForWorker_(managerOrg) {
+    var mgrRows = readConfigSlgManagers_();
+    var byName = {};
+    mgrRows.forEach(function (r) { byName[r.manager_name] = r; });
+    var descendants = buildManagerDescendants_(mgrRows);
+    var cur = String(managerOrg || '').trim();
+    while (cur) {
+      if ((descendants[cur] || []).length >= 1) return cur;
+      var row = byName[cur];
+      cur = row ? String(row.parent_manager || '').trim() : '';
+    }
+    return '';
+  }
+
+  var directorName = resolveDirectorForWorker_(info.manager_org);
+  Logger.log('  director (scoped teams[0])=' + (directorName || '(unresolved)'));
+
+  function sumProductiveQuarter_(forecast, workerName, quarterKey) {
+    var w = (forecast.workers || []).find(function (x) {
+      return x.resource === workerName;
+    });
+    if (!w) return { found: false, sum: 0 };
+    return {
+      found: true,
+      sum: sumForecastProductiveForQuarter_(w, quarterKey, forecast.weeks)
+    };
+  }
+
+  var bounds = fiscalQuarterBounds_(TRACE_Q);
+  Logger.log('  quarter bounds: ' + _toIso_(bounds.start) + ' .. ' + _toIso_(bounds.end));
+
+  // ---- 2. BEFORE (workerScope:'All') ----
+  Logger.log('--- 2. BEFORE (workerScope:All) ---');
+  var beforeAll = computeWeeklyForecast_({ workerScope: 'All' });
+  var beforeResult = sumProductiveQuarter_(beforeAll, WORKER, TRACE_Q);
+  Logger.log('  found=' + beforeResult.found);
+  Logger.log('  FY27-Q4 productiveWeekly sum=' + beforeResult.sum.toFixed(4));
+
+  // ---- 3. Write temp committed assignment ----
+  var assignCountBefore = readTable_(ASSIGNMENTS).length;
+  var tempId = null;
+  var tempPayload = {
+    opportunity_id: '',
+    resource_name: WORKER,
+    resource_type: info.resource_type || '',
+    start_date: bounds.start,
+    end_date: bounds.end,
+    estimated_hours: TEMP_HOURS,
+    distribution: 'Even',
+    status: 'Committed',
+    scenario_id: '',
+    notes: ''
+  };
+
+  Logger.log('--- 3. Temp committed assignment ---');
+  var saved = saveAssignment_(tempPayload);
+  tempId = saved && saved.assignment_id ? String(saved.assignment_id) : null;
+  Logger.log('  assignment_id=' + (tempId || '(none)'));
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+
+  // ---- 4. AFTER (workerScope:'All') ----
+  Logger.log('--- 4. AFTER (workerScope:All) ---');
+  var afterAll = computeWeeklyForecast_({ workerScope: 'All' });
+  var afterResult = sumProductiveQuarter_(afterAll, WORKER, TRACE_Q);
+  var deltaAll = afterResult.sum - beforeResult.sum;
+  Logger.log('  found=' + afterResult.found);
+  Logger.log('  BEFORE=' + beforeResult.sum.toFixed(4) +
+    ' AFTER=' + afterResult.sum.toFixed(4) +
+    ' delta=' + (deltaAll >= 0 ? '+' : '') + deltaAll.toFixed(4));
+
+  // ---- 5. SCOPED (gate-style Director params) ----
+  Logger.log('--- 5. SCOPED (teams=[' + (directorName || '?') + '], includeMyManagers:true) ---');
+  var scopedParams = {
+    teams: directorName ? [directorName] : null,
+    includeMyManagers: true
+  };
+  var scopedForecast = computeWeeklyForecast_(scopedParams);
+  var scopedResult = sumProductiveQuarter_(scopedForecast, WORKER, TRACE_Q);
+  Logger.log('  found=' + scopedResult.found);
+  Logger.log('  FY27-Q4 productiveWeekly sum=' + scopedResult.sum.toFixed(4));
+  Logger.log('  forecast.worker count=' + (scopedForecast.workers || []).length);
+
+  // ---- 6. Cleanup ----
+  Logger.log('--- 6. Cleanup ---');
+  if (tempId) {
+    _dbg_wfm23DeleteAssignmentsByIds_([tempId]);
+  }
+  invalidateCache_(ASSIGNMENTS);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  var assignCountAfter = readTable_(ASSIGNMENTS).length;
+  Logger.log('  row count before=' + assignCountBefore + ' after=' + assignCountAfter +
+    (assignCountBefore === assignCountAfter ? ' OK' : ' MISMATCH'));
+
+  // ---- Summary ----
+  var allCountsCommitted = beforeResult.found && afterResult.found &&
+    Math.abs(deltaAll - TEMP_HOURS) <= TOL;
+  Logger.log('--- SUMMARY ---');
+  Logger.log('  workerScope:All counts committed assignment (delta~' + TEMP_HOURS + ')? ' +
+    (allCountsCommitted ? 'YES (delta=' + deltaAll.toFixed(2) + ')' :
+      'NO (delta=' + deltaAll.toFixed(2) + ', found before=' + beforeResult.found +
+      ' after=' + afterResult.found + ')'));
+  Logger.log('  SCOPED call includes ' + WORKER + '? ' +
+    (scopedResult.found ? 'YES (FY27-Q4 sum=' + scopedResult.sum.toFixed(2) + ')' : 'NO'));
+
+  Logger.log('=== _dbg_traceCommittedInclusion: DONE ===');
+}
+
+/**
+ * Trace committed-util divergence for one worker across detailV2, projection
+ * baseline, and scorecard paths. Admin-gated; Logger only; read-only.
+ */
+function _dbg_traceCommittedUtilDivergence() {
+  _dbg_requireAdmin_();
+
+  var WORKER = 'Al Romulo';
+  var EMPLOYEE_ID = '13945';
+  var TRACE_Q = 'FY27-Q3';
+  var TOL = 0.0001;
+
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+
+  var curQ = fiscalQuarterKey_(new Date());
+  Logger.log('=== _dbg_traceCommittedUtilDivergence: ' + WORKER + ' (' + TRACE_Q + ') ===');
+  Logger.log('  today=' + _toIso_(new Date()) + ' calendarCurrentQuarter=' + curQ);
+  if (TRACE_Q !== curQ) {
+    Logger.log('  NOTE: TRACE_Q=' + TRACE_Q + ' differs from calendar current quarter=' + curQ);
+  }
+
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : {};
+  var info = resIndex[WORKER] || {};
+  if (String(info.employee_id || '').trim() !== EMPLOYEE_ID) {
+    Object.keys(resIndex).some(function (nm) {
+      if (String(resIndex[nm].employee_id || '').trim() === EMPLOYEE_ID) {
+        WORKER = nm;
+        info = resIndex[nm];
+        return true;
+      }
+      return false;
+    });
+  }
+  Logger.log('  resolved worker=' + WORKER + ' employee_id=' + (info.employee_id || '(blank)'));
+
+  function near_(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= TOL;
+  }
+
+  function pct_(v) {
+    return (Number(v) * 100).toFixed(2) + '%';
+  }
+
+  /**
+   * Derive icpUtil numerator/denominator labels from a buildWorkerQuarters_ cell.
+   * @param {Object} q
+   * @return {{num:number, den:number, denLabel:string, usedD8BonusScale:boolean}}
+   */
+  function quarterNumDen_(q) {
+    var prod = Number(q.productiveHours) || 0;
+    var icpAvail = Number(q.icpAvailableHours) || 0;
+    var target = Number(q.targetHours) || 0;
+    var usedD8 = String(q.source || '') === 'actuals_plus_forecast';
+    if (usedD8 && target > 0) {
+      return {
+        num: prod,
+        den: target,
+        denLabel: 'bonus_target (D8 bonus-scale)',
+        usedD8BonusScale: true
+      };
+    }
+    return {
+      num: prod,
+      den: icpAvail,
+      denLabel: 'icpAvailableHours',
+      usedD8BonusScale: false
+    };
+  }
+
+  function logQuarterPath_(label, q, extra) {
+    if (!q) {
+      Logger.log('--- ' + label + ': quarter ' + TRACE_Q + ' NOT FOUND ---');
+      return null;
+    }
+    var nd = quarterNumDen_(q);
+    Logger.log('--- ' + label + ' ---');
+    Logger.log('  quarterKey=' + q.quarterKey);
+    Logger.log('  icpUtil=' + Number(q.icpUtil).toFixed(6) + ' (' + pct_(q.icpUtil) + ')');
+    Logger.log('  productiveHours=' + Number(q.productiveHours).toFixed(4));
+    Logger.log('  icpAvailableHours=' + Number(q.icpAvailableHours).toFixed(4));
+    if (q.targetHours != null) {
+      Logger.log('  targetHours=' + Number(q.targetHours).toFixed(4));
+    }
+    if (q.source != null) {
+      Logger.log('  source=' + q.source);
+    }
+    Logger.log('  D8 bonus-scale denominator? ' + (nd.usedD8BonusScale ? 'YES' : 'NO'));
+    Logger.log('  numerator=' + nd.num.toFixed(4) + ' denominator=' + nd.den.toFixed(4) +
+      ' (' + nd.denLabel + ')');
+    if (extra) {
+      Object.keys(extra).forEach(function (k) {
+        Logger.log('  ' + k + '=' + extra[k]);
+      });
+    }
+    return {
+      icpUtil: Number(q.icpUtil) || 0,
+      num: nd.num,
+      den: nd.den,
+      denLabel: nd.denLabel,
+      usedD8BonusScale: nd.usedD8BonusScale
+    };
+  }
+
+  // ---- PATH A: api_getResourceDetailV2 ----
+  var v2 = api_getResourceDetailV2(Object.assign({ resource: WORKER }, baseParams));
+  if (!v2.found) {
+    Logger.log('PATH A: worker not found in api_getResourceDetailV2');
+  }
+  var pathA = logQuarterPath_('PATH A (api_getResourceDetailV2)',
+    (v2.quarters || []).find(function (q) { return q.quarterKey === TRACE_Q; }));
+
+  // ---- PATH B: api_projectSoftBookings baseline.worker ----
+  var projection = api_projectSoftBookings(baseParams, []);
+  var baseWorker = (projection.baseline.worker || []).find(function (w) {
+    return w.resourceName === WORKER ||
+      String(w.employeeId || '').trim() === EMPLOYEE_ID;
+  });
+  var pathB = null;
+  if (!baseWorker) {
+    Logger.log('--- PATH B (api_projectSoftBookings baseline.worker): worker NOT FOUND ---');
+  } else {
+    var bq = (baseWorker.quarters || []).find(function (q) { return q.quarterKey === TRACE_Q; });
+    if (!bq) {
+      Logger.log('--- PATH B: quarter ' + TRACE_Q + ' NOT FOUND ---');
+    } else {
+      var bProd = Number(bq.productiveHours) || 0;
+      var bDen = Number(bq.icpAvailableHours) || 0;
+      Logger.log('--- PATH B (api_projectSoftBookings baseline.worker) ---');
+      Logger.log('  quarterKey=' + bq.quarterKey);
+      Logger.log('  icpUtil=' + Number(bq.icpUtil).toFixed(6) + ' (' + pct_(bq.icpUtil) + ')');
+      Logger.log('  productiveHours=' + bProd.toFixed(4));
+      Logger.log('  icpAvailableHours=' + bDen.toFixed(4) + ' (denominator)');
+      Logger.log('  D8 bonus-scale denominator? NO (projection always uses icpAvailableHours)');
+      Logger.log('  numerator=' + bProd.toFixed(4) + ' denominator=' + bDen.toFixed(4) +
+        ' (icpAvailableHours)');
+      pathB = {
+        icpUtil: Number(bq.icpUtil) || 0,
+        num: bProd,
+        den: bDen,
+        denLabel: 'icpAvailableHours',
+        usedD8BonusScale: false
+      };
+    }
+  }
+
+  // ---- PATH C: computeQuarterlyScorecard_ ----
+  var scorecard = computeQuarterlyScorecard_(baseParams);
+  var scWorker = (scorecard.workers || []).find(function (w) {
+    return w.worker === WORKER || String(w.employeeId || '').trim() === EMPLOYEE_ID;
+  });
+  var pathC = logQuarterPath_('PATH C (computeQuarterlyScorecard_)',
+    scWorker ? (scWorker.quarters || []).find(function (q) { return q.quarterKey === TRACE_Q; }) : null);
+
+  // ---- SUMMARY ----
+  function fmtPath_(tag, p) {
+    if (!p) return tag + ' icpUtil=n/a (num=n/a / den=n/a)';
+    return tag + ' icpUtil=' + p.icpUtil.toFixed(6) +
+      ' (num=' + p.num.toFixed(4) + ' / den=' + p.den.toFixed(4) +
+      ' [' + p.denLabel + '])';
+  }
+
+  var allPresent = pathA && pathB && pathC;
+  var abMatch = allPresent && near_(pathA.icpUtil, pathB.icpUtil);
+  var acMatch = allPresent && near_(pathA.icpUtil, pathC.icpUtil);
+  var bcMatch = allPresent && near_(pathB.icpUtil, pathC.icpUtil);
+  var allMatch = abMatch && acMatch && bcMatch;
+
+  Logger.log('--- SUMMARY ---');
+  Logger.log('Path A icpUtil=' + (pathA ? pathA.icpUtil.toFixed(6) : 'n/a') +
+    ' | Path B icpUtil=' + (pathB ? pathB.icpUtil.toFixed(6) : 'n/a') +
+    ' | Path C icpUtil=' + (pathC ? pathC.icpUtil.toFixed(6) : 'n/a') +
+    ' — MATCH? ' + (allMatch ? 'yes' : 'no'));
+  Logger.log('  ' + fmtPath_('Path A', pathA));
+  Logger.log('  ' + fmtPath_('Path B', pathB));
+  Logger.log('  ' + fmtPath_('Path C', pathC));
+  if (allPresent && !allMatch) {
+    if (!abMatch) {
+      Logger.log('  A vs B: denominator differs? ' +
+        (pathA.denLabel !== pathB.denLabel ? 'YES (' + pathA.denLabel + ' vs ' + pathB.denLabel + ')' :
+          'same label; num/den values differ'));
+    }
+    if (!acMatch) {
+      Logger.log('  A vs C: denominator differs? ' +
+        (pathA.denLabel !== pathC.denLabel ? 'YES (' + pathA.denLabel + ' vs ' + pathC.denLabel + ')' :
+          'same label; num/den values differ'));
+    }
+    if (!bcMatch) {
+      Logger.log('  B vs C: denominator differs? ' +
+        (pathB.denLabel !== pathC.denLabel ? 'YES (' + pathB.denLabel + ' vs ' + pathC.denLabel + ')' :
+          'same label; num/den values differ'));
+    }
+  }
+
+  Logger.log('=== _dbg_traceCommittedUtilDivergence: DONE ===');
+}
+
+/**
+ * WFM.23 perf: decompose one cold baseline projection path (workerScope All,
+ * empty bookings) into timed phases, then two back-to-back
+ * api_projectSoftBookings calls to prove baseline cache reuse. Logger only.
+ */
+function _dbg_traceProjectionTiming() {
+  _dbg_requireAdmin_();
+
+  var params = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+  var forecastParams = {
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  };
+
+  Logger.log('=== _dbg_traceProjectionTiming (workerScope=All, bookings=0) ===');
+
+  // 1. Force cold caches.
+  var tFlush = Date.now();
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  Logger.log('1. api_flushCaches: ' + (Date.now() - tFlush) + 'ms');
+
+  // 2. computeWeeklyForecast_ alone (cold).
+  var tForecast = Date.now();
+  var forecast = computeWeeklyForecast_(forecastParams);
+  var forecastMs = Date.now() - tForecast;
+  var workerCount = (forecast.workers || []).length;
+  Logger.log('2. computeWeeklyForecast_: ' + forecastMs + 'ms workers=' + workerCount);
+
+  var holidays = readHolidays_();
+  var quarterKeys = _quarterKeysForSoftBookings_([]);
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var curQ = fiscalQuarterKey_(new Date());
+  var visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
+  var weeklyWorkerNames = {};
+
+  // 4. committedAssignmentQuarterIndex_ alone (cold index build).
+  committedAssignmentQuarterIndex_.cache = null;
+  committedAssignmentQuarterIndex_.cacheVersion = null;
+  committedAssignmentQuarterIndex_._dbgIndexBuildCount = 0;
+  var calendar = readCalendar_();
+  var tIndex = Date.now();
+  committedAssignmentQuarterIndex_(calendar);
+  var indexMs = Date.now() - tIndex;
+  Logger.log('4. committedAssignmentQuarterIndex_ (first build): ' + indexMs + 'ms' +
+    ' indexBuilds=' + (committedAssignmentQuarterIndex_._dbgIndexBuildCount || 0));
+
+  // 3. _aggregateSoftBookingProjection_ baseline alone.
+  committedAssignmentQuarterIndex_.cache = null;
+  committedAssignmentQuarterIndex_.cacheVersion = null;
+  committedAssignmentQuarterIndex_._dbgIndexBuildCount = 0;
+  var tAgg = Date.now();
+  _aggregateSoftBookingProjection_(
+    forecast, quarterKeys, holidays, actualsSummary, curQ, null, weeklyWorkerNames, visibleWeeks);
+  var aggMs = Date.now() - tAgg;
+  Logger.log('3. _aggregateSoftBookingProjection_ (baseline): ' + aggMs + 'ms' +
+    ' indexBuildsDuringAgg=' + (committedAssignmentQuarterIndex_._dbgIndexBuildCount || 0));
+
+  // 5–6. _getCachedBaselineForecast_ L2 read + write (no recompute — use step-2 forecast).
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+    invalidateSoftBookingBaselineCache_();
+  }
+  var cacheKey = _projectionBaselineCacheKey_(forecastParams);
+  var tCacheRead = Date.now();
+  var l2Cached = _enrichedCacheRead_(cacheKey);
+  var cacheReadMs = Date.now() - tCacheRead;
+
+  var serialized = _serializeForecastForCache_(forecast);
+  var serializedBytes = JSON.stringify(serialized).length;
+  var rawForecastBytes = JSON.stringify(forecast).length;
+
+  var tCacheWrite = Date.now();
+  var cacheWriteMs = 0;
+  try {
+    var cache = CacheService.getScriptCache();
+    var payload = JSON.stringify(serialized);
+    var chunkCount = Math.ceil(payload.length / _CACHE_CHUNK_BYTES);
+    if (chunkCount <= 0 || chunkCount > 50) {
+      Logger.log('6. baseline L2 put FAILED: chunkCount=' + chunkCount + ' (limit 50)');
+    } else {
+      var writes = {};
+      for (var i = 0; i < chunkCount; i++) {
+        var start = i * _CACHE_CHUNK_BYTES;
+        writes[cacheKey + ':' + i] = payload.slice(start, start + _CACHE_CHUNK_BYTES);
+      }
+      writes[cacheKey + ':meta'] = String(chunkCount);
+      cache.putAll(writes, 21600);
+      Logger.log('6. baseline L2 put OK size=' + serializedBytes);
+    }
+    cacheWriteMs = Date.now() - tCacheWrite;
+  } catch (e) {
+    cacheWriteMs = Date.now() - tCacheWrite;
+    Logger.log('6. baseline L2 put FAILED: ' + e.message);
+  }
+
+  Logger.log('5. baseline cache L2 read=' + cacheReadMs + 'ms write=' + cacheWriteMs + 'ms' +
+    ' l2PreWriteHit=' + (l2Cached ? 'yes' : 'no') +
+    ' serializedBytes=' + serializedBytes +
+    ' rawForecastBytes=' + rawForecastBytes +
+    ' cacheLimit~100000');
+
+  // Populate L1 so the warm repeat exercises the same path as production.
+  var sig = _projectionFilterSignature_(forecastParams);
+  _softBookingBaselineCache_.signature = sig;
+  _softBookingBaselineCache_.forecast = forecast;
+
+  // 7. Two back-to-back api_projectSoftBookings (no flush) — second proves cache reuse.
+  Logger.log('7. api_projectSoftBookings warm repeat (no flush):');
+  var logBefore = Logger.getLog() || '';
+  var tCall1 = Date.now();
+  api_projectSoftBookings(params, []);
+  var call1Ms = Date.now() - tCall1;
+  var logMid = Logger.getLog() || '';
+  var call1Slice = logMid.slice(logBefore.length);
+  var call1CacheHit = call1Slice.indexOf('baselineCache=hit') >= 0;
+
+  var tCall2 = Date.now();
+  api_projectSoftBookings(params, []);
+  var call2Ms = Date.now() - tCall2;
+  var logAfter = Logger.getLog() || '';
+  var call2Slice = logAfter.slice(logMid.length);
+  var call2CacheHit = call2Slice.indexOf('baselineCache=hit') >= 0;
+
+  Logger.log('  call 1 elapsed=' + call1Ms + 'ms baselineCache=' + (call1CacheHit ? 'hit' : 'miss'));
+  Logger.log('  call 2 elapsed=' + call2Ms + 'ms baselineCache=' + (call2CacheHit ? 'hit' : 'miss') +
+  (call2Ms < call1Ms ? ' (faster)' : '') +
+  (call2CacheHit || call2Ms < call1Ms ? '' : ' — cache may not be reused'));
+
+  Logger.log('=== _dbg_traceProjectionTiming: DONE ===');
+}
+
+/**
+ * WFM.25 perf: trace baseline cache-key stability (WRITE vs READ) and
+ * rank per-cell helper hotspots inside _aggregateSoftBookingProjection_
+ * and computeWeeklyForecast_. Logger only; no production logic changes.
+ */
+function _dbg_traceProjectionInternals() {
+  _dbg_requireAdmin_();
+
+  var params = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+  var forecastParams = {
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  };
+
+  Logger.log('=== _dbg_traceProjectionInternals (workerScope=All, bookings=0) ===');
+
+  // ----------------------------------------------------------------
+  // PART A — cache key WRITE vs READ (cold then warm, no flush)
+  // ----------------------------------------------------------------
+  Logger.log('--- PART A: baseline cache key (WRITE vs READ) ---');
+
+  if (typeof api_flushCaches === 'function') api_flushCaches();
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+    invalidateSoftBookingBaselineCache_();
+  }
+
+  var sigWrite = _projectionFilterSignature_(forecastParams);
+  var versionWrite = _getEnrichedCacheVersion_();
+  var writeKey = _projectionBaselineCacheKey_(forecastParams);
+
+  var cold = _getCachedBaselineForecast_(forecastParams);
+  Logger.log('1. WRITE path (cold _getCachedBaselineForecast_):');
+  Logger.log('   cacheKey=' + writeKey);
+  Logger.log('   filterSignature=' + sigWrite);
+  Logger.log('   enrichedCacheVersion=' + versionWrite);
+  Logger.log('   cacheHit=' + cold.cacheHit + ' l2Hit=' + cold.l2Hit);
+
+  var sigRead = _projectionFilterSignature_(forecastParams);
+  var versionRead = _getEnrichedCacheVersion_();
+  var readKey = _projectionBaselineCacheKey_(forecastParams);
+
+  var warm = _getCachedBaselineForecast_(forecastParams);
+  Logger.log('2. READ path (second call, no flush):');
+  Logger.log('   cacheKey=' + readKey);
+  Logger.log('   filterSignature=' + sigRead);
+  Logger.log('   enrichedCacheVersion=' + versionRead);
+  Logger.log('   cacheHit=' + warm.cacheHit + ' l2Hit=' + warm.l2Hit);
+
+  var byteIdentical = (writeKey === readKey);
+  Logger.log('3. byteIdentical=' + byteIdentical);
+  if (!byteIdentical) {
+    var writeParts = _dbg_parseBaselineCacheKey_(writeKey);
+    var readParts = _dbg_parseBaselineCacheKey_(readKey);
+    Logger.log('   key diff: version WRITE=' + writeParts.version + ' READ=' + readParts.version +
+      ' digest WRITE=' + writeParts.digest + ' READ=' + readParts.digest);
+    if (versionWrite !== versionRead) {
+      Logger.log('   enrichedCacheVersion changed between WRITE and READ');
+    }
+    if (sigWrite !== sigRead) {
+      Logger.log('   filterSignature changed between WRITE and READ');
+      _dbg_diffProjectionSignatureFields_(sigWrite, sigRead).forEach(function (line) {
+        Logger.log('     ' + line);
+      });
+    } else if (writeParts.digest !== readParts.digest) {
+      Logger.log('   signatures match but digest differs — unexpected MD5 mismatch');
+    }
+  }
+
+  // ----------------------------------------------------------------
+  // PART B — instrumented aggregation + computeWeeklyForecast_ loops
+  // ----------------------------------------------------------------
+  Logger.log('--- PART B: per-cell helper hotspots ---');
+
+  var stats = _dbg_newProjectionHotspotStats_();
+
+  function timed_(name, fn) {
+    var bucket = stats[name];
+    if (!bucket) bucket = stats[name] = { calls: 0, ms: 0 };
+    var t0 = Date.now();
+    var result = fn();
+    bucket.calls++;
+    bucket.ms += Date.now() - t0;
+    return result;
+  }
+
+  // --- computeWeeklyForecast_ (full + replicated inner-loop counts) ---
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') {
+    invalidateSoftBookingBaselineCache_();
+  }
+  var tFc = Date.now();
+  var forecast = computeWeeklyForecast_(forecastParams);
+  stats.computeWeeklyForecast_.calls = 1;
+  stats.computeWeeklyForecast_.ms = Date.now() - tFc;
+
+  var weeks = forecast.weeks || [];
+  var workers = forecast.workers || [];
+  Logger.log('computeWeeklyForecast_: ' + stats.computeWeeklyForecast_.ms + 'ms' +
+    ' workers=' + workers.length + ' weeks=' + weeks.length);
+
+  _dbg_profileComputeWeeklyForecastLoops_(forecastParams, forecast, stats, timed_);
+
+  var holidays = timed_('readHolidays_', function () { return readHolidays_(); });
+  var quarterKeys = timed_('_quarterKeysForSoftBookings_', function () {
+    return _quarterKeysForSoftBookings_([]);
+  });
+  var actualsSummary = timed_('getActualsSummaryByEmployee_', function () {
+    return (typeof getActualsSummaryByEmployee_ === 'function')
+      ? getActualsSummaryByEmployee_() : {};
+  });
+  var curQ = fiscalQuarterKey_(new Date());
+  var visibleWeeks = timed_('_deriveVisibleWeeksFiscal_', function () {
+    return _deriveVisibleWeeksFiscal_(forecast.weeks);
+  });
+  var weeklyWorkerNames = {};
+
+  committedAssignmentQuarterIndex_.cache = null;
+  committedAssignmentQuarterIndex_.cacheVersion = null;
+
+  var tAgg = Date.now();
+  _dbg_instrumentedAggregateBaseline_(
+    forecast, quarterKeys, holidays, actualsSummary, curQ,
+    null, weeklyWorkerNames, visibleWeeks, stats, timed_);
+  stats._aggregateSoftBookingProjection_.calls = 1;
+  stats._aggregateSoftBookingProjection_.ms = Date.now() - tAgg;
+
+  Logger.log('_aggregateSoftBookingProjection_ (instrumented): ' +
+    stats._aggregateSoftBookingProjection_.ms + 'ms' +
+    ' workerQuarterCells=' + (stats.workerQuarterCells || 0));
+
+  _dbg_logProjectionHotspotRankings_(stats);
+
+  Logger.log('=== _dbg_traceProjectionInternals: DONE ===');
+}
+
+/**
+ * @param {string} key
+ * @return {{version:string, digest:string}}
+ * @private
+ */
+function _dbg_parseBaselineCacheKey_(key) {
+  var m = /^wfm23:baseline:v([^:]+):([a-f0-9]+)$/.exec(String(key || ''));
+  return m ? { version: m[1], digest: m[2] } : { version: '(unparsed)', digest: String(key || '') };
+}
+
+/**
+ * @param {string} sigA
+ * @param {string} sigB
+ * @return {string[]}
+ * @private
+ */
+function _dbg_diffProjectionSignatureFields_(sigA, sigB) {
+  var a = {};
+  var b = {};
+  try { a = JSON.parse(sigA); } catch (e) { a = {}; }
+  try { b = JSON.parse(sigB); } catch (e) { b = {}; }
+  var keys = {};
+  Object.keys(a).concat(Object.keys(b)).forEach(function (k) { keys[k] = true; });
+  var diffs = [];
+  Object.keys(keys).sort().forEach(function (k) {
+    var va = JSON.stringify(a[k]);
+    var vb = JSON.stringify(b[k]);
+    if (va !== vb) {
+      diffs.push(k + ': WRITE=' + va + ' READ=' + vb);
+    }
+  });
+  return diffs;
+}
+
+/**
+ * @return {Object<string, {calls:number, ms:number}>}
+ * @private
+ */
+function _dbg_newProjectionHotspotStats_() {
+  return {
+    computeWeeklyForecast_: { calls: 0, ms: 0 },
+    _aggregateSoftBookingProjection_: { calls: 0, ms: 0 },
+    sumForecastProductiveForQuarter_: { calls: 0, ms: 0 },
+    quarterWorkdaySummary_: { calls: 0, ms: 0 },
+    _quarterCapacityForProjection_: { calls: 0, ms: 0 },
+    quarterTargetFromWoW_: { calls: 0, ms: 0 },
+    _workerQuarterProductive_: { calls: 0, ms: 0 },
+    committedAssignmentHoursForQuarter_: { calls: 0, ms: 0 },
+    committedAssignmentQuarterIndex_: { calls: 0, ms: 0 },
+    productiveHoursForWeek_: { calls: 0, ms: 0 },
+    _workerWeeklyCellsForProjection_: { calls: 0, ms: 0 },
+    expandAssignmentToWeekly_: { calls: 0, ms: 0 },
+    expandAdjustmentToWeekly_: { calls: 0, ms: 0 },
+    getEnrichedAllocations_: { calls: 0, ms: 0 },
+    getEnrichedAssignments_: { calls: 0, ms: 0 },
+    readCalendar_: { calls: 0, ms: 0 },
+    readHolidays_: { calls: 0, ms: 0 },
+    getActualsSummaryByEmployee_: { calls: 0, ms: 0 },
+    _quarterKeysForSoftBookings_: { calls: 0, ms: 0 },
+    _deriveVisibleWeeksFiscal_: { calls: 0, ms: 0 },
+    workerQuarterCells: 0,
+    workersTimesAllWeeksPasses: 0,
+    blendInnerLoopIterations: 0
+  };
+}
+
+/**
+ * Replicate computeWeeklyForecast_ inner loops with counters (read-only).
+ * @param {Object} forecastParams
+ * @param {Object} forecast
+ * @param {Object} stats
+ * @param {function(string, function):*} timed_
+ * @private
+ */
+function _dbg_profileComputeWeeklyForecastLoops_(forecastParams, forecast, stats, timed_) {
+  forecastParams = forecastParams || {};
+  var viewMode = forecastParams.viewMode || 'Committed';
+  var workerScope = forecastParams.workerScope || 'SLG';
+  var includePto = forecastParams.includeTimeOff !== false;
+
+  var settings = readSettings_();
+  var hideAllExternal = String(settings['hide_all_external'] || '').trim().toLowerCase() === 'true';
+  var excluded = readExclusions_();
+  var allocRaw = timed_('getEnrichedAllocations_', function () {
+    return (typeof getEnrichedAllocations_ === 'function')
+      ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+  });
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_() : _resourceIndex_(allocRaw);
+  var assignsRaw = timed_('getEnrichedAssignments_', function () {
+    return (typeof getEnrichedAssignments_ === 'function')
+      ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  });
+  var calendar = timed_('readCalendar_', function () { return readCalendar_(); });
+  var allWeeks = calendar.weeks || [];
+
+  function inScope(workerName) {
+    var info = resIndex[workerName] || {};
+    var cls = String(info.worker_class || '');
+    if (hideAllExternal && cls.startsWith('External_')) return false;
+    return _workerClassInScope_(cls, workerScope);
+  }
+
+  var allocRows = 0;
+  allocRaw.forEach(function (a) {
+    if (!a.resource_name) return;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return;
+    if (!inScope(a.resource_name)) return;
+    allocRows++;
+  });
+
+  var assignExpandWeeks = 0;
+  var assignInScope = 0;
+  if (viewMode !== 'Actual') {
+    assignsRaw.forEach(function (a) {
+      if (!a.resource_name) return;
+      if (excluded.has(_exclusionKey_(a.resource_name))) return;
+      if (!inScope(a.resource_name)) return;
+      var isCommitted = (a.status === 'Committed');
+      var isScenario = (a.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isScenario &&
+         (!forecastParams.scenarioId || a.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      assignInScope++;
+      timed_('expandAssignmentToWeekly_', function () {
+        var expanded = expandAssignmentToWeekly_(a, calendar);
+        assignExpandWeeks += expanded.length;
+        return expanded;
+      });
+    });
+  }
+
+  var adjExpandWeeks = 0;
+  if (viewMode !== 'Actual') {
+    var adjRows = [];
+    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
+    adjRows.forEach(function (adj) {
+      if (!adj.resource_name) return;
+      if (excluded.has(_exclusionKey_(adj.resource_name))) return;
+      if (!inScope(adj.resource_name)) return;
+      var isCommitted = (adj.status === 'Committed');
+      var isModeled = (adj.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isModeled &&
+         (!forecastParams.scenarioId || adj.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      timed_('expandAdjustmentToWeekly_', function () {
+        var expanded = expandAdjustmentToWeekly_(adj, calendar);
+        adjExpandWeeks += expanded.length;
+        return expanded;
+      });
+    });
+  }
+
+  var blendInner = 0;
+  var workersTimesAllWeeks = 0;
+  (forecast.workers || []).forEach(function (w) {
+    var allWeekKeys = {};
+    Object.keys(w.workerWeekly || {}).forEach(function (k) { allWeekKeys[k] = true; });
+    blendInner += Object.keys(allWeekKeys).length;
+    allWeeks.forEach(function (wk) {
+      workersTimesAllWeeks++;
+      timed_('productiveHoursForWeek_', function () {
+        return productiveHoursForWeek_(w, wk.week_key);
+      });
+    });
+  });
+
+  stats.blendInnerLoopIterations = blendInner;
+  stats.workersTimesAllWeeksPasses = workersTimesAllWeeks;
+
+  Logger.log('computeWeeklyForecast_ loop profile:');
+  Logger.log('  allocRowsInScope=' + allocRows);
+  Logger.log('  assignmentsInScope=' + assignInScope +
+    ' expandAssignmentWeekRows=' + assignExpandWeeks);
+  Logger.log('  expandAdjustmentWeekRows=' + adjExpandWeeks);
+  Logger.log('  blendInnerLoopIterations=' + blendInner +
+    ' (per-worker unique week keys, not full calendar)');
+  Logger.log('  workersTimesAllWeeksPasses=' + workersTimesAllWeeks +
+    ' (= workers × calendarWeeks; O(W×K) probe)');
+}
+
+/**
+ * Instrumented mirror of _aggregateSoftBookingProjection_ baseline path.
+ * @private
+ */
+function _dbg_instrumentedAggregateBaseline_(
+  forecast, quarterKeys, holidays, actualsSummary, curQ,
+  baselineForecast, weeklyWorkerNames, visibleWeeks, stats, timed_) {
+
+  var weeks = forecast.weeks || [];
+  var workers = forecast.workers || [];
+  actualsSummary = actualsSummary || {};
+  curQ = curQ || fiscalQuarterKey_(new Date());
+  var calendar = timed_('readCalendar_', function () { return readCalendar_(); });
+  timed_('committedAssignmentQuarterIndex_', function () {
+    return committedAssignmentQuarterIndex_(calendar);
+  });
+
+  var baselineByEmployeeId = {};
+  if (baselineForecast) {
+    (baselineForecast.workers || []).forEach(function (bw) {
+      baselineByEmployeeId[String(bw.employeeId || '')] = bw;
+    });
+  }
+
+  function workerQuarterProductive_(worker, qk) {
+    return timed_('_workerQuarterProductive_', function () {
+      if (worker.blendedWeekly || worker.productiveWeekly) {
+        return timed_('sumForecastProductiveForQuarter_', function () {
+          return sumForecastProductiveForQuarter_(worker, qk, weeks);
+        });
+      }
+      if (worker.quarterProductive && worker.quarterProductive.hasOwnProperty(qk)) {
+        return Number(worker.quarterProductive[qk]) || 0;
+      }
+      return timed_('sumForecastProductiveForQuarter_', function () {
+        return sumForecastProductiveForQuarter_(worker, qk, weeks);
+      });
+    });
+  }
+
+  function quarterCapacity_(qk) {
+    return timed_('_quarterCapacityForProjection_', function () {
+      var maxHolidayYear = 0;
+      (holidays || []).forEach(function (h) {
+        if (h.date) {
+          var y = h.date.getFullYear();
+          if (y > maxHolidayYear) maxHolidayYear = y;
+        }
+      });
+      var bounds = fiscalQuarterBounds_(qk);
+      var approximate = bounds.end.getFullYear() > maxHolidayYear;
+      var effectiveHolidays = approximate ? [] : holidays;
+      var wd = timed_('quarterWorkdaySummary_', function () {
+        return quarterWorkdaySummary_(qk, effectiveHolidays);
+      });
+      return {
+        icpAvailableHours: Number(wd.icpAvailableHours) || 0,
+        rawCapacityHours: Number(wd.rawCapacityHours) || 0,
+        approximate: approximate
+      };
+    });
+  }
+
+  function icpUtilPair_(worker, productiveHours, qk) {
+    var employeeId = String(worker.employeeId || '');
+    var den = employeeId ? quarterTargetFromWoW_(employeeId, qk) : null;
+    if (den == null || den <= 0) return null;
+
+    var summary = employeeId ? actualsSummary[employeeId] : null;
+    var prod = Number(productiveHours) || 0;
+    var committedHrs = timed_('committedAssignmentHoursForQuarter_', function () {
+      return committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+    });
+    var num;
+
+    if (qk === curQ && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
+        summary.bonus_target_billable_hours_eoq > 0) {
+      num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
+      if (baselineForecast) {
+        var baseWorker = baselineByEmployeeId[employeeId];
+        if (baseWorker) {
+          var baseProd = workerQuarterProductive_(baseWorker, qk);
+          num += prod - baseProd;
+        }
+      }
+    } else if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+      var actual = quarterActualIcpFromWoW_(employeeId, qk);
+      num = actual != null ? actual : 0;
+    } else {
+      var wowFc = quarterForecastIcpFromWoW_(employeeId, qk);
+      num = (wowFc != null ? wowFc : prod) + committedHrs;
+      if (baselineForecast) {
+        var baseWorkerFwd = baselineByEmployeeId[employeeId];
+        if (baseWorkerFwd) {
+          var baseProdFwd = workerQuarterProductive_(baseWorkerFwd, qk);
+          num += prod - baseProdFwd;
+        }
+      }
+    }
+    return { num: num, den: den };
+  }
+
+  function quarterCell_(worker, productiveHours, qk) {
+    stats.workerQuarterCells = (stats.workerQuarterCells || 0) + 1;
+    var qinfo = quarterCapacity_(qk);
+    var icpAvail = qinfo.icpAvailableHours;
+    var rawCap = qinfo.rawCapacityHours;
+    var prod = Number(productiveHours) || 0;
+    var pair = icpUtilPair_(worker, prod, qk);
+    var displayProd = pair ? pair.num : prod;
+    var icpUtil = pair ? (pair.den > 0 ? pair.num / pair.den : null) : null;
+    return {
+      quarterKey: String(qk),
+      productiveHours: displayProd,
+      icpAvailableHours: icpAvail,
+      rawCapacityHours: rawCap,
+      icpUtil: icpUtil,
+      financeUtil: rawCap > 0 ? displayProd / rawCap : 0,
+      approximate: !!qinfo.approximate
+    };
+  }
+
+  function aggregateQuarters_(group) {
+    return quarterKeys.map(function (qk) {
+      var sumProd = 0;
+      var sumIcpAvail = 0;
+      var sumRawCap = 0;
+      var sumIcpNum = 0;
+      var sumIcpDen = 0;
+      var approx = false;
+      group.forEach(function (w) {
+        var prod = workerQuarterProductive_(w, qk);
+        var qinfo = quarterCapacity_(qk);
+        sumIcpAvail += qinfo.icpAvailableHours;
+        sumRawCap += qinfo.rawCapacityHours;
+        if (qinfo.approximate) approx = true;
+        var pair = icpUtilPair_(w, prod, qk);
+        if (pair) {
+          sumProd += pair.num;
+          sumIcpNum += pair.num;
+          sumIcpDen += pair.den;
+        } else {
+          sumProd += prod;
+        }
+      });
+      var icpUtil = sumIcpDen > 0 ? sumIcpNum / sumIcpDen : null;
+      return {
+        quarterKey: String(qk),
+        productiveHours: Number(sumProd) || 0,
+        icpAvailableHours: Number(sumIcpAvail) || 0,
+        rawCapacityHours: Number(sumRawCap) || 0,
+        icpUtil: icpUtil,
+        financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+        approximate: approx
+      };
+    });
+  }
+
+  workers.forEach(function (w) {
+    quarterKeys.forEach(function (qk) {
+      quarterCell_(w, workerQuarterProductive_(w, qk), qk);
+    });
+    if (weeklyWorkerNames && weeklyWorkerNames[w.resource] && visibleWeeks && visibleWeeks.length) {
+      timed_('_workerWeeklyCellsForProjection_', function () {
+        return _workerWeeklyCellsForProjection_(w, visibleWeeks, forecast);
+      });
+    }
+  });
+
+  aggregateQuarters_(workers);
+  var byLabel = {};
+  workers.forEach(function (w) {
+    var label = String(w.teamLabel || 'Unclassified');
+    if (!byLabel[label]) byLabel[label] = [];
+    byLabel[label].push(w);
+  });
+  Object.keys(byLabel).sort().forEach(function (label) {
+    aggregateQuarters_(byLabel[label]);
+  });
+}
+
+/**
+ * @param {Object} stats
+ * @private
+ */
+function _dbg_logProjectionHotspotRankings_(stats) {
+  var rows = [];
+  Object.keys(stats).forEach(function (name) {
+    if (name === 'workerQuarterCells' || name === 'workersTimesAllWeeksPasses' ||
+        name === 'blendInnerLoopIterations') return;
+    var bucket = stats[name];
+    if (!bucket || typeof bucket.calls !== 'number') return;
+    rows.push({ name: name, calls: bucket.calls, ms: bucket.ms || 0 });
+  });
+
+  var byCalls = rows.slice().sort(function (a, b) { return b.calls - a.calls; });
+  var byMs = rows.slice().sort(function (a, b) { return b.ms - a.ms; });
+
+  Logger.log('--- ranked by call count ---');
+  byCalls.slice(0, 12).forEach(function (r, i) {
+    Logger.log('  ' + (i + 1) + '. ' + r.name + ': calls=' + r.calls + ' ms=' + r.ms);
+  });
+
+  Logger.log('--- ranked by total ms ---');
+  byMs.slice(0, 12).forEach(function (r, i) {
+    Logger.log('  ' + (i + 1) + '. ' + r.name + ': ms=' + r.ms + ' calls=' + r.calls);
+  });
+
+  Logger.log('--- cell / loop counters ---');
+  Logger.log('  workerQuarterCells=' + (stats.workerQuarterCells || 0));
+  Logger.log('  workersTimesAllWeeksPasses=' + (stats.workersTimesAllWeeksPasses || 0));
+  Logger.log('  blendInnerLoopIterations=' + (stats.blendInnerLoopIterations || 0));
+}
+
+/**
+ * WFM.25 WP2.0: trace past-quarter sparkline icpUtil payload for one worker.
+ * Logs buildActualsWeeklyCells_ inputs + sample weeks (hours / icpAvailable / icpUtil)
+ * and api_getResourceDetailV2 parity. Admin-gated; Logger only.
+ *
+ * @param {string} [workerName] default Al Romulo
+ * @param {string} [fiscalQuarter] default FY27-Q2
+ */
+function _dbg_traceWFM25SparklineIcpUtil_(workerName, fiscalQuarter) {
+  _dbg_requireAdmin_();
+  workerName = String(workerName || 'Al Romulo').trim();
+  fiscalQuarter = String(fiscalQuarter || 'FY27-Q2').trim();
+  var baseParams = {
+    viewMode: 'Committed',
+    workerScope: 'All',
+    includeTimeOff: false
+  };
+
+  Logger.log('=== _dbg_traceWFM25SparklineIcpUtil_: ' + workerName + ' ' + fiscalQuarter + ' ===');
+
+  var forecast = computeWeeklyForecast_(baseParams);
+  var rawCapacity = Number(forecast.rawCapacity) || readRawCapacity_();
+  var holidayHoursByWeek = forecast.holidayHoursByWeek || {};
+  Logger.log('  forecast.rawCapacity=' + forecast.rawCapacity + ' resolved=' + rawCapacity);
+  Logger.log('  holidayHoursByWeek key count=' + Object.keys(holidayHoursByWeek).length);
+
+  var w = (forecast.workers || []).find(function (x) { return x.resource === workerName; });
+  if (!w) {
+    Logger.log('  worker NOT FOUND in forecast scope');
+    return;
+  }
+  Logger.log('  employeeId=' + (w.employeeId || '(blank)') + ' icpTarget=' + w.icpTarget);
+
+  var cells = buildActualsWeeklyCells_(
+    workerName, fiscalQuarter, rawCapacity, holidayHoursByWeek, w.icpTarget, w.employeeId
+  );
+  var withHours = (cells.weeks || []).filter(function (c) {
+    return (Number(c.hours) || 0) > 0;
+  });
+  Logger.log('  buildActualsWeeklyCells_: total weeks=' + (cells.weeks || []).length +
+    ' with hours>0=' + withHours.length);
+  withHours.slice(0, 5).forEach(function (c, i) {
+    Logger.log('    [' + i + '] ' + c.weekKey +
+      ' hours=' + c.hours +
+      ' icpAvailable=' + c.icpAvailable +
+      ' icpUtil=' + (Number(c.icpUtil) * 100).toFixed(2) + '%' +
+      ' holidayHours=' + c.holidayHours);
+  });
+
+  var v2 = api_getResourceDetailV2(Object.assign({
+    resource: workerName,
+    selectedQuarter: fiscalQuarter
+  }, baseParams));
+  var v2Hours = (v2.weeks || []).filter(function (c) {
+    return (Number(c.hours) || 0) > 0;
+  });
+  Logger.log('  api_getResourceDetailV2: weeks=' + (v2.weeks || []).length +
+    ' with hours>0=' + v2Hours.length +
+    ' selectedQuarter=' + v2.selectedQuarter);
+  v2Hours.slice(0, 5).forEach(function (c, i) {
+    Logger.log('    [' + i + '] ' + c.weekKey +
+      ' hours=' + c.hours +
+      ' icpAvailable=' + c.icpAvailable +
+      ' icpUtil=' + (Number(c.icpUtil) * 100).toFixed(2) + '%');
+  });
+
+  var zeroUtil = v2Hours.filter(function (c) {
+    return !(Number(c.icpUtil) > 0);
+  });
+  if (zeroUtil.length && v2Hours.length) {
+    Logger.log('  DIAGNOSIS: ' + zeroUtil.length + '/' + v2Hours.length +
+      ' worked weeks have icpUtil=0 — check icpAvailable (rawCapacity − holidayHours)');
+  } else if (!v2Hours.length) {
+    Logger.log('  DIAGNOSIS: no weeks with hours>0 — sparkline series empty (renderer returns blank)');
+  } else {
+    Logger.log('  DIAGNOSIS: icpUtil populated for worked weeks — if sparkline blank, check client filter/color');
+  }
 }

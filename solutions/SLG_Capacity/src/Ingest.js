@@ -401,6 +401,20 @@ function runConsolidatedPreflight_(tempSs, warnings) {
       'Optional sheet present (' + Math.max(data[UNSTAFFED_DEMAND_SHEET].length - 1, 0) + ' data rows)');
   }
 
+  var xorgSh = tempSs.getSheetByName(XORG_FORECAST_AGGREGATE);
+  if (xorgSh) {
+    data[XORG_FORECAST_AGGREGATE] = xorgSh.getDataRange().getValues();
+    recordCheck('sheet_present:' + XORG_FORECAST_AGGREGATE, true,
+      Math.max(data[XORG_FORECAST_AGGREGATE].length - 1, 0) + ' data rows (empty is valid)');
+    validateSheetHeadersStrict_(
+      XORG_FORECAST_AGGREGATE, data[XORG_FORECAST_AGGREGATE],
+      XORG_FORECAST_AGGREGATE_HEADERS, recordCheck
+    );
+  } else {
+    recordCheck('sheet_present:' + XORG_FORECAST_AGGREGATE, true,
+      'Optional sheet absent — app tab will be cleared on write');
+  }
+
   validateForecastStagedHeaders_(data.Forecast_Staged, recordCheck, warnings);
   validateSheetHeadersStrict_(
     'Actuals_Current_Normalized', data.Actuals_Current_Normalized,
@@ -635,16 +649,30 @@ function validateConsolidatedManifestTotals_(data, manifestMap, recordCheck, war
       totalOk,
       'expected ' + expected.primary_total + ', actual ' + actualTotal
     );
-    recordCheck(
-      'manifest:min_period:' + sheetName,
-      !!expected.min_period && expected.min_period === actualMin,
-      'expected ' + expected.min_period + ', actual ' + actualMin
-    );
-    recordCheck(
-      'manifest:max_period:' + sheetName,
-      !!expected.max_period && expected.max_period === actualMax,
-      'expected ' + expected.max_period + ', actual ' + actualMax
-    );
+    // Empty sheets have no period range (e.g. start-of-quarter Actuals_Current).
+    if (dataRows === 0) {
+      recordCheck(
+        'manifest:min_period:' + sheetName,
+        true,
+        'skipped — empty sheet'
+      );
+      recordCheck(
+        'manifest:max_period:' + sheetName,
+        true,
+        'skipped — empty sheet'
+      );
+    } else {
+      recordCheck(
+        'manifest:min_period:' + sheetName,
+        !!expected.min_period && expected.min_period === actualMin,
+        'expected ' + expected.min_period + ', actual ' + actualMin
+      );
+      recordCheck(
+        'manifest:max_period:' + sheetName,
+        !!expected.max_period && expected.max_period === actualMax,
+        'expected ' + expected.max_period + ', actual ' + actualMax
+      );
+    }
   });
 }
 
@@ -727,7 +755,7 @@ function sumConsolidatedPrimary_(sheetName, values, warnings) {
   var colBySheet = {
     Actuals_Current_Normalized: 'actual_icp_hours',
     Utilization_Normalized: 'target_hours',
-    History_Normalized: 'worked_hours'
+    History_Normalized: 'icp_hours'
   };
   var col = colBySheet[sheetName];
   if (!col || idx[col] === undefined) return 0;
@@ -740,16 +768,14 @@ function sumConsolidatedPrimary_(sheetName, values, warnings) {
 }
 
 /**
- * Compare manifest primary_total (rounded to 1 decimal) against app sum.
+ * Compare manifest primary_total against app-computed sum (0.1 tolerance).
  * @param {number} expected manifest primary_total
  * @param {number} actual app-computed sum
  * @return {boolean}
  * @private
  */
 function compareManifestPrimaryTotal_(expected, actual) {
-  var e = Math.round(Number(expected) * 10) / 10;
-  var a = Math.round(Number(actual) * 10) / 10;
-  return Math.abs(e - a) <= 0.01;
+  return Math.abs(Number(expected) - Number(actual)) < 0.1;
 }
 
 /**
@@ -948,8 +974,8 @@ function validateUtilizationQuarterCount_(values, recordCheck) {
   var count = Object.keys(quarters).length;
   recordCheck(
     'utilization_quarters',
-    count === 4,
-    'Expected 4 distinct fiscal_quarter values, found ' + count +
+    count === 3,
+    'Expected 3 distinct fiscal_quarter values, found ' + count +
       ' (' + Object.keys(quarters).join(', ') + ')'
   );
 }
@@ -999,7 +1025,10 @@ function writeConsolidatedWorkbook_(data, warnings) {
   t0 = _logConsolidatedPhase_('write_actuals_history', t0, historyRows + ' rows');
 
   var unstaffedRowsOut = writeConsolidatedUnstaffedDemand_(data[UNSTAFFED_DEMAND_SHEET]);
-  _logConsolidatedPhase_('write_unstaffed_demand', t0, unstaffedRowsOut + ' rows');
+  t0 = _logConsolidatedPhase_('write_unstaffed_demand', t0, unstaffedRowsOut + ' rows');
+
+  var xorgRowsOut = writeConsolidatedXorgForecast_(data[XORG_FORECAST_AGGREGATE]);
+  _logConsolidatedPhase_('write_xorg_forecast_aggregate', t0, xorgRowsOut + ' rows');
 
   return {
     forecastRowsOut: normResult.rowsOut || 0,
@@ -1007,8 +1036,41 @@ function writeConsolidatedWorkbook_(data, warnings) {
     summaryRowsOut: summaryRowsOut,
     utilQuarterlyRows: utilQuarterlyRows,
     historyRows: historyRows,
-    unstaffedDemandRowsOut: unstaffedRowsOut
+    unstaffedDemandRowsOut: unstaffedRowsOut,
+    xorgForecastRowsOut: xorgRowsOut
   };
+}
+
+/**
+ * Copy Xorg_Forecast_Aggregate into the app tab (aggregate-only; not routed to Allocations_Normalized).
+ * Empty sheet or absent upload clears the tab.
+ * @param {Array[]|undefined} values sheet values including header
+ * @return {number} data rows written (0 if empty/absent)
+ * @private
+ */
+function writeConsolidatedXorgForecast_(values) {
+  if (!values || values.length < 2) {
+    writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, []);
+    invalidateCache_(XORG_FORECAST_AGGREGATE);
+    return 0;
+  }
+  var header = values[0];
+  var data = values.slice(1);
+  var idx = {};
+  header.forEach(function (h, i) { idx[String(h).trim()] = i; });
+  var out = [];
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    out.push([
+      String(row[idx.worker_group] || '').trim(),
+      String(row[idx.region] || '').trim(),
+      String(row[idx.fiscal_quarter] || '').trim(),
+      Number(row[idx.forecast_hours]) || 0
+    ]);
+  }
+  writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, out);
+  invalidateCache_(XORG_FORECAST_AGGREGATE);
+  return out.length;
 }
 
 /**
@@ -1051,17 +1113,42 @@ function writeConsolidatedActuals_(values) {
   var out = [];
   for (var r = 0; r < data.length; r++) {
     var row = data[r];
-    out.push([
-      String(row[idx.employee_id] || '').trim(),
-      String(row[idx.resource_name] || '').trim(),
-      row[idx.week_start],
-      String(row[idx.week_key] || '').trim(),
-      Number(row[idx.actual_icp_hours]) || 0,
-      r + 2
-    ]);
+    out.push(ACTUALS_HEADERS.map(function (h) {
+      if (h === 'actual_icp_hours') return Number(row[idx[h]]) || 0;
+      if (h === 'week_start') return row[idx[h]]; // Date, Saturday anchor
+      if (h === 'project' || h === 'project_role_category') {
+        var v = idx[h] !== undefined ? String(row[idx[h]] || '').trim() : '';
+        return v || 'Unclassified';
+      }
+      if (h === 'source_row') return r + 2;
+      return String(row[idx[h]] || '').trim();
+    }));
   }
   writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, out);
   invalidateCache_(ACTUALS_NORM);
+
+  try {
+    var weekStarts = [];
+    var seenWs = {};
+    var iWeekStart = ACTUALS_HEADERS.indexOf('week_start');
+    out.forEach(function (row) {
+      var ws = row[iWeekStart];
+      if (!ws) return;
+      var wk = weekKey_(ws);
+      if (!wk || seenWs[wk]) return;
+      seenWs[wk] = true;
+      weekStarts.push(weekStart_(ws));
+    });
+    if (weekStarts.length) {
+      var addedCal = ensureCalendarWeeks_(weekStarts);
+      if (addedCal) {
+        Logger.log('writeConsolidatedActuals_: added ' + addedCal + ' week(s) to Config_Calendar');
+      }
+    }
+  } catch (e) {
+    Logger.log('writeConsolidatedActuals_: ensureCalendarWeeks_ failed — ' + e);
+  }
+
   return out.length;
 }
 
@@ -1146,11 +1233,21 @@ function writeConsolidatedHistory_(values) {
   var idx = {};
   header.forEach(function (h, i) { idx[String(h).trim()] = i; });
   var out = [];
+  var iRegion = idx['workday_region_as_of_date_worked'];
+  if (iRegion === undefined) iRegion = idx['Region as of Date Worked'];
+
   for (var r = 0; r < data.length; r++) {
     var row = data[r];
     out.push(ACTUALS_HISTORY_HEADERS.map(function (h) {
-      if (h === 'worked_hours') {
+      if (h === 'icp_hours' || h === 'non_icp_hours') {
         return Number(row[idx[h]]) || 0;
+      }
+      if (h === 'workday_region_as_of_date_worked') {
+        return iRegion !== undefined ? String(row[iRegion] || '').trim() : '';
+      }
+      if (h === 'specialty_practice' || h === 'sub_specialty_practice') {
+        var spVal = idx[h] !== undefined ? String(row[idx[h]] || '').trim() : '';
+        return spVal || 'Unclassified';
       }
       return String(row[idx[h]] || '').trim();
     }));
@@ -1897,6 +1994,8 @@ function normalizeStaff() {
     // WFM-FIX.3: stamp every row regardless of exclusion -- retained as the
     // hook for a future requirement even for workers who end up excluded.
     const onLeave = _deriveOnLeave_(workerName);
+    const rawSpecialty = iTeam >= 0 ? String(row[iTeam] || '').trim() : '';
+    const specialtyPractice = rawSpecialty || 'Unclassified';
 
     const base = [
       iEmpId >= 0 ? String(row[iEmpId] || '').trim() : '',  // employee_id (Phase 0) — trimmed string for cross-source join
@@ -1922,8 +2021,8 @@ function normalizeStaff() {
       if (!hrs) continue;
 
       out.push(
-        // week_start, week_key, hours, source_row, on_leave
-        base.concat([wc.weekStart, weekKey_(wc.weekStart), hrs, entry.rowIndex + 2, onLeave])
+        // week_start, week_key, hours, source_row, on_leave, specialty_practice
+        base.concat([wc.weekStart, weekKey_(wc.weekStart), hrs, entry.rowIndex + 2, onLeave, specialtyPractice])
       );
     }
   }
@@ -2021,7 +2120,10 @@ function reconcileWorkerExclusions_(allocRows) {
         reason: '',
         active: 'Yes',
         source: '',
-        override: String(prev.override || '').trim()  // preserve human override
+        override: String(prev.override || '').trim(),  // preserve human override
+        return_date: prev.return_date || '',
+        modified_by: prev.modified_by || '',
+        modified_at: prev.modified_at || ''
       };
     }
     return out[k];
@@ -2038,7 +2140,10 @@ function reconcileWorkerExclusions_(allocRows) {
         worker_name: r.worker_name, manager_org: r.manager_org || '',
         reason: r.reason || '', active: r.active || 'Yes',
         source: isManual ? 'manual' : (r.source || 'manual'),
-        override: ovr
+        override: ovr,
+        return_date: r.return_date || '',
+        modified_by: r.modified_by || '',
+        modified_at: r.modified_at || ''
       };
     }
   });

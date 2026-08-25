@@ -385,6 +385,8 @@ function api_flushCaches() {
   if (typeof invalidateEnrichedCaches_ === 'function') {
     invalidateEnrichedCaches_();
   }
+  if (typeof _resetProjectionMemos_ === 'function') _resetProjectionMemos_();
+  invalidateSoftBookingBaselineCache_();
   return { ok: true, flushedAt: new Date().toISOString() };
 }
 
@@ -440,6 +442,8 @@ function api_getResourceDetailV2(params) {
     weeks: [],
     quarters: [],
     projects: [],
+    roleCategoryRollup: [],
+    specialtyPracticeRollup: [],
     blendedSummary: null
   };
   if (!resourceName) return emptyPayload;
@@ -460,15 +464,17 @@ function api_getResourceDetailV2(params) {
   if (!w) return emptyPayload;
 
   const visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
-  const rawCapacity = Number(forecast.rawCapacity) || 40;
+  const settingsForCapacity = readSettings_();
+  const rawCapacity = Number(forecast.rawCapacity) || readRawCapacity_(settingsForCapacity);
   const holidayHoursByWeek = forecast.holidayHoursByWeek || {};
   const icpTarget = Number(w.icpTarget) || 0;
 
-  const weeksOut = visibleWeeks.map(function (vw) {
+  let weeksOut = visibleWeeks.map(function (vw) {
+    // week_start is the Saturday anchor; week-ending label is that same Saturday (+0).
     const labelDate = new Date(
       vw.week_start.getFullYear(),
       vw.week_start.getMonth(),
-      vw.week_start.getDate() + 1
+      vw.week_start.getDate()
     );
     const cell = (w.blendedWeekly && w.blendedWeekly[vw.week_key]) || { hours: 0, isActual: false };
     const hours = Number(cell.hours) || 0;
@@ -482,7 +488,7 @@ function api_getResourceDetailV2(params) {
       weekStart: _toIso_(vw.week_start),
       label: Utilities.formatDate(labelDate, Session.getScriptTimeZone() || 'Etc/UTC', 'MM/dd/yy'),
       fiscalQuarter: String(vw.fiscal_quarter || ''),
-      fiscalQuarterKey: String(fiscalQuarterKey_(vw.week_start) || ''),
+      fiscalQuarterKey: String(fiscalQuarterKeyFromWeekStart_(vw.week_start) || ''),
       hours: Number(hours) || 0,
       icpUtil: Number(icpUtil) || 0,
       financeUtil: Number(financeUtil) || 0,
@@ -499,9 +505,11 @@ function api_getResourceDetailV2(params) {
     ? getActualsSummaryByEmployee_() : {};
   const settings = readSettings_();
   const curQ = fiscalQuarterKey_(new Date());
+  const selectedQuarter = String(params.selectedQuarter || '') || curQ;
+  const isPastQuarter = compareFiscalQuarterKeys_(selectedQuarter, curQ) < 0;
   const quartersOut = buildWorkerQuarters_(
     w,
-    rollingQuarterKeys_(4),
+    scorecardWindowKeys_(),
     forecast.weeks,
     holidays,
     actualsSummary,
@@ -509,17 +517,55 @@ function api_getResourceDetailV2(params) {
     curQ
   );
 
-  const projectsOut = Object.keys(w.projects || {}).sort().map(function (proj) {
-    return {
-      project: String(proj),
-      weekly: visibleWeeks.map(function (vw) {
-        return {
-          weekKey: String(vw.week_key),
-          hours: Number((w.projects[proj] || {})[vw.week_key] || 0) || 0
-        };
-      })
-    };
-  });
+  let projectsOut;
+  let roleCategoryRollup;
+  let specialtyPracticeRollup;
+  let weeklyProjectsOut = {};
+
+  if (isPastQuarter) {
+    const historyRollups = buildResourceHistoryRollups_(resourceName, selectedQuarter);
+    projectsOut = historyRollups.projects;
+    roleCategoryRollup = historyRollups.roleCategoryRollup;
+    specialtyPracticeRollup = historyRollups.specialtyPracticeRollup;
+    const actualsCells = buildActualsWeeklyCells_(
+      resourceName,
+      selectedQuarter,
+      rawCapacity,
+      holidayHoursByWeek,
+      icpTarget,
+      w.employeeId
+    );
+    weeksOut = actualsCells.weeks;
+    weeklyProjectsOut = actualsCells.weeklyProjects;
+  } else {
+    projectsOut = Object.keys(w.projects || {}).sort().map(function (proj) {
+      return {
+        project: String(proj),
+        weekly: visibleWeeks.map(function (vw) {
+          return {
+            weekKey: String(vw.week_key),
+            hours: Number((w.projects[proj] || {})[vw.week_key] || 0) || 0
+          };
+        })
+      };
+    });
+
+    const roleCategoryPayload = buildResourceRoleCategoryRollup_(
+      resourceName, projectsOut, selectedQuarter, visibleWeeks
+    );
+    roleCategoryRollup = roleCategoryPayload.rollup;
+    specialtyPracticeRollup = buildResourceSpecialtyPracticeRollup_(
+      resourceName, selectedQuarter, visibleWeeks
+    );
+    const projectNameEnrichment = enrichResourceProjectNames_(resourceName, projectsOut);
+    projectsOut.forEach(function (p, i) {
+      p.roleCategory = roleCategoryPayload.roleCategories[i] || 'Unclassified';
+      p.account_name = projectNameEnrichment[i].account_name;
+      p.project_name = projectNameEnrichment[i].project_name;
+      p.quarterHours = _projectQuarterHoursFromWeekly_(p, visibleWeeks, selectedQuarter);
+    });
+    weeklyProjectsOut = buildWeeklyProjectsMap_(resourceName, selectedQuarter, w.employeeId);
+  }
 
   let totalProductive = 0;
   let totalIcpAvailable = 0;
@@ -547,12 +593,21 @@ function api_getResourceDetailV2(params) {
   const avgFinancialUtilization = totalRawCapacity > 0 ? totalProductive / totalRawCapacity : 0;
   const blendedRatioToTarget = icpTarget > 0 ? avgIcpProductiveUtilization / icpTarget : 0;
 
+  const dataDiscrepancy = buildDataDiscrepancy_(
+    w, selectedQuarter, curQ, actualsSummary, settings
+  );
+
   return {
     resource: resourceName,
     found: true,
+    selectedQuarter: selectedQuarter,
     weeks: weeksOut,
     quarters: quartersOut,
     projects: projectsOut,
+    roleCategoryRollup: roleCategoryRollup,
+    specialtyPracticeRollup: specialtyPracticeRollup,
+    weeklyProjects: weeklyProjectsOut || {},
+    dataDiscrepancy: dataDiscrepancy,
     blendedSummary: {
       avgIcpProductiveUtilization: Number(avgIcpProductiveUtilization) || 0,
       avgFinancialUtilization: Number(avgFinancialUtilization) || 0,
@@ -569,6 +624,500 @@ function api_getResourceDetailV2(params) {
 }
 
 /**
+ * Sum a project's hours for one fiscal quarter from weekly forecast payload.
+ * @param {{weekly:Array}} p
+ * @param {Array} visibleWeeks
+ * @param {string} selectedQuarter
+ * @return {number}
+ * @private
+ */
+function _projectQuarterHoursFromWeekly_(p, visibleWeeks, selectedQuarter) {
+  var curWeekKeys = {};
+  (visibleWeeks || []).forEach(function (vw) {
+    if (fiscalQuarterKey_(vw.week_start) === selectedQuarter) {
+      curWeekKeys[String(vw.week_key)] = true;
+    }
+  });
+  var sum = 0;
+  (p.weekly || []).forEach(function (wk) {
+    if (curWeekKeys[wk.weekKey]) sum += Number(wk.hours) || 0;
+  });
+  return sum;
+}
+
+/**
+ * Past-quarter Projects + Specialty from Actuals_History (WoW actuals, consumed as-is).
+ * @param {string} resourceName
+ * @param {string} fiscalQuarter
+ * @return {{specialtyPracticeRollup:Array, roleCategoryRollup:Array, projects:Array}}
+ */
+function buildResourceHistoryRollups_(resourceName, fiscalQuarter) {
+  var rows = readTable_(ACTUALS_HISTORY) || [];
+  var specialtyHours = {};
+  var roleCatHours = {};
+  var projectHours = {};
+  var projectRoleVotes = {};
+
+  rows.forEach(function (r) {
+    if (String(r.resource_name || '') !== resourceName) return;
+    if (String(r.fiscal_quarter || '').trim() !== fiscalQuarter) return;
+    var hrs = Number(r.icp_hours) || 0;
+    if (!hrs) return;
+    var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
+    specialtyHours[sp] = (specialtyHours[sp] || 0) + hrs;
+    var rc = String(r.project_role_category || '').trim() || 'Unclassified';
+    roleCatHours[rc] = (roleCatHours[rc] || 0) + hrs;
+    var proj = String(r.project || '').trim();
+    if (!proj) return;
+    projectHours[proj] = (projectHours[proj] || 0) + hrs;
+    if (!projectRoleVotes[proj]) projectRoleVotes[proj] = {};
+    projectRoleVotes[proj][rc] = (projectRoleVotes[proj][rc] || 0) + hrs;
+  });
+
+  function pickTopRole_(proj) {
+    var votes = projectRoleVotes[proj] || {};
+    var keys = Object.keys(votes);
+    if (!keys.length) return 'Unclassified';
+    keys.sort(function (a, b) { return (votes[b] || 0) - (votes[a] || 0); });
+    return keys[0];
+  }
+
+  var specialtyPracticeRollup = Object.keys(specialtyHours).map(function (sp) {
+    return {
+      specialtyPractice: sp,
+      currentQuarterHours: Number(specialtyHours[sp]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
+
+  var roleCategoryRollup = Object.keys(roleCatHours).map(function (rc) {
+    return {
+      roleCategory: rc,
+      currentQuarterHours: Number(roleCatHours[rc]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
+
+  var projects = Object.keys(projectHours).sort().map(function (proj) {
+    return {
+      project: proj,
+      account_name: '',
+      project_name: proj,
+      roleCategory: pickTopRole_(proj),
+      weekly: [],
+      quarterHours: Number(projectHours[proj]) || 0
+    };
+  });
+
+  return {
+    specialtyPracticeRollup: specialtyPracticeRollup,
+    roleCategoryRollup: roleCategoryRollup,
+    projects: projects
+  };
+}
+
+/**
+ * Past-quarter weekly capacity cells from Actuals_Normalized aggregate + project drilldown.
+ * Week totals come from getActualsAggregated_(); quarter week set from
+ * getActualWeekKeysForQuarter_ (work-day fiscal quarter).
+ *
+ * @param {string} resourceName
+ * @param {string} fiscalQuarter
+ * @param {number} rawCapacity
+ * @param {Object<string, number>} holidayHoursByWeek
+ * @param {number} icpTarget
+ * @param {string} [employeeId]
+ * @return {{weeks:Array, weeklyProjects:Object}}
+ */
+function buildActualsWeeklyCells_(resourceName, fiscalQuarter, rawCapacity, holidayHoursByWeek, icpTarget, employeeId) {
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  resourceName = String(resourceName || '').trim();
+  employeeId = String(employeeId || '').trim();
+  var resolvedCapacity = Number(rawCapacity);
+  if (!isFinite(resolvedCapacity) || resolvedCapacity <= 0) {
+    resolvedCapacity = (typeof readRawCapacity_ === 'function') ? readRawCapacity_() : 40;
+  }
+  rawCapacity = resolvedCapacity;
+  icpTarget = Number(icpTarget) || 0;
+  holidayHoursByWeek = holidayHoursByWeek || {};
+  var holidays = (typeof readHolidays_ === 'function') ? readHolidays_() : [];
+
+  var weekKeys = (typeof getActualWeekKeysForQuarter_ === 'function')
+    ? getActualWeekKeysForQuarter_(fiscalQuarter) : [];
+  if (!weekKeys.length) return { weeks: [], weeklyProjects: {} };
+
+  var actualsAgg = (typeof getActualsAggregated_ === 'function')
+    ? getActualsAggregated_() : { byEmployeeId: {}, byResourceName: {} };
+  var workerMap = (typeof _workerWeeklyActualsMap_ === 'function')
+    ? _workerWeeklyActualsMap_(
+      { employeeId: employeeId, resource: resourceName },
+      actualsAgg.byEmployeeId,
+      actualsAgg.byResourceName
+    ) : {};
+
+  var weeklyProjects = buildWeeklyProjectsMap_(resourceName, fiscalQuarter, employeeId);
+
+  var weeks = [];
+  weekKeys.forEach(function (wk) {
+    var hours = Number(workerMap[wk]) || 0;
+
+    if (weeklyProjects[wk] && weeklyProjects[wk].length) {
+      var projSum = 0;
+      weeklyProjects[wk].forEach(function (p) { projSum += Number(p.hours) || 0; });
+      if (Math.abs(projSum - hours) > 0.05) {
+        Logger.log('buildActualsWeeklyCells_: project sum mismatch for ' +
+          resourceName + ' week ' + wk + ': projects=' + projSum + ' aggregate=' + hours);
+      }
+    }
+
+    var ws = _weekStartFromWeekKey_(wk);
+    if (!ws) return;
+
+    var holidayHours = Number(holidayHoursByWeek[wk] || 0);
+    if (!holidayHours && ws && typeof holidayHoursForWeek_ === 'function') {
+      holidayHours = holidayHoursForWeek_(ws, holidays);
+    }
+    var icpAvailable = rawCapacity - holidayHours;
+    if (icpAvailable < 0) icpAvailable = 0;
+    var icpUtil = icpAvailable > 0 ? (hours / icpAvailable) : 0;
+    var financeUtil = rawCapacity > 0 ? (hours / rawCapacity) : 0;
+    var ratioToTarget = icpTarget > 0 ? (icpUtil / icpTarget) : 0;
+    var labelDate = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate());
+
+    weeks.push({
+      weekKey: String(wk),
+      weekStart: _toIso_(ws),
+      label: Utilities.formatDate(labelDate, Session.getScriptTimeZone() || 'Etc/UTC', 'MM/dd/yy'),
+      fiscalQuarter: fiscalQuarter,
+      fiscalQuarterKey: fiscalQuarter,
+      hours: hours,
+      isActual: true,
+      icpTarget: icpTarget,
+      icpAvailable: Number(icpAvailable) || 0,
+      icpUtil: Number(icpUtil) || 0,
+      financeUtil: Number(financeUtil) || 0,
+      ratioToTarget: Number(ratioToTarget) || 0,
+      holidayHours: holidayHours
+    });
+  });
+
+  weeks.sort(function (a, b) {
+    if (a.weekStart < b.weekStart) return -1;
+    if (a.weekStart > b.weekStart) return 1;
+    return 0;
+  });
+
+  return { weeks: weeks, weeklyProjects: weeklyProjects };
+}
+
+/**
+ * Per-week project breakdown from Actuals_Normalized for one worker+quarter.
+ * Keys are canonical week_key; values are [{project, roleCategory, hours}] desc.
+ *
+ * @param {string} resourceName
+ * @param {string} fiscalQuarter
+ * @param {string} [employeeId]
+ * @return {Object<string, Array<{project:string, roleCategory:string, hours:number}>>}
+ */
+function buildWeeklyProjectsMap_(resourceName, fiscalQuarter, employeeId) {
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  resourceName = String(resourceName || '').trim();
+  employeeId = String(employeeId || '').trim();
+
+  var weeklyProjects = {};
+  var normRows = [];
+  try {
+    normRows = cachedRead_(ACTUALS_NORM) || [];
+  } catch (e) {
+    normRows = [];
+  }
+
+  normRows.forEach(function (r) {
+    var eid = String(r.employee_id || '').trim();
+    var name = String(r.resource_name || '').trim();
+    if (employeeId) {
+      if (eid !== employeeId && name !== resourceName) return;
+    } else if (name !== resourceName) {
+      return;
+    }
+
+    var wk = '';
+    if (r.week_start) {
+      try { wk = weekKey_(r.week_start); } catch (e2) { wk = ''; }
+    }
+    if (!wk && r.week_key) wk = String(r.week_key).trim();
+    if (!wk) return;
+    if (fiscalQuarterKeyFromWeekKey_(wk) !== fiscalQuarter) return;
+
+    var proj = String(r.project || '').trim();
+    if (!proj) return;
+    var hrs = Number(r.actual_icp_hours) || 0;
+    if (!hrs) return;
+
+    if (!weeklyProjects[wk]) weeklyProjects[wk] = {};
+    var bucketKey = proj + '\x00' + String(r.project_role_category || '').trim();
+    if (!weeklyProjects[wk][bucketKey]) {
+      weeklyProjects[wk][bucketKey] = {
+        project: proj,
+        roleCategory: String(r.project_role_category || '').trim() || 'Unclassified',
+        hours: 0
+      };
+    }
+    weeklyProjects[wk][bucketKey].hours += hrs;
+  });
+
+  Object.keys(weeklyProjects).forEach(function (wk) {
+    var arr = Object.keys(weeklyProjects[wk]).map(function (k) {
+      return weeklyProjects[wk][k];
+    });
+    arr.sort(function (a, b) { return (b.hours || 0) - (a.hours || 0); });
+    weeklyProjects[wk] = arr;
+  });
+
+  return weeklyProjects;
+}
+
+/**
+ * Current-quarter weekly-vs-reconciled discrepancy flag (WP2.0 feature E).
+ * Compares sum of current-quarter weekly actuals (aggregate) vs qtd_actual_icp.
+ *
+ * @param {Object} worker forecast worker row
+ * @param {string} selectedQuarter
+ * @param {string} curQ
+ * @param {Object} actualsSummary getActualsSummaryByEmployee_ map
+ * @param {Object} settings readSettings_ output
+ * @return {{flagged:boolean, week:string, weeklyActual:number, reconciledActual:number, delta:number}}
+ */
+function buildDataDiscrepancy_(worker, selectedQuarter, curQ, actualsSummary, settings) {
+  if (String(selectedQuarter || '') !== String(curQ || '')) {
+    return { flagged: false };
+  }
+
+  settings = settings || readSettings_();
+  var tolHours = Number(settings.discrepancy_tolerance_hours);
+  if (!isFinite(tolHours) || tolHours < 0) tolHours = 2;
+  var tolPct = Number(settings.discrepancy_tolerance_pct);
+  if (!isFinite(tolPct) || tolPct < 0) tolPct = 0.05;
+
+  var weekKeys = (typeof getActualWeekKeysForQuarter_ === 'function')
+    ? getActualWeekKeysForQuarter_(curQ) : [];
+  var actualsAgg = (typeof getActualsAggregated_ === 'function')
+    ? getActualsAggregated_() : { byEmployeeId: {}, byResourceName: {} };
+  var workerMap = (typeof _workerWeeklyActualsMap_ === 'function')
+    ? _workerWeeklyActualsMap_(
+      { employeeId: worker.employeeId, resource: worker.resource },
+      actualsAgg.byEmployeeId,
+      actualsAgg.byResourceName
+    ) : {};
+
+  var weeklyActualsSum = 0;
+  var latestWeek = '';
+  weekKeys.forEach(function (wk) {
+    var hrs = Number(workerMap[wk]) || 0;
+    weeklyActualsSum += hrs;
+    if (hrs > 0) latestWeek = wk;
+  });
+  if (!latestWeek && weekKeys.length) latestWeek = weekKeys[weekKeys.length - 1];
+
+  var eid = String(worker.employeeId || '').trim();
+  var reconciled = (actualsSummary[eid] && Number(actualsSummary[eid].qtd_actual_icp_hours)) || 0;
+  var delta = weeklyActualsSum - reconciled;
+  var threshold = Math.max(tolHours, tolPct * reconciled);
+  var flagged = Math.abs(delta) > threshold;
+
+  return {
+    flagged: !!flagged,
+    week: String(latestWeek || ''),
+    weeklyActual: Number(weeklyActualsSum) || 0,
+    reconciledActual: Number(reconciled) || 0,
+    delta: Number(delta) || 0
+  };
+}
+
+/**
+ * ADD-ONLY: passthrough Project Role Category rollup for api_getResourceDetailV2.
+ * Maps project hours to role_category from allocation rows; does not alter hours.
+ * @param {string} resourceName
+ * @param {Array<{project:string, weekly:Array}>} projectsOut
+ * @param {string} curQ current fiscal quarter key
+ * @param {Array<{week_key:string, week_start:Date}>} visibleWeeks
+ * @return {{rollup: Array<{roleCategory:string, currentQuarterHours:number}>, roleCategories: string[]}}
+ */
+function buildResourceRoleCategoryRollup_(resourceName, projectsOut, curQ, visibleWeeks) {
+  var curWeekKeys = {};
+  (visibleWeeks || []).forEach(function (vw) {
+    if (fiscalQuarterKey_(vw.week_start) === curQ) {
+      curWeekKeys[String(vw.week_key)] = true;
+    }
+  });
+
+  var projRoleVotes = {};
+  var workerRoleVotes = {};
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  allocRows.forEach(function (a) {
+    if (String(a.resource_name || '') !== resourceName) return;
+    var rc = String(a.role_category || '').trim() || 'Unclassified';
+    workerRoleVotes[rc] = (workerRoleVotes[rc] || 0) + 1;
+    var proj = String(a.project_name || '').trim();
+    if (!proj) return;
+    if (!projRoleVotes[proj]) projRoleVotes[proj] = {};
+    projRoleVotes[proj][rc] = (projRoleVotes[proj][rc] || 0) + 1;
+  });
+
+  function pickTop_(counts) {
+    var keys = Object.keys(counts || {});
+    if (!keys.length) return '';
+    keys.sort(function (a, b) { return (counts[b] || 0) - (counts[a] || 0); });
+    return keys[0];
+  }
+
+  var workerDefaultRole = pickTop_(workerRoleVotes) || 'Unclassified';
+  var roleCategories = (projectsOut || []).map(function (p) {
+    return pickTop_(projRoleVotes[p.project]) || workerDefaultRole;
+  });
+
+  var roleCatHours = {};
+  (projectsOut || []).forEach(function (p, idx) {
+    var rc = roleCategories[idx] || workerDefaultRole;
+    (p.weekly || []).forEach(function (wk) {
+      if (!curWeekKeys[wk.weekKey]) return;
+      var hrs = Number(wk.hours) || 0;
+      if (!hrs) return;
+      roleCatHours[rc] = (roleCatHours[rc] || 0) + hrs;
+    });
+  });
+
+  var rollup = Object.keys(roleCatHours).map(function (rc) {
+    return {
+      roleCategory: rc,
+      currentQuarterHours: Number(roleCatHours[rc]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
+
+  return { rollup: rollup, roleCategories: roleCategories };
+}
+
+/**
+ * ADD-ONLY: passthrough Specialty Practice rollup for api_getResourceDetailV2.
+ * Sums allocation-row hours by raw specialty_practice for the current quarter.
+ * @param {string} resourceName
+ * @param {string} curQ current fiscal quarter key
+ * @param {Array<{week_key:string, week_start:Date}>} visibleWeeks
+ * @return {Array<{specialtyPractice:string, currentQuarterHours:number}>}
+ */
+function buildResourceSpecialtyPracticeRollup_(resourceName, curQ, visibleWeeks) {
+  var curWeekKeys = {};
+  (visibleWeeks || []).forEach(function (vw) {
+    if (fiscalQuarterKey_(vw.week_start) === curQ) {
+      curWeekKeys[String(vw.week_key)] = true;
+    }
+  });
+
+  var specialtyHours = {};
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  allocRows.forEach(function (a) {
+    if (String(a.resource_name || '') !== resourceName) return;
+    var wk = String(a.week_key || '');
+    if (!curWeekKeys[wk]) return;
+    var hrs = Number(a.hours) || 0;
+    if (!hrs) return;
+    var sp = String(a.specialty_practice || '').trim() || 'Unclassified';
+    specialtyHours[sp] = (specialtyHours[sp] || 0) + hrs;
+  });
+
+  return Object.keys(specialtyHours).map(function (sp) {
+    return {
+      specialtyPractice: sp,
+      currentQuarterHours: Number(specialtyHours[sp]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
+}
+
+/**
+ * Vote worker specialty_practice from Allocations_Normalized hours (verbatim passthrough).
+ * @param {Array<Object>} allocRows
+ * @return {Object<string,string>} resourceName → specialtyPractice
+ */
+function buildWorkerSpecialtyPracticeMap_(allocRows) {
+  var votes = {};
+  (allocRows || []).forEach(function (a) {
+    var res = String(a.resource_name || '');
+    if (!res) return;
+    var hrs = Number(a.hours) || 0;
+    if (!hrs) return;
+    var sp = String(a.specialty_practice || '').trim() || 'Unclassified';
+    if (!votes[res]) votes[res] = {};
+    votes[res][sp] = (votes[res][sp] || 0) + hrs;
+  });
+  var out = {};
+  Object.keys(votes).forEach(function (res) {
+    var counts = votes[res];
+    var keys = Object.keys(counts);
+    keys.sort(function (a, b) { return (counts[b] || 0) - (counts[a] || 0); });
+    out[res] = keys[0] || 'Unclassified';
+  });
+  return out;
+}
+
+/**
+ * ADD-ONLY: passthrough account_name + project_name for api_getResourceDetailV2 projects[].
+ * Votes from Allocations_Normalized rows; does not alter hours or existing fields.
+ * @param {string} resourceName
+ * @param {Array<{project:string}>} projectsOut
+ * @return {Array<{account_name:string, project_name:string}>}
+ */
+function enrichResourceProjectNames_(resourceName, projectsOut) {
+  var projMeta = {};
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  allocRows.forEach(function (a) {
+    if (String(a.resource_name || '') !== resourceName) return;
+    var proj = String(a.project_name || '').trim();
+    if (!proj) return;
+    if (!projMeta[proj]) projMeta[proj] = { accountVotes: {} };
+    var acct = String(a.account_name || '').trim();
+    if (acct) {
+      projMeta[proj].accountVotes[acct] = (projMeta[proj].accountVotes[acct] || 0) + 1;
+    }
+  });
+
+  function pickTop_(counts) {
+    var keys = Object.keys(counts || {});
+    if (!keys.length) return '';
+    keys.sort(function (a, b) { return (counts[b] || 0) - (counts[a] || 0); });
+    return keys[0];
+  }
+
+  return (projectsOut || []).map(function (p) {
+    var meta = projMeta[p.project] || {};
+    return {
+      account_name: pickTop_(meta.accountVotes) || '',
+      project_name: String(p.project || '')
+    };
+  });
+}
+
+/**
  * WFM.17: Team quarterly scorecard (rolling four fiscal quarters).
  * @param {Object} params same shape as api_getDashboard
  * @return {Object}
@@ -576,6 +1125,1291 @@ function api_getResourceDetailV2(params) {
 function api_getQuarterlyScorecard(params) {
   _requireAuthorized_();
   return computeQuarterlyScorecard_(params || {});
+}
+
+/**
+ * WFM.25 Stage 4: Historical worker-type hours for Mix & Trend.
+ * Reads Actuals_History; aggregates by fiscal quarter and display class.
+ * @param {Object} [params] reserved for future filter params
+ * @return {Object}
+ */
+function api_getWorkerTypeHistory(params) {
+  _requireAuthorized_();
+  return getWorkerTypeHistory_(params || {});
+}
+
+/**
+ * WFM.25: Cross-org + contractor quarterly forecast aggregate (read-only).
+ * Scoped to the scorecard forward window (current + next fiscal quarters).
+ * @param {Object} [params] reserved for future filter params
+ * @return {Object}
+ */
+function api_getXorgForecast(params) {
+  _requireAuthorized_();
+  return getXorgForecast_(params || {});
+}
+
+/**
+ * Read Xorg_Forecast_Aggregate and shape for Hours & Capacity + Mix & Trend forward views.
+ * @param {Object} [params]
+ * @return {Object}
+ */
+function getXorgForecast_(params) {
+  var windowKeys = scorecardWindowKeys_();
+  var forwardKeys = windowKeys.length >= 3
+    ? [windowKeys[1], windowKeys[2]]
+    : windowKeys.slice(1);
+  var forwardSet = {};
+  forwardKeys.forEach(function (qk) { forwardSet[qk] = true; });
+
+  var rows = readTable_(XORG_FORECAST_AGGREGATE) || [];
+  var out = [];
+  var byGroupQuarter = {};
+  var regionByQuarter = {};
+
+  rows.forEach(function (r) {
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq || !forwardSet[fq]) return;
+    var workerGroup = String(r.worker_group || '').trim();
+    if (!workerGroup) return;
+    var region = String(r.region || '').trim();
+    var hrs = Number(r.forecast_hours) || 0;
+    if (!hrs) return;
+
+    out.push({
+      workerGroup: workerGroup,
+      region: region,
+      fiscalQuarter: fq,
+      forecastHours: hrs
+    });
+
+    if (!byGroupQuarter[workerGroup]) byGroupQuarter[workerGroup] = {};
+    byGroupQuarter[workerGroup][fq] = (byGroupQuarter[workerGroup][fq] || 0) + hrs;
+
+    if (workerGroup === 'Workday Regions') {
+      if (!regionByQuarter[fq]) regionByQuarter[fq] = {};
+      var rk = region || 'Unclassified';
+      regionByQuarter[fq][rk] = (regionByQuarter[fq][rk] || 0) + hrs;
+    }
+  });
+
+  return {
+    rows: out,
+    quarterKeys: windowKeys,
+    forwardQuarterKeys: forwardKeys,
+    byGroupQuarter: byGroupQuarter,
+    regionByQuarter: regionByQuarter
+  };
+}
+
+/**
+ * Aggregate Actuals_History into Mix & Trend wire payload.
+ * Storage worker_class → display class: SLG, Workday Regions, Contractor.
+ * @param {Object} [params]
+ * @return {Object}
+ */
+function getWorkerTypeHistory_(params) {
+  var rows = readTable_(ACTUALS_HISTORY) || [];
+  var quarterTotals = {};
+  var quarterClasses = {};
+  var quarterRegions = {};
+  var grandTotal = 0;
+
+  rows.forEach(function (r) {
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq) return;
+    var hrs = Number(r.icp_hours) || 0;
+    if (!hrs) return;
+
+    var displayClass = historyDisplayClass_(r.worker_class);
+    if (!displayClass) return;
+
+    grandTotal += hrs;
+    quarterTotals[fq] = (quarterTotals[fq] || 0) + hrs;
+
+    if (!quarterClasses[fq]) quarterClasses[fq] = {};
+    quarterClasses[fq][displayClass] = (quarterClasses[fq][displayClass] || 0) + hrs;
+
+    if (displayClass === 'Workday Regions') {
+      var region = String(r.workday_region_as_of_date_worked || '').trim();
+      if (!region) region = 'Unclassified';
+      if (!quarterRegions[fq]) quarterRegions[fq] = {};
+      quarterRegions[fq][region] = (quarterRegions[fq][region] || 0) + hrs;
+    }
+  });
+
+  var fiscalQuarters = Object.keys(quarterTotals).sort(compareFiscalQuarterKeys_);
+  var summaries = buildWorkerTypeHistorySummaries_(
+    fiscalQuarters, quarterTotals, quarterClasses, quarterRegions
+  );
+
+  return {
+    fiscalQuarters: fiscalQuarters,
+    quarterTotals: quarterTotals,
+    quarterClasses: quarterClasses,
+    quarterRegions: quarterRegions,
+    grandTotal: grandTotal,
+    quarters: summaries.quarters,
+    categoryByQuarter: summaries.categoryByQuarter,
+    regionByQuarter: summaries.regionByQuarter,
+    bannerSummary: summaries.bannerSummary
+  };
+}
+
+/**
+ * Pre-aggregated Mix & Trend summaries for banner sparklines and drill-down.
+ * Historical actual quarters only (caller supplies Actuals_History aggregates).
+ * @param {string[]} fiscalQuarters
+ * @param {Object<string,number>} quarterTotals
+ * @param {Object<string,Object<string,number>>} quarterClasses
+ * @param {Object<string,Object<string,number>>} quarterRegions
+ * @return {Object}
+ * @private
+ */
+function buildWorkerTypeHistorySummaries_(fiscalQuarters, quarterTotals, quarterClasses, quarterRegions) {
+  var DISPLAY_CLASSES = ['SLG', 'Workday Regions', 'Contractor'];
+
+  var quarters = fiscalQuarters.map(function (fq) {
+    return { fiscalQuarter: fq, totalHours: Number(quarterTotals[fq]) || 0 };
+  });
+
+  var categoryByQuarter = fiscalQuarters.map(function (fq) {
+    var cls = quarterClasses[fq] || {};
+    return {
+      fiscalQuarter: fq,
+      slgHours: Number(cls['SLG']) || 0,
+      workdayRegionsHours: Number(cls['Workday Regions']) || 0,
+      contractorHours: Number(cls['Contractor']) || 0
+    };
+  });
+
+  var regionByQuarter = {};
+  fiscalQuarters.forEach(function (fq) {
+    var regions = quarterRegions[fq] || {};
+    var rows = Object.keys(regions).map(function (rk) {
+      return { workdayRegion: rk, hours: Number(regions[rk]) || 0 };
+    });
+    rows.sort(function (a, b) { return b.hours - a.hours; });
+    regionByQuarter[fq] = rows;
+  });
+
+  var n = fiscalQuarters.length;
+  var latestQ = n ? fiscalQuarters[n - 1] : '';
+  var priorQ = n > 1 ? fiscalQuarters[n - 2] : '';
+  var latestHours = n ? (Number(quarterTotals[latestQ]) || 0) : 0;
+  var priorHours = n > 1 ? (Number(quarterTotals[priorQ]) || 0) : 0;
+  var qoqAbs = latestHours - priorHours;
+  var qoqPct = priorHours > 0 ? qoqAbs / priorHours : 0;
+
+  var histGrand = 0;
+  var catTotals = { 'SLG': 0, 'Workday Regions': 0, 'Contractor': 0 };
+  fiscalQuarters.forEach(function (fq) {
+    histGrand += Number(quarterTotals[fq]) || 0;
+    var cls = quarterClasses[fq] || {};
+    DISPLAY_CLASSES.forEach(function (c) {
+      catTotals[c] += Number(cls[c]) || 0;
+    });
+  });
+  var avgQuarterlyHours = n > 0 ? histGrand / n : 0;
+
+  var shareSeriesSLG = [];
+  var shareSeriesWorkdayRegions = [];
+  var shareSeriesContractor = [];
+  var totalHoursSeries = [];
+
+  fiscalQuarters.forEach(function (fq) {
+    var total = Number(quarterTotals[fq]) || 0;
+    var cls = quarterClasses[fq] || {};
+    totalHoursSeries.push(total);
+    if (total > 0) {
+      shareSeriesSLG.push((Number(cls['SLG']) || 0) / total);
+      shareSeriesWorkdayRegions.push((Number(cls['Workday Regions']) || 0) / total);
+      shareSeriesContractor.push((Number(cls['Contractor']) || 0) / total);
+    } else {
+      shareSeriesSLG.push(0);
+      shareSeriesWorkdayRegions.push(0);
+      shareSeriesContractor.push(0);
+    }
+  });
+
+  return {
+    quarters: quarters,
+    categoryByQuarter: categoryByQuarter,
+    regionByQuarter: regionByQuarter,
+    bannerSummary: {
+      latestQuarter: latestQ,
+      latestQuarterHours: latestHours,
+      priorQuarter: priorQ,
+      qoqAbsHours: qoqAbs,
+      qoqPct: qoqPct,
+      avgQuarterlyHours: avgQuarterlyHours,
+      pooledShareSLG: histGrand > 0 ? catTotals['SLG'] / histGrand : 0,
+      pooledShareWorkdayRegions: histGrand > 0 ? catTotals['Workday Regions'] / histGrand : 0,
+      pooledShareContractor: histGrand > 0 ? catTotals['Contractor'] / histGrand : 0,
+      shareSeriesSLG: shareSeriesSLG,
+      shareSeriesWorkdayRegions: shareSeriesWorkdayRegions,
+      shareSeriesContractor: shareSeriesContractor,
+      totalHoursSeries: totalHoursSeries
+    }
+  };
+}
+
+/**
+ * Map Actuals_History storage worker_class to Mix & Trend display class.
+ * @param {string} storageClass
+ * @return {string|null}
+ */
+function historyDisplayClass_(storageClass) {
+  var wc = String(storageClass || '').trim();
+  if (wc === 'SLG' || wc === 'SLG_Real' || wc === 'SLG_Generic') return 'SLG';
+  if (wc === 'Non-SLG' || wc === 'External_NonSLG') return 'Workday Regions';
+  if (wc === 'Contractor' || wc === 'External_Contractor') return 'Contractor';
+  return null;
+}
+
+/**
+ * Compare fiscal-quarter keys chronologically (e.g. FY26-Q1 < FY26-Q4).
+ * @param {string} a
+ * @param {string} b
+ * @return {number}
+ */
+function compareFiscalQuarterKeys_(a, b) {
+  var ma = String(a || '').match(/^FY(\d{2})-(Q[1-4])$/);
+  var mb = String(b || '').match(/^FY(\d{2})-(Q[1-4])$/);
+  if (!ma || !mb) return String(a).localeCompare(String(b));
+  var ya = parseInt(ma[1], 10);
+  var yb = parseInt(mb[1], 10);
+  if (ya !== yb) return ya - yb;
+  return parseInt(ma[2].charAt(1), 10) - parseInt(mb[2].charAt(1), 10);
+}
+
+// ------------------------------------------------------------
+// WFM.23 — Soft booking projection (Stage 1)
+// ------------------------------------------------------------
+
+/** Per-execution L1 baseline forecast cache (L2 = CacheService). */
+var _softBookingBaselineCache_ = { signature: '', forecast: null };
+
+/**
+ * Clear WFM.23 projection L1 baseline cache (called from api_flushCaches).
+ * L2 entries are keyed on _getEnrichedCacheVersion_() and invalidate via
+ * invalidateEnrichedCaches_() version bump.
+ */
+function invalidateSoftBookingBaselineCache_() {
+  _softBookingBaselineCache_.signature = '';
+  _softBookingBaselineCache_.forecast = null;
+}
+
+/**
+ * CacheService key for a projection baseline (version + filter signature).
+ * @param {Object} forecastParams
+ * @return {string}
+ */
+function _projectionBaselineCacheKey_(forecastParams) {
+  var sig = _projectionFilterSignature_(forecastParams);
+  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, sig, Utilities.Charset.UTF_8);
+  var hex = digest.map(function (b) {
+    return ('0' + (b < 0 ? b + 256 : b).toString(16)).slice(-2);
+  }).join('');
+  return 'wfm23:baseline:v' + _getEnrichedCacheVersion_() + ':' + hex;
+}
+
+/**
+ * Pre-compute per-quarter productive hours for lean baseline caching.
+ * @param {Object} worker computeWeeklyForecast_ worker row
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @return {Object<string, number>}
+ */
+function _quarterProductiveForWorker_(worker, weeks) {
+  var qp = {};
+  (weeks || []).forEach(function (wk) {
+    var qk = fiscalQuarterKey_(wk.week_start);
+    qp[qk] = (qp[qk] || 0) + productiveHoursForWeek_(worker, wk.week_key);
+  });
+  return qp;
+}
+
+/**
+ * Productive hours for one worker-quarter (lean cache or live weekly maps).
+ * @param {Object} worker
+ * @param {string} qk
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @return {number}
+ */
+function _workerQuarterProductive_(worker, qk, weeks) {
+  if (worker.blendedWeekly || worker.productiveWeekly) {
+    return sumForecastProductiveForQuarter_(worker, qk, weeks);
+  }
+  if (worker.quarterProductive && worker.quarterProductive.hasOwnProperty(qk)) {
+    return Number(worker.quarterProductive[qk]) || 0;
+  }
+  return sumForecastProductiveForQuarter_(worker, qk, weeks);
+}
+
+/**
+ * Lean worker row for L2 baseline cache (quarter sums only; no weekly maps).
+ * @param {Object} worker
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @return {Object}
+ */
+function _leanWorkerForCache_(worker, weeks) {
+  return {
+    resource: worker.resource,
+    jobProfile: worker.jobProfile,
+    level: worker.level,
+    managerOrg: worker.managerOrg,
+    managersManager: worker.managersManager,
+    icpRole: worker.icpRole,
+    teamLabel: worker.teamLabel,
+    workerClass: worker.workerClass,
+    icpTarget: worker.icpTarget,
+    employeeId: worker.employeeId,
+    quarterProductive: _quarterProductiveForWorker_(worker, weeks)
+  };
+}
+
+/**
+ * JSON-safe lean forecast payload for CacheService (no Date objects, no
+ * per-worker weekly maps — quarterProductive only; must stay <100KB).
+ * @param {Object} forecast
+ * @return {Object}
+ */
+function _serializeForecastForCache_(forecast) {
+  var weeks = forecast.weeks || [];
+  return {
+    weeks: weeks.map(function (w) {
+      return {
+        week_start: _toIso_(w.week_start),
+        week_key: String(w.week_key || ''),
+        fiscal_year: Number(w.fiscal_year) || 0,
+        fiscal_quarter: String(w.fiscal_quarter || ''),
+        workdays_in_week: Number(w.workdays_in_week) || 5,
+        holiday_hours: Number(w.holiday_hours) || 0
+      };
+    }),
+    workers: (forecast.workers || []).map(function (w) {
+      return _leanWorkerForCache_(w, weeks);
+    }),
+    icp: forecast.icp,
+    rawCapacity: Number(forecast.rawCapacity) || 40,
+    holidayHoursByWeek: forecast.holidayHoursByWeek || {}
+  };
+}
+
+/**
+ * Rehydrate a cached forecast (week_start → Date).
+ * @param {Object} cached
+ * @return {Object|null}
+ */
+function _deserializeForecastFromCache_(cached) {
+  if (!cached) return null;
+  return {
+    weeks: (cached.weeks || []).map(function (w) {
+      return {
+        week_start: w.week_start ? new Date(w.week_start) : null,
+        week_key: String(w.week_key || ''),
+        fiscal_year: Number(w.fiscal_year) || 0,
+        fiscal_quarter: String(w.fiscal_quarter || ''),
+        workdays_in_week: Number(w.workdays_in_week) || 5,
+        holiday_hours: Number(w.holiday_hours) || 0
+      };
+    }),
+    workers: cached.workers || [],
+    icp: cached.icp,
+    rawCapacity: Number(cached.rawCapacity) || 40,
+    holidayHoursByWeek: cached.holidayHoursByWeek || {}
+  };
+}
+
+/**
+ * Stable filter signature for projection baseline caching.
+ * Mirrors computeWeeklyForecast_ param defaults.
+ * @param {Object} params
+ * @return {string}
+ */
+function _projectionFilterSignature_(params) {
+  params = params || {};
+  return JSON.stringify({
+    viewMode: params.viewMode || 'Committed',
+    scenarioId: params.scenarioId || null,
+    teams: params.teams || null,
+    teamLabel: params.teamLabel ? String(params.teamLabel).trim() : '',
+    workerScope: params.workerScope || 'SLG',
+    includeMyManagers: !!params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff !== false
+  });
+}
+
+/**
+ * Baseline computeWeeklyForecast_ with L1 (per-execution) + L2 (CacheService).
+ * @param {Object} forecastParams
+ * @return {{forecast:Object, cacheHit:boolean, l2Hit:boolean}}
+ */
+function _getCachedBaselineForecast_(forecastParams) {
+  var sig = _projectionFilterSignature_(forecastParams);
+
+  if (_softBookingBaselineCache_.signature === sig && _softBookingBaselineCache_.forecast) {
+    return {
+      forecast: _softBookingBaselineCache_.forecast,
+      cacheHit: true,
+      l2Hit: false
+    };
+  }
+
+  var cacheKey = _projectionBaselineCacheKey_(forecastParams);
+  var cached = _enrichedCacheRead_(cacheKey);
+  if (cached) {
+    var fromL2 = _deserializeForecastFromCache_(cached);
+    if (fromL2) {
+      _softBookingBaselineCache_.signature = sig;
+      _softBookingBaselineCache_.forecast = fromL2;
+      return { forecast: fromL2, cacheHit: true, l2Hit: true };
+    }
+  }
+
+  var forecast = computeWeeklyForecast_(forecastParams);
+  var serialized = _serializeForecastForCache_(forecast);
+  var serializedBytes = JSON.stringify(serialized).length;
+  Logger.log('_getCachedBaselineForecast_: serializedBytes=' + serializedBytes +
+    ' workers=' + (forecast.workers || []).length +
+    (serializedBytes < 100000 ? '' : ' OVER_LIMIT'));
+  _enrichedCacheWrite_(cacheKey, serialized, 21600);
+  _softBookingBaselineCache_.signature = sig;
+  _softBookingBaselineCache_.forecast = forecast;
+  return { forecast: forecast, cacheHit: false, l2Hit: false };
+}
+
+/**
+ * Fiscal quarter keys touched by soft-booking date ranges (dynamic, cap 8).
+ * Empty bookings ⇒ scorecard planning window (previous / current / next).
+ * @param {Array<{start_date:*, end_date:*}>} softBookings
+ * @return {string[]}
+ */
+function _quarterKeysForSoftBookings_(softBookings) {
+  if (!softBookings || !softBookings.length) {
+    return scorecardWindowKeys_();
+  }
+  var minDate = null;
+  var maxDate = null;
+  softBookings.forEach(function (sb) {
+    var s = sb.start_date ? new Date(sb.start_date) : null;
+    var e = sb.end_date ? new Date(sb.end_date) : null;
+    if (s && !isNaN(s.getTime()) && (!minDate || s < minDate)) minDate = s;
+    if (e && !isNaN(e.getTime()) && (!maxDate || e > maxDate)) maxDate = e;
+  });
+  if (!minDate || !maxDate) return scorecardWindowKeys_();
+
+  var keys = [];
+  var qk = fiscalQuarterKey_(minDate);
+  var endQk = fiscalQuarterKey_(maxDate);
+  var safety = 0;
+  while (safety < 12) {
+    keys.push(qk);
+    if (qk === endQk) break;
+    var bounds = fiscalQuarterBounds_(qk);
+    var nextStart = new Date(bounds.end.getFullYear(), bounds.end.getMonth() + 1, 1);
+    qk = fiscalQuarterKey_(nextStart);
+    safety++;
+  }
+  if (keys.indexOf(endQk) < 0) keys.push(endQk);
+  return keys.slice(0, 8);
+}
+
+/**
+ * Quarter capacity for soft-booking projection. Quarters beyond the last
+ * configured holiday year are holiday-free with approximate:true (D4a).
+ * @param {string} quarterKey
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @return {{icpAvailableHours:number, rawCapacityHours:number, approximate:boolean}}
+ */
+function _quarterCapacityForProjection_(quarterKey, holidays) {
+  var maxHolidayYear = 0;
+  (holidays || []).forEach(function (h) {
+    if (h.date) {
+      var y = h.date.getFullYear();
+      if (y > maxHolidayYear) maxHolidayYear = y;
+    }
+  });
+  var bounds = fiscalQuarterBounds_(quarterKey);
+  var approximate = bounds.end.getFullYear() > maxHolidayYear;
+  var effectiveHolidays = approximate ? [] : holidays;
+  var wd = quarterWorkdaySummary_(quarterKey, effectiveHolidays);
+  return {
+    icpAvailableHours: Number(wd.icpAvailableHours) || 0,
+    rawCapacityHours: Number(wd.rawCapacityHours) || 0,
+    approximate: approximate
+  };
+}
+
+/**
+ * On-demand weekly maps for projection-affected workers when the L2
+ * baseline is lean (no workerWeekly / blendedWeekly). Scoped to named
+ * resources only — avoids a full computeWeeklyForecast_ rebuild.
+ * @param {Object} forecast baseline or projected forecast (mutates workers in place)
+ * @param {string[]} resourceNames
+ * @param {Object} forecastParams computeWeeklyForecast_ params
+ * @param {{forceRefresh?:boolean}} [options] when true, rebuild weekly maps even if blendedWeekly exists
+ */
+function _hydrateWorkersWeeklyForProjection_(forecast, resourceNames, forecastParams, options) {
+  if (!forecast || !resourceNames || !resourceNames.length) return;
+  options = options || {};
+  var forceRefresh = !!options.forceRefresh;
+  var targets = {};
+  resourceNames.forEach(function (rn) {
+    rn = String(rn || '').trim();
+    if (rn) targets[rn] = true;
+  });
+  if (!Object.keys(targets).length) return;
+
+  var needs = false;
+  (forecast.workers || []).forEach(function (w) {
+    if (targets[w.resource] && (!w.blendedWeekly || forceRefresh)) needs = true;
+  });
+  if (!needs) return;
+
+  forecastParams = forecastParams || {};
+  var viewMode = forecastParams.viewMode || 'Committed';
+  var includePto = forecastParams.includeTimeOff !== false;
+  var excluded = readExclusions_();
+  var calendar = readCalendar_();
+  var assignsRaw = (typeof getEnrichedAssignments_ === 'function')
+    ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  var allocRaw = (typeof getEnrichedAllocations_ === 'function')
+    ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
+  var actualsAgg = (typeof getActualsAggregated_ === 'function')
+    ? getActualsAggregated_() : { byEmployeeId: {}, byResourceName: {} };
+
+  var workerByName = {};
+  (forecast.workers || []).forEach(function (w) {
+    if (!targets[w.resource] || (w.blendedWeekly && !forceRefresh)) return;
+    w.workerWeekly = {};
+    w.productiveWeekly = {};
+    w.projects = {};
+    delete w.quarterProductive;
+    workerByName[w.resource] = w;
+  });
+
+  function addHours(resourceName, weekKey, project, hours, isProductive) {
+    var w = workerByName[resourceName];
+    if (!w || !hours) return;
+    w.workerWeekly[weekKey] = (w.workerWeekly[weekKey] || 0) + hours;
+    if (isProductive) {
+      w.productiveWeekly[weekKey] = (w.productiveWeekly[weekKey] || 0) + hours;
+    }
+    var proj = project || 'Unassigned';
+    if (!w.projects[proj]) w.projects[proj] = {};
+    w.projects[proj][weekKey] = (w.projects[proj][weekKey] || 0) + hours;
+  }
+
+  allocRaw.forEach(function (a) {
+    if (!a.resource_name || !targets[a.resource_name] || !a.week_key) return;
+    if (excluded.has(_exclusionKey_(a.resource_name))) return;
+    if (a.allocation_type === 'PTO_Holiday' && !includePto) return;
+    var h = Number(a.hours) || 0;
+    if (!h) return;
+    addHours(a.resource_name, a.week_key, a.project_name, h, a.allocation_type !== 'PTO_Holiday');
+  });
+
+  if (viewMode !== 'Actual') {
+    assignsRaw.forEach(function (a) {
+      if (!a.resource_name || !targets[a.resource_name]) return;
+      if (excluded.has(_exclusionKey_(a.resource_name))) return;
+      var isCommitted = (a.status === 'Committed');
+      var isScenario = (a.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isScenario &&
+         (!forecastParams.scenarioId || a.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      var label = 'Assignment' + (a.opportunity_id ? (' — ' + a.opportunity_id) : '');
+      expandAssignmentToWeekly_(a, calendar).forEach(function (wk) {
+        addHours(a.resource_name, wk.week_key, label, wk.hours, true);
+      });
+    });
+  }
+
+  Object.keys(workerByName).forEach(function (rn) {
+    _blendWorkerWeeklyMaps_(workerByName[rn], actualsAgg);
+  });
+
+  if (viewMode !== 'Actual') {
+    var adjRows = [];
+    try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
+    adjRows.forEach(function (adj) {
+      if (!adj.resource_name || !targets[adj.resource_name]) return;
+      if (excluded.has(_exclusionKey_(adj.resource_name))) return;
+      var isCommitted = (adj.status === 'Committed');
+      var isModeled = (adj.status === 'Modeled');
+      var include = isCommitted ||
+        (viewMode === 'Scenario' && isModeled &&
+         (!forecastParams.scenarioId || adj.scenario_id === forecastParams.scenarioId));
+      if (!include) return;
+      applyCapacityAdjustmentWeekly_(function (rn) {
+        return workerByName[rn];
+      }, adj, calendar);
+    });
+    Object.keys(workerByName).forEach(function (rn) {
+      _syncBlendedWeeklyForecastCells_(workerByName[rn]);
+    });
+  }
+}
+
+/**
+ * Weekly capacity cells for soft-booking projection (mirrors api_getResourceDetailV2 /
+ * api_getForecastTable weekly grain). Reuses forecast rawCapacity and holidayHoursByWeek.
+ * @param {Object} worker forecast worker row
+ * @param {Array<{week_key:string}>} visibleWeeks from _deriveVisibleWeeksFiscal_
+ * @param {Object} forecast computeWeeklyForecast_ result
+ * @return {Array<{weekKey:string, hours:number, icpUtil:number, icpAvailable:number, isActual:boolean}>}
+ */
+function _workerWeeklyCellsForProjection_(worker, visibleWeeks, forecast) {
+  var rawCapacity = Number(forecast.rawCapacity) || 40;
+  var holidayHoursByWeek = forecast.holidayHoursByWeek || {};
+  return (visibleWeeks || []).map(function (vw) {
+    var cell = (worker.blendedWeekly && worker.blendedWeekly[vw.week_key]) ||
+      { hours: 0, isActual: false };
+    var hours = Number(cell.hours) || 0;
+    var holidayHours = Number(holidayHoursByWeek[vw.week_key] || 0);
+    var icpAvailable = rawCapacity - holidayHours;
+    var icpUtil = icpAvailable > 0 ? (hours / icpAvailable) : 0;
+    return {
+      weekKey: String(vw.week_key),
+      hours: Number(hours) || 0,
+      icpUtil: Number(icpUtil) || 0,
+      icpAvailable: Number(icpAvailable) || 0,
+      isActual: !!cell.isActual
+    };
+  });
+}
+
+/**
+ * Build worker / team / org-team quarterly aggregates from a forecast.
+ * Current-quarter icpUtil uses D8 bonus-scale pairing (matching buildWorkerQuarters_)
+ * when actuals summary provides qtd_icp_plus_forecast_hours and bonus_target.
+ * @param {Object} forecast computeWeeklyForecast_ result
+ * @param {string[]} quarterKeys
+ * @param {Array<{date:Date, hours:number}>} holidays
+ * @param {Object} actualsSummary from getActualsSummaryByEmployee_()
+ * @param {string} curQ fiscal quarter key for calendar today
+ * @param {Object} [baselineForecast] baseline forecast (projected path only; for curQ draft delta)
+ * @param {Object} [weeklyWorkerNames] map resourceName→true for workers needing weeks[]
+ * @param {Array<{week_key:string}>} [visibleWeeks] visible week window (_deriveVisibleWeeksFiscal_)
+ * @return {{worker:Object[], team:Object, orgTeams:Object[]}}
+ */
+function _aggregateSoftBookingProjection_(forecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast, weeklyWorkerNames, visibleWeeks) {
+  var weeks = forecast.weeks || [];
+  var workers = forecast.workers || [];
+  actualsSummary = actualsSummary || {};
+  curQ = curQ || fiscalQuarterKey_(new Date());
+  var calendar = readCalendar_();
+  committedAssignmentQuarterIndex_(calendar);
+  _wowQuarterTargetIndex_();
+
+  var baselineByEmployeeId = {};
+  if (baselineForecast) {
+    (baselineForecast.workers || []).forEach(function (bw) {
+      baselineByEmployeeId[String(bw.employeeId || '')] = bw;
+    });
+  }
+
+  /**
+   * WFM.25: target-based icpUtil numerator/denominator for one worker-quarter,
+   * or null when target_hours <= 0 (excluded from team roll-ups).
+   * @param {Object} worker forecast worker row
+   * @param {number} productiveHours forecast productive hours for the quarter
+   * @param {string} qk
+   * @return {{num:number, den:number}|null}
+   */
+  function icpUtilPair_(worker, productiveHours, qk) {
+    var employeeId = String(worker.employeeId || '');
+    var den = employeeId ? quarterTargetFromWoW_(employeeId, qk) : null;
+    if (den == null || den <= 0) return null;
+
+    var summary = employeeId ? actualsSummary[employeeId] : null;
+    var prod = Number(productiveHours) || 0;
+    var committedHrs = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+    var num;
+
+    if (qk === curQ && summary && summary.qtd_icp_plus_forecast_hours > 0 &&
+        summary.bonus_target_billable_hours_eoq > 0) {
+      num = (Number(summary.qtd_icp_plus_forecast_hours) || 0) + committedHrs;
+      if (baselineForecast) {
+        var baseWorker = baselineByEmployeeId[employeeId];
+        if (baseWorker) {
+          var baseProd = _workerQuarterProductive_(baseWorker, qk, baselineForecast.weeks || []);
+          num += prod - baseProd;
+        }
+      }
+    } else if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+      var actual = quarterActualIcpFromWoW_(employeeId, qk);
+      num = actual != null ? actual : 0;
+    } else {
+      var wowFc = quarterForecastIcpFromWoW_(employeeId, qk);
+      num = (wowFc != null ? wowFc : prod) + committedHrs;
+      if (baselineForecast) {
+        var baseWorkerFwd = baselineByEmployeeId[employeeId];
+        if (baseWorkerFwd) {
+          var baseProdFwd = _workerQuarterProductive_(baseWorkerFwd, qk, baselineForecast.weeks || []);
+          num += prod - baseProdFwd;
+        }
+      }
+    }
+    return { num: num, den: den };
+  }
+
+  function quarterCell_(worker, productiveHours, qk) {
+    var qinfo = _quarterCapacityForProjection_(qk, holidays);
+    var icpAvail = qinfo.icpAvailableHours;
+    var rawCap = qinfo.rawCapacityHours;
+    var prod = Number(productiveHours) || 0;
+    var pair = icpUtilPair_(worker, prod, qk);
+    var displayProd = pair ? pair.num : prod;
+    var icpUtil = pair ? (pair.den > 0 ? pair.num / pair.den : null) : null;
+    return {
+      quarterKey: String(qk),
+      productiveHours: displayProd,
+      icpAvailableHours: icpAvail,
+      rawCapacityHours: rawCap,
+      icpUtil: icpUtil,
+      financeUtil: rawCap > 0 ? displayProd / rawCap : 0,
+      approximate: !!qinfo.approximate
+    };
+  }
+
+  function aggregateQuarters_(group) {
+    return quarterKeys.map(function (qk) {
+      var sumProd = 0;
+      var sumIcpAvail = 0;
+      var sumRawCap = 0;
+      var sumIcpNum = 0;
+      var sumIcpDen = 0;
+      var approx = false;
+      group.forEach(function (w) {
+        var prod = _workerQuarterProductive_(w, qk, weeks);
+        var qinfo = _quarterCapacityForProjection_(qk, holidays);
+        sumIcpAvail += qinfo.icpAvailableHours;
+        sumRawCap += qinfo.rawCapacityHours;
+        if (qinfo.approximate) approx = true;
+        var pair = icpUtilPair_(w, prod, qk);
+        if (pair) {
+          sumProd += pair.num;
+          sumIcpNum += pair.num;
+          sumIcpDen += pair.den;
+        } else {
+          sumProd += prod;
+        }
+      });
+      var icpUtil = sumIcpDen > 0 ? sumIcpNum / sumIcpDen : null;
+      return {
+        quarterKey: String(qk),
+        productiveHours: Number(sumProd) || 0,
+        icpAvailableHours: Number(sumIcpAvail) || 0,
+        rawCapacityHours: Number(sumRawCap) || 0,
+        icpUtil: icpUtil,
+        financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
+        approximate: approx
+      };
+    });
+  }
+
+  var workerOut = workers.map(function (w) {
+    var row = {
+      employeeId: String(w.employeeId || ''),
+      resourceName: String(w.resource || ''),
+      teamLabel: String(w.teamLabel || ''),
+      managerOrg: String(w.managerOrg || ''),
+      quarters: quarterKeys.map(function (qk) {
+        return quarterCell_(w, _workerQuarterProductive_(w, qk, weeks), qk);
+      })
+    };
+    if (weeklyWorkerNames && weeklyWorkerNames[w.resource] && visibleWeeks && visibleWeeks.length) {
+      row.weeks = _workerWeeklyCellsForProjection_(w, visibleWeeks, forecast);
+    }
+    return row;
+  });
+
+  return {
+    worker: workerOut,
+    team: { quarters: aggregateQuarters_(workers) },
+    orgTeams: (function () {
+      var byLabel = {};
+      workers.forEach(function (w) {
+        var label = String(w.teamLabel || 'Unclassified');
+        if (!byLabel[label]) byLabel[label] = [];
+        byLabel[label].push(w);
+      });
+      return Object.keys(byLabel).sort().map(function (label) {
+        return { teamLabel: String(label), quarters: aggregateQuarters_(byLabel[label]) };
+      });
+    })()
+  };
+}
+
+/**
+ * WFM.23 Stage 1.5: apply soft-booking hours as a delta on the cached
+ * baseline forecast — clone affected workers only; baseline objects are
+ * never mutated (gate check 2).
+ * @param {Object} baselineForecast computeWeeklyForecast_ result
+ * @param {Array<Object>} assignments in-memory Modeled assignment shapes
+ * @return {{forecast:Object, affectedWorkers:number}}
+ */
+function _buildProjectedForecastDelta_(baselineForecast, assignments) {
+  if (!assignments || !assignments.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+  var calendar = readCalendar_();
+  var workerByName = {};
+  (baselineForecast.workers || []).forEach(function (w) {
+    workerByName[w.resource] = w;
+  });
+
+  var deltasByResource = {};
+  assignments.forEach(function (a) {
+    if (!a.resource_name || !workerByName[a.resource_name]) return;
+    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+      var rn = a.resource_name;
+      if (!deltasByResource[rn]) deltasByResource[rn] = {};
+      var hrs = Number(w.hours) || 0;
+      if (!hrs) return;
+      deltasByResource[rn][w.week_key] = (deltasByResource[rn][w.week_key] || 0) + hrs;
+    });
+  });
+
+  var affectedNames = Object.keys(deltasByResource);
+  if (!affectedNames.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+
+  var projectedWorkers = (baselineForecast.workers || []).map(function (w) {
+    var delta = deltasByResource[w.resource];
+    if (!delta) return w;
+    var clone = {
+      resource: w.resource,
+      jobProfile: w.jobProfile,
+      level: w.level,
+      managerOrg: w.managerOrg,
+      managersManager: w.managersManager,
+      icpRole: w.icpRole,
+      teamLabel: w.teamLabel,
+      workerClass: w.workerClass,
+      icpTarget: w.icpTarget,
+      employeeId: w.employeeId,
+      workerWeekly: Object.assign({}, w.workerWeekly || {}),
+      productiveWeekly: Object.assign({}, w.productiveWeekly || {}),
+      projects: JSON.parse(JSON.stringify(w.projects || {})),
+      blendedWeekly: JSON.parse(JSON.stringify(w.blendedWeekly || {}))
+    };
+    Object.keys(delta).forEach(function (wk) {
+      var hrs = delta[wk];
+      clone.productiveWeekly[wk] = (clone.productiveWeekly[wk] || 0) + hrs;
+      clone.workerWeekly[wk] = (clone.workerWeekly[wk] || 0) + hrs;
+    });
+    _syncBlendedWeeklyForecastCells_(clone);
+    return clone;
+  });
+
+  return {
+    forecast: {
+      weeks: baselineForecast.weeks,
+      workers: projectedWorkers,
+      icp: baselineForecast.icp,
+      rawCapacity: baselineForecast.rawCapacity,
+      holidayHoursByWeek: baselineForecast.holidayHoursByWeek
+    },
+    affectedWorkers: affectedNames.length
+  };
+}
+
+/**
+ * WFM.25: apply draft reduction hours as a subtractive delta on the cached
+ * baseline forecast — per-week zero-clamp on productive hours (never Modeled).
+ * @param {Object} baselineForecast computeWeeklyForecast_ result
+ * @param {Array<Object>} adjustments in-memory reduction shapes (hours_reduction > 0)
+ * @return {{forecast:Object, affectedWorkers:number}}
+ */
+function _buildProjectedReductionDelta_(baselineForecast, adjustments) {
+  if (!adjustments || !adjustments.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+  var calendar = readCalendar_();
+  var workerByName = {};
+  (baselineForecast.workers || []).forEach(function (w) {
+    workerByName[w.resource] = w;
+  });
+
+  var affectedNames = [];
+  adjustments.forEach(function (adj) {
+    if (!adj.resource_name || !workerByName[adj.resource_name]) return;
+    if (affectedNames.indexOf(adj.resource_name) < 0) affectedNames.push(adj.resource_name);
+  });
+
+  if (!affectedNames.length) {
+    return { forecast: baselineForecast, affectedWorkers: 0 };
+  }
+
+  var projectedWorkers = (baselineForecast.workers || []).map(function (w) {
+    if (affectedNames.indexOf(w.resource) < 0) return w;
+    var clone = {
+      resource: w.resource,
+      jobProfile: w.jobProfile,
+      level: w.level,
+      managerOrg: w.managerOrg,
+      managersManager: w.managersManager,
+      icpRole: w.icpRole,
+      teamLabel: w.teamLabel,
+      workerClass: w.workerClass,
+      icpTarget: w.icpTarget,
+      employeeId: w.employeeId,
+      workerWeekly: Object.assign({}, w.workerWeekly || {}),
+      productiveWeekly: Object.assign({}, w.productiveWeekly || {}),
+      projects: JSON.parse(JSON.stringify(w.projects || {})),
+      blendedWeekly: JSON.parse(JSON.stringify(w.blendedWeekly || {}))
+    };
+    delete clone.quarterProductive;
+    adjustments.forEach(function (adj) {
+      if (adj.resource_name !== w.resource) return;
+      applyCapacityAdjustmentWeekly_(function () { return clone; }, adj, calendar);
+    });
+    _syncBlendedWeeklyForecastCells_(clone);
+    return clone;
+  });
+
+  return {
+    forecast: {
+      weeks: baselineForecast.weeks,
+      workers: projectedWorkers,
+      icp: baselineForecast.icp,
+      rawCapacity: baselineForecast.rawCapacity,
+      holidayHoursByWeek: baselineForecast.holidayHoursByWeek
+    },
+    affectedWorkers: affectedNames.length
+  };
+}
+
+/**
+ * Summarize per-resource clamp for draft reductions (requested vs applied totals).
+ * @param {Object} baselineForecast
+ * @param {Array<Object>} adjustments
+ * @return {Array<{resource_name:string, requested_hours:number, effective_hours:number}>}
+ */
+function _reductionClampWarnings_(baselineForecast, adjustments) {
+  if (!adjustments || !adjustments.length) return [];
+  var calendar = readCalendar_();
+  var actualsAgg = (typeof getActualsAggregated_ === 'function')
+    ? getActualsAggregated_() : { byEmployeeId: {}, byResourceName: {} };
+  var workerByName = {};
+  (baselineForecast.workers || []).forEach(function (w) {
+    workerByName[w.resource] = w;
+  });
+  var warnings = [];
+  adjustments.forEach(function (adj) {
+    if (!adj.resource_name || !workerByName[adj.resource_name]) return;
+    var src = workerByName[adj.resource_name];
+    var snap = {
+      employeeId: src.employeeId,
+      productiveWeekly: Object.assign({}, src.productiveWeekly || {}),
+      workerWeekly: Object.assign({}, src.workerWeekly || {}),
+      projects: JSON.parse(JSON.stringify(src.projects || {})),
+      blendedWeekly: src.blendedWeekly
+        ? JSON.parse(JSON.stringify(src.blendedWeekly))
+        : undefined
+    };
+    if (!snap.blendedWeekly) {
+      _blendWorkerWeeklyMaps_(snap, actualsAgg);
+    }
+    var clamped = expandClampedAdjustmentWeekly_(snap, adj, calendar, false);
+    if (clamped.requested > clamped.applied + 0.05) {
+      warnings.push({
+        resource_name: String(adj.resource_name),
+        requested_hours: clamped.requested,
+        effective_hours: clamped.applied
+      });
+    }
+  });
+  return warnings;
+}
+
+/**
+ * WFM.23: project soft-booking overlay utilization at worker / team /
+ * org-team levels. Empty softBookings ⇒ projected deep-equals baseline.
+ * @param {Object} params standard buildServerParams_ shape
+ * @param {Array<{employee_id:string, resource_name:string, start_date:*, end_date:*, total_hours:number}>} softBookings
+ * @return {{baseline:Object, projected:Object}}
+ */
+function api_projectSoftBookings(params, softBookings) {
+  _requireAuthorized_();
+  var t0 = Date.now();
+  params = params || {};
+  softBookings = softBookings || [];
+
+  softBookings.forEach(function (sb, i) {
+    var isReduce = String(sb.direction || 'add') === 'reduce';
+    var dist = String(sb.distribution || 'Even');
+    if (dist !== 'Custom') return;
+    var magnitude = Math.abs(Number(sb.total_hours) || 0);
+    validateCustomWeeklyDistribution_({
+      label: 'Soft booking ' + (i + 1),
+      distribution: dist,
+      custom_weekly_json: sb.custom_weekly_json,
+      expectedTotal: magnitude,
+      isAdjustment: isReduce,
+      direction: isReduce ? 'reduce' : 'add',
+      signedTotal: isReduce ? magnitude : undefined
+    });
+  });
+
+  var forecastParams = {
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: params.workerScope,
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  };
+
+  var baselineCached = _getCachedBaselineForecast_(forecastParams);
+  var baselineForecast = baselineCached.forecast;
+  var baselineCacheHit = baselineCached.l2Hit;
+  var holidays = readHolidays_();
+  var quarterKeys = _quarterKeysForSoftBookings_(softBookings);
+
+  var inMemoryModeledAssignments = softBookings.filter(function (sb) {
+    return String(sb.direction || 'add') !== 'reduce';
+  }).map(function (sb) {
+    return {
+      resource_name: String(sb.resource_name || ''),
+      employee_id: String(sb.employee_id || ''),
+      start_date: sb.start_date ? new Date(sb.start_date) : null,
+      end_date: sb.end_date ? new Date(sb.end_date) : null,
+      estimated_hours: Number(sb.total_hours) || 0,
+      distribution: String(sb.distribution || 'Even'),
+      custom_weekly_json: sb.custom_weekly_json || '',
+      status: 'Modeled'
+    };
+  }).filter(function (a) {
+    return a.resource_name && a.start_date && a.end_date && !isNaN(a.start_date.getTime()) &&
+      !isNaN(a.end_date.getTime()) && a.estimated_hours > 0;
+  });
+
+  var inMemoryDraftReductions = softBookings.filter(function (sb) {
+    return String(sb.direction || 'add') === 'reduce';
+  }).map(function (sb) {
+    return {
+      resource_name: String(sb.resource_name || ''),
+      start_date: sb.start_date ? new Date(sb.start_date) : null,
+      end_date: sb.end_date ? new Date(sb.end_date) : null,
+      hours_reduction: Number(sb.total_hours) || 0,
+      distribution: String(sb.distribution || 'Even'),
+      custom_weekly_json: sb.custom_weekly_json || '',
+      direction: 'reduce'
+    };
+  }).filter(function (a) {
+    return a.resource_name && a.start_date && a.end_date && !isNaN(a.start_date.getTime()) &&
+      !isNaN(a.end_date.getTime()) && a.hours_reduction > 0;
+  });
+
+  var actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
+    ? getActualsSummaryByEmployee_() : {};
+  var curQ = fiscalQuarterKey_(new Date());
+  var visibleWeeks = _deriveVisibleWeeksFiscal_(baselineForecast.weeks);
+  var weeklyWorkerNames = {};
+  softBookings.forEach(function (sb) {
+    var rn = String(sb.resource_name || '');
+    if (rn) weeklyWorkerNames[rn] = true;
+  });
+  if (inMemoryModeledAssignments.length || inMemoryDraftReductions.length) {
+    var baselineByName = {};
+    (baselineForecast.workers || []).forEach(function (w) {
+      baselineByName[w.resource] = w;
+    });
+    inMemoryModeledAssignments.forEach(function (a) {
+      if (a.resource_name && baselineByName[a.resource_name]) {
+        weeklyWorkerNames[a.resource_name] = true;
+      }
+    });
+    inMemoryDraftReductions.forEach(function (a) {
+      if (a.resource_name && baselineByName[a.resource_name]) {
+        weeklyWorkerNames[a.resource_name] = true;
+      }
+    });
+  }
+
+  var hydrateNames = Object.keys(weeklyWorkerNames);
+  if (hydrateNames.length) {
+    _hydrateWorkersWeeklyForProjection_(baselineForecast, hydrateNames, forecastParams, {
+      forceRefresh: inMemoryDraftReductions.length > 0
+    });
+  }
+
+  var projectedForecast = baselineForecast;
+  var affectedWorkerCount = 0;
+  var projectedMode = 'baseline';
+  var clampWarnings = [];
+  if (inMemoryModeledAssignments.length) {
+    var deltaResult = _buildProjectedForecastDelta_(baselineForecast, inMemoryModeledAssignments);
+    projectedForecast = deltaResult.forecast;
+    affectedWorkerCount = deltaResult.affectedWorkers;
+    projectedMode = 'targeted';
+  }
+  if (inMemoryDraftReductions.length) {
+    clampWarnings = _reductionClampWarnings_(projectedForecast, inMemoryDraftReductions);
+    var reduceResult = _buildProjectedReductionDelta_(projectedForecast, inMemoryDraftReductions);
+    projectedForecast = reduceResult.forecast;
+    affectedWorkerCount = Math.max(affectedWorkerCount, reduceResult.affectedWorkers);
+    projectedMode = 'targeted';
+  }
+
+  var result = {
+    baseline: _aggregateSoftBookingProjection_(
+      baselineForecast, quarterKeys, holidays, actualsSummary, curQ, null, weeklyWorkerNames, visibleWeeks),
+    projected: _aggregateSoftBookingProjection_(
+      projectedForecast, quarterKeys, holidays, actualsSummary, curQ, baselineForecast, weeklyWorkerNames, visibleWeeks),
+    clampWarnings: clampWarnings
+  };
+
+  Logger.log('api_projectSoftBookings: elapsed ' + (Date.now() - t0) + 'ms' +
+    ' baselineCache=' + (baselineCacheHit ? 'hit' : 'miss') +
+    ' projectedMode=' + projectedMode +
+    ' affectedWorkers=' + affectedWorkerCount +
+    ' workers=' + (baselineForecast.workers || []).length +
+    ' quarters=' + quarterKeys.length +
+    ' bookings=' + softBookings.length);
+  return result;
+}
+
+/**
+ * Resolve resource_type for a soft-booking commit. Uses the booking payload
+ * when present; otherwise looks up the worker in the resource index by name
+ * or employee_id. Blank-safe — returns '' when no type is known.
+ * @param {Object} booking
+ * @return {string}
+ */
+function _resolveBookingResourceType_(booking) {
+  var fromBooking = String((booking && booking.resource_type) || '').trim();
+  if (fromBooking) return fromBooking;
+
+  var resourceName = String((booking && booking.resource_name) || '').trim();
+  var employeeId = String((booking && booking.employee_id) || '').trim();
+  if (!resourceName && !employeeId) return '';
+
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_()
+    : _resourceIndex_(cachedRead_(ALLOC_NORM));
+
+  var info = null;
+  if (resourceName && resIndex[resourceName]) {
+    info = resIndex[resourceName];
+  } else if (employeeId) {
+    Object.keys(resIndex).some(function (k) {
+      if (String(resIndex[k].employee_id || '').trim() === employeeId) {
+        info = resIndex[k];
+        return true;
+      }
+      return false;
+    });
+  }
+
+  return info ? String(info.resource_type || '').trim() : '';
+}
+
+/**
+ * WFM.23 Stage 3 / WFM.25 two-state: promote soft-booking drafts to Committed assignments.
+ * @param {string} scenarioName non-empty → always creates a NEW scenario via saveScenario_
+ * @param {Array<Object>} bookings
+ * @return {{scenario_id:string, committed:Object[], count:number}}
+ */
+function api_commitSoftBookings(scenarioName, bookings) {
+  _requireAuthorized_();
+  scenarioName = String(scenarioName || '').trim();
+  bookings = bookings || [];
+
+  var scenarioId = '';
+  if (scenarioName) {
+    var scen = saveScenario_({
+      name: scenarioName,
+      description: 'WFM.23 soft-booking submit-all',
+      status: 'Active'
+    });
+    scenarioId = scen ? String(scen.scenario_id || '') : '';
+  }
+
+  var committed = [];
+  bookings.forEach(function (b) {
+    var direction = String(b.direction || 'add').toLowerCase();
+    var what = b.what || {};
+    var whatType = String(what.type || '');
+    var notes = '';
+    var identity = (typeof resolveBookingProjectIdentity_ === 'function')
+      ? resolveBookingProjectIdentity_(b) : {
+        project_id_type: '', project_id: '', project_label: '',
+        opportunity_id: '', deployment_id: ''
+      };
+
+    if (whatType === 'label') {
+      notes = 'Soft-book label: ' + String(what.label || '');
+    } else if (identity.deployment_id && !identity.project_label) {
+      notes = 'Soft-book deployment: ' + identity.deployment_id;
+    } else if (identity.opportunity_id && !identity.project_label) {
+      notes = 'Opportunity: ' + identity.opportunity_id;
+    }
+
+    var resolvedResourceType = _resolveBookingResourceType_(b);
+
+    if (direction === 'reduce') {
+      var savedAdj = saveCapacityAdjustment_({
+        resource_name: String(b.resource_name || ''),
+        start_date: b.start_date,
+        end_date: b.end_date,
+        hours_reduction: Number(b.total_hours) || 0,
+        direction: 'reduce',
+        distribution: 'Even',
+        status: 'Committed',
+        scenario_id: scenarioId,
+        deployment_id: identity.deployment_id || '',
+        reason: notes || identity.project_label || ''
+      });
+      committed.push({
+        resource_name: String(savedAdj.resource_name || b.resource_name || ''),
+        adjustment_id: String(savedAdj.adjustment_id || ''),
+        direction: 'reduce'
+      });
+      return;
+    }
+
+    var saved = saveAssignment_({
+      opportunity_id: identity.opportunity_id || '',
+      project_id_type: identity.project_id_type || '',
+      project_id: identity.project_id || '',
+      project_label: identity.project_label || '',
+      resource_name: String(b.resource_name || ''),
+      resource_type: resolvedResourceType,
+      start_date: b.start_date,
+      end_date: b.end_date,
+      estimated_hours: Number(b.total_hours) || 0,
+      distribution: 'Even',
+      status: 'Committed',
+      scenario_id: scenarioId,
+      notes: notes
+    });
+    committed.push({
+      resource_name: String(saved.resource_name || b.resource_name || ''),
+      assignment_id: String(saved.assignment_id || ''),
+      direction: 'add'
+    });
+  });
+
+  invalidateCache_(ASSIGNMENTS);
+  invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
+  if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  if (typeof _resetProjectionMemos_ === 'function') _resetProjectionMemos_();
+  invalidateSoftBookingBaselineCache_();
+
+  Logger.log('api_commitSoftBookings: scenario_id=' + scenarioId + ' count=' + committed.length);
+  return {
+    scenario_id: scenarioId,
+    committed: committed,
+    count: committed.length
+  };
 }
 
 // ------------------------------------------------------------
@@ -607,18 +2441,63 @@ function _deriveVisibleWeeks_(weeks, windowMonths) {
 /**
  * Visible weeks for the blended forecast table: current fiscal quarter
  * (captures QTD actuals) through the end of the next fiscal quarter.
+ * Current quarter = union of forecast-calendar weeks AND actual weeks from
+ * Actuals_Normalized (via getActualWeekKeysForQuarter_) so early actualized
+ * weeks before the Forecast sheet window still render.
  * Fiscal quarters are Feb-anchored (see fiscalQuarterKey_ / Constants).
+ * @param {Array<{week_start:Date, week_key:string}>} weeks forecast calendar weeks
+ * @return {Array<{week_start:Date, week_key:string, fiscal_year:number, fiscal_quarter:string, workdays_in_week:number, holiday_hours:number}>}
  */
 function _deriveVisibleWeeksFiscal_(weeks) {
   const today = new Date();
-  const curQ = fiscalQuarterKey_(today);          // e.g. 'FY27-Q2'
+  const curQ = fiscalQuarterKey_(today);          // e.g. 'FY27-Q3'
   // Next fiscal quarter key: advance ~3 months and recompute.
   const nextQDate = new Date(today.getFullYear(), today.getMonth() + 3, 1);
   const nextQ = fiscalQuarterKey_(nextQDate);
-  return (weeks || []).filter(function (w) {
-    const qk = fiscalQuarterKey_(w.week_start);
-    return qk === curQ || qk === nextQ;
+  var calendarByWeekKey = {};
+  try {
+    calendarByWeekKey = readCalendar_().byWeekKey || {};
+  } catch (e) {
+    calendarByWeekKey = {};
+  }
+
+  var visible = [];
+  var seen = {};
+
+  (weeks || []).forEach(function (w) {
+    var qk = fiscalQuarterKeyFromWeekStart_(w.week_start);
+    if (qk !== curQ && qk !== nextQ) return;
+    var wk = String(w.week_key || weekKey_(w.week_start));
+    if (seen[wk]) return;
+    seen[wk] = true;
+    visible.push(w);
   });
+
+  if (typeof getActualWeekKeysForQuarter_ === 'function') {
+    getActualWeekKeysForQuarter_(curQ).forEach(function (wk) {
+      if (seen[wk]) return;
+      seen[wk] = true;
+      var entry = calendarByWeekKey[wk];
+      if (!entry) {
+        var ws = _weekStartFromWeekKey_(wk);
+        if (!ws) return;
+        var anchor = fiscalQuarterWorkdayAnchor_(ws);
+        if (!anchor) return;
+        entry = {
+          week_start: ws,
+          week_key: wk,
+          fiscal_year: fiscalYear_(anchor),
+          fiscal_quarter: fiscalQuarter_(anchor),
+          workdays_in_week: 5,
+          holiday_hours: 0
+        };
+      }
+      visible.push(entry);
+    });
+  }
+
+  visible.sort(function (a, b) { return a.week_start - b.week_start; });
+  return visible;
 }
 
 /**
@@ -661,19 +2540,18 @@ function api_getForecastTable(params) {
   const visibleWeeks = _deriveVisibleWeeksFiscal_(forecast.weeks);
 
   const weeksOut = visibleWeeks.map(w => {
-    // Display label shows the SUNDAY of the week (week_start is the Saturday
-    // export anchor). Data stays Saturday-anchored; this is display-only.
+    // week_start is the Saturday anchor; week-ending label is that same Saturday (+0).
     const labelDate = new Date(
       w.week_start.getFullYear(),
       w.week_start.getMonth(),
-      w.week_start.getDate() + 1
+      w.week_start.getDate()
     );
     return {
       weekKey: String(w.week_key),
       weekStart: _toIso_(w.week_start),
       label: Utilities.formatDate(labelDate, Session.getScriptTimeZone() || 'Etc/UTC', 'MM/dd/yy'),
       fiscalQuarter: String(w.fiscal_quarter || ''),
-      fiscalQuarterKey: fiscalQuarterKey_(w.week_start)
+      fiscalQuarterKey: fiscalQuarterKeyFromWeekStart_(w.week_start)
     };
   });
 
@@ -737,6 +2615,269 @@ function api_getForecastTable(params) {
     rows:                rowsOut,
     planningWindowWeeks: visibleWeeks.length,
     seamWeekKey:         seamWeekKey
+  };
+}
+
+/**
+ * Map specialty values to leadership team labels from Config_Resource_Type.
+ * Keys on resource_type (full WoW specialty strings); unmapped values resolve at lookup time.
+ * @return {Object<string,string>} resource_type -> team_label
+ */
+function buildSpecialtyTeamMap_() {
+  return readConfigResourceType_();
+}
+
+/**
+ * Resolve a specialty practice to a leadership team label for demand grouping.
+ * @param {string} specialtyPractice
+ * @param {Object<string,string>} teamMap
+ * @return {string}
+ */
+function resolveSpecialtyTeamLabel_(specialtyPractice, teamMap) {
+  var sp = String(specialtyPractice || '').trim();
+  if (!sp || sp === 'Unclassified' || sp === 'Student') return 'Other / Unmapped';
+  if (!teamMap) return 'Other / Unmapped';
+
+  var team = teamMap[sp];
+  if (!team) {
+    var lower = sp.toLowerCase();
+    Object.keys(teamMap).forEach(function (k) {
+      if (!team && k.toLowerCase() === lower) team = teamMap[k];
+    });
+  }
+  if (!team || team === 'Unclassified') return 'Other / Unmapped';
+  return team;
+}
+
+/**
+ * Sort specialty demand rows: totalHours desc; Unclassified last.
+ * @param {Array} rows
+ * @return {Array}
+ */
+function sortSpecialtyDemandRows_(rows) {
+  rows.sort(function (a, b) {
+    if (a.specialtyPractice === 'Unclassified' && b.specialtyPractice !== 'Unclassified') return 1;
+    if (b.specialtyPractice === 'Unclassified' && a.specialtyPractice !== 'Unclassified') return -1;
+    return (Number(b.totalHours) || 0) - (Number(a.totalHours) || 0);
+  });
+  return rows;
+}
+
+/**
+ * Sort sub-specialty rows: totalHours desc; Unclassified last.
+ * @param {Array} rows
+ * @return {Array}
+ */
+function sortSpecialtySubRows_(rows) {
+  rows.sort(function (a, b) {
+    if (a.subSpecialtyPractice === 'Unclassified' && b.subSpecialtyPractice !== 'Unclassified') return 1;
+    if (b.subSpecialtyPractice === 'Unclassified' && a.subSpecialtyPractice !== 'Unclassified') return -1;
+    return (Number(b.totalHours) || 0) - (Number(a.totalHours) || 0);
+  });
+  return rows;
+}
+
+/**
+ * Whether an Actuals_History row counts toward SLG-scoped specialty demand.
+ * Actuals_History uses flat worker_class ('SLG' / 'Non-SLG' / 'Contractor'), not
+ * roster vocabulary (SLG_Real / SLG_Generic). Aligns with historyDisplayClass_.
+ * When worker_class is absent, excludes Corporate region (cross-org marker).
+ * @param {Object} row Actuals_History row
+ * @return {boolean}
+ */
+function specialtyActualsRowInSlgScope_(row) {
+  var wc = String((row && row.worker_class) || '').trim();
+  if (wc) {
+    return historyDisplayClass_(wc) === 'SLG';
+  }
+  var region = String((row && row.workday_region_as_of_date_worked) || '').trim();
+  return region !== 'Corporate';
+}
+
+/**
+ * WFM.25 Pass 3C: historical worked hours by specialty practice × fiscal quarter.
+ * Read-only aggregation over Actuals_History; no reconciliation changes.
+ * SLG delivery scope only (reuses worker-scope classification).
+ * @param {Object} [params] reserved for future filter params
+ * @return {{
+ *   quarters: string[],
+ *   rows: Array<{specialtyPractice:string, hoursByQuarter:Object<string,number>, totalHours:number,
+ *     subRows:Array<{subSpecialtyPractice:string, hoursByQuarter:Object<string,number>, totalHours:number}>}>,
+ *   grandTotalByQuarter: Object<string,number>,
+ *   grandTotal: number,
+ *   specialtyTeamMap: Object<string,string>
+ * }}
+ */
+function api_getSpecialtyActuals(params) {
+  _requireAuthorized_();
+  params = params || {};
+
+  var histRows = readTable_(ACTUALS_HISTORY) || [];
+  var quarterSet = {};
+  var spBucket = {};
+  var grandTotalByQuarter = {};
+  var grandTotal = 0;
+
+  histRows.forEach(function (r) {
+    if (!specialtyActualsRowInSlgScope_(r)) return;
+
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq) return;
+    var hrs = Number(r.icp_hours) || 0;
+    if (!hrs) return;
+
+    var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
+    var subSp = String(r.sub_specialty_practice || '').trim() || 'Unclassified';
+
+    quarterSet[fq] = true;
+    grandTotalByQuarter[fq] = (grandTotalByQuarter[fq] || 0) + hrs;
+    grandTotal += hrs;
+
+    if (!spBucket[sp]) {
+      spBucket[sp] = { hoursByQuarter: {}, sub: {} };
+    }
+    spBucket[sp].hoursByQuarter[fq] = (spBucket[sp].hoursByQuarter[fq] || 0) + hrs;
+
+    if (!spBucket[sp].sub[subSp]) {
+      spBucket[sp].sub[subSp] = {};
+    }
+    spBucket[sp].sub[subSp][fq] = (spBucket[sp].sub[subSp][fq] || 0) + hrs;
+  });
+
+  var quarters = Object.keys(quarterSet).sort(compareFiscalQuarterKeys_);
+
+  var rows = Object.keys(spBucket).map(function (sp) {
+    var entry = spBucket[sp];
+    var hoursByQuarter = {};
+    var totalHours = 0;
+    quarters.forEach(function (qk) {
+      var h = Number(entry.hoursByQuarter[qk]) || 0;
+      hoursByQuarter[qk] = h;
+      totalHours += h;
+    });
+
+    var subRows = Object.keys(entry.sub || {}).map(function (subSp) {
+      var subEntry = entry.sub[subSp];
+      var subHoursByQuarter = {};
+      var subTotal = 0;
+      quarters.forEach(function (qk) {
+        var sh = Number(subEntry[qk]) || 0;
+        subHoursByQuarter[qk] = sh;
+        subTotal += sh;
+      });
+      return {
+        subSpecialtyPractice: subSp,
+        hoursByQuarter: subHoursByQuarter,
+        totalHours: subTotal
+      };
+    });
+    sortSpecialtySubRows_(subRows);
+
+    return {
+      specialtyPractice: sp,
+      hoursByQuarter: hoursByQuarter,
+      totalHours: totalHours,
+      subRows: subRows
+    };
+  });
+  sortSpecialtyDemandRows_(rows);
+
+  return {
+    quarters: quarters,
+    rows: rows,
+    grandTotalByQuarter: grandTotalByQuarter,
+    grandTotal: grandTotal,
+    specialtyTeamMap: buildSpecialtyTeamMap_()
+  };
+}
+
+/**
+ * WFM.25 Pass 3B: org-level forecast demand hours by specialty practice × fiscal quarter.
+ * Read-only aggregation over computeWeeklyForecast_ productive hours; no reconciliation changes.
+ * SLG delivery scope only (reuses worker-scope classification).
+ * @param {Object} params same filter shape as api_getForecastTable
+ * @return {{
+ *   quarters: string[],
+ *   currentQuarterKey: string,
+ *   rows: Array<{specialtyPractice:string, hoursByQuarter:Object<string,number>, totalHours:number}>,
+ *   grandTotalByQuarter: Object<string,number>,
+ *   grandTotal: number,
+ *   specialtyTeamMap: Object<string,string>
+ * }}
+ */
+function api_getSpecialtyDemand(params) {
+  _requireAuthorized_();
+  params = params || {};
+
+  var forecast = computeWeeklyForecast_({
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: 'SLG',
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff
+  });
+
+  var quarterKeys = scorecardWindowKeys_();
+  var curQ = fiscalQuarterKey_(new Date());
+  var weeks = forecast.weeks || [];
+
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  var workerSpMap = buildWorkerSpecialtyPracticeMap_(allocRows);
+
+  var bucket = {};
+  var grandTotalByQuarter = {};
+  quarterKeys.forEach(function (qk) { grandTotalByQuarter[qk] = 0; });
+  var grandTotal = 0;
+
+  (forecast.workers || []).forEach(function (worker) {
+    var sp = workerSpMap[worker.resource] || 'Unclassified';
+    if (!bucket[sp]) {
+      bucket[sp] = {};
+      quarterKeys.forEach(function (qk) { bucket[sp][qk] = 0; });
+    }
+    quarterKeys.forEach(function (qk) {
+      var hrs = sumForecastProductiveForQuarter_(worker, qk, weeks);
+      bucket[sp][qk] += hrs;
+      grandTotalByQuarter[qk] += hrs;
+      grandTotal += hrs;
+    });
+  });
+
+  var rows = Object.keys(bucket).map(function (sp) {
+    var hoursByQuarter = {};
+    var totalHours = 0;
+    quarterKeys.forEach(function (qk) {
+      var h = Number(bucket[sp][qk]) || 0;
+      hoursByQuarter[qk] = h;
+      totalHours += h;
+    });
+    return {
+      specialtyPractice: sp,
+      hoursByQuarter: hoursByQuarter,
+      totalHours: totalHours
+    };
+  });
+
+  rows.sort(function (a, b) {
+    if (a.specialtyPractice === 'Unclassified' && b.specialtyPractice !== 'Unclassified') return 1;
+    if (b.specialtyPractice === 'Unclassified' && a.specialtyPractice !== 'Unclassified') return -1;
+    return b.totalHours - a.totalHours;
+  });
+
+  return {
+    quarters: quarterKeys,
+    currentQuarterKey: curQ,
+    rows: rows,
+    grandTotalByQuarter: grandTotalByQuarter,
+    grandTotal: grandTotal,
+    specialtyTeamMap: buildSpecialtyTeamMap_()
   };
 }
 
@@ -1448,6 +3589,102 @@ function api_getReportingSummary(params) {
 //                     Drives the topbar Team dropdown.
 // ------------------------------------------------------------
 
+/**
+ * Read WFM.25 unified utilization color band edges from Config_Settings.
+ * Falls back to UTIL_BAND_DEFAULTS when a key is blank or bands are malformed.
+ * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
+ */
+function _readUtilBandSettings_() {
+  const defaults = UTIL_BAND_DEFAULTS;
+  const keys = UTIL_BAND_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      const v = raw ? Number(raw) : NaN;
+      return (v > 0) ? v : fallback;
+    };
+    const bands = {
+      coldMax: read(keys.coldMax, defaults.coldMax),
+      ontargetMax: read(keys.ontargetMax, defaults.ontargetMax),
+      warmMax: read(keys.warmMax, defaults.warmMax)
+    };
+    if (!(bands.coldMax < bands.ontargetMax && bands.ontargetMax < bands.warmMax)) {
+      Logger.log('_readUtilBandSettings_: malformed util_band config — using defaults');
+      return Object.assign({}, defaults);
+    }
+    return bands;
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
+/**
+ * Validate a Config_Settings util band color (#RGB or #RRGGBB).
+ * @param {string} value
+ * @returns {boolean}
+ */
+function _isValidUtilHexColor_(value) {
+  return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(String(value || '').trim());
+}
+
+/**
+ * Read WFM.25 unified utilization band colors from Config_Settings.
+ * Falls back to UTIL_COLOR_DEFAULTS when a key is blank or malformed.
+ * @returns {{coldBg:string, coldFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
+ */
+function _readUtilColorSettings_() {
+  const defaults = UTIL_COLOR_DEFAULTS;
+  const keys = UTIL_COLOR_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      if (_isValidUtilHexColor_(raw)) return raw;
+      if (raw) {
+        Logger.log('_readUtilColorSettings_: malformed ' + settingKey + '="' + raw + '" — using fallback');
+      }
+      return fallback;
+    };
+    return {
+      coldBg: read(keys.coldBg, defaults.coldBg),
+      coldFg: read(keys.coldFg, defaults.coldFg),
+      ontargetBg: read(keys.ontargetBg, defaults.ontargetBg),
+      ontargetFg: read(keys.ontargetFg, defaults.ontargetFg),
+      warmBg: read(keys.warmBg, defaults.warmBg),
+      warmFg: read(keys.warmFg, defaults.warmFg),
+      hotBg: read(keys.hotBg, defaults.hotBg),
+      hotFg: read(keys.hotFg, defaults.hotFg)
+    };
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
+/**
+ * Read WFM.25 exception-glyph settings from Config_Settings (read-only).
+ * Falls back to UTIL_GLYPH_DEFAULTS when a key is blank.
+ * @returns {{fire:string, cold:string, enabled:string}}
+ */
+function _readUtilGlyphSettings_() {
+  const defaults = UTIL_GLYPH_DEFAULTS;
+  const keys = UTIL_GLYPH_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      return raw || fallback;
+    };
+    return {
+      fire: read(keys.fire, defaults.fire),
+      cold: read(keys.cold, defaults.cold),
+      enabled: read(keys.enabled, defaults.enabled)
+    };
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
 function api_getReference() {
   _requireAuthorized_();
   // Per-user 60-second cache wrapper. api_getReference is hit on every
@@ -1566,6 +3803,10 @@ function api_getReference() {
   // Priority 4: resource_type options for the Assign drawer's Role dropdown.
   const resourceTypeOptions = _readResourceTypeOptions_();
 
+  const utilBands = _readUtilBandSettings_();
+  const utilColors = _readUtilColorSettings_();
+  const utilGlyphs = _readUtilGlyphSettings_();
+
   const response = {
     user: userResolution.email,
     matchedManager: userResolution.matchedManager,
@@ -1583,6 +3824,40 @@ function api_getReference() {
     icp: icp,
     roles: roles,
     planningWindowMonths: planningWindowMonths,
+    allocOverRatio: (function () {
+      try {
+        const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+        const raw = String(settings.alloc_over_ratio || '').trim();
+        const v = raw ? Number(raw) : NaN;
+        return (v > 0) ? v : 1.10;
+      } catch (e) {
+        return 1.10;
+      }
+    })(),
+    allocUnderRatio: (function () {
+      try {
+        const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+        const raw = String(settings.alloc_under_ratio || '').trim();
+        const v = raw ? Number(raw) : NaN;
+        return (v > 0) ? v : 0.85;
+      } catch (e) {
+        return 0.85;
+      }
+    })(),
+    utilBandColdMax: utilBands.coldMax,
+    utilBandOntargetMax: utilBands.ontargetMax,
+    utilBandWarmMax: utilBands.warmMax,
+    utilColorColdBg: utilColors.coldBg,
+    utilColorColdFg: utilColors.coldFg,
+    utilColorOntargetBg: utilColors.ontargetBg,
+    utilColorOntargetFg: utilColors.ontargetFg,
+    utilColorWarmBg: utilColors.warmBg,
+    utilColorWarmFg: utilColors.warmFg,
+    utilColorHotBg: utilColors.hotBg,
+    utilColorHotFg: utilColors.hotFg,
+    utilGlyphFire: utilGlyphs.fire,
+    utilGlyphCold: utilGlyphs.cold,
+    utilGlyphEnabled: utilGlyphs.enabled,
     // WFM-FIX.1: no longer used to drive boot behavior (see
     // applyAutoManagerDefaults_, JavaScript.html, which now personalizes
     // the boot default off matchedManager/userIsAdmin instead). Left in
@@ -1799,6 +4074,7 @@ function _sanitizeAssignmentForWire_(a) {
     estimated_hours: Number(a.estimated_hours) || 0,
     distribution: String(a.distribution || ''),
     custom_monthly_json: String(a.custom_monthly_json || ''),
+    custom_weekly_json: String(a.custom_weekly_json || ''),
     status: String(a.status || ''),
     scenario_id: String(a.scenario_id || ''),
     notes: String(a.notes || ''),
@@ -1807,7 +4083,10 @@ function _sanitizeAssignmentForWire_(a) {
     modified_by: String(a.modified_by || ''),
     modified_at: _toIso_(a.modified_at),
     resource_type: String(a.resource_type || ''),  // Priority 4
-    team_label: String(a.team_label || '')          // Priority 4
+    team_label: String(a.team_label || ''),          // Priority 4
+    project_id_type: String(a.project_id_type || ''),
+    project_id: String(a.project_id || ''),
+    project_label: String(a.project_label || '')
   };
 }
 
@@ -2571,7 +4850,18 @@ function api_previewCapacityAdjustment(adj) {
   _requireAuthorized_();
   if (adj.start_date) adj.start_date = new Date(adj.start_date);
   if (adj.end_date)   adj.end_date   = new Date(adj.end_date);
-  adj.hours_reduction = Number(adj.hours_reduction) || 0;
+  adj.direction = adj.direction || 'reduce';
+  const magnitude = Math.abs(Number(adj.hours_reduction) || 0);
+  adj.hours_reduction = adj.direction === 'add' ? -magnitude : magnitude;
+  adj.distribution = adj.distribution || 'Even';
+  validateCustomWeeklyDistribution_({
+    label: 'Capacity adjustment preview',
+    distribution: adj.distribution,
+    custom_weekly_json: adj.custom_weekly_json,
+    isAdjustment: true,
+    direction: adj.direction,
+    signedTotal: adj.hours_reduction
+  });
   const settings = readSettings_();
   const basis = settings['week_month_split_basis'] || 'calendar';
   const weekly = expandAdjustmentToWeekly_(adj, readCalendar_());
@@ -2655,7 +4945,10 @@ function api_saveExclusions(payload) {
       reason: r.reason || '',
       active: r.active || '',
       source: (r.source !== undefined ? r.source : prev.source) || '',
-      override: (r.override !== undefined ? r.override : prev.override) || ''
+      override: (r.override !== undefined ? r.override : prev.override) || '',
+      return_date: (r.return_date !== undefined ? r.return_date : prev.return_date) || '',
+      modified_by: (r.modified_by !== undefined ? r.modified_by : prev.modified_by) || '',
+      modified_at: (r.modified_at !== undefined ? r.modified_at : prev.modified_at) || ''
     };
   });
 
@@ -2684,6 +4977,66 @@ function api_listAllWorkers() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Read-only directory search for WFM.25 global search overlay.
+ * Matches teams, workers, and roles from enriched resource index — no writes.
+ * @param {string} query
+ * @return {{teams:Object[], workers:Object[], roles:Object[]}}
+ */
+function api_searchDirectory(query) {
+  _requireAuthorized_();
+  var q = String(query || '').trim().toLowerCase();
+  if (!q) return { teams: [], workers: [], roles: [] };
+
+  var resIndex = (typeof getResourceIndex_ === 'function')
+    ? getResourceIndex_()
+    : _resourceIndex_(readTable_(ALLOC_NORM));
+
+  var teamSet = {};
+  var workers = [];
+  var roleMap = {};
+  var workerCap = 12;
+  var teamCap = 8;
+  var roleCap = 8;
+
+  Object.keys(resIndex || {}).forEach(function (key) {
+    var res = resIndex[key];
+    if (!res) return;
+    var name = String(res.name || '').trim();
+    var team = String(res.resolved_team || '').trim();
+    var role = String(res.role_category || res.icp || '').trim();
+    if (!name) return;
+
+    if (team && team.toLowerCase().indexOf(q) >= 0) {
+      teamSet[team] = true;
+    }
+    if (name.toLowerCase().indexOf(q) >= 0 && workers.length < workerCap) {
+      workers.push({
+        name: name,
+        teamLabel: team,
+        roleCategory: role
+      });
+    }
+    if (role && role.toLowerCase().indexOf(q) >= 0) {
+      if (!roleMap[role]) {
+        roleMap[role] = { label: role, count: 0, sampleTeam: team || '' };
+      }
+      roleMap[role].count++;
+      if (!roleMap[role].sampleTeam && team) roleMap[role].sampleTeam = team;
+    }
+  });
+
+  var teams = Object.keys(teamSet).sort(function (a, b) { return a.localeCompare(b); })
+    .slice(0, teamCap)
+    .map(function (label) { return { label: label }; });
+
+  var roles = Object.keys(roleMap).sort(function (a, b) { return a.localeCompare(b); })
+    .slice(0, roleCap)
+    .map(function (k) { return roleMap[k]; });
+
+  return { teams: teams, workers: workers, roles: roles };
+}
+
 function api_uploadStaffFile(base64, filename) {
   _requireAuthorized_();
   return uploadStaffFile(base64, filename);
@@ -2697,6 +5050,186 @@ function api_uploadActualsFile(base64, filename) {
 function api_refreshOpportunities() {
   _requireAuthorized_();
   return normalizeOpportunities();
+}
+
+/**
+ * Build a wire-safe freshness event (ISO timestamp + detail string).
+ * @param {Date|string|number} when
+ * @param {string} detail
+ * @return {{when:string, detail:string}}
+ */
+function _dataFreshnessEvent_(when, detail) {
+  var whenStr = '';
+  try {
+    if (when instanceof Date) whenStr = _toIso_(when);
+    else if (when) whenStr = _toIso_(new Date(when));
+  } catch (e) {
+    whenStr = String(when || '');
+  }
+  return {
+    when: whenStr,
+    detail: String(detail || '')
+  };
+}
+
+/**
+ * @return {{lastSuccess:Object|null, lastFailure:Object|null}}
+ */
+function _dataFreshnessNullFeed_() {
+  return { lastSuccess: null, lastFailure: null };
+}
+
+/**
+ * @param {Date|string|number} when
+ * @return {boolean}
+ */
+function _isWithin7Days_(when) {
+  if (!when) return false;
+  try {
+    var d = when instanceof Date ? when : new Date(when);
+    if (isNaN(d.getTime())) return false;
+    return (Date.now() - d.getTime()) <= 7 * 24 * 60 * 60 * 1000;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * WoW ingest freshness from Normalization_Log source='staff'.
+ * @return {{lastSuccess:Object|null, lastFailure:Object|null}}
+ */
+function _dataFreshnessWowIngest_() {
+  var out = _dataFreshnessNullFeed_();
+  try {
+    var rows = (readTable_(REFRESH_LOG) || []).filter(function (r) {
+      return String(r.source || '').trim() === 'staff';
+    }).sort(function (a, b) {
+      return new Date(b.timestamp) - new Date(a.timestamp);
+    });
+    rows.some(function (r) {
+      if (Number(r.rows_out) > 0) {
+        out.lastSuccess = _dataFreshnessEvent_(r.timestamp,
+          String(Number(r.rows_out) || 0) + ' rows');
+        return true;
+      }
+      return false;
+    });
+    rows.some(function (r) {
+      var rowsOut = Number(r.rows_out) || 0;
+      var warnings = String(r.warnings || '').trim();
+      if (rowsOut === 0 || warnings) {
+        if (_isWithin7Days_(r.timestamp)) {
+          out.lastFailure = _dataFreshnessEvent_(r.timestamp,
+            warnings || 'ingest produced 0 rows');
+          return true;
+        }
+      }
+      return false;
+    });
+  } catch (e) {
+    Logger.log('_dataFreshnessWowIngest_ failed — ' + e);
+  }
+  return out;
+}
+
+/**
+ * Read SF pipeline refresh log rows as wire-safe primitives.
+ * @return {Object[]}
+ */
+function _readSfPipelineRefreshRows_() {
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(SF_PIPELINE_REFRESH_LOG);
+    if (!sh) return [];
+    var values = sh.getDataRange().getValues();
+    if (!values || values.length < 2) return [];
+    var header = values[0].map(function (h) { return String(h || '').trim(); });
+    var out = [];
+    for (var i = 1; i < values.length; i++) {
+      var row = {};
+      header.forEach(function (h, j) {
+        var v = values[i][j];
+        if (v === null || v === undefined) row[h] = '';
+        else if (v instanceof Date) row[h] = _toIso_(v);
+        else if (typeof v === 'number' || typeof v === 'boolean') row[h] = v;
+        else row[h] = String(v);
+      });
+      out.push(row);
+    }
+    return out.sort(function (a, b) {
+      return new Date(b['Refresh Time']) - new Date(a['Refresh Time']);
+    });
+  } catch (e) {
+    Logger.log('_readSfPipelineRefreshRows_ failed — ' + e);
+    return [];
+  }
+}
+
+/**
+ * Pipeline or Deployments freshness from Auto Refresh Execution Log 1.
+ * @param {string} sheetName 'Pipeline' | 'Deployments'
+ * @return {{lastSuccess:Object|null, lastFailure:Object|null}}
+ */
+function _dataFreshnessSfFeed_(sheetName) {
+  var out = _dataFreshnessNullFeed_();
+  var rows = _readSfPipelineRefreshRows_().filter(function (r) {
+    return String(r['Sheet'] || '').trim() === sheetName;
+  });
+  rows.some(function (r) {
+    if (String(r['Status'] || '').trim() === 'Success') {
+      var detail = String(r['Operation'] || '').trim() || 'Success';
+      out.lastSuccess = _dataFreshnessEvent_(r['Refresh Time'], detail);
+      return true;
+    }
+    return false;
+  });
+  rows.some(function (r) {
+    if (String(r['Status'] || '').trim() !== 'Success') {
+      if (_isWithin7Days_(r['Refresh Time'])) {
+        var status = String(r['Status'] || '').trim() || 'failed';
+        var op = String(r['Operation'] || '').trim();
+        var detail = op ? (op + ' — ' + status) : status;
+        out.lastFailure = _dataFreshnessEvent_(r['Refresh Time'], detail);
+        return true;
+      }
+    }
+    return false;
+  });
+  return out;
+}
+
+/**
+ * WFM.23 D9: compact data-freshness summary for Admin Operations tab.
+ * Self-computing from Normalization_Log + SF pipeline refresh log.
+ * Wire-safe: no Date objects in the response.
+ * @return {{wowIngest:Object, pipeline:Object, deployments:Object}}
+ */
+function api_getDataFreshness() {
+  _requireAuthorized_();
+  return {
+    wowIngest: _dataFreshnessWowIngest_(),
+    pipeline: _dataFreshnessSfFeed_('Pipeline'),
+    deployments: _dataFreshnessSfFeed_('Deployments')
+  };
+}
+
+/**
+ * WFM.25: Config_Settings tunable staleness thresholds (days) for data-freshness UI.
+ * Keys: data_freshness_wow_days (default 7), data_freshness_pipeline_days (2),
+ * data_freshness_deployments_days (2).
+ * @return {{wowIngestDays:number, pipelineDays:number, deploymentsDays:number}}
+ */
+function api_getDataFreshnessThresholds() {
+  _requireAuthorized_();
+  var settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+  function days_(key, fallback) {
+    var v = Number(String(settings[key] || '').trim());
+    return (v > 0) ? v : fallback;
+  }
+  return {
+    wowIngestDays: days_('data_freshness_wow_days', 7),
+    pipelineDays: days_('data_freshness_pipeline_days', 2),
+    deploymentsDays: days_('data_freshness_deployments_days', 2)
+  };
 }
 
 function api_getRefreshLog() {
@@ -2937,7 +5470,9 @@ function api_listSettings() {
     { key: 'weekly_target_default',   label: 'Weekly target hours (default)',  description: 'Default weekly capacity target hours per worker (weekly-forecast-migration).', defaultValue: '32.8' },
     { key: 'weekly_target_P6',        label: 'Weekly target hours (P6)',       description: 'Weekly capacity target hours for P6-level workers (Job Profile starts with P6).', defaultValue: '26.0' },
     { key: 'week_month_split_basis',  label: 'Week\u2192month split basis',    description: '"calendar" splits a week\'s hours across months by calendar days; "weekday" splits by Mon\u2013Fri days only.', defaultValue: 'calendar' },
-    { key: 'fiscal_year_start_month', label: 'Fiscal year start month',        description: '1-indexed calendar month the fiscal year starts in (2 = February, Workday\u2019s fiscal anchor).', defaultValue: '2' }
+    { key: 'fiscal_year_start_month', label: 'Fiscal year start month',        description: '1-indexed calendar month the fiscal year starts in (2 = February, Workday\u2019s fiscal anchor).', defaultValue: '2' },
+    { key: 'alloc_over_ratio',        label: 'Over-allocation ratio threshold', description: 'Ratio-to-target at or above which a worker counts as over-allocated in the Utilization allocation banner.', defaultValue: '1.10' },
+    { key: 'alloc_under_ratio',       label: 'Under-allocation ratio threshold', description: 'Ratio-to-target below which a worker counts as under-allocated in the Utilization allocation banner.', defaultValue: '0.85' }
   ];
   const currentSettings = readSettings_();
   return KNOWN_SETTINGS.map(function (s) {
@@ -3128,6 +5663,18 @@ function api_archiveAssignment(assignment_id) {
   return setAssignmentStatus_(assignment_id, 'Archived');
 }
 
+/** Soft-void a committed assignment (audit action 'void'). */
+function api_voidAssignment(assignment_id, notes) {
+  _requireAuthorized_();
+  return voidAssignment_(assignment_id, notes || '');
+}
+
+/** Soft-void a committed adjustment (audit action 'void'). */
+function api_voidCapacityAdjustment(adjustment_id, notes) {
+  _requireAuthorized_();
+  return voidCapacityAdjustment_(adjustment_id, notes || '');
+}
+
 /** Flip a Committed assignment back to Modeled. */
 function api_revertAssignmentToModeled(assignment_id) {
   _requireAuthorized_();
@@ -3182,4 +5729,177 @@ function api_listCapacityAdjustmentAudit(filter) {
       notes:         String(r.notes         || '')
     };
   });
+}
+
+// ------------------------------------------------------------
+// WFM.25 — On Leave roster + return-date API (display-only math)
+// ------------------------------------------------------------
+
+/**
+ * @param {*} v
+ * @return {string} YYYY-MM-DD or ''
+ */
+function _toDateWire_(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * @param {Object} r
+ * @return {Object}
+ */
+function _sanitizeOnLeaveForWire_(r) {
+  return {
+    worker_key:   String(r.worker_key   || ''),
+    worker_name:  String(r.worker_name  || ''),
+    team_label:   String(r.team_label   || ''),
+    manager_org:  String(r.manager_org  || ''),
+    source:       String(r.source       || ''),
+    return_date:  _toDateWire_(r.return_date),
+    modified_by:  String(r.modified_by  || ''),
+    modified_at:  _toIso_(r.modified_at)
+  };
+}
+
+/**
+ * Admin on-leave list with return dates from Config_Worker_Exclusions.
+ * @return {Object[]}
+ */
+function api_getOnLeaveList() {
+  _requireAuthorized_();
+  return listOnLeave_().map(_sanitizeOnLeaveForWire_);
+}
+
+/**
+ * Save return date for an on-leave worker (authorized).
+ * @param {string} worker_key
+ * @param {*} return_date valid date or blank to clear
+ * @param {*} [modified_at] optimistic-lock stamp from prior read
+ * @return {Object}
+ */
+function api_saveOnLeaveReturnDate(worker_key, return_date, modified_at) {
+  _requireAuthorized_();
+  const saved = saveOnLeaveReturnDate_(worker_key, return_date, modified_at);
+  return _sanitizeOnLeaveForWire_(saved);
+}
+
+/**
+ * Per-team on-leave roster sidecar for Utilization display (no hours math).
+ * @return {Object<string, {name:string, return_date:string}[]>}
+ */
+function api_getOnLeaveRoster() {
+  _requireAuthorized_();
+  var roster = getOnLeaveByTeam_();
+  Object.keys(roster).forEach(function (tl) {
+    roster[tl] = roster[tl].map(function (entry) {
+      return {
+        name: String(entry.name || ''),
+        return_date: _toDateWire_(entry.return_date)
+      };
+    });
+  });
+  return roster;
+}
+
+/**
+ * WFM.25: read-only passthrough of the Unstaffed_Demand tab (verbatim WoW rows).
+ * Display-layer only — no normalization, no capacity math.
+ * @return {Object[]}
+ */
+function api_getUnstaffedDemand() {
+  _requireAuthorized_();
+  try {
+    return readTable_(UNSTAFFED_DEMAND_SHEET) || [];
+  } catch (e) {
+    Logger.log('api_getUnstaffedDemand: ' + e);
+    return [];
+  }
+}
+
+// ------------------------------------------------------------
+// WFM.25 — Commitments ledger (union assignments + adjustments)
+// ------------------------------------------------------------
+
+/**
+ * Sanitize a ledger entry for google.script.run transport.
+ * @param {Object} e
+ * @return {Object}
+ */
+function _sanitizeCommitmentLedgerForWire_(e) {
+  if (!e) return null;
+  return {
+    ledger_key: String(e.ledger_key || ''),
+    object_type: String(e.object_type || ''),
+    object_id: String(e.object_id || ''),
+    worker: String(e.worker || ''),
+    team: String(e.team || ''),
+    project_label: String(e.project_label || ''),
+    booking_type: String(e.booking_type || ''),
+    committed_hours: Number(e.committed_hours) || 0,
+    locked_hours: Number(e.locked_hours) || 0,
+    reducible_hours: Number(e.reducible_hours) || 0,
+    start_date: String(e.start_date || ''),
+    end_date: String(e.end_date || ''),
+    quarters: (e.quarters || []).map(String),
+    status: String(e.status || ''),
+    scenario_id: String(e.scenario_id || ''),
+    scenario_name: String(e.scenario_name || ''),
+    committed_by: String(e.committed_by || ''),
+    committed_at: String(e.committed_at || ''),
+    opportunity_id: String(e.opportunity_id || ''),
+    weekly_detail: (e.weekly_detail || []).map(function (w) {
+      return {
+        week_key: String(w.week_key || ''),
+        week_start: String(w.week_start || ''),
+        hours: Number(w.hours) || 0,
+        locked: !!w.locked
+      };
+    }),
+    resource_type: String(e.resource_type || ''),
+    distribution: String(e.distribution || 'Even'),
+    estimated_hours: Number(e.estimated_hours) || 0,
+    hours_reduction: Number(e.hours_reduction) || 0,
+    direction: String(e.direction || ''),
+    reason: String(e.reason || '')
+  };
+}
+
+/**
+ * Full commitments ledger (Committed + Archived-void rows).
+ * @return {Object[]}
+ */
+function api_getCommitmentsLedger() {
+  _requireAuthorized_();
+  return listCommitmentsLedger_().map(_sanitizeCommitmentLedgerForWire_);
+}
+
+/**
+ * Scenario rollups for the By Scenario pivot.
+ * @return {Object[]}
+ */
+function api_getCommitmentsScenarioRollups() {
+  _requireAuthorized_();
+  return listCommitmentsScenarioRollups_();
+}
+
+/**
+ * Modify forecast-remaining hours on a committed booking.
+ * @param {string} object_type 'assignment' | 'adjustment'
+ * @param {string} object_id
+ * @param {number} newTotalHours total committed hours (unsigned)
+ * @return {Object}
+ */
+function api_modifyCommitment(object_type, object_id, newTotalHours) {
+  _requireAuthorized_();
+  if (object_type === 'assignment') {
+    var saved = modifyCommittedAssignmentHours_(object_id, newTotalHours);
+    return _sanitizeAssignmentForWire_(saved);
+  }
+  if (object_type === 'adjustment') {
+    var adj = modifyCommittedAdjustmentHours_(object_id, newTotalHours);
+    return _sanitizeAdjustmentForWire_(adj);
+  }
+  throw new Error('object_type must be assignment or adjustment');
 }

@@ -447,9 +447,9 @@ function buildEffectiveManagers_(selectedName, includeMyManagers, managersByName
  *
  * 'Custom' distribution was removed in WFM.12 (client collected
  * month-keyed custom_monthly_json while this function looked up
- * week_key, silently zeroing every week). Any distribution value outside
- * DISTRIBUTIONS -- e.g. a legacy 'Custom' row -- is defensively treated
- * as Even, with a logged warning; never silently produces all-zero weeks.
+ * week_key, silently zeroing every week). Feature F restores 'Custom' via
+ * week_key-keyed custom_weekly_json. Any distribution value outside
+ * DISTRIBUTIONS is defensively treated as Even, with a logged warning.
  *
  * @param {Object} a assignment row (start_date, end_date, estimated_hours, distribution)
  * @param {{weeks: Array}} calendar output of readCalendar_()
@@ -472,6 +472,17 @@ function expandAssignmentToWeekly_(a, calendar) {
   if (DISTRIBUTIONS.indexOf(dist) === -1) {
     Logger.log('expandAssignmentToWeekly_: unrecognized distribution "' + dist +
       '" for assignment ' + (a.assignment_id || '(no id)') + ' -- defaulting to Even');
+    dist = 'Even';
+  }
+
+  if (dist === 'Custom') {
+    const custom = parseCustomWeeklyJson_(a.custom_weekly_json);
+    if (custom && Object.keys(custom).length) {
+      return expandWeeksFromCustomJson_(weeks, custom, 'hours',
+        'expandAssignmentToWeekly_');
+    }
+    Logger.log('expandAssignmentToWeekly_: Custom distribution without custom_weekly_json for ' +
+      (a.assignment_id || '(no id)') + ' -- defaulting to Even');
     dist = 'Even';
   }
 
@@ -1261,6 +1272,175 @@ function computeUtilization(params) {
  *   holidayHoursByWeek: Object<string, number>
  * }}
  */
+/**
+ * Build blendedWeekly on a worker from forecast weekly maps + actuals overlay.
+ * Must run before reduction clamp so actual weeks are non-reducible (WFM.25).
+ * @param {Object} worker
+ * @param {Object} actualsAgg employeeId map, or {byEmployeeId, byResourceName} aggregate
+ * @param {Object} [byResourceName] optional resource_name map when actualsAgg is employee-only
+ */
+function _blendWorkerWeeklyMaps_(worker, actualsAgg, byResourceName) {
+  var byEmployeeId = (actualsAgg && actualsAgg.byEmployeeId) ? actualsAgg.byEmployeeId : (actualsAgg || {});
+  if (byResourceName === undefined && actualsAgg && actualsAgg.byResourceName) {
+    byResourceName = actualsAgg.byResourceName;
+  }
+  byResourceName = byResourceName || {};
+  var wActuals = (typeof _workerWeeklyActualsMap_ === 'function')
+    ? _workerWeeklyActualsMap_(worker, byEmployeeId, byResourceName)
+    : ((worker.employeeId && byEmployeeId[worker.employeeId])
+      ? byEmployeeId[worker.employeeId] : {});
+  worker.blendedWeekly = {};
+  var allWeekKeys = {};
+  Object.keys(worker.workerWeekly || {}).forEach(function (k) { allWeekKeys[k] = true; });
+  Object.keys(wActuals).forEach(function (k) { allWeekKeys[k] = true; });
+  Object.keys(allWeekKeys).forEach(function (wk) {
+    if (wActuals.hasOwnProperty(wk)) {
+      worker.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
+      // Actual weeks are non-reducible; zero forecast productive so clamp cannot
+      // consume assignment hours on weeks already closed in D8 actuals.
+      worker.productiveWeekly[wk] = 0;
+    } else {
+      worker.blendedWeekly[wk] = {
+        hours: worker.workerWeekly[wk] || 0,
+        isActual: false
+      };
+    }
+  });
+}
+
+/**
+ * Sync non-actual blendedWeekly cells from productiveWeekly after reductions.
+ * @param {Object} worker
+ */
+function _syncBlendedWeeklyForecastCells_(worker) {
+  Object.keys(worker.blendedWeekly || {}).forEach(function (wk) {
+    var cell = worker.blendedWeekly[wk];
+    if (!cell || cell.isActual) return;
+    cell.hours = Math.max(0, Number(worker.productiveWeekly[wk]) || 0);
+  });
+}
+
+/**
+ * Forecast-remaining productive hours for per-week reduction zero-clamp (WFM.25).
+ * Single basis for preview and committed: actual weeks (D8 blended) are not
+ * reducible; forecast weeks clamp on productiveWeekly only, never workerWeekly.
+ * @param {Object} worker forecast worker row (blendedWeekly should be built first)
+ * @param {string} weekKey
+ * @param {Object} [actualsAgg] optional preloaded aggregate from getActualsAggregated_()
+ * @return {number}
+ */
+function productiveHoursAvailableForReductionClamp_(worker, weekKey, actualsAgg, weekStart) {
+  // WFM.25 item 3: current-quarter weeks are D8 actuals-driven and non-reducible.
+  if (weekStart && fiscalQuarterKey_(weekStart) === fiscalQuarterKey_(new Date())) return 0;
+  var blended = worker.blendedWeekly && worker.blendedWeekly[weekKey];
+  if (blended && blended.isActual) return 0;
+  if (!blended && worker) {
+    var byEmployeeId = (actualsAgg && actualsAgg.byEmployeeId) ? actualsAgg.byEmployeeId : (actualsAgg || {});
+    var byResourceName = (actualsAgg && actualsAgg.byResourceName) ? actualsAgg.byResourceName : {};
+    var wActuals = (typeof _workerWeeklyActualsMap_ === 'function')
+      ? _workerWeeklyActualsMap_(worker, byEmployeeId, byResourceName)
+      : (worker.employeeId && byEmployeeId[worker.employeeId] ? byEmployeeId[worker.employeeId] : null);
+    if (wActuals && Object.prototype.hasOwnProperty.call(wActuals, weekKey)) return 0;
+  }
+  return Math.max(0, Number(worker.productiveWeekly && worker.productiveWeekly[weekKey]) || 0);
+}
+
+/**
+ * Sum forecast-remaining productive hours reducible in a fiscal quarter (WFM.25).
+ * Single basis for clamp expected totals: actual/closed weeks contribute 0.
+ * @param {Object} worker computeWeeklyForecast_ worker row (blendedWeekly built)
+ * @param {string} quarterKey
+ * @param {Array<{week_start:Date, week_key:string}>} weeks
+ * @param {Object} [actualsAgg] optional preloaded aggregate from getActualsAggregated_()
+ * @return {number}
+ */
+function forecastRemainingProductiveForQuarter_(worker, quarterKey, weeks, actualsAgg) {
+  if (quarterKey === fiscalQuarterKey_(new Date())) return 0;
+  var sum = 0;
+  (weeks || []).forEach(function (wk) {
+    if (fiscalQuarterKey_(wk.week_start) !== quarterKey) return;
+    sum += productiveHoursAvailableForReductionClamp_(worker, wk.week_key, actualsAgg, wk.week_start);
+  });
+  return sum;
+}
+
+/**
+ * Expand an adjustment to weekly rows with per-week zero-clamp on productive hours.
+ * Sequential: each week clamps against productive hours remaining after prior weeks.
+ * @param {Object} worker forecast worker row (mutated when apply is true)
+ * @param {Object} adj
+ * @param {{weeks:Array}} calendar
+ * @param {boolean} [apply] when true, write clamped deltas to worker weekly maps
+ * @return {{
+ *   weeks: Array<{week_key:string, week_start:Date, hours_reduction:number}>,
+ *   applied: number,
+ *   requested: number
+ * }}
+ */
+function expandClampedAdjustmentWeekly_(worker, adj, calendar, apply) {
+  const out = { weeks: [], applied: 0, requested: 0 };
+  if (!worker || !adj) return out;
+  var actualsAgg = null;
+  const projLabel = 'Capacity Adjustment';
+  expandAdjustmentToWeekly_(adj, calendar).forEach(function (wk) {
+    const hrs = Number(wk.hours_reduction) || 0;
+    if (!hrs) return;
+    const weekKey = wk.week_key;
+    if (hrs > 0) {
+      out.requested += hrs;
+      if (!worker.blendedWeekly && actualsAgg === null) {
+        actualsAgg = (typeof getActualsAggregated_ === 'function')
+          ? getActualsAggregated_() : { byEmployeeId: {}, byResourceName: {} };
+      }
+      const currentProd = productiveHoursAvailableForReductionClamp_(
+        worker, weekKey, actualsAgg, wk.week_start);
+      const weekApplied = Math.min(hrs, currentProd);
+      if (!weekApplied) return;
+      out.applied += weekApplied;
+      out.weeks.push({
+        week_key: weekKey,
+        week_start: wk.week_start,
+        hours_reduction: weekApplied
+      });
+      if (!apply) return;
+      worker.workerWeekly[weekKey] = Math.max(0, (worker.workerWeekly[weekKey] || 0) - weekApplied);
+      worker.productiveWeekly[weekKey] = currentProd - weekApplied;
+      if (!worker.projects[projLabel]) worker.projects[projLabel] = {};
+      worker.projects[projLabel][weekKey] = (worker.projects[projLabel][weekKey] || 0) - weekApplied;
+    } else {
+      const addAmt = -hrs;
+      out.requested += addAmt;
+      out.applied += addAmt;
+      out.weeks.push({
+        week_key: weekKey,
+        week_start: wk.week_start,
+        hours_reduction: -addAmt
+      });
+      if (!apply) return;
+      worker.workerWeekly[weekKey] = (worker.workerWeekly[weekKey] || 0) + addAmt;
+      worker.productiveWeekly[weekKey] = (worker.productiveWeekly[weekKey] || 0) + addAmt;
+      if (!worker.projects[projLabel]) worker.projects[projLabel] = {};
+      worker.projects[projLabel][weekKey] = (worker.projects[projLabel][weekKey] || 0) + addAmt;
+    }
+  });
+  return out;
+}
+
+/**
+ * Apply weekly expansion of a capacity adjustment to worker weekly maps.
+ * Reductions (positive hours_reduction) are zero-clamped per week on productive hours.
+ * @param {function(string):Object} ensureWorker
+ * @param {Object} adj
+ * @param {{weeks:Array}} calendar
+ * @return {{applied:number, requested:number}}
+ */
+function applyCapacityAdjustmentWeekly_(ensureWorker, adj, calendar) {
+  if (!adj || !adj.resource_name) return { applied: 0, requested: 0 };
+  const w = ensureWorker(adj.resource_name);
+  const result = expandClampedAdjustmentWeekly_(w, adj, calendar, true);
+  return { applied: result.applied, requested: result.requested };
+}
+
 function computeWeeklyForecast_(params) {
   params = params || {};
   const viewMode = params.viewMode || 'Committed';
@@ -1302,7 +1482,8 @@ function computeWeeklyForecast_(params) {
   const resIndex = (typeof getResourceIndex_ === 'function')
     ? getResourceIndex_() : _resourceIndex_(allocRaw);
 
-  var actualsByWorker = (typeof getActualsByWorkerWeek_ === 'function') ? getActualsByWorkerWeek_() : {};
+  var actualsAgg = (typeof getActualsAggregated_ === 'function')
+    ? getActualsAggregated_() : { byEmployeeId: {}, byResourceName: {} };
 
   function inScope(workerName) {
     const info = resIndex[workerName] || {};
@@ -1415,9 +1596,23 @@ function computeWeeklyForecast_(params) {
         addHours(a.resource_name, w.week_key, label, w.hours, true);
       });
     });
+
+    // WFM.23: in-memory soft booking overlay (additive; never persisted).
+    (params.inMemoryModeledAssignments || []).forEach(function (a) {
+      if (!a.resource_name) return;
+      expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+        addHours(a.resource_name, w.week_key, 'Soft Booking', w.hours, true);
+      });
+    });
   }
 
-  // 2.5) Capacity adjustments (signed: positive = reduce, so we subtract).
+  // Blend actuals before reductions so the clamp uses forecast-remaining only
+  // (actual weeks are non-reducible — WFM.25 current-quarter D8 parity).
+  Object.values(workers).forEach(function (w) {
+    _blendWorkerWeeklyMaps_(w, actualsAgg);
+  });
+
+  // 2.5) Capacity adjustments — committed reductions zero-clamped per week (WFM.25).
   if (viewMode !== 'Actual') {
     let adjRows = [];
     try { adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET); } catch (e) { adjRows = []; }
@@ -1430,27 +1625,12 @@ function computeWeeklyForecast_(params) {
         (viewMode === 'Scenario' && isModeled &&
          (!params.scenarioId || adj.scenario_id === params.scenarioId));
       if (!include) return;
-      expandAdjustmentToWeekly_(adj, calendar).forEach(w => {
-        addHours(adj.resource_name, w.week_key, 'Capacity Adjustment', -w.hours_reduction, true);
-      });
+      applyCapacityAdjustmentWeekly_(ensureWorker, adj, calendar);
+    });
+    Object.values(workers).forEach(function (w) {
+      _syncBlendedWeeklyForecastCells_(w);
     });
   }
-
-  // Blend actuals at read time: additive blendedWeekly alongside intact workerWeekly.
-  Object.values(workers).forEach(function (w) {
-    var wActuals = (w.employeeId && actualsByWorker[w.employeeId]) ? actualsByWorker[w.employeeId] : {};
-    w.blendedWeekly = {};
-    var allWeekKeys = {};
-    Object.keys(w.workerWeekly).forEach(function (k) { allWeekKeys[k] = true; });
-    Object.keys(wActuals).forEach(function (k) { allWeekKeys[k] = true; });
-    Object.keys(allWeekKeys).forEach(function (wk) {
-      if (wActuals.hasOwnProperty(wk)) {
-        w.blendedWeekly[wk] = { hours: wActuals[wk], isActual: true };
-      } else {
-        w.blendedWeekly[wk] = { hours: w.workerWeekly[wk] || 0, isActual: false };
-      }
-    });
-  });
 
   // 3) Apply manager + Team filters (same semantics as computeUtilization).
   const filteredWorkers = Object.values(workers).filter(w => {
@@ -1807,6 +1987,153 @@ function quarterWorkdaySummary_(quarterKey, holidays) {
   };
 }
 
+var _committedAsgIdxMemo_ = null;
+var _committedReductionIdxMemo_ = null;
+var _wowTargetIdxMemo_ = null;
+var _wowActualIcpIdxMemo_ = null;
+var _wowWeeklyRateIdxMemo_ = null;
+var _wowForecastIcpIdxMemo_ = null;
+
+/**
+ * Clear per-execution projection indexes (committed assignments, reductions, WoW targets).
+ */
+function _resetProjectionMemos_() {
+  _committedAsgIdxMemo_ = null;
+  _committedReductionIdxMemo_ = null;
+  _wowTargetIdxMemo_ = null;
+  _wowActualIcpIdxMemo_ = null;
+  _wowForecastIcpIdxMemo_ = null;
+  _wowWeeklyRateIdxMemo_ = null;
+}
+
+/**
+ * Per-request index of Utilization_Quarterly target_hours by employee and
+ * fiscal quarter. Reads CFG_UTIL_QUARTERLY once; plain per-execution memo.
+ * @return {Object<string, Object<string, number>>} employeeId → { quarterKey → target_hours }
+ */
+function _wowQuarterTargetIndex_() {
+  if (_wowTargetIdxMemo_) return _wowTargetIdxMemo_;
+  var idx = {};
+  var actuals = {};
+  var forecasts = {};
+  var weeklyRates = {};
+  cachedRead_(CFG_UTIL_QUARTERLY).forEach(function (r) {
+    var eid = String(r.employee_id || '').trim();
+    var qk = String(r.fiscal_quarter || '').trim();
+    if (!eid || !qk) return;
+    if (!idx[eid]) idx[eid] = {};
+    if (!actuals[eid]) actuals[eid] = {};
+    if (!forecasts[eid]) forecasts[eid] = {};
+    if (!weeklyRates[eid]) weeklyRates[eid] = {};
+    idx[eid][qk] = Number(r.target_hours) || 0;
+    actuals[eid][qk] = Number(r.qtd_actual_icp) || 0;
+    forecasts[eid][qk] = Number(r.qtd_icp_plus_forecast) || 0;
+    weeklyRates[eid][qk] = Number(r.util_rate_wkly) || 0;
+  });
+  _wowTargetIdxMemo_ = idx;
+  _wowActualIcpIdxMemo_ = actuals;
+  _wowForecastIcpIdxMemo_ = forecasts;
+  _wowWeeklyRateIdxMemo_ = weeklyRates;
+  return idx;
+}
+
+/**
+ * Completed-quarter actual ICP hours from Utilization_Quarterly (UTIL_Previous
+ * rows). Returns the stored qtd_actual_icp verbatim — no re-derivation.
+ *
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter e.g. 'FY27-Q2'
+ * @return {number|null}
+ */
+function quarterActualIcpFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return null;
+  _wowQuarterTargetIndex_();
+  var byQ = _wowActualIcpIdxMemo_[employeeId];
+  return (byQ && Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter))
+    ? byQ[fiscalQuarter] : null;
+}
+
+/**
+ * Forecast-quarter ICP hours from Utilization_Quarterly (UTIL_Next rows).
+ * Returns qtd_icp_plus_forecast verbatim — no re-derivation.
+ *
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter e.g. 'FY27-Q4'
+ * @return {number|null}
+ */
+function quarterForecastIcpFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return null;
+  _wowQuarterTargetIndex_();
+  var byQ = _wowForecastIcpIdxMemo_[employeeId];
+  return (byQ && Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter))
+    ? byQ[fiscalQuarter] : null;
+}
+
+/**
+ * WoW-first quarter target from Utilization_Quarterly (WFM.24 D5 / WFM.25).
+ *
+ * Returns target_hours for the worker+quarter when a WoW row exists, else null
+ * so the caller can fall back to quarterTargetHoursFor_.
+ *
+ * target_hours is the utilization denominator for all quarters (WFM.25).
+ *
+ * WoW coverage is FY27-Q1..Q4 in the current workbook; outside that window
+ * this returns null and the formula path applies.
+ *
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter e.g. 'FY27-Q2'
+ * @return {number|null}
+ */
+function quarterTargetFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return null;
+  var idx = _wowQuarterTargetIndex_();
+  var byQ = idx[employeeId];
+  return (byQ && Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter))
+    ? byQ[fiscalQuarter] : null;
+}
+
+/**
+ * WoW-first weekly target hours from Utilization_Quarterly util_rate_wkly.
+ * Same sheet as quarterTargetFromWoW_ (target_hours); not target_hours ÷ weeks.
+ *
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter e.g. 'FY27-Q2'
+ * @return {number|null}
+ */
+function weeklyTargetFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return null;
+  _wowQuarterTargetIndex_();
+  var byQ = _wowWeeklyRateIdxMemo_[employeeId];
+  if (!byQ || !Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter)) return null;
+  var v = Number(byQ[fiscalQuarter]);
+  return (isFinite(v) && v > 0) ? v : null;
+}
+
+/**
+ * Per-worker weekly target hours for chart reference line (WP2.0 feature B).
+ * Weekly HOURS = raw_weekly_capacity × icp_target_rate (e.g. 40 × 0.77 ≈ 31h).
+ * util_rate_wkly on Utilization_Quarterly is a utilization rate, not hours — do not use it here.
+ *
+ * @param {Object} worker computeWeeklyForecast_ worker row
+ * @param {string} fiscalQuarter
+ * @param {Object} [settings]
+ * @return {number}
+ */
+function weeklyTargetHoursFor_(worker, fiscalQuarter, settings) {
+  settings = settings || readSettings_();
+  var rawWeekly = readRawCapacity_(settings);
+  var icpTargetRate = icpTargetFor_(worker.icpRole, worker.jobProfile, settings);
+  return rawWeekly * icpTargetRate;
+}
+
 /**
  * Quarterly target hours per WFM.15/WFM.17:
  * daily target = (raw_weekly_capacity × icp target %) ÷ 5
@@ -1844,6 +2171,19 @@ function rollingQuarterKeys_(count) {
     qk = fiscalQuarterKey_(nextStart);
   }
   return keys;
+}
+
+/**
+ * Shared three-quarter planning window for Scorecard and Explorer detail:
+ * previous, current, next.
+ * @return {string[]}
+ */
+function scorecardWindowKeys_() {
+  const curQ = fiscalQuarterKey_(new Date());
+  const curBounds = fiscalQuarterBounds_(curQ);
+  const prevDay = new Date(curBounds.start.getFullYear(), curBounds.start.getMonth(), curBounds.start.getDate() - 1);
+  const prevQ = fiscalQuarterKey_(prevDay);
+  return [prevQ].concat(rollingQuarterKeys_(2));
 }
 
 /**
@@ -2002,35 +2342,186 @@ function computeBlendedWindowKpis_(params) {
   };
 }
 
+/**
+ * Per-request index of Committed Opportunity_Assignment hours by resource and
+ * fiscal quarter. Reads getEnrichedAssignments_() once and expands each
+ * committed assignment once; plain per-execution memo.
+ * @param {Object} [calendar] from readCalendar_()
+ * @return {Object<string, Object<string, number>>} resource_name → { quarterKey → hours }
+ */
+function committedAssignmentQuarterIndex_(calendar) {
+  if (_committedAsgIdxMemo_) return _committedAsgIdxMemo_;
+  calendar = calendar || readCalendar_();
+  var assignsRaw = [];
+  try {
+    assignsRaw = (typeof getEnrichedAssignments_ === 'function')
+      ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
+  } catch (e) {
+    assignsRaw = [];
+  }
+  var idx = {};
+  assignsRaw.forEach(function (a) {
+    if (String(a.status || '') !== 'Committed') return;
+    var res = a.resource_name;
+    if (!res) return;
+    expandAssignmentToWeekly_(a, calendar).forEach(function (w) {
+      var qk = fiscalQuarterKey_(w.week_start);
+      if (!qk) return;
+      if (!idx[res]) idx[res] = {};
+      idx[res][qk] = (idx[res][qk] || 0) + (Number(w.hours) || 0);
+    });
+  });
+  _committedAsgIdxMemo_ = idx;
+  return idx;
+}
+
+/**
+ * Sum Committed Opportunity_Assignment hours for one worker in a fiscal quarter.
+ * O(1) lookup into committedAssignmentQuarterIndex_; does not mutate data.
+ * @param {string} resourceName
+ * @param {string} quarterKey
+ * @param {Object} [calendar] from readCalendar_()
+ * @return {number}
+ */
+function committedAssignmentHoursForQuarter_(resourceName, quarterKey, calendar) {
+  if (!resourceName || !quarterKey) return 0;
+  var idx = committedAssignmentQuarterIndex_(calendar);
+  var byQ = idx && idx[resourceName];
+  return (byQ && Number(byQ[quarterKey])) || 0;
+}
+
+/**
+ * Clone worker weekly maps before any Capacity_Adjustment deltas (add or reduce).
+ * Restores productive/worker weekly from projects['Capacity Adjustment'] so
+ * committed reductions can be re-expanded with the same sequential clamp.
+ * @param {Object} worker computeWeeklyForecast_ worker row
+ * @return {Object}
+ */
+function _workerPreCapacityAdjustmentSnapshot_(worker) {
+  var capAdj = (worker.projects && worker.projects['Capacity Adjustment']) || {};
+  var prod = Object.assign({}, worker.productiveWeekly || {});
+  var wkMap = Object.assign({}, worker.workerWeekly || {});
+  Object.keys(capAdj).forEach(function (weekKey) {
+    var delta = Number(capAdj[weekKey]) || 0;
+    if (!delta) return;
+    prod[weekKey] = (Number(prod[weekKey]) || 0) - delta;
+    wkMap[weekKey] = (Number(wkMap[weekKey]) || 0) - delta;
+  });
+  return {
+    employeeId: worker.employeeId,
+    productiveWeekly: prod,
+    workerWeekly: wkMap,
+    projects: JSON.parse(JSON.stringify(worker.projects || {})),
+    blendedWeekly: JSON.parse(JSON.stringify(worker.blendedWeekly || {}))
+  };
+}
+
+/**
+ * Per-request index of Committed Capacity_Adjustments by resource (sheet order).
+ * Includes add and reduce rows so sequential clamp matches computeWeeklyForecast_.
+ * @param {Object} [calendar] from readCalendar_()
+ * @return {Object<string, Array<Object>>} resource_name → committed adjustments
+ */
+function committedReductionQuarterIndex_(calendar) {
+  if (_committedReductionIdxMemo_) return _committedReductionIdxMemo_;
+  calendar = calendar || readCalendar_();
+  var idx = {};
+  var adjRows = [];
+  try {
+    adjRows = cachedRead_(CAPACITY_ADJUSTMENTS_SHEET);
+  } catch (e) {
+    adjRows = [];
+  }
+  adjRows.forEach(function (adj) {
+    if (String(adj.status || '') !== 'Committed') return;
+    var res = adj.resource_name;
+    if (!res) return;
+    if (!idx[res]) idx[res] = [];
+    idx[res].push(adj);
+  });
+  _committedReductionIdxMemo_ = idx;
+  return idx;
+}
+
+/**
+ * Sum Committed capacity-reduction hours for one worker in a fiscal quarter,
+ * zero-clamped to forecast-remaining productive hours (never actualized D8 weeks).
+ * Replays committed adjustments in sheet order on the pre-adjustment weekly basis.
+ * @param {Object} worker computeWeeklyForecast_ worker row
+ * @param {string} quarterKey
+ * @param {Object} [calendar] from readCalendar_()
+ * @return {number}
+ */
+function committedReductionHoursForQuarter_(worker, quarterKey, calendar) {
+  if (!worker || !worker.resource || !quarterKey) return 0;
+  calendar = calendar || readCalendar_();
+  var adjs = committedReductionQuarterIndex_(calendar)[worker.resource];
+  if (!adjs || !adjs.length) return 0;
+  var snap = _workerPreCapacityAdjustmentSnapshot_(worker);
+  var total = 0;
+  adjs.forEach(function (adj) {
+    var result = expandClampedAdjustmentWeekly_(snap, adj, calendar, true);
+    if (String(adj.direction || 'reduce') !== 'reduce') return;
+    result.weeks.forEach(function (w) {
+      if (fiscalQuarterKey_(w.week_start) !== quarterKey) return;
+      var hrs = Number(w.hours_reduction) || 0;
+      if (hrs > 0) total += hrs;
+    });
+  });
+  return total;
+}
+
 function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSummary, settings, curQ) {
+  const calendar = readCalendar_();
+  committedAssignmentQuarterIndex_(calendar);
+  _wowQuarterTargetIndex_();
   return quarterKeys.map(function (qk) {
     const wd = quarterWorkdaySummary_(qk, holidays);
     const isCurrent = (qk === curQ);
     const appTarget = quarterTargetHoursFor_(worker.icpRole, worker.jobProfile, qk, holidays, settings);
-    const summary = worker.employeeId ? actualsSummary[worker.employeeId] : null;
     let productiveHours = 0;
     let targetHours = appTarget;
-    let bonusAttainment = 0;
+    let bonusAttainment = null;
     let source = 'forecast';
+    let icpUtil = null;
+    let stale = false;
+    let committedAssignmentHours = 0;
 
-    if (isCurrent && summary && summary.qtd_icp_plus_forecast_hours > 0) {
-      productiveHours = summary.qtd_icp_plus_forecast_hours;
-      if (summary.bonus_target_billable_hours_eoq > 0) {
-        targetHours = summary.bonus_target_billable_hours_eoq;
-        bonusAttainment = productiveHours / targetHours;
-      }
-      source = 'actuals_plus_forecast';
+    const wowTarget = quarterTargetFromWoW_(worker.employeeId, qk);
+    const hasWowTarget = wowTarget != null && wowTarget > 0;
+    if (hasWowTarget) targetHours = wowTarget;
+
+    // WFM.25: icpUtil = numerator / target_hours for every quarter.
+    // Previous: qtd_actual_icp / target_hours; Current+Next: qtd_icp_plus_forecast / target_hours.
+    // When Utilization_Quarterly is present, use WoW fields verbatim — never Actuals_Worker_Summary.
+    const cmp = compareFiscalQuarterKeys_(qk, curQ);
+    if (cmp < 0) {
+      const wowActual = quarterActualIcpFromWoW_(worker.employeeId, qk);
+      productiveHours = wowActual != null ? wowActual : 0;
+      source = 'actuals';
+      stale = wowActual == null;
     } else {
-      productiveHours = sumForecastProductiveForQuarter_(worker, qk, weeks);
-      targetHours = appTarget;
-      bonusAttainment = appTarget > 0 ? productiveHours / appTarget : 0;
-      source = 'forecast';
+      const wowForecast = quarterForecastIcpFromWoW_(worker.employeeId, qk);
+      if (wowForecast != null && hasWowTarget) {
+        productiveHours = wowForecast;
+        source = isCurrent ? 'actuals_plus_forecast' : 'forecast';
+      } else {
+        committedAssignmentHours = committedAssignmentHoursForQuarter_(worker.resource, qk, calendar);
+        productiveHours = (wowForecast != null ? wowForecast :
+          sumForecastProductiveForQuarter_(worker, qk, weeks)) + committedAssignmentHours;
+        source = isCurrent ? 'actuals_plus_forecast' : 'forecast';
+        stale = !hasWowTarget || wowForecast == null;
+      }
     }
 
-    const icpUtil = wd.icpAvailableHours > 0 ? productiveHours / wd.icpAvailableHours : 0;
+    if (targetHours > 0) {
+      bonusAttainment = productiveHours / targetHours;
+      icpUtil = bonusAttainment;
+    }
+
     const financeUtil = wd.rawCapacityHours > 0 ? productiveHours / wd.rawCapacityHours : 0;
     const icpTarget = Number(worker.icpTarget) || 0;
-    const ratioToTarget = icpTarget > 0 ? icpUtil / icpTarget : 0;
+    const ratioToTarget = (icpTarget > 0 && icpUtil != null) ? icpUtil / icpTarget : 0;
     const trackingHours = productiveHours - targetHours;
 
     return {
@@ -2042,18 +2533,21 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       icpAvailableHours: wd.icpAvailableHours,
       targetHours: Number(targetHours) || 0,
       appTargetHours: Number(appTarget) || 0,
+      weeklyTargetHours: Number(weeklyTargetHoursFor_(worker, qk, settings)) || 0,
       trackingHours: Number(trackingHours) || 0,
-      icpUtil: Number(icpUtil) || 0,
+      icpUtil: icpUtil,
       financeUtil: Number(financeUtil) || 0,
       ratioToTarget: Number(ratioToTarget) || 0,
-      bonusAttainment: Number(bonusAttainment) || 0,
-      source: source
+      bonusAttainment: bonusAttainment,
+      source: source,
+      stale: !!stale,
+      committedAssignmentHours: Number(committedAssignmentHours) || 0
     };
   });
 }
 
 /**
- * Team quarterly scorecard: rolling four fiscal quarters per worker plus
+ * Team quarterly scorecard: three-quarter planning window per worker plus
  * hours-weighted team summaries.
  * @param {Object} params same shape as computeUtilization
  * @return {Object}
@@ -2065,8 +2559,8 @@ function computeQuarterlyScorecard_(params) {
   const forecast = computeWeeklyForecast_(params);
   const actualsSummary = (typeof getActualsSummaryByEmployee_ === 'function')
     ? getActualsSummaryByEmployee_() : {};
-  const quarterKeys = rollingQuarterKeys_(4);
   const curQ = fiscalQuarterKey_(new Date());
+  const quarterKeys = scorecardWindowKeys_();
   const weeks = forecast.weeks || [];
 
   const workersOut = forecast.workers.map(function (w) {
@@ -2086,6 +2580,7 @@ function computeQuarterlyScorecard_(params) {
 
   const teamSummary = quarterKeys.map(function (qk, qi) {
     let sumProd = 0, sumIcpAvail = 0, sumRawCap = 0, sumTarget = 0, sumTracking = 0;
+    let sumUtilProd = 0, sumUtilTarget = 0;
     workersOut.forEach(function (wr) {
       const q = wr.quarters[qi];
       if (!q) return;
@@ -2094,14 +2589,19 @@ function computeQuarterlyScorecard_(params) {
       sumRawCap += q.rawCapacityHours;
       sumTarget += q.targetHours;
       sumTracking += q.trackingHours;
+      if (q.targetHours > 0) {
+        sumUtilProd += q.productiveHours;
+        sumUtilTarget += q.targetHours;
+      }
     });
+    const targetUtil = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : 0;
     return {
       quarterKey: qk,
       quarterLabel: qk,
       isCurrentQuarter: qk === curQ,
-      icpUtil: sumIcpAvail > 0 ? sumProd / sumIcpAvail : 0,
+      icpUtil: targetUtil,
       financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
-      bonusAttainment: sumTarget > 0 ? sumProd / sumTarget : 0,
+      bonusAttainment: targetUtil,
       trackingHours: sumTracking,
       productiveHours: sumProd,
       targetHours: sumTarget

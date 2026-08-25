@@ -54,6 +54,16 @@ function saveCapacityAdjustment_(adj) {
   if (adj.start_date) adj.start_date = new Date(adj.start_date);
   if (adj.end_date)   adj.end_date   = new Date(adj.end_date);
 
+  _normalizeCustomWeeklyJsonField_(adj, adj.distribution);
+  validateCustomWeeklyDistribution_({
+    label: 'Capacity adjustment',
+    distribution: adj.distribution,
+    custom_weekly_json: adj.custom_weekly_json,
+    isAdjustment: true,
+    direction: adj.direction,
+    signedTotal: adj.hours_reduction
+  });
+
   if (!adj.adjustment_id) {
     // 60-second natural-key dedup: prevent double-submit duplicates.
     const _startIso = adj.start_date ? adj.start_date.toISOString().slice(0,10) : '';
@@ -96,6 +106,7 @@ function saveCapacityAdjustment_(adj) {
 
   invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') invalidateSoftBookingBaselineCache_();
   return adj;
 }
 
@@ -122,6 +133,7 @@ function deleteCapacityAdjustment_(adjustment_id) {
       sh.deleteRow(r + 1);
       invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
       if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+      if (typeof invalidateSoftBookingBaselineCache_ === 'function') invalidateSoftBookingBaselineCache_();
       return { deleted: true };
     }
   }
@@ -135,10 +147,14 @@ function deleteCapacityAdjustment_(adjustment_id) {
  * expandAssignmentToWeekly_ (Engine.gs). Returns positive hours_reduction
  * values; the engine negates when applying to buckets.
  *
- * 'Custom' distribution was removed in WFM.12 (see expandAssignmentToWeekly_
- * for the full rationale). Any distribution value outside DISTRIBUTIONS is
- * defensively treated as Even, with a logged warning; never silently
- * produces all-zero weeks.
+ * 'Custom' distribution uses week_key-keyed custom_weekly_json (Feature F).
+ * Any distribution value outside DISTRIBUTIONS is defensively treated as
+ * Even, with a logged warning.
+ *
+ * Sign convention for custom_weekly_json on adjustments: hours_reduction is
+ * SIGNED — positive = reduce, negative = add — matching saveCapacityAdjustment_
+ * (direction === 'add' ? -magnitude : magnitude). Custom JSON values are
+ * stored and expanded in that same signed convention; no direction re-apply.
  *
  * @param {Object} adj  - adjustment row (start_date, end_date, hours_reduction, distribution)
  * @param {{weeks: Array}} calendar - output of readCalendar_() (Engine.gs)
@@ -161,6 +177,17 @@ function expandAdjustmentToWeekly_(adj, calendar) {
   if (DISTRIBUTIONS.indexOf(dist) === -1) {
     Logger.log('expandAdjustmentToWeekly_: unrecognized distribution "' + dist +
       '" for adjustment ' + (adj.adjustment_id || '(no id)') + ' -- defaulting to Even');
+    dist = 'Even';
+  }
+
+  if (dist === 'Custom') {
+    const custom = parseCustomWeeklyJson_(adj.custom_weekly_json);
+    if (custom && Object.keys(custom).length) {
+      return expandWeeksFromCustomJson_(weeks, custom, 'hours_reduction',
+        'expandAdjustmentToWeekly_');
+    }
+    Logger.log('expandAdjustmentToWeekly_: Custom distribution without custom_weekly_json for ' +
+      (adj.adjustment_id || '(no id)') + ' -- defaulting to Even');
     dist = 'Even';
   }
 
@@ -232,12 +259,14 @@ function runDocBMigration() {
 
 /**
  * Flip a single adjustment's status. Used by commitScenario_ and the
- * "Commit Now" drawer action. Appends a 'commit' or 'archive' audit row.
+ * "Commit Now" drawer action. Appends a 'commit', 'archive', or 'void' audit row.
  * @param {string} adjustment_id
  * @param {string} status  'Committed' | 'Archived'
+ * @param {string} [auditAction] override audit action (e.g. 'void')
+ * @param {string} [notes]
  * @return {{ adjustment_id: string, status: string }}
  */
-function setAdjustmentStatus_(adjustment_id, status) {
+function setAdjustmentStatus_(adjustment_id, status, auditAction, notes) {
   const user = getUserEmail_();
   // Capture before-state for audit.
   const _before = listCapacityAdjustments_({}).find(function (r) {
@@ -246,11 +275,25 @@ function setAdjustmentStatus_(adjustment_id, status) {
   const patch = { status: status, modified_by: user, modified_at: now_() };
   updateRow_(CAPACITY_ADJUSTMENTS_SHEET, 'adjustment_id', adjustment_id, patch, ADJUSTMENT_HEADERS);
   const _after = _before ? Object.assign({}, _before, patch) : { adjustment_id: adjustment_id, status: status };
-  const auditAction = (status === 'Committed') ? 'commit' : 'archive';
-  appendCapacityAdjustmentAudit_(auditAction, _before, _after, '');
+  var action = auditAction;
+  if (!action) {
+    action = (status === 'Committed') ? 'commit' : 'archive';
+  }
+  appendCapacityAdjustmentAudit_(action, _before, _after, notes || '');
   invalidateCache_(CAPACITY_ADJUSTMENTS_SHEET);
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+  if (typeof invalidateSoftBookingBaselineCache_ === 'function') invalidateSoftBookingBaselineCache_();
   return { adjustment_id: adjustment_id, status: status };
+}
+
+/**
+ * Soft-void a committed adjustment (status → Archived, audit action 'void').
+ * @param {string} adjustment_id
+ * @param {string} [notes]
+ * @return {{ adjustment_id: string, status: string }}
+ */
+function voidCapacityAdjustment_(adjustment_id, notes) {
+  return setAdjustmentStatus_(adjustment_id, 'Archived', 'void', notes || '');
 }
 
 // ============================================================

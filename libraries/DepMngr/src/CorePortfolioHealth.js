@@ -35,7 +35,7 @@ var CorePortfolioHealth = (function () {
    * @param {AppConfig} config
    * @return {Object}
    */
-  function getSnapshot(config) {
+  function getSnapshot(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var ph  = cfg.report.portfolioHealth || {};
 
@@ -43,7 +43,7 @@ var CorePortfolioHealth = (function () {
     var now = new Date();
 
     // ---- Effective deployments (Green/Yellow/Red, post-overrides) -----------
-    var allEffective = CoreData.getAllEffectiveDeployments(cfg)
+    var allEffective = CoreData.getAllEffectiveDeployments(cfg, productOpts)
       .filter(function (r) { return !r.excludeFromReport; });
 
     // S1: exclude Student deployments from Portfolio Health (HENP only).
@@ -78,7 +78,7 @@ var CorePortfolioHealth = (function () {
     // Phase 3i: use getRecentGoLives() (SOQL-backed, Complete deployments) instead
     // of the deprecated getGoLives() which read from the frozen legacy Go Lives sheet.
     var workdayPartner = ph.workdayPartner || 'Workday Professional Services';
-    var goLives = (CoreData.getRecentGoLives(cfg) || [])
+    var goLives = (CoreData.getRecentGoLives(cfg, viewModeOpts, undefined, productOpts) || [])
       .filter(function (r) { return String(r.partner || '').trim() === workdayPartner; });
 
     // Sorted ascending by lastGoLiveDate in CoreData.getRecentGoLives.
@@ -114,7 +114,7 @@ var CorePortfolioHealth = (function () {
     // ---- Phase 3a: Phased deployments count (upcoming window) ---------------
     var phasedDeployments = 0;
     try {
-      var upcomingRows = CoreData.getUpcomingGoLives(cfg) || [];
+      var upcomingRows = CoreData.getUpcomingGoLives(cfg, viewModeOpts, productOpts) || [];
       // getUpcomingGoLives already filters Student out (S1); phasedDeployments
       // count stays Student-exclusive automatically.
       phasedDeployments = upcomingRows.filter(function (r) {

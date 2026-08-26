@@ -157,6 +157,7 @@ function _CoreUI_Css_getStylesheet() {
     '  padding: var(--space-4) var(--space-5) var(--space-4) var(--space-3);',
     '  flex-shrink: 0;',
     '}',
+    '.header-product { margin-left: var(--space-2); }',
     // N4: data freshness badge (header, between title and header-right)
     '.freshness-badge { display:inline-flex; align-items:center; gap:4px; padding:2px 10px; border-radius:var(--radius-pill); font-size:12px; font-weight:600; margin:0 var(--space-3); white-space:nowrap; }',
     '.freshness-fresh { background:var(--color-status-green-bg); color:var(--color-status-green-fg); }',

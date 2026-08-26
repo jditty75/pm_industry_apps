@@ -1384,10 +1384,12 @@ function _sfdcDataVersion_(cfg) {
    * @param {Object=}   viewModeOpts       Phase 2 viewMode options (same shape as getUpcomingGoLives).
    * @param {number=}   windowDaysOverride When positive, overrides the config-derived window (e.g. 180
    *                                       for the Notable picker). Absent/null/0 → today's behavior.
+   * @param {Object=}   productOpts        { product: string } — global product filter; 'all' or absent = no filter
    * @return {Array<Object>}
    */
   function getRecentGoLives(config, viewModeOpts, windowDaysOverride, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
 
     // Recent window: positive windowDaysOverride wins; otherwise fall back to config / 60-day default.
     var recentWindowDays =
@@ -1419,6 +1421,8 @@ function _sfdcDataVersion_(cfg) {
       Logger.log('CoreData.getRecentGoLives: SFDC_Deployments returned no rows.');
       return [];
     }
+
+    sfdcRows = filterDeploymentsByProduct_(sfdcRows, pa, cfg);
 
     // Get CoreSalesforce enrichment map (recentDates = Actual dates < today).
     var enrichmentMap = {};

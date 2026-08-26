@@ -1,0 +1,25 @@
+{
+  "timeZone": "America/New_York",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Gmail",
+        "serviceId": "gmail",
+        "version": "v1"
+      }
+    ],
+    "libraries": [
+      {
+        "userSymbol": "CoreLib",
+        "libraryId": "1qIBm-m342W-uJVhnWu0iGZQu-ovnI2qaTuKCKoZej94lsvjalQViAhi3",
+        "version": "105"
+      }
+    ]
+  },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "DOMAIN"
+  }
+}

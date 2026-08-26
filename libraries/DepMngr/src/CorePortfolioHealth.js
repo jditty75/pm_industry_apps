@@ -38,18 +38,16 @@ var CorePortfolioHealth = (function () {
   function getSnapshot(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var ph  = cfg.report.portfolioHealth || {};
-    var pa  = (productOpts && productOpts.product) || 'all';
 
     var tz  = Session.getScriptTimeZone();
     var now = new Date();
 
     // ---- Effective deployments (Green/Yellow/Red, post-overrides) -----------
-    var allEffective = CoreData.getAllEffectiveDeployments(cfg)
+    var allEffective = CoreData.getAllEffectiveDeployments(cfg, productOpts)
       .filter(function (r) { return !r.excludeFromReport; });
 
     // S1: exclude Student deployments from Portfolio Health (HENP only).
     allEffective = CoreData.filterDeploymentsByStudent_(allEffective, 'exclude', cfg);
-    allEffective = CoreData.filterDeploymentsByProduct_(allEffective, pa, cfg);
 
     // ---- Health totals -------------------------------------------------------
     var green = 0, yellow = 0, red = 0;

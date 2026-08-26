@@ -624,9 +624,10 @@ var CoreData = (function () {
    * no Active rows — never falls back to legacy ActiveDeployments.
    *
    * @param {AppConfig} config
+   * @param {Object=} productOpts  { product: string } — global product filter; 'all' or absent = no filter
    * @return {Array<Object>}
    */
-  function getAllEffectiveDeployments(config) {
+  function getAllEffectiveDeployments(config, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var effective = [];
     try {
@@ -636,7 +637,10 @@ var CoreData = (function () {
       effective = [];
     }
 
-    return _attachDdContactsToRows_(effective, cfg);
+    effective = _attachDdContactsToRows_(effective, cfg);
+    var pa = (productOpts && productOpts.product) || 'all';
+    effective = filterDeploymentsByProduct_(effective, pa, cfg);
+    return effective;
   }
 
   /**
@@ -1107,8 +1111,7 @@ function _sfdcDataVersion_(cfg) {
 
   function getActiveDeployments(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var allEffective = getAllEffectiveDeployments(cfg);
-    var pa = (productOpts && productOpts.product) || 'all';
+    var allEffective = getAllEffectiveDeployments(cfg, productOpts);
 
     var redYellow = allEffective
       .filter(function (r) {
@@ -1124,7 +1127,6 @@ function _sfdcDataVersion_(cfg) {
       });
 
     redYellow = filterDeploymentsByStudent_(redYellow, 'exclude', cfg);
-    redYellow = filterDeploymentsByProduct_(redYellow, pa, cfg);
     return applyViewModeFilter_(cfg, redYellow, viewModeOpts);
   }
 
@@ -1147,11 +1149,10 @@ function _sfdcDataVersion_(cfg) {
    */
   function getAllDeployments(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var pa = (productOpts && productOpts.product) || 'all';
 
     // Base effective view — includes SFDC-vs-legacy fallback, Active-only filter,
     // meta application, overrides application, and D1 ddContacts/ddFromContacts.
-    var allEffective = getAllEffectiveDeployments(cfg);
+    var allEffective = getAllEffectiveDeployments(cfg, productOpts);
 
     // Phase 3a: enrich with isPhased, upcomingDates, nextGoLiveDate.
     // Degrade gracefully when the enrichment sheet is absent.
@@ -1174,7 +1175,6 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from the Deployments tab view (HENP only).
     enriched = filterDeploymentsByStudent_(enriched, 'exclude', cfg);
-    enriched = filterDeploymentsByProduct_(enriched, pa, cfg);
 
     // Health-rank sort: Red -> Yellow -> Green -> other; tiebreak by accountName.
     var sorted = enriched.sort(function (a, b) {
@@ -1211,10 +1211,9 @@ function _sfdcDataVersion_(cfg) {
    */
   function getUpcomingGoLives(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var pa = (productOpts && productOpts.product) || 'all';
 
     // Get the effective view of all deployments (post-meta + post-overrides).
-    var allEffective = getAllEffectiveDeployments(cfg);
+    var allEffective = getAllEffectiveDeployments(cfg, productOpts);
 
     // Get GoLives overrides (exclusion, partner override, date override).
     var goLivesOverrides = getGoLivesOverridesMap_(cfg);
@@ -1341,7 +1340,6 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from non-Student surfaces (HENP only).
     results = filterDeploymentsByStudent_(results, 'exclude', cfg);
-    results = filterDeploymentsByProduct_(results, pa, cfg);
 
     Logger.log('CoreData.getUpcomingGoLives: ' + results.length + ' upcoming rows ' +
                '(pass1=' + Object.keys(seenDeploymentIds).length + ', ' +
@@ -1390,7 +1388,6 @@ function _sfdcDataVersion_(cfg) {
    */
   function getRecentGoLives(config, viewModeOpts, windowDaysOverride, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var pa = (productOpts && productOpts.product) || 'all';
 
     // Recent window: positive windowDaysOverride wins; otherwise fall back to config / 60-day default.
     var recentWindowDays =
@@ -1482,7 +1479,6 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from non-Student surfaces (HENP only).
     results = filterDeploymentsByStudent_(results, 'exclude', cfg);
-    results = filterDeploymentsByProduct_(results, pa, cfg);
 
     Logger.log('CoreData.getRecentGoLives: ' + results.length +
                ' deployments with in-window go-live dates (last ' +
@@ -1844,7 +1840,6 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    */
   function getAllActiveOverrides(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    var pa = (productOpts && productOpts.product) || 'all';
     var out = [];
 
     var depMap = getDeploymentOverridesMap_(cfg);
@@ -1912,7 +1907,6 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       return tb - ta;
     });
 
-    out = filterDeploymentsByProduct_(out, pa, cfg);
     return applyViewModeFilter_(cfg, out, viewModeOpts);
   }
 

@@ -613,6 +613,8 @@ var CoreConfig = (function () {
       cfg.ui.productFilter.defaultProduct = 'all';
     if (typeof cfg.ui.productFilter.aliases !== 'object' || cfg.ui.productFilter.aliases === null)
       cfg.ui.productFilter.aliases = {};
+    if (typeof cfg.ui.productFilter.nameTokens !== 'object' || cfg.ui.productFilter.nameTokens === null)
+      cfg.ui.productFilter.nameTokens = {};
 
     // -------------------------------------------------------------------------
     // Trends (T1)

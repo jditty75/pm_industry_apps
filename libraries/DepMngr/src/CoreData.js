@@ -4438,9 +4438,12 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
-   * Filters deployment-shaped rows to those whose product-functions include the
-   * selected Product_Area__c. No-op when the feature is disabled or productArea is
-   * falsy/'all' (the gate + safety guarantee, mirroring filterDeploymentsByStudent_).
+   * Filters deployment-shaped rows to those belonging to the selected product area.
+   * A deployment matches when EITHER signal is true (same union the connector scopes by):
+   *   (1) deployment name contains a configured nameToken for the product area, or
+   *   (2) a product-function row has Product_Area__c equal to productArea.
+   * No-op when the feature is disabled or productArea is falsy/'all' (mirrors
+   * filterDeploymentsByStudent_). Fail-open when product-function read fails.
    * @param {Array<Object>} rows  rows with a deploymentId field
    * @param {string} productArea  raw Product_Area__c value, or 'all'/'' for no filter
    * @param {AppConfig} cfg
@@ -4451,6 +4454,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     if (!productArea || productArea === 'all') return rows;
     if (!Array.isArray(rows) || rows.length === 0) return rows;
 
+    var pfCfg = cfg.ui.productFilter;
+    var nameTokens = (pfCfg.nameTokens && pfCfg.nameTokens[productArea]) || [];
     var allowed = {};
     try {
       var pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
@@ -4463,7 +4468,21 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       Logger.log('filterDeploymentsByProduct_: PF read failed: ' + e);
       return rows;
     }
-    return rows.filter(function (r) { return allowed[_canonicalId_(r.deploymentId)]; });
+
+    function matchesNameToken_(row) {
+      if (!nameTokens.length) return false;
+      var depName = String(row.deploymentName || row.name || '').toLowerCase();
+      if (!depName) return false;
+      for (var ti = 0; ti < nameTokens.length; ti++) {
+        var token = String(nameTokens[ti] || '').toLowerCase();
+        if (token && depName.indexOf(token) >= 0) return true;
+      }
+      return false;
+    }
+
+    return rows.filter(function (r) {
+      return allowed[_canonicalId_(r.deploymentId)] || matchesNameToken_(r);
+    });
   }
 
   /**

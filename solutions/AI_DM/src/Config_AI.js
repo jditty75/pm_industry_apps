@@ -21,6 +21,11 @@ var APP_CONFIG = {
         'Contract Management and Document Intelligence': 'Evisort (Contract Mgmt & DI)',
         'Workday HiredScore': 'HiredScore',
         'Workday Paradox': 'Paradox'
+      },
+      nameTokens: {
+        'Contract Management and Document Intelligence': ['Evisort', 'CLM'],
+        'Workday HiredScore': ['HiredScore'],
+        'Workday Paradox': ['Paradox']
       }
     }
   }

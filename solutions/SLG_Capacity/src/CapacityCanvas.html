@@ -5,35 +5,21 @@
 
 <div id="capacityCanvas" class="wfm25-capacity-canvas wfm25-capacity-primary">
 
-  <!-- ── Tab bar + Group-by toggle (right-aligned) ── -->
+  <!-- ── Tab bar (global filters live in #wfm25GlobalFilterBar above the split) ── -->
   <div class="wfm25-tab-bar">
     <div class="wfm25-tabs" role="tablist" aria-label="Capacity views">
       <button class="wfm25-tab active" data-wfm25-tab="utilization"
-              role="tab" aria-selected="true" id="wfm25TabUtilization">Utilization</button>
-      <button class="wfm25-tab" data-wfm25-tab="hours-budget"
-              role="tab" aria-selected="false" id="wfm25TabHoursCapacity">Hours &amp; Capacity</button>
-      <button class="wfm25-tab" data-wfm25-tab="mix-trend"
-              role="tab" aria-selected="false" id="wfm25TabMixTrend">Mix &amp; Trend</button>
+              role="tab" aria-selected="true" id="wfm25TabUtilization"
+              aria-controls="wfm25PanelUtilization">PSA ICP Attainment</button>
       <button class="wfm25-tab" data-wfm25-tab="specialty-demand"
               role="tab" aria-selected="false" id="wfm25TabSpecialtyDemand"
-              aria-controls="wfm25PanelSpecialtyDemand">Specialty Demand</button>
-    </div>
-    <div class="wfm25-tab-bar-controls">
-      <div class="wfm25-groupby wfm25-scope" aria-label="Scope">
-        <span class="wfm25-groupby-label">Scope:</span>
-        <button type="button" class="wfm25-groupby-btn active" data-wfm25-scope="all"
-                aria-pressed="true">All SLG</button>
-        <button type="button" class="wfm25-groupby-btn" data-wfm25-scope="myTeam"
-                aria-pressed="false">My Team</button>
-      </div>
-      <div class="wfm25-groupby" aria-label="Group by">
-        <span class="wfm25-groupby-label">Group by:</span>
-        <button class="wfm25-groupby-btn active" data-wfm25-groupby="team"
-                aria-pressed="true">Team</button>
-        <!-- Role grouping deferred to Stage 6; hidden from Stage 4 VP deck -->
-        <button class="wfm25-groupby-btn wfm25-groupby-deferred" data-wfm25-groupby="role"
-                hidden aria-hidden="true" tabindex="-1">Role</button>
-      </div>
+              aria-controls="wfm25PanelSpecialtyDemand">Specialty Utilization</button>
+      <button class="wfm25-tab" data-wfm25-tab="hours-budget"
+              role="tab" aria-selected="false" id="wfm25TabHoursCapacity"
+              aria-controls="wfm25PanelHoursBudget">Hours &amp; Capacity</button>
+      <button class="wfm25-tab" data-wfm25-tab="mix-trend"
+              role="tab" aria-selected="false" id="wfm25TabMixTrend"
+              aria-controls="wfm25PanelMixTrend">Mix &amp; Trend</button>
     </div>
   </div>
 
@@ -148,7 +134,7 @@
             <div class="wfm25-chrome-card wfm25-specialty-demand-banner-card"
                  id="wfm25SpecialtyDemandBannerCard">
               <div class="wfm25-specialty-demand-banner" id="wfm25SpecialtyDemandBanner"
-                   aria-label="Specialty demand summary metrics"></div>
+                   aria-label="Specialty Utilization summary metrics"></div>
             </div>
 
             <!-- Card B: 3-column matrix (Historical Avg | Previous | Current) -->
@@ -163,11 +149,13 @@
                           aria-pressed="false">Share %</button>
                   <button type="button" data-wfm25-sd-unit="qoq"
                           aria-pressed="false">QoQ %</button>
+                  <button type="button" data-wfm25-sd-unit="projected-util"
+                          aria-pressed="false">Proj. Util %</button>
                 </div>
               </div>
               <div class="table-wrap wfm25-specialty-demand-wrap" id="wfm25SpecialtyDemandWrap">
                 <table class="wfm25-specialty-demand-table wfm25-table" id="wfm25SpecialtyDemandTable"
-                       aria-label="Team-grouped specialty demand matrix">
+                       aria-label="Team-grouped specialty utilization matrix">
                   <thead id="wfm25SpecialtyDemandThead">
                     <tr id="wfm25SpecialtyDemandHeaderRow">
                       <th class="wfm25-specialty-demand-col-label" scope="col">Practice / Team</th>

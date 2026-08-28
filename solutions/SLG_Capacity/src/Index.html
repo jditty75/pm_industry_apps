@@ -56,9 +56,46 @@
 
     <!-- Main content: Capacity canvas + minimal Admin surface -->
     <main class="wfm25-main" id="wfm25Main">
-      <div class="wfm25-capacity-body" id="wfm25CapacityBody">
-        <?!= include('CapacityCanvas'); ?>
-        <?!= include('WorkerPanel'); ?>
+      <div class="wfm25-capacity-view" id="wfm25CapacityView">
+        <div id="wfm25GlobalFilterBar" class="wfm25-global-filter-bar" aria-label="Global filters">
+          <div class="wfm25-global-filter-cluster">
+            <div class="wfm25-groupby wfm25-scope" aria-label="Scope">
+              <span class="wfm25-groupby-label">Scope:</span>
+              <button type="button" class="wfm25-groupby-btn active" data-wfm25-scope="all"
+                      aria-pressed="true">All SLG</button>
+              <button type="button" class="wfm25-groupby-btn" data-wfm25-scope="myTeam"
+                      aria-pressed="false">My Team</button>
+            </div>
+            <div class="wfm25-groupby wfm25-onleave" aria-label="On-Leave">
+              <span class="wfm25-groupby-label">On-Leave:</span>
+              <button type="button" class="wfm25-groupby-btn active" data-wfm25-onleave="exclude"
+                      aria-pressed="true">Exclude</button>
+              <button type="button" class="wfm25-groupby-btn" data-wfm25-onleave="include"
+                      aria-pressed="false">Include</button>
+            </div>
+            <div class="wfm25-groupby wfm25-util-metric" aria-label="Utilization metric">
+              <span class="wfm25-groupby-label">Utilization:</span>
+              <button type="button" class="wfm25-groupby-btn active" data-wfm25-util-metric="icp"
+                      aria-pressed="true">ICP</button>
+              <button type="button" class="wfm25-groupby-btn" data-wfm25-util-metric="productive"
+                      aria-pressed="false">Productive</button>
+            </div>
+          </div>
+          <div class="wfm25-global-filter-cluster wfm25-global-filter-cluster--end">
+            <div class="wfm25-groupby" aria-label="Group by">
+              <span class="wfm25-groupby-label">Group by:</span>
+              <button class="wfm25-groupby-btn active" data-wfm25-groupby="team"
+                      aria-pressed="true">Team</button>
+              <!-- Role grouping deferred to Stage 6; hidden from Stage 4 VP deck -->
+              <button class="wfm25-groupby-btn wfm25-groupby-deferred" data-wfm25-groupby="role"
+                      hidden aria-hidden="true" tabindex="-1">Role</button>
+            </div>
+          </div>
+        </div>
+        <div class="wfm25-capacity-body" id="wfm25CapacityBody">
+          <?!= include('CapacityCanvas'); ?>
+          <?!= include('WorkerPanel'); ?>
+        </div>
       </div>
       <?!= include('CommitmentsCanvas'); ?>
       <?!= include('AdminCanvas'); ?>
@@ -95,6 +132,23 @@
 
   <!-- ============ Soft-book overlay (fixed; outside flex split) ============ -->
   <?!= include('SoftBookDrawer'); ?>
+
+  <!-- ============ WFM.25 tab purpose info modal (Spec 4 §B) ============ -->
+  <div class="modal" id="wfm25TabInfoModal" hidden>
+    <div class="modal-backdrop" data-wfm25-tab-info-close></div>
+    <div class="modal-panel wfm25-tab-info-panel">
+      <header class="modal-header">
+        <div class="drawer-title" id="wfm25TabInfoModalTitle">Tab info</div>
+        <button type="button" class="icon-btn" data-wfm25-tab-info-close aria-label="Close">✕</button>
+      </header>
+      <div class="modal-body wfm25-tab-info-body">
+        <div id="wfm25TabInfoModalBody"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" id="wfm25TabInfoModalGotIt">Got it</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ============ Confirm Modal (kept for JS compatibility) ============ -->
   <div class="modal" id="confirmModal" hidden>

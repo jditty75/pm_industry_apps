@@ -3342,6 +3342,28 @@ td.cell-with-bar {
   font-size: 18px;
   line-height: 1;
 }
+.wfm25-strip-btn--in-dev {
+  border-bottom: 2px dashed color-mix(in srgb, var(--pencil) 75%, transparent);
+}
+.wfm25-in-dev-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--highlighter) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pencil) 70%, transparent);
+  flex-shrink: 0;
+  cursor: help;
+}
+.wfm25-in-dev-chip--nav {
+  font-size: 7px;
+  padding: 1px 4px;
+  max-width: 46px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+}
 .wfm25-strip-label {
   font-size: 10px;
   letter-spacing: .3px;
@@ -3361,6 +3383,43 @@ td.cell-with-bar {
 }
 .wfm25-main:has(.wfm25-panel-open) {
   overflow: hidden;
+}
+
+/* Capacity view: persistent global filter bar + flex split below */
+.wfm25-capacity-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+.wfm25-capacity-view:has(.wfm25-panel-open) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+#wfm25GlobalFilterBar.wfm25-global-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  width: 100%;
+  gap: 16px;
+  padding: 8px 20px;
+  background: var(--wfm25-chrome-canvas);
+  border-bottom: 1px solid var(--wfm25-chrome-bdr);
+}
+.wfm25-global-filter-cluster {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.wfm25-global-filter-cluster--end {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* ── Draft tray (right edge slide-out) ───────────────────── */
@@ -3507,6 +3566,8 @@ td.cell-with-bar {
   flex-direction: row;
   width: 100%;
   min-width: 0;
+  flex: 1;
+  min-height: 0;
 }
 /* Panel closed: full-width aggregate, page scroll via .wfm25-main */
 .wfm25-capacity-body:not(.wfm25-panel-open) {
@@ -4882,10 +4943,13 @@ td.cell-with-bar {
   border-radius: 4px;
   background: var(--business-card);
 }
-.wfm25-sb-worker-util.wfm25-util-band--cold { color: #1a6b2e; }
-.wfm25-sb-worker-util.wfm25-util-band--ontarget { color: #5c4d00; }
-.wfm25-sb-worker-util.wfm25-util-band--warm { color: #9a5b00; }
-.wfm25-sb-worker-util.wfm25-util-band--fire { color: #b42318; }
+.wfm25-sb-worker-util.wfm25-util-band--darkred { color: #5c1010; }
+.wfm25-sb-worker-util.wfm25-util-band--red { color: #b42318; }
+.wfm25-sb-worker-util.wfm25-util-band--pink { color: #9d174d; }
+.wfm25-sb-worker-util.wfm25-util-band--green { color: #1a6b2e; }
+.wfm25-sb-worker-util.wfm25-util-band--lightblue { color: #0A3D7C; }
+.wfm25-sb-worker-util.wfm25-util-band--blue { color: #0875C1; }
+.wfm25-sb-worker-util.wfm25-util-band--darkblue { color: #0a3d7c; }
 .wfm25-sb-worker-empty {
   font-size: 12px;
   padding: 8px 0;
@@ -5018,19 +5082,11 @@ td.cell-with-bar {
 .wfm25-tab-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   border-bottom: 0;
   background: var(--wfm25-chrome-canvas);
   padding: 12px 20px 0;
   flex-shrink: 0;
   gap: 16px;
-}
-.wfm25-tab-bar-controls {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 .wfm25-tabs {
   display: flex;
@@ -5103,6 +5159,11 @@ td.cell-with-bar {
 }
 .wfm25-groupby-btn:hover:not(.active) {
   background: var(--business-card);
+}
+
+.wfm25-util-cell--plain {
+  background: var(--business-card) !important;
+  color: var(--staple) !important;
 }
 
 /* ── Aggregate content region ────────────────────────────── */
@@ -5354,8 +5415,8 @@ td.cell-with-bar {
   opacity: 1;
 }
 /* Hours & Capacity: dark glyph on neutral cell background */
-.wfm25-hours-capacity-cell .wfm25-util-glyph.wfm25-util-band--cold,
-.wfm25-hours-capacity-cell .wfm25-util-glyph.wfm25-util-band--fire {
+.wfm25-hours-capacity-cell .wfm25-util-glyph.wfm25-util-band--darkblue,
+.wfm25-hours-capacity-cell .wfm25-util-glyph.wfm25-util-band--darkred {
   color: #1a2332;
   opacity: 1;
 }
@@ -6220,17 +6281,26 @@ td.cell-with-bar {
   max-width: 56px;
   height: 4px;
 }
-.wfm25-hours-capacity-cell.wfm25-util-band--cold {
-  box-shadow: inset 3px 0 0 #0a3d7c;
+.wfm25-hours-capacity-cell.wfm25-util-band--darkred {
+  box-shadow: inset 3px 0 0 #5c1010;
 }
-.wfm25-hours-capacity-cell.wfm25-util-band--ontarget {
+.wfm25-hours-capacity-cell.wfm25-util-band--red {
+  box-shadow: inset 3px 0 0 #D6371E;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--pink {
+  box-shadow: inset 3px 0 0 #f9a8d4;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--green {
   box-shadow: inset 3px 0 0 #c8e6c9;
 }
-.wfm25-hours-capacity-cell.wfm25-util-band--warm {
-  box-shadow: inset 3px 0 0 #E76F1C;
+.wfm25-hours-capacity-cell.wfm25-util-band--lightblue {
+  box-shadow: inset 3px 0 0 #AED9F4;
 }
-.wfm25-hours-capacity-cell.wfm25-util-band--fire {
-  box-shadow: inset 3px 0 0 #D6371E;
+.wfm25-hours-capacity-cell.wfm25-util-band--blue {
+  box-shadow: inset 3px 0 0 #2FA4E7;
+}
+.wfm25-hours-capacity-cell.wfm25-util-band--darkblue {
+  box-shadow: inset 3px 0 0 #0a3d7c;
 }
 .wfm25-hc-util-bar-wrap {
   width: 100%;
@@ -6647,6 +6717,31 @@ td.cell-with-bar {
 .wfm25-specialty-demand-hours--qoq-up { color: #1e7a3c; }
 .wfm25-specialty-demand-hours--qoq-down { color: var(--thumbtack); }
 .wfm25-specialty-demand-hours--qoq-flat { color: var(--staple); }
+.wfm25-specialty-demand-proj-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: var(--wfm25-sd-value-slot);
+}
+.wfm25-specialty-demand-proj-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.wfm25-specialty-demand-proj-pct[class*="wfm25-util-band--"] {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  line-height: 1.35;
+}
+.wfm25-specialty-demand-proj-frac {
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
 .wfm25-specialty-demand-qoq-arrow {
   margin-right: 2px;
   font-size: 11px;
@@ -6751,6 +6846,79 @@ td.cell-with-bar {
   outline-offset: 2px;
 }
 
+/* ── WFM.25 Spec 4: tab info modal + IN DEVELOPMENT chip ─── */
+.wfm25-tab-info-panel {
+  width: 420px;
+  max-width: 92vw;
+}
+.wfm25-tab-info-body {
+  padding: 16px 20px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--staple);
+}
+.wfm25-tab-label {
+  margin-right: 6px;
+}
+.wfm25-in-dev-chip {
+  display: inline-block;
+  margin: 0 6px 0 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--staple);
+  background: color-mix(in srgb, var(--highlighter) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pencil) 70%, transparent);
+  vertical-align: middle;
+}
+.wfm25-tab-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 2px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--staple) 25%, transparent);
+  border-radius: 50%;
+  background: var(--business-card);
+  color: var(--ballpoint);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+  user-select: none;
+}
+.wfm25-tab-info-btn:hover,
+.wfm25-tab-info-btn:focus-visible {
+  border-color: var(--ballpoint);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ballpoint) 25%, transparent);
+}
+.wfm25-tab.wfm25-tab--in-dev {
+  border-bottom: 2px dashed color-mix(in srgb, var(--pencil) 75%, transparent);
+}
+.wfm25-tab-section-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px 0;
+}
+.wfm25-tab-section-head--in-dev {
+  border-bottom: 2px dashed color-mix(in srgb, var(--pencil) 75%, transparent);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+.wfm25-tab-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--staple);
+}
+
 /* ── WFM.25 Utilization allocation banner ───────────────── */
 .wfm25-util-banner {
   padding: var(--wfm25-chrome-card-pad);
@@ -6819,6 +6987,12 @@ td.cell-with-bar {
 }
 .wfm25-util-banner-tile--ontarget {
   box-shadow: inset 3px 0 0 #1b5e20;
+}
+.wfm25-util-banner-tile--muted {
+  opacity: 0.55;
+  cursor: default;
+  pointer-events: none;
+  filter: grayscale(0.35);
 }
 .wfm25-util-banner-label {
   font-size: 10px;

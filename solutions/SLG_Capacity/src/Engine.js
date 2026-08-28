@@ -285,28 +285,76 @@ function buildPlanningWindow_(windowMonths) {
  *   2) else any row with override='exclude' -> excluded
  *   3) else excluded if a rule:* row exists, OR a manual row with active=Yes exists
  *
+ * @param {boolean} [includeOnLeave] session override; when omitted, uses Config default
  * @return {Set<string>} set of _exclusionKey_ values that ARE excluded
  */
-function readExclusions_() {
-  var rows;
-  try { rows = cachedRead_(CFG_WORKER_EXCLUSIONS); }
-  catch (e) { rows = readTable_(CFG_WORKER_EXCLUSIONS); }
+function includeOnLeaveEffective_(includeOnLeave) {
+  if (includeOnLeave !== undefined && includeOnLeave !== null) {
+    return !!includeOnLeave;
+  }
+  var settings = readSettings_();
+  var raw = String(settings.include_on_leave || '').trim().toLowerCase();
+  return raw === 'true' || raw === 'yes' || raw === '1' || raw === 'on';
+}
+
+/**
+ * Per-worker exclusion profile for readExclusions_ on-leave gate (Spec 7 §A2).
+ * @param {Array<Object>} rows Config_Worker_Exclusions rows
+ * @param {string} key _exclusionKey_ value
+ * @return {{forceInclude:boolean, forceExclude:boolean, hasOnLeaveRule:boolean, hasOtherExclude:boolean}}
+ * @private
+ */
+function _exclusionProfileForKey_(rows, key) {
   var TRUTHY = {'yes':1,'y':1,'true':1,'t':1,'1':1,'x':1,'active':1,'on':1};
-  var forceInclude = {}, excluded = {};
+  var profile = {
+    forceInclude: false,
+    forceExclude: false,
+    hasOnLeaveRule: false,
+    hasOtherExclude: false
+  };
   (rows || []).forEach(function (r) {
-    var k = _exclusionKey_(r.worker_name);
-    if (!k) return;
+    if (_exclusionKey_(r.worker_name) !== key) return;
     var ovr = String(r.override || '').trim().toLowerCase();
-    if (ovr === 'include') { forceInclude[k] = true; return; }
-    if (ovr === 'exclude') { excluded[k] = true; return; }
+    if (ovr === 'include') { profile.forceInclude = true; return; }
+    if (ovr === 'exclude') { profile.forceExclude = true; return; }
     var src = String(r.source || '').trim();
     var isRule = src.indexOf('rule:') === 0 || src.indexOf('rule:') > 0;
     var activeRaw = (r.active === '' || r.active == null) ? 'Yes' : r.active;
-    var active = String(activeRaw).replace(/\u00A0/g,' ').trim().toLowerCase();
-    if (isRule || TRUTHY[active]) excluded[k] = true;
+    var active = String(activeRaw).replace(/\u00A0/g, ' ').trim().toLowerCase();
+    if (isRule) {
+      if (src.indexOf('rule:on_leave') >= 0) profile.hasOnLeaveRule = true;
+      var tokens = src.split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+      var ruleTokens = tokens.filter(function (t) { return t.indexOf('rule:') === 0; });
+      if (ruleTokens.length !== 1 || ruleTokens[0] !== 'rule:on_leave') {
+        profile.hasOtherExclude = true;
+      }
+    } else if (TRUTHY[active]) {
+      profile.hasOtherExclude = true;
+    }
+  });
+  return profile;
+}
+
+function readExclusions_(includeOnLeave) {
+  var effectiveIncludeOnLeave = includeOnLeaveEffective_(includeOnLeave);
+  var rows;
+  try { rows = cachedRead_(CFG_WORKER_EXCLUSIONS); }
+  catch (e) { rows = readTable_(CFG_WORKER_EXCLUSIONS); }
+  var keys = {};
+  (rows || []).forEach(function (r) {
+    var k = _exclusionKey_(r.worker_name);
+    if (k) keys[k] = true;
+  });
+  var excluded = {};
+  Object.keys(keys).forEach(function (k) {
+    var profile = _exclusionProfileForKey_(rows, k);
+    if (profile.forceExclude) { excluded[k] = true; return; }
+    if (profile.forceInclude) return;
+    if (profile.hasOtherExclude) { excluded[k] = true; return; }
+    if (profile.hasOnLeaveRule && !effectiveIncludeOnLeave) excluded[k] = true;
   });
   var set = new Set();
-  Object.keys(excluded).forEach(function (k) { if (!forceInclude[k]) set.add(k); });
+  Object.keys(excluded).forEach(function (k) { set.add(k); });
   return set;
 }
 
@@ -770,7 +818,7 @@ function computeUtilization(params) {
     ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
   const assignsRaw = (typeof getEnrichedAssignments_ === 'function')
     ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
-  const excluded = readExclusions_();
+  const excluded = readExclusions_(params.includeOnLeave);
   const resIndex = (typeof getResourceIndex_ === 'function')
     ? getResourceIndex_() : _resourceIndex_(allocRaw);
 
@@ -1478,7 +1526,7 @@ function computeWeeklyForecast_(params) {
     ? getEnrichedAllocations_() : cachedRead_(ALLOC_NORM);
   const assignsRaw = (typeof getEnrichedAssignments_ === 'function')
     ? getEnrichedAssignments_() : cachedRead_(ASSIGNMENTS);
-  const excluded = readExclusions_();
+  const excluded = readExclusions_(params.includeOnLeave);
   const resIndex = (typeof getResourceIndex_ === 'function')
     ? getResourceIndex_() : _resourceIndex_(allocRaw);
 
@@ -1663,7 +1711,7 @@ function computeResourceDetail(params) {
   params = params || {};
   const resource = params.resource;
   if (!resource) return { months: [], summary: null };
-  const excluded = readExclusions_();
+  const excluded = readExclusions_(params.includeOnLeave);
   if (excluded.has(_exclusionKey_(resource))) return { months: [], summary: null };
 
   const viewMode = params.viewMode || 'Committed';
@@ -1993,6 +2041,7 @@ var _wowTargetIdxMemo_ = null;
 var _wowActualIcpIdxMemo_ = null;
 var _wowWeeklyRateIdxMemo_ = null;
 var _wowForecastIcpIdxMemo_ = null;
+var _wowProdDenIdxMemo_ = null;
 
 /**
  * Clear per-execution projection indexes (committed assignments, reductions, WoW targets).
@@ -2004,6 +2053,7 @@ function _resetProjectionMemos_() {
   _wowActualIcpIdxMemo_ = null;
   _wowForecastIcpIdxMemo_ = null;
   _wowWeeklyRateIdxMemo_ = null;
+  _wowProdDenIdxMemo_ = null;
 }
 
 /**
@@ -2017,6 +2067,7 @@ function _wowQuarterTargetIndex_() {
   var actuals = {};
   var forecasts = {};
   var weeklyRates = {};
+  var prodDen = {};
   cachedRead_(CFG_UTIL_QUARTERLY).forEach(function (r) {
     var eid = String(r.employee_id || '').trim();
     var qk = String(r.fiscal_quarter || '').trim();
@@ -2025,16 +2076,36 @@ function _wowQuarterTargetIndex_() {
     if (!actuals[eid]) actuals[eid] = {};
     if (!forecasts[eid]) forecasts[eid] = {};
     if (!weeklyRates[eid]) weeklyRates[eid] = {};
+    if (!prodDen[eid]) prodDen[eid] = {};
     idx[eid][qk] = Number(r.target_hours) || 0;
     actuals[eid][qk] = Number(r.qtd_actual_icp) || 0;
     forecasts[eid][qk] = Number(r.qtd_icp_plus_forecast) || 0;
     weeklyRates[eid][qk] = Number(r.util_rate_wkly) || 0;
+    var pdh = Number(r.productive_denominator_hours);
+    prodDen[eid][qk] = (pdh > 0) ? pdh : 0;
   });
   _wowTargetIdxMemo_ = idx;
   _wowActualIcpIdxMemo_ = actuals;
   _wowForecastIcpIdxMemo_ = forecasts;
   _wowWeeklyRateIdxMemo_ = weeklyRates;
+  _wowProdDenIdxMemo_ = prodDen;
   return idx;
+}
+
+/**
+ * Productive-utilization denominator from Utilization_Quarterly (Spec 7 §B3).
+ * @param {string} employeeId
+ * @param {string} fiscalQuarter
+ * @return {number}
+ */
+function quarterProductiveDenominatorFromWoW_(employeeId, fiscalQuarter) {
+  employeeId = String(employeeId || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+  if (!employeeId || !fiscalQuarter) return 0;
+  _wowQuarterTargetIndex_();
+  var byQ = _wowProdDenIdxMemo_[employeeId];
+  return (byQ && Object.prototype.hasOwnProperty.call(byQ, fiscalQuarter))
+    ? (Number(byQ[fiscalQuarter]) || 0) : 0;
 }
 
 /**
@@ -2118,20 +2189,54 @@ function weeklyTargetFromWoW_(employeeId, fiscalQuarter) {
 }
 
 /**
- * Per-worker weekly target hours for chart reference line (WP2.0 feature B).
- * Weekly HOURS = raw_weekly_capacity × icp_target_rate (e.g. 40 × 0.77 ≈ 31h).
- * util_rate_wkly on Utilization_Quarterly is a utilization rate, not hours — do not use it here.
+ * Role family for weekly target hours (WFM.25 Spec 4 §G).
+ * CS_FUNC/CS_TECH → consultant; EM → em; PD → pd; DA/unmatched → default.
+ * @param {string} icpRole
+ * @return {string} 'consultant' | 'em' | 'pd' | 'default'
+ */
+function weeklyTargetRoleFamily_(icpRole) {
+  const r = String(icpRole || '').trim().toUpperCase();
+  if (r === 'CS_FUNC' || r === 'CS_TECH') return 'consultant';
+  if (r === 'EM') return 'em';
+  if (r === 'PD') return 'pd';
+  return 'default';
+}
+
+/**
+ * Per-worker weekly target hours for chart reference line (WFM.25 Spec 4 §G).
+ * Config-driven by role-family × level; falls back to weekly_target_default.
  *
- * @param {Object} worker computeWeeklyForecast_ worker row
- * @param {string} fiscalQuarter
+ * @param {string} jobProfile
+ * @param {string} icpRole
  * @param {Object} [settings]
  * @return {number}
  */
-function weeklyTargetHoursFor_(worker, fiscalQuarter, settings) {
+function weeklyTargetHoursFor_(jobProfile, icpRole, settings) {
   settings = settings || readSettings_();
-  var rawWeekly = readRawCapacity_(settings);
-  var icpTargetRate = icpTargetFor_(worker.icpRole, worker.jobProfile, settings);
-  return rawWeekly * icpTargetRate;
+  function num(k, d) {
+    const v = Number(settings[k]);
+    return (isFinite(v) && v > 0) ? v : d;
+  }
+  const def = num('weekly_target_default', 32.8);
+  const level = deriveLevel_(jobProfile);
+  const fam = weeklyTargetRoleFamily_(icpRole);
+
+  if (fam === 'consultant') {
+    if (level === 'P6') return num('weekly_target_consultant_p6', 26);
+    if (level === 'P3' || level === 'P4' || level === 'P5') {
+      return num('weekly_target_consultant_p3_p5', 32);
+    }
+    return def;
+  }
+  if (fam === 'em') {
+    if (level === 'P4' || level === 'P5') return num('weekly_target_em_p4_p5', 28);
+    return def;
+  }
+  if (fam === 'pd') {
+    if (level === 'P6') return num('weekly_target_pd_p6', 26);
+    return def;
+  }
+  return def;
 }
 
 /**
@@ -2243,7 +2348,8 @@ function dashboardKpiFilterParams_(params) {
     teamLabel: params.teamLabel,
     workerScope: params.workerScope,
     includeMyManagers: params.includeMyManagers,
-    includeTimeOff: !!params.includeTimeOff
+    includeTimeOff: !!params.includeTimeOff,
+    includeOnLeave: includeOnLeaveEffective_(params.includeOnLeave)
   };
 }
 
@@ -2265,7 +2371,7 @@ function sumScenarioDemandHoursInWindow_(params, visibleWeeks, workers) {
   const calendar = readCalendar_();
   let assignsRaw = [];
   try { assignsRaw = cachedRead_(ASSIGNMENTS); } catch (e) { assignsRaw = []; }
-  const excluded = readExclusions_();
+  const excluded = readExclusions_(params.includeOnLeave);
   let sum = 0;
   assignsRaw.forEach(function (a) {
     if (!a.resource_name || !workerSet[a.resource_name]) return;
@@ -2519,6 +2625,10 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       icpUtil = bonusAttainment;
     }
 
+    const productiveDenominatorHours = quarterProductiveDenominatorFromWoW_(worker.employeeId, qk);
+    const productiveUtil = productiveDenominatorHours > 0
+      ? (productiveHours / productiveDenominatorHours) : null;
+
     const financeUtil = wd.rawCapacityHours > 0 ? productiveHours / wd.rawCapacityHours : 0;
     const icpTarget = Number(worker.icpTarget) || 0;
     const ratioToTarget = (icpTarget > 0 && icpUtil != null) ? icpUtil / icpTarget : 0;
@@ -2533,9 +2643,11 @@ function buildWorkerQuarters_(worker, quarterKeys, weeks, holidays, actualsSumma
       icpAvailableHours: wd.icpAvailableHours,
       targetHours: Number(targetHours) || 0,
       appTargetHours: Number(appTarget) || 0,
-      weeklyTargetHours: Number(weeklyTargetHoursFor_(worker, qk, settings)) || 0,
+      weeklyTargetHours: Number(weeklyTargetHoursFor_(worker.jobProfile, worker.icpRole, settings)) || 0,
       trackingHours: Number(trackingHours) || 0,
       icpUtil: icpUtil,
+      productiveUtil: productiveUtil,
+      productiveDenominatorHours: Number(productiveDenominatorHours) || 0,
       financeUtil: Number(financeUtil) || 0,
       ratioToTarget: Number(ratioToTarget) || 0,
       bonusAttainment: bonusAttainment,
@@ -2580,7 +2692,7 @@ function computeQuarterlyScorecard_(params) {
 
   const teamSummary = quarterKeys.map(function (qk, qi) {
     let sumProd = 0, sumIcpAvail = 0, sumRawCap = 0, sumTarget = 0, sumTracking = 0;
-    let sumUtilProd = 0, sumUtilTarget = 0;
+    let sumUtilProd = 0, sumUtilTarget = 0, sumProdDen = 0;
     workersOut.forEach(function (wr) {
       const q = wr.quarters[qi];
       if (!q) return;
@@ -2593,18 +2705,24 @@ function computeQuarterlyScorecard_(params) {
         sumUtilProd += q.productiveHours;
         sumUtilTarget += q.targetHours;
       }
+      if (q.productiveDenominatorHours > 0) {
+        sumProdDen += q.productiveDenominatorHours;
+      }
     });
     const targetUtil = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : 0;
+    const productiveUtil = sumProdDen > 0 ? sumProd / sumProdDen : null;
     return {
       quarterKey: qk,
       quarterLabel: qk,
       isCurrentQuarter: qk === curQ,
       icpUtil: targetUtil,
+      productiveUtil: productiveUtil,
       financeUtil: sumRawCap > 0 ? sumProd / sumRawCap : 0,
       bonusAttainment: targetUtil,
       trackingHours: sumTracking,
       productiveHours: sumProd,
-      targetHours: sumTarget
+      targetHours: sumTarget,
+      productiveDenominatorHours: sumProdDen
     };
   });
 

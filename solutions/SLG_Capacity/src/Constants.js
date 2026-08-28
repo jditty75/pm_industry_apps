@@ -53,9 +53,14 @@ const CFG_SETTINGS = 'Config_Settings';         // key/value settings
 //   discrepancy_tolerance_hours -- WP2.0 feature E: hours tolerance for
 //                                  current-quarter weekly vs reconciled actual (default 2)
 //   discrepancy_tolerance_pct   -- WP2.0 feature E: pct tolerance (default 0.05)
+//   include_on_leave            -- DEFAULT state of the On-Leave view toggle.
+//                                 true = on-leave workers included in utilization
+//                                 rows/totals by default; false (default) = excluded
+//                                 by default. Users can override per-session via the
+//                                 On-Leave toggle in the capacity view.
 // Existing keys (planning_window_months, etc.) are unchanged.
 
-/** Config_Settings keys + fallbacks for WFM.25 unified utilization color bands. */
+/** Legacy 4-band keys (rollback); superseded by UTIL_BAND7_* for WFM.25 Spec 4 §H. */
 const UTIL_BAND_SETTING_KEYS = {
   coldMax: 'util_band_cold_max',
   ontargetMax: 'util_band_ontarget_max',
@@ -67,7 +72,25 @@ const UTIL_BAND_DEFAULTS = {
   warmMax: 1.15
 };
 
-/** Config_Settings keys + hex fallbacks for WFM.25 unified utilization band colors. */
+/** WFM.25 Spec 4 §H: 7-band utilization edges (half-open; boundary → upper band). */
+const UTIL_BAND7_SETTING_KEYS = {
+  darkred: 'util_band_edge_darkred',
+  red: 'util_band_edge_red',
+  pink: 'util_band_edge_pink',
+  green: 'util_band_edge_green',
+  lightblue: 'util_band_edge_lightblue',
+  blue: 'util_band_edge_blue'
+};
+const UTIL_BAND7_DEFAULTS = {
+  darkred: 1.30,
+  red: 1.20,
+  pink: 1.08,
+  green: 1.00,
+  lightblue: 0.92,
+  blue: 0.85
+};
+
+/** Legacy 4-band palette keys (rollback); superseded by UTIL_COLOR7_* for §H. */
 const UTIL_COLOR_SETTING_KEYS = {
   coldBg: 'util_color_cold_bg',
   coldFg: 'util_color_cold_fg',
@@ -87,6 +110,40 @@ const UTIL_COLOR_DEFAULTS = {
   warmFg: '#ffffff',
   hotBg: '#D6371E',
   hotFg: '#ffffff'
+};
+
+/** WFM.25 Spec 4 §H: 7-band utilization palette (bg/fg hex pairs). */
+const UTIL_COLOR7_SETTING_KEYS = {
+  darkredBg: 'util_color_darkred_bg',
+  darkredFg: 'util_color_darkred_fg',
+  redBg: 'util_color_red_bg',
+  redFg: 'util_color_red_fg',
+  pinkBg: 'util_color_pink_bg',
+  pinkFg: 'util_color_pink_fg',
+  greenBg: 'util_color_green_bg',
+  greenFg: 'util_color_green_fg',
+  lightblueBg: 'util_color_lightblue_bg',
+  lightblueFg: 'util_color_lightblue_fg',
+  blueBg: 'util_color_blue_bg',
+  blueFg: 'util_color_blue_fg',
+  darkblueBg: 'util_color_darkblue_bg',
+  darkblueFg: 'util_color_darkblue_fg'
+};
+const UTIL_COLOR7_DEFAULTS = {
+  darkredBg: '#5c1010',
+  darkredFg: '#ffffff',
+  redBg: '#D6371E',
+  redFg: '#ffffff',
+  pinkBg: '#f9a8d4',
+  pinkFg: '#831843',
+  greenBg: '#c8e6c9',
+  greenFg: '#1b5e20',
+  lightblueBg: '#AED9F4',
+  lightblueFg: '#0A3D7C',
+  blueBg: '#2FA4E7',
+  blueFg: '#ffffff',
+  darkblueBg: '#0a3d7c',
+  darkblueFg: '#ffffff'
 };
 
 /** Config_Settings keys + fallbacks for WFM.25 exception glyphs (read-only). */
@@ -179,7 +236,8 @@ const ACTUALS_SUMMARY_HEADERS = [
 
 const CFG_UTIL_QUARTERLY = 'Utilization_Quarterly';
 const UTIL_QUARTERLY_HEADERS = ['employee_id','resource_name','fiscal_quarter',
-    'target_hours','util_rate_wkly','qtd_actual_icp','qtd_icp_plus_forecast','source_sheet'];
+    'target_hours','util_rate_wkly','qtd_actual_icp','qtd_icp_plus_forecast','source_sheet',
+    'productive_denominator_hours'];
 const XORG_FORECAST_AGGREGATE = 'Xorg_Forecast_Aggregate';
 const XORG_FORECAST_AGGREGATE_HEADERS = [
   'worker_group',

@@ -455,7 +455,8 @@ function api_getResourceDetailV2(params) {
     teamLabel: params.teamLabel,
     workerScope: params.workerScope,
     includeMyManagers: params.includeMyManagers,
-    includeTimeOff: params.includeTimeOff
+    includeTimeOff: params.includeTimeOff,
+    includeOnLeave: params.includeOnLeave
   });
 
   const w = (forecast.workers || []).find(function (worker) {
@@ -523,10 +524,6 @@ function api_getResourceDetailV2(params) {
   let weeklyProjectsOut = {};
 
   if (isPastQuarter) {
-    const historyRollups = buildResourceHistoryRollups_(resourceName, selectedQuarter);
-    projectsOut = historyRollups.projects;
-    roleCategoryRollup = historyRollups.roleCategoryRollup;
-    specialtyPracticeRollup = historyRollups.specialtyPracticeRollup;
     const actualsCells = buildActualsWeeklyCells_(
       resourceName,
       selectedQuarter,
@@ -537,6 +534,10 @@ function api_getResourceDetailV2(params) {
     );
     weeksOut = actualsCells.weeks;
     weeklyProjectsOut = actualsCells.weeklyProjects;
+    projectsOut = rollupWeeklyProjectsToQuarter_(weeklyProjectsOut);
+    const historyRollups = buildResourceHistoryRollups_(resourceName, selectedQuarter);
+    roleCategoryRollup = historyRollups.roleCategoryRollup;
+    specialtyPracticeRollup = historyRollups.specialtyPracticeRollup;
   } else {
     projectsOut = Object.keys(w.projects || {}).sort().map(function (proj) {
       return {
@@ -646,7 +647,53 @@ function _projectQuarterHoursFromWeekly_(p, visibleWeeks, selectedQuarter) {
 }
 
 /**
- * Past-quarter Projects + Specialty from Actuals_History (WoW actuals, consumed as-is).
+ * Quarter Projects rollup from the same weekly drill-down map (Actuals_Normalized).
+ * Aggregates project + role-category buckets so the Projects card cannot disagree
+ * with weeklyProjects[weekKey].
+ *
+ * @param {Object<string, Array<{project:string, roleCategory:string, hours:number}>>} weeklyProjects
+ * @return {Array<{project:string, account_name:string, project_name:string,
+ *   roleCategory:string, weekly:Array, quarterHours:number}>}
+ */
+function rollupWeeklyProjectsToQuarter_(weeklyProjects) {
+  var buckets = {};
+  Object.keys(weeklyProjects || {}).forEach(function (wk) {
+    (weeklyProjects[wk] || []).forEach(function (p) {
+      var proj = String(p.project || '').trim();
+      if (!proj) return;
+      var rc = String(p.roleCategory || '').trim() || 'Unclassified';
+      var hrs = Number(p.hours) || 0;
+      if (!hrs) return;
+      var key = proj + '\x00' + rc;
+      if (!buckets[key]) {
+        buckets[key] = {
+          project: proj,
+          account_name: '',
+          project_name: proj,
+          roleCategory: rc,
+          weekly: [],
+          quarterHours: 0
+        };
+      }
+      buckets[key].quarterHours += hrs;
+    });
+  });
+  return Object.keys(buckets).sort().map(function (k) {
+    var b = buckets[k];
+    return {
+      project: b.project,
+      account_name: b.account_name,
+      project_name: b.project_name,
+      roleCategory: b.roleCategory,
+      weekly: b.weekly,
+      quarterHours: Number(b.quarterHours) || 0
+    };
+  });
+}
+
+/**
+ * Past-quarter Specialty + role-category rollups from Actuals_History (WoW actuals).
+ * Projects card for past quarters uses rollupWeeklyProjectsToQuarter_ instead.
  * @param {string} resourceName
  * @param {string} fiscalQuarter
  * @return {{specialtyPracticeRollup:Array, roleCategoryRollup:Array, projects:Array}}
@@ -1536,7 +1583,8 @@ function _projectionFilterSignature_(params) {
     teamLabel: params.teamLabel ? String(params.teamLabel).trim() : '',
     workerScope: params.workerScope || 'SLG',
     includeMyManagers: !!params.includeMyManagers,
-    includeTimeOff: params.includeTimeOff !== false
+    includeTimeOff: params.includeTimeOff !== false,
+    includeOnLeave: includeOnLeaveEffective_(params.includeOnLeave)
   });
 }
 
@@ -2532,7 +2580,8 @@ function api_getForecastTable(params) {
     teamLabel: params.teamLabel,
     workerScope: params.workerScope,
     includeMyManagers: params.includeMyManagers,
-    includeTimeOff: params.includeTimeOff
+    includeTimeOff: params.includeTimeOff,
+    includeOnLeave: params.includeOnLeave
   });
 
   const windowMonths = (typeof readPlanningWindowMonths_ === 'function')
@@ -2816,7 +2865,8 @@ function api_getSpecialtyDemand(params) {
     teamLabel: params.teamLabel,
     workerScope: 'SLG',
     includeMyManagers: params.includeMyManagers,
-    includeTimeOff: params.includeTimeOff
+    includeTimeOff: params.includeTimeOff,
+    includeOnLeave: params.includeOnLeave
   });
 
   var quarterKeys = scorecardWindowKeys_();
@@ -2878,6 +2928,138 @@ function api_getSpecialtyDemand(params) {
     grandTotalByQuarter: grandTotalByQuarter,
     grandTotal: grandTotal,
     specialtyTeamMap: buildSpecialtyTeamMap_()
+  };
+}
+
+/**
+ * WFM.25 Pass 3D: org-level projected utilization by specialty practice × fiscal quarter.
+ * Numerator = reconciled WoW ICP hours (actual for closed quarters, A+F for current/next).
+ * Denominator = Utilization_Quarterly target_hours (workers with target > 0 only).
+ * SLG delivery scope only; same worker→specialty map as api_getSpecialtyDemand.
+ * @param {Object} [params] same filter shape as api_getSpecialtyDemand
+ * @return {{
+ *   quarters: string[],
+ *   currentQuarterKey: string,
+ *   rows: Array<{
+ *     specialtyPractice: string,
+ *     utilByQuarter: Object<string, number|null>,
+ *     numByQuarter: Object<string, number>,
+ *     denByQuarter: Object<string, number>
+ *   }>
+ * }}
+ */
+function api_getSpecialtyProjectedUtil(params) {
+  _requireAuthorized_();
+  params = params || {};
+
+  var quarterKeys = scorecardWindowKeys_();
+  var curQ = fiscalQuarterKey_(new Date());
+  var quarterKeySet = {};
+  quarterKeys.forEach(function (qk) { quarterKeySet[qk] = true; });
+
+  var forecast = computeWeeklyForecast_({
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: 'SLG',
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff,
+    includeOnLeave: params.includeOnLeave
+  });
+  var slgEmployeeIds = {};
+  (forecast.workers || []).forEach(function (w) {
+    var eid = String(w.employeeId || '').trim();
+    if (eid) slgEmployeeIds[eid] = true;
+  });
+
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  var workerSpMap = buildWorkerSpecialtyPracticeMap_(allocRows);
+
+  _wowQuarterTargetIndex_();
+
+  var numBucket = {};
+  var denBucket = {};
+  var utilRows = [];
+  try {
+    utilRows = cachedRead_(CFG_UTIL_QUARTERLY);
+  } catch (e2) {
+    utilRows = [];
+  }
+
+  utilRows.forEach(function (r) {
+    var qk = String(r.fiscal_quarter || '').trim();
+    if (!quarterKeySet[qk]) return;
+
+    var eid = String(r.employee_id || '').trim();
+    if (!eid || !slgEmployeeIds[eid]) return;
+
+    var target = Number(r.target_hours) || 0;
+    if (target <= 0) return;
+
+    var res = String(r.resource_name || '').trim();
+    var sp = workerSpMap[res] || 'Unclassified';
+
+    if (!numBucket[sp]) {
+      numBucket[sp] = {};
+      denBucket[sp] = {};
+      quarterKeys.forEach(function (qk0) {
+        numBucket[sp][qk0] = 0;
+        denBucket[sp][qk0] = 0;
+      });
+    }
+
+    denBucket[sp][qk] = (denBucket[sp][qk] || 0) + target;
+
+    var num;
+    if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+      num = quarterActualIcpFromWoW_(eid, qk);
+    } else {
+      num = quarterForecastIcpFromWoW_(eid, qk);
+    }
+    if (num != null) {
+      numBucket[sp][qk] = (numBucket[sp][qk] || 0) + num;
+    }
+  });
+
+  var rows = Object.keys(numBucket).map(function (sp) {
+    var utilByQuarter = {};
+    var numByQuarter = {};
+    var denByQuarter = {};
+    var sortTotal = 0;
+    quarterKeys.forEach(function (qk) {
+      var num = Number(numBucket[sp][qk]) || 0;
+      var den = Number(denBucket[sp][qk]) || 0;
+      numByQuarter[qk] = num;
+      denByQuarter[qk] = den;
+      utilByQuarter[qk] = den > 0 ? num / den : null;
+      sortTotal += num;
+    });
+    return {
+      specialtyPractice: sp,
+      utilByQuarter: utilByQuarter,
+      numByQuarter: numByQuarter,
+      denByQuarter: denByQuarter,
+      _sortTotal: sortTotal
+    };
+  });
+
+  rows.sort(function (a, b) {
+    if (a.specialtyPractice === 'Unclassified' && b.specialtyPractice !== 'Unclassified') return 1;
+    if (b.specialtyPractice === 'Unclassified' && a.specialtyPractice !== 'Unclassified') return -1;
+    return b._sortTotal - a._sortTotal;
+  });
+  rows.forEach(function (row) { delete row._sortTotal; });
+
+  return {
+    quarters: quarterKeys,
+    currentQuarterKey: curQ,
+    rows: rows
   };
 }
 
@@ -3590,6 +3772,81 @@ function api_getReportingSummary(params) {
 // ------------------------------------------------------------
 
 /**
+ * Read WFM.25 7-band utilization edges from Config_Settings (Spec 4 §H).
+ * Half-open bands: each boundary belongs to the upper band.
+ * Falls back to UTIL_BAND7_DEFAULTS when a key is blank or bands are malformed.
+ * @returns {{darkred:number, red:number, pink:number, green:number, lightblue:number, blue:number}}
+ */
+function _readUtilBand7Settings_() {
+  const defaults = UTIL_BAND7_DEFAULTS;
+  const keys = UTIL_BAND7_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      const v = raw ? Number(raw) : NaN;
+      return (v > 0) ? v : fallback;
+    };
+    const bands = {
+      darkred: read(keys.darkred, defaults.darkred),
+      red: read(keys.red, defaults.red),
+      pink: read(keys.pink, defaults.pink),
+      green: read(keys.green, defaults.green),
+      lightblue: read(keys.lightblue, defaults.lightblue),
+      blue: read(keys.blue, defaults.blue)
+    };
+    const ordered = [bands.darkred, bands.red, bands.pink, bands.green, bands.lightblue, bands.blue];
+    for (let i = 1; i < ordered.length; i++) {
+      if (!(ordered[i - 1] > ordered[i])) {
+        Logger.log('_readUtilBand7Settings_: malformed util_band_edge config — using defaults');
+        return Object.assign({}, defaults);
+      }
+    }
+    return bands;
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
+/**
+ * Read WFM.25 7-band utilization palette from Config_Settings (Spec 4 §H).
+ * @returns {Object}
+ */
+function _readUtilColor7Settings_() {
+  const defaults = UTIL_COLOR7_DEFAULTS;
+  const keys = UTIL_COLOR7_SETTING_KEYS;
+  try {
+    const settings = (typeof readSettings_ === 'function') ? readSettings_() : {};
+    const read = function (settingKey, fallback) {
+      const raw = String(settings[settingKey] || '').trim();
+      if (_isValidUtilHexColor_(raw)) return raw;
+      if (raw) {
+        Logger.log('_readUtilColor7Settings_: malformed ' + settingKey + '="' + raw + '" — using fallback');
+      }
+      return fallback;
+    };
+    return {
+      darkredBg: read(keys.darkredBg, defaults.darkredBg),
+      darkredFg: read(keys.darkredFg, defaults.darkredFg),
+      redBg: read(keys.redBg, defaults.redBg),
+      redFg: read(keys.redFg, defaults.redFg),
+      pinkBg: read(keys.pinkBg, defaults.pinkBg),
+      pinkFg: read(keys.pinkFg, defaults.pinkFg),
+      greenBg: read(keys.greenBg, defaults.greenBg),
+      greenFg: read(keys.greenFg, defaults.greenFg),
+      lightblueBg: read(keys.lightblueBg, defaults.lightblueBg),
+      lightblueFg: read(keys.lightblueFg, defaults.lightblueFg),
+      blueBg: read(keys.blueBg, defaults.blueBg),
+      blueFg: read(keys.blueFg, defaults.blueFg),
+      darkblueBg: read(keys.darkblueBg, defaults.darkblueBg),
+      darkblueFg: read(keys.darkblueFg, defaults.darkblueFg)
+    };
+  } catch (e) {
+    return Object.assign({}, defaults);
+  }
+}
+
+/**
  * Read WFM.25 unified utilization color band edges from Config_Settings.
  * Falls back to UTIL_BAND_DEFAULTS when a key is blank or bands are malformed.
  * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
@@ -3693,7 +3950,7 @@ function api_getReference() {
   // resolved identity in the response. Cache invalidates automatically
   // via TTL; for forced refresh, call api_flushCaches.
   const cache = CacheService.getUserCache();
-  const cacheKey = 'api_getReference_v1';
+  const cacheKey = 'api_getReference_v2';
   try {
     const hit = cache.get(cacheKey);
     if (hit) {
@@ -3803,8 +4060,8 @@ function api_getReference() {
   // Priority 4: resource_type options for the Assign drawer's Role dropdown.
   const resourceTypeOptions = _readResourceTypeOptions_();
 
-  const utilBands = _readUtilBandSettings_();
-  const utilColors = _readUtilColorSettings_();
+  const utilBands7 = _readUtilBand7Settings_();
+  const utilColors7 = _readUtilColor7Settings_();
   const utilGlyphs = _readUtilGlyphSettings_();
 
   const response = {
@@ -3844,17 +4101,26 @@ function api_getReference() {
         return 0.85;
       }
     })(),
-    utilBandColdMax: utilBands.coldMax,
-    utilBandOntargetMax: utilBands.ontargetMax,
-    utilBandWarmMax: utilBands.warmMax,
-    utilColorColdBg: utilColors.coldBg,
-    utilColorColdFg: utilColors.coldFg,
-    utilColorOntargetBg: utilColors.ontargetBg,
-    utilColorOntargetFg: utilColors.ontargetFg,
-    utilColorWarmBg: utilColors.warmBg,
-    utilColorWarmFg: utilColors.warmFg,
-    utilColorHotBg: utilColors.hotBg,
-    utilColorHotFg: utilColors.hotFg,
+    utilBandEdgeDarkred: utilBands7.darkred,
+    utilBandEdgeRed: utilBands7.red,
+    utilBandEdgePink: utilBands7.pink,
+    utilBandEdgeGreen: utilBands7.green,
+    utilBandEdgeLightblue: utilBands7.lightblue,
+    utilBandEdgeBlue: utilBands7.blue,
+    utilColorDarkredBg: utilColors7.darkredBg,
+    utilColorDarkredFg: utilColors7.darkredFg,
+    utilColorRedBg: utilColors7.redBg,
+    utilColorRedFg: utilColors7.redFg,
+    utilColorPinkBg: utilColors7.pinkBg,
+    utilColorPinkFg: utilColors7.pinkFg,
+    utilColorGreenBg: utilColors7.greenBg,
+    utilColorGreenFg: utilColors7.greenFg,
+    utilColorLightblueBg: utilColors7.lightblueBg,
+    utilColorLightblueFg: utilColors7.lightblueFg,
+    utilColorBlueBg: utilColors7.blueBg,
+    utilColorBlueFg: utilColors7.blueFg,
+    utilColorDarkblueBg: utilColors7.darkblueBg,
+    utilColorDarkblueFg: utilColors7.darkblueFg,
     utilGlyphFire: utilGlyphs.fire,
     utilGlyphCold: utilGlyphs.cold,
     utilGlyphEnabled: utilGlyphs.enabled,
@@ -3868,6 +4134,13 @@ function api_getReference() {
         return String(settings['default_team_filter'] || '').trim();
       } catch (e) {
         return '';
+      }
+    })(),
+    includeOnLeaveDefault: (function () {
+      try {
+        return includeOnLeaveEffective_(undefined);
+      } catch (e) {
+        return false;
       }
     })()
   };
@@ -4782,7 +5055,7 @@ function api_saveGenericResources(payload) {
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   // Bust the per-user api_getReference cache so the Capacity Explorer
   // resource list reflects new generic workers immediately on next load.
-  try { CacheService.getUserCache().remove('api_getReference_v1'); } catch (e) {}
+  try { CacheService.getUserCache().remove('api_getReference_v2'); } catch (e) {}
   return { ok: true, count: rows.length };
 }
 
@@ -4960,7 +5233,7 @@ function api_saveExclusions(payload) {
   if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
   // Bust per-user api_getReference cache so excluded workers disappear
   // from Capacity Explorer immediately on next reference fetch.
-  try { CacheService.getUserCache().remove('api_getReference_v1'); } catch (e) {}
+  try { CacheService.getUserCache().remove('api_getReference_v2'); } catch (e) {}
   return { ok: true, count: merged.length };
 }
 

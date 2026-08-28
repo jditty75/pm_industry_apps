@@ -120,6 +120,12 @@ function bootstrap() {
       util_band_cold_max: '0.85',
       util_band_ontarget_max: '1.05',
       util_band_warm_max: '1.15',
+      util_band_edge_darkred: '1.30',
+      util_band_edge_red: '1.20',
+      util_band_edge_pink: '1.08',
+      util_band_edge_green: '1.00',
+      util_band_edge_lightblue: '0.92',
+      util_band_edge_blue: '0.85',
       util_glyph_fire: 'fire',
       util_glyph_cold: 'cold',
       util_glyph_enabled: 'true'
@@ -127,6 +133,38 @@ function bootstrap() {
     Object.keys(wfm25UtilDefaults).forEach(function (k) {
       if (existingKeys[k]) return;
       appendRow_(CFG_SETTINGS, { key: k, value: wfm25UtilDefaults[k] }, ['key', 'value']);
+    });
+
+    const wfm25UtilColorDefaults = {
+      util_color_darkred_bg: '#5c1010',
+      util_color_darkred_fg: '#ffffff',
+      util_color_red_bg: '#D6371E',
+      util_color_red_fg: '#ffffff',
+      util_color_pink_bg: '#f9a8d4',
+      util_color_pink_fg: '#831843',
+      util_color_green_bg: '#c8e6c9',
+      util_color_green_fg: '#1b5e20',
+      util_color_lightblue_bg: '#AED9F4',
+      util_color_lightblue_fg: '#0A3D7C',
+      util_color_blue_bg: '#2FA4E7',
+      util_color_blue_fg: '#ffffff',
+      util_color_darkblue_bg: '#0a3d7c',
+      util_color_darkblue_fg: '#ffffff'
+    };
+    Object.keys(wfm25UtilColorDefaults).forEach(function (k) {
+      if (existingKeys[k]) return;
+      appendRow_(CFG_SETTINGS, { key: k, value: wfm25UtilColorDefaults[k] }, ['key', 'value']);
+    });
+
+    const wfm25WeeklyTargetDefaults = {
+      weekly_target_consultant_p3_p5: '32',
+      weekly_target_consultant_p6: '26',
+      weekly_target_em_p4_p5: '28',
+      weekly_target_pd_p6: '26'
+    };
+    Object.keys(wfm25WeeklyTargetDefaults).forEach(function (k) {
+      if (existingKeys[k]) return;
+      appendRow_(CFG_SETTINGS, { key: k, value: wfm25WeeklyTargetDefaults[k] }, ['key', 'value']);
     });
 
     const wp20DiscrepancyDefaults = {
@@ -137,6 +175,13 @@ function bootstrap() {
       if (existingKeys[k]) return;
       appendRow_(CFG_SETTINGS, { key: k, value: wp20DiscrepancyDefaults[k] }, ['key', 'value']);
     });
+
+    if (!existingKeys.include_on_leave) {
+      appendRow_(CFG_SETTINGS, {
+        key: 'include_on_leave',
+        value: 'false'
+      }, ['key', 'value']);
+    }
   }
 
   // Reorder tabs for usability

@@ -352,8 +352,21 @@
       scenarioId: f.scenarioId || null,
       quarter: f.quarter || null,
       includeTimeOff: !!f.includeTimeOff,
-      groupBy: f.groupBy || 'Individual'
+      groupBy: f.groupBy || 'Individual',
+      includeOnLeave: (typeof WFM25State !== 'undefined' && WFM25State)
+        ? !!WFM25State.includeOnLeave : includeOnLeaveEffectiveClient_(State.ref)
     }, extra || {});
+  }
+
+  /**
+   * Client-side mirror of includeOnLeaveEffective_ for boot before WFM25State exists.
+   * @param {Object} [ref] State.ref
+   * @return {boolean}
+   */
+  function includeOnLeaveEffectiveClient_(ref) {
+    ref = ref || State.ref || {};
+    if (ref.includeOnLeaveDefault != null) return !!ref.includeOnLeaveDefault;
+    return false;
   }
 
   // ============================================================
@@ -385,27 +398,36 @@
     return true;
   }
 
-  // Heatmap color (unified ratio-to-target scale; config via api_getReference)
-  const UTIL_BAND_DEFAULTS_ = {
-    coldMax: 0.85,
-    ontargetMax: 1.05,
-    warmMax: 1.15
+  // Heatmap color (7-band ratio-to-target scale; config via api_getReference §H)
+  const UTIL_BAND7_DEFAULTS_ = {
+    darkred: 1.30,
+    red: 1.20,
+    pink: 1.08,
+    green: 1.00,
+    lightblue: 0.92,
+    blue: 0.85
   };
 
-  const UTIL_COLOR_DEFAULTS_ = {
-    coldBg: '#0a3d7c',
-    coldFg: '#ffffff',
-    ontargetBg: '#c8e6c9',
-    ontargetFg: '#1b5e20',
-    warmBg: '#E76F1C',
-    warmFg: '#ffffff',
-    hotBg: '#D6371E',
-    hotFg: '#ffffff'
+  const UTIL_COLOR7_DEFAULTS_ = {
+    darkredBg: '#5c1010',
+    darkredFg: '#ffffff',
+    redBg: '#D6371E',
+    redFg: '#ffffff',
+    pinkBg: '#f9a8d4',
+    pinkFg: '#831843',
+    greenBg: '#c8e6c9',
+    greenFg: '#1b5e20',
+    lightblueBg: '#AED9F4',
+    lightblueFg: '#0A3D7C',
+    blueBg: '#2FA4E7',
+    blueFg: '#ffffff',
+    darkblueBg: '#0a3d7c',
+    darkblueFg: '#ffffff'
   };
 
   /**
-   * Utilization color band edges from api_getReference (Config_Settings fallbacks).
-   * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
+   * Utilization band edges from api_getReference (Config_Settings fallbacks).
+   * @returns {{darkred:number, red:number, pink:number, green:number, lightblue:number, blue:number}}
    */
   function wfm25UtilBands_() {
     const ref = State.ref || {};
@@ -416,20 +438,26 @@
       return v > 0 ? v : fallback;
     };
     const bands = {
-      coldMax: read('utilBandColdMax', UTIL_BAND_DEFAULTS_.coldMax),
-      ontargetMax: read('utilBandOntargetMax', UTIL_BAND_DEFAULTS_.ontargetMax),
-      warmMax: read('utilBandWarmMax', UTIL_BAND_DEFAULTS_.warmMax)
+      darkred: read('utilBandEdgeDarkred', UTIL_BAND7_DEFAULTS_.darkred),
+      red: read('utilBandEdgeRed', UTIL_BAND7_DEFAULTS_.red),
+      pink: read('utilBandEdgePink', UTIL_BAND7_DEFAULTS_.pink),
+      green: read('utilBandEdgeGreen', UTIL_BAND7_DEFAULTS_.green),
+      lightblue: read('utilBandEdgeLightblue', UTIL_BAND7_DEFAULTS_.lightblue),
+      blue: read('utilBandEdgeBlue', UTIL_BAND7_DEFAULTS_.blue)
     };
-    if (!(bands.coldMax < bands.ontargetMax && bands.ontargetMax < bands.warmMax)) {
-      console.warn('wfm25UtilBands_: malformed config — using defaults');
-      return Object.assign({}, UTIL_BAND_DEFAULTS_);
+    const ordered = [bands.darkred, bands.red, bands.pink, bands.green, bands.lightblue, bands.blue];
+    for (let i = 1; i < ordered.length; i++) {
+      if (!(ordered[i - 1] > ordered[i])) {
+        console.warn('wfm25UtilBands_: malformed config — using defaults');
+        return Object.assign({}, UTIL_BAND7_DEFAULTS_);
+      }
     }
     return bands;
   }
 
   /**
    * Utilization band palette from api_getReference (Config_Settings hex fallbacks).
-   * @returns {{coldBg:string, coldFg:string, ontargetBg:string, ontargetFg:string, warmBg:string, warmFg:string, hotBg:string, hotFg:string}}
+   * @returns {Object}
    */
   function wfm25UtilColors_() {
     const ref = State.ref || {};
@@ -440,15 +468,22 @@
       if (s) console.warn('wfm25UtilColors_: malformed ' + key + '="' + s + '" — using fallback');
       return fallback;
     };
+    const d = UTIL_COLOR7_DEFAULTS_;
     return {
-      coldBg: readHex('utilColorColdBg', UTIL_COLOR_DEFAULTS_.coldBg),
-      coldFg: readHex('utilColorColdFg', UTIL_COLOR_DEFAULTS_.coldFg),
-      ontargetBg: readHex('utilColorOntargetBg', UTIL_COLOR_DEFAULTS_.ontargetBg),
-      ontargetFg: readHex('utilColorOntargetFg', UTIL_COLOR_DEFAULTS_.ontargetFg),
-      warmBg: readHex('utilColorWarmBg', UTIL_COLOR_DEFAULTS_.warmBg),
-      warmFg: readHex('utilColorWarmFg', UTIL_COLOR_DEFAULTS_.warmFg),
-      hotBg: readHex('utilColorHotBg', UTIL_COLOR_DEFAULTS_.hotBg),
-      hotFg: readHex('utilColorHotFg', UTIL_COLOR_DEFAULTS_.hotFg)
+      darkredBg: readHex('utilColorDarkredBg', d.darkredBg),
+      darkredFg: readHex('utilColorDarkredFg', d.darkredFg),
+      redBg: readHex('utilColorRedBg', d.redBg),
+      redFg: readHex('utilColorRedFg', d.redFg),
+      pinkBg: readHex('utilColorPinkBg', d.pinkBg),
+      pinkFg: readHex('utilColorPinkFg', d.pinkFg),
+      greenBg: readHex('utilColorGreenBg', d.greenBg),
+      greenFg: readHex('utilColorGreenFg', d.greenFg),
+      lightblueBg: readHex('utilColorLightblueBg', d.lightblueBg),
+      lightblueFg: readHex('utilColorLightblueFg', d.lightblueFg),
+      blueBg: readHex('utilColorBlueBg', d.blueBg),
+      blueFg: readHex('utilColorBlueFg', d.blueFg),
+      darkblueBg: readHex('utilColorDarkblueBg', d.darkblueBg),
+      darkblueFg: readHex('utilColorDarkblueFg', d.darkblueFg)
     };
   }
 
@@ -466,10 +501,13 @@
     }
     const b = bands || wfm25UtilBands_();
     const c = colors || wfm25UtilColors_();
-    if (r < b.coldMax) return { bg: c.coldBg, fg: c.coldFg };
-    if (r < b.ontargetMax) return { bg: c.ontargetBg, fg: c.ontargetFg };
-    if (r < b.warmMax) return { bg: c.warmBg, fg: c.warmFg };
-    return { bg: c.hotBg, fg: c.hotFg };
+    if (r >= b.darkred) return { bg: c.darkredBg, fg: c.darkredFg };
+    if (r >= b.red) return { bg: c.redBg, fg: c.redFg };
+    if (r >= b.pink) return { bg: c.pinkBg, fg: c.pinkFg };
+    if (r >= b.green) return { bg: c.greenBg, fg: c.greenFg };
+    if (r >= b.lightblue) return { bg: c.lightblueBg, fg: c.lightblueFg };
+    if (r >= b.blue) return { bg: c.blueBg, fg: c.blueFg };
+    return { bg: c.darkblueBg, fg: c.darkblueFg };
   }
 
   /**
@@ -3922,6 +3960,7 @@
         WFM25State.xorgForecastData = null;
         WFM25State.specialtyDemandData = null;
         WFM25State.specialtyActualsData = null;
+        WFM25State.specialtyProjectedUtilData = null;
         await wfm25AfterSoftBookCommitRefresh_();
       } else {
         onSoftBookingsChanged_();
@@ -7197,6 +7236,7 @@ async function _qaRefreshPsaHours_() {
             WFM25State.xorgForecastData = null;
             WFM25State.specialtyDemandData = null;
         WFM25State.specialtyActualsData = null;
+        WFM25State.specialtyProjectedUtilData = null;
             WFM25State.unfilledDemandRaw = null;
             WFM25State.unfilledDemandWeeklyKeys = [];
             WFM25State.commitmentsLedger = null;
@@ -7944,6 +7984,35 @@ async function _qaRefreshPsaHours_() {
   // Under/approaching floor thresholds are intentionally deferred (leadership review).
   const WFM25_OVER_ALLOCATED_CEILING = 1.10;
 
+  /** @type {Object<string, {title:string, body:string, inDev:boolean}>} */
+  const WFM25_TAB_INFO = {
+    'utilization': {
+      title: 'PSA ICP Attainment',
+      body: 'Shows how each worker and team is tracking against their quarterly ICP bonus target. Attainment % = (actual ICP hours to date + forecast ICP hours) ÷ quarterly target hours, per worker per quarter. Green (95–105%) is on target; red/pink bands are over-allocated; blue bands are under-allocated. On-leave workers appear in the team\'s on-leave count but are excluded from the utilization rows and totals.',
+      inDev: false
+    },
+    'specialty-demand': {
+      title: 'Specialty Utilization',
+      body: 'Projected utilization by specialty practice (e.g. FIN, HCM), so leadership can see which specialties are over- or under-subscribed across the quarter window. Projected utilization = (Σ actual + forecast ICP hours for all workers in the specialty) ÷ (Σ quarterly target hours for those same workers), shown for the previous, current, and next quarter.',
+      inDev: false
+    },
+    'hours-budget': {
+      title: 'Hours & Capacity',
+      body: 'Planned productive hours against available delivery capacity, per team and quarter. Utilization shown here = planned productive hours ÷ ICP-available hours (raw capacity net of holidays). This is a capacity view and is intentionally different from the target-based attainment on the PSA ICP Attainment tab — the same worker can read differently on the two tabs because the denominators differ (available capacity here vs. bonus target there).',
+      inDev: true
+    },
+    'mix-trend': {
+      title: 'Mix & Trend',
+      body: 'Total delivery hours over time, split by worker type, to show how the delivery mix (SLG staff vs. Workday Regions vs. Contractors) is trending quarter over quarter. Historical quarters are actuals; the current quarter is actuals-to-date plus forecast; the next quarter is forecast only.',
+      inDev: true
+    },
+    'demand': {
+      title: 'Demand',
+      body: 'Staffing demand across Commitments and Unfilled Demand — open RPL lines, scenario bookings, and backlog by project or practice. Capacity-aware fill actions on this surface are in development.',
+      inDev: true
+    }
+  };
+
   // ── WFM.25 client state ───────────────────────────────────────
   const WFM25State = {
     scorecardData:    null,          // last api_getQuarterlyScorecard result
@@ -7955,14 +8024,18 @@ async function _qaRefreshPsaHours_() {
     mixTrendSelectedCategory: null,  // 'SLG' | 'Workday Regions' | 'Contractor' | null
     specialtyDemandData:  null,      // last api_getSpecialtyDemand result
     specialtyActualsData: null,      // last api_getSpecialtyActuals result
+    specialtyProjectedUtilData: null, // last api_getSpecialtyProjectedUtil result
     specialtyDemandReqId: 0,         // race-guard for specialty-demand fetch
-    specialtyDemandUnit: 'hours',    // 'hours' | 'share' | 'qoq'
+    specialtyDemandUnit: 'hours',    // 'hours' | 'share' | 'qoq' | 'projected-util'
     specialtyDemandCollapsedTeams: new Set(),
     expandedTeam:     null,          // teamLabel string currently expanded, or null
     activeTab:        'utilization', // 'utilization' | 'hours-budget' | 'mix-trend' | 'specialty-demand'
     groupBy:          'team',        // 'team' | 'role'
     landingBreadcrumb: 'SLG Org',
     scopeMode:          'all',          // 'all' | 'myTeam' — session-only; default full SLG
+    utilMetric:         'icp',          // 'icp' | 'productive' — session-only display toggle
+    includeOnLeave:     false,          // session override; init from api_getReference
+    onLeaveReqId:       0,              // race-guard for on-leave toggle fetch
     activeView:       'capacity',     // 'capacity' | 'staffing' | 'admin'
     selectedWorker:   null,          // worker name when panel is open
     selectedWorkerTeam: null,       // team label for breadcrumb + live aggregate shift
@@ -8024,6 +8097,149 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Whether the PSA utilization view is showing Productive Utilization (Spec 7 §B4).
+   * @returns {boolean}
+   */
+  function wfm25UtilMetricIsProductive_() {
+    return WFM25State.utilMetric === 'productive';
+  }
+
+  /**
+   * Active utilization ratio for a worker quarter object (icpUtil or productiveUtil).
+   * @param {Object|null} q
+   * @returns {number|null}
+   */
+  function wfm25ActiveUtilFromQuarter_(q) {
+    if (!q) return null;
+    if (wfm25UtilMetricIsProductive_()) {
+      return q.productiveUtil != null ? q.productiveUtil : null;
+    }
+    return q.icpUtil != null ? q.icpUtil : null;
+  }
+
+  /**
+   * Active utilization for aggregated team/org cells.
+   * @param {Object|null} cell
+   * @returns {number|null}
+   */
+  function wfm25ActiveUtilFromAggCell_(cell) {
+    if (!cell) return null;
+    if (wfm25UtilMetricIsProductive_()) {
+      return cell.productiveUtil != null ? cell.productiveUtil : null;
+    }
+    return cell.util != null ? cell.util : (cell.icpUtil != null ? cell.icpUtil : null);
+  }
+
+  /**
+   * Sync On-Leave segmented-control UI to WFM25State.includeOnLeave.
+   */
+  function wfm25SyncOnLeaveToggleUi_() {
+    const mode = WFM25State.includeOnLeave ? 'include' : 'exclude';
+    $$('[data-wfm25-onleave]').forEach(function (btn) {
+      const on = btn.dataset.wfm25Onleave === mode;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  /**
+   * Sync Utilization metric segmented-control UI to WFM25State.utilMetric.
+   */
+  function wfm25SyncUtilMetricToggleUi_() {
+    $$('[data-wfm25-util-metric]').forEach(function (btn) {
+      const on = btn.dataset.wfm25UtilMetric === WFM25State.utilMetric;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  /**
+   * Switch ICP ⟷ Productive utilization display (client re-paint only; Spec 7 §B4).
+   * @param {'icp'|'productive'} metric
+   */
+  function wfm25SetUtilMetric_(metric) {
+    metric = metric === 'productive' ? 'productive' : 'icp';
+    if (WFM25State.utilMetric === metric) return;
+    WFM25State.utilMetric = metric;
+    wfm25SyncUtilMetricToggleUi_();
+    if (metric === 'productive' && WFM25State.utilAllocFilter) {
+      WFM25State.utilAllocFilter = null;
+    }
+    if (WFM25State.scorecardData) {
+      renderWFM25UtilTable_(WFM25State.scorecardData);
+      renderWFM25UtilAllocationBanner_(WFM25State.scorecardData);
+    }
+    if (WFM25State.selectedWorker && WFM25State.selectedWorkerDetail) {
+      paintWFM25WorkerPanel_(State.explorerProjection);
+    }
+  }
+
+  /**
+   * Apply on-leave session override and re-fetch capacity surfaces (Spec 7 §A4).
+   * @param {boolean} include
+   */
+  async function wfm25SetOnLeaveMode_(include) {
+    include = !!include;
+    if (WFM25State.includeOnLeave === include) return;
+
+    WFM25State.includeOnLeave = include;
+    wfm25SyncOnLeaveToggleUi_();
+    $$('[data-wfm25-onleave]').forEach(function (btn) { btn.disabled = true; });
+    WFM25State.onLeaveReqId = (WFM25State.onLeaveReqId || 0) + 1;
+    const reqId = WFM25State.onLeaveReqId;
+
+    const utilWrap = document.getElementById('wfm25UtilWrap');
+    const workerBody = document.getElementById('wfm25WorkerPanelBody');
+    wfm25ShowLoading_(utilWrap);
+    if (WFM25State.selectedWorker && workerBody) {
+      wfm25ShowLoading_(workerBody);
+    }
+
+    try {
+      const params = buildServerParams_({ workerScope: 'SLG' });
+      const results = await Promise.all([
+        call('api_getQuarterlyScorecard', params),
+        call('api_getOnLeaveRoster').catch(function () { return {}; })
+      ]);
+      if (reqId !== WFM25State.onLeaveReqId) return;
+      WFM25State.onLeaveRoster = results[1] || {};
+      renderWFM25UtilTable_(results[0]);
+
+      if (WFM25State.selectedWorker) {
+        const detail = await call(
+          'api_getResourceDetailV2',
+          buildServerParams_({
+            resource: WFM25State.selectedWorker,
+            workerScope: 'SLG',
+            selectedQuarter: wfm25EffectivePanelQuarter_()
+          })
+        );
+        if (reqId !== WFM25State.onLeaveReqId) return;
+        WFM25State.selectedWorkerDetail = detail;
+        paintWFM25WorkerPanel_(State.explorerProjection);
+        if (State.softBookings && State.softBookings.length) {
+          scheduleWFM25Projection_();
+        }
+      }
+    } catch (err) {
+      if (reqId !== WFM25State.onLeaveReqId) return;
+      const body = document.getElementById('wfm25UtilBody');
+      const contentEl = document.getElementById('wfm25UtilContent');
+      if (contentEl) contentEl.hidden = false;
+      if (body) {
+        body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px;color:var(--thumbtack)">' +
+          'Failed to load utilization data: ' + escapeHtml_(err.message || String(err)) + '</td></tr>';
+      }
+      console.error('[WFM.25] wfm25SetOnLeaveMode_ failed:', err);
+    } finally {
+      if (reqId !== WFM25State.onLeaveReqId) return;
+      wfm25HideLoading_(utilWrap);
+      wfm25HideLoading_(workerBody);
+      $$('[data-wfm25-onleave]').forEach(function (btn) { btn.disabled = false; });
+    }
+  }
+
+  /**
    * Clear cached payloads that depend on manager scope.
    */
   function wfm25InvalidateScopeCaches_() {
@@ -8031,6 +8247,7 @@ async function _qaRefreshPsaHours_() {
     WFM25State.xorgForecastData = null;
     WFM25State.specialtyDemandData = null;
     WFM25State.specialtyActualsData = null;
+    WFM25State.specialtyProjectedUtilData = null;
     WFM25State.unfilledDemandRaw = null;
     WFM25State.unfilledDemandWeeklyKeys = [];
     WFM25State.commitmentsLedger = null;
@@ -8098,6 +8315,184 @@ async function _qaRefreshPsaHours_() {
   }
 
   // ── Tab switching ─────────────────────────────────────────────
+
+  /**
+   * Decorate a tab button with label, optional IN DEVELOPMENT chip, and info icon.
+   * @param {HTMLButtonElement} btn
+   * @param {string} tabKey
+   */
+  function wfm25DecorateTabButton_(btn, tabKey) {
+    const info = WFM25_TAB_INFO[tabKey];
+    if (!info || btn.dataset.wfm25TabDecorated) return;
+    btn.dataset.wfm25TabDecorated = '1';
+    btn.textContent = '';
+    btn.classList.toggle('wfm25-tab--in-dev', !!info.inDev);
+    btn.setAttribute('aria-label', info.title + (info.inDev ? ' (in development)' : ''));
+
+    const label = document.createElement('span');
+    label.className = 'wfm25-tab-label';
+    label.textContent = info.title;
+    btn.appendChild(label);
+
+    if (info.inDev) wfm25AppendInDevChip_(btn, false);
+
+    const infoBtn = document.createElement('span');
+    infoBtn.className = 'wfm25-tab-info-btn';
+    infoBtn.setAttribute('role', 'button');
+    infoBtn.setAttribute('tabindex', '0');
+    infoBtn.setAttribute('aria-label', 'About ' + info.title);
+    infoBtn.title = 'About ' + info.title;
+    infoBtn.textContent = '\u24D8';
+    infoBtn.dataset.wfm25TabInfo = tabKey;
+    infoBtn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        wfm25OpenTabInfoModal_(tabKey);
+      }
+    });
+    btn.appendChild(infoBtn);
+  }
+
+  /**
+   * Append the amber IN DEVELOPMENT chip to a host element.
+   * @param {HTMLElement} host
+   * @param {boolean} [navVariant] compact styling for left-nav strip
+   * @returns {HTMLElement}
+   */
+  function wfm25AppendInDevChip_(host, navVariant) {
+    const chip = document.createElement('span');
+    chip.className = 'wfm25-in-dev-chip' + (navVariant ? ' wfm25-in-dev-chip--nav' : '');
+    chip.textContent = 'IN DEVELOPMENT';
+    host.appendChild(chip);
+    return chip;
+  }
+
+  /**
+   * Create a compact amber in-development dot (no text) for cramped nav chrome.
+   * @returns {HTMLElement}
+   */
+  function wfm25CreateInDevDot_() {
+    const dot = document.createElement('span');
+    dot.className = 'wfm25-in-dev-dot';
+    dot.setAttribute('title', 'In development \u2014 data and layout may change.');
+    dot.setAttribute('aria-label', 'In development');
+    return dot;
+  }
+
+  /**
+   * Mount icon-only in-development indicator on the left-nav Demand strip button.
+   */
+  function wfm25DecorateDemandNavStrip_() {
+    const btn = document.querySelector('.wfm25-strip-btn[data-wfm25-nav="staffing"]');
+    const info = WFM25_TAB_INFO['demand'];
+    if (!btn || !info || !info.inDev || btn.dataset.wfm25DemandNavDecorated) return;
+    btn.dataset.wfm25DemandNavDecorated = '1';
+    btn.classList.add('wfm25-strip-btn--in-dev');
+    btn.setAttribute('aria-label', info.title + ' (in development)');
+    const label = btn.querySelector('.wfm25-strip-label');
+    if (label) {
+      label.insertAdjacentElement('afterend', wfm25CreateInDevDot_());
+    } else {
+      btn.appendChild(wfm25CreateInDevDot_());
+    }
+  }
+
+  /**
+   * Mount IN DEVELOPMENT chip + info icon on the Demand section content header.
+   */
+  function wfm25DecorateDemandSectionHead_() {
+    const head = document.getElementById('wfm25DemandSectionHead');
+    const info = WFM25_TAB_INFO['demand'];
+    if (!head || !info || head.dataset.wfm25TabDecorated) return;
+    head.dataset.wfm25TabDecorated = '1';
+    if (info.inDev) head.classList.add('wfm25-tab-section-head--in-dev');
+
+    const title = head.querySelector('.wfm25-tab-section-title');
+    if (title) title.textContent = info.title;
+
+    if (info.inDev) wfm25AppendInDevChip_(head, false);
+
+    const infoBtn = document.createElement('span');
+    infoBtn.className = 'wfm25-tab-info-btn';
+    infoBtn.setAttribute('role', 'button');
+    infoBtn.setAttribute('tabindex', '0');
+    infoBtn.setAttribute('aria-label', 'About ' + info.title);
+    infoBtn.title = 'About ' + info.title;
+    infoBtn.textContent = '\u24D8';
+    infoBtn.dataset.wfm25TabInfo = 'demand';
+    infoBtn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        wfm25OpenTabInfoModal_('demand');
+      }
+    });
+    head.appendChild(infoBtn);
+  }
+
+  /**
+   * Open the reusable tab-purpose info modal.
+   * @param {string} tabKey
+   */
+  function wfm25OpenTabInfoModal_(tabKey) {
+    const info = WFM25_TAB_INFO[tabKey];
+    const modal = document.getElementById('wfm25TabInfoModal');
+    const titleEl = document.getElementById('wfm25TabInfoModalTitle');
+    const bodyEl = document.getElementById('wfm25TabInfoModalBody');
+    if (!info || !modal || !titleEl || !bodyEl) return;
+    titleEl.textContent = info.title;
+    bodyEl.textContent = info.body;
+    modal.hidden = false;
+  }
+
+  /**
+   * Close the tab-purpose info modal.
+   */
+  function wfm25CloseTabInfoModal_() {
+    const modal = document.getElementById('wfm25TabInfoModal');
+    if (modal) modal.hidden = true;
+  }
+
+  /**
+   * Wire tab info modal dismiss (X, Got it, Esc, click-outside).
+   */
+  function wfm25WireTabInfoModal_() {
+    const modal = document.getElementById('wfm25TabInfoModal');
+    if (!modal || modal.dataset.wfm25Wired) return;
+    modal.dataset.wfm25Wired = '1';
+
+    modal.querySelectorAll('[data-wfm25-tab-info-close]').forEach(function (el) {
+      el.addEventListener('click', wfm25CloseTabInfoModal_);
+    });
+    const gotIt = document.getElementById('wfm25TabInfoModalGotIt');
+    if (gotIt) gotIt.addEventListener('click', wfm25CloseTabInfoModal_);
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modal && !modal.hidden) wfm25CloseTabInfoModal_();
+    });
+
+    document.addEventListener('click', function (e) {
+      const infoBtn = e.target.closest('.wfm25-tab-info-btn');
+      if (infoBtn && infoBtn.dataset.wfm25TabInfo) {
+        e.preventDefault();
+        e.stopPropagation();
+        wfm25OpenTabInfoModal_(infoBtn.dataset.wfm25TabInfo);
+        return;
+      }
+    });
+  }
+
+  /**
+   * Decorate capacity tab bar from WFM25_TAB_INFO (labels, chip, info icon).
+   */
+  function wfm25InitCapacityTabBar_() {
+    $$('#capacityCanvas .wfm25-tab[data-wfm25-tab]').forEach(function (btn) {
+      wfm25DecorateTabButton_(btn, btn.dataset.wfm25Tab);
+    });
+    wfm25DecorateDemandNavStrip_();
+    wfm25DecorateDemandSectionHead_();
+    wfm25WireTabInfoModal_();
+  }
 
   /**
    * Activate a capacity tab by key.
@@ -8675,7 +9070,15 @@ async function _qaRefreshPsaHours_() {
     const openAttr = openQuarter
       ? ' data-open-quarter="' + escapeHtml_(String(openQuarter)) + '"'
       : '';
+    const isProductive = wfm25UtilMetricIsProductive_();
     if (!hasDraft) {
+      if (isProductive) {
+        return '<td class="wfm25-util-cell wfm25-util-cell--plain' +
+          (extraCls ? ' ' + extraCls : '') + '"' + openAttr + '>' +
+          '<span class="wfm25-util-cell-value">' +
+          (baseUtil != null ? fmtPct(baseUtil) : '\u2014') +
+          '</span></td>';
+      }
       const color = (baseUtil != null)
         ? wfm25UtilBandColor_(baseUtil)
         : { bg: 'var(--business-card)', fg: 'var(--staple)' };
@@ -8980,7 +9383,11 @@ async function _qaRefreshPsaHours_() {
    * @returns {number}
    */
   function wfm25WorkerPanelCurQAttainment_(curQ) {
-    return curQ ? (Number(curQ.bonusAttainment) || 0) : 0;
+    if (!curQ) return 0;
+    if (wfm25UtilMetricIsProductive_()) {
+      return curQ.productiveUtil != null ? (Number(curQ.productiveUtil) || 0) : 0;
+    }
+    return Number(curQ.bonusAttainment) || 0;
   }
 
   /**
@@ -8989,6 +9396,9 @@ async function _qaRefreshPsaHours_() {
    * @returns {{bg:string, fg:string}}
    */
   function wfm25WorkerPanelAttainmentTileColor_(curQ) {
+    if (wfm25UtilMetricIsProductive_()) {
+      return { bg: 'var(--business-card)', fg: 'var(--staple)' };
+    }
     return utilBandColor_(wfm25WorkerPanelCurQAttainment_(curQ));
   }
 
@@ -9032,9 +9442,15 @@ async function _qaRefreshPsaHours_() {
    * @returns {{label: string, color: {bg:string, fg:string}}}
    */
   function wfm25WorkerPanelStatus_(curQ) {
-    const util = curQ && curQ.icpUtil != null ? Number(curQ.icpUtil) : null;
+    const util = wfm25ActiveUtilFromQuarter_(curQ);
     if (util == null || isNaN(util)) {
       return { label: '', color: { bg: 'var(--business-card)', fg: 'var(--staple)' } };
+    }
+    if (wfm25UtilMetricIsProductive_()) {
+      return {
+        label: fmtPct(util),
+        color: { bg: 'var(--business-card)', fg: 'var(--staple)' }
+      };
     }
     return {
       label: wfm25UtilStatusWord_(util),
@@ -9125,7 +9541,16 @@ async function _qaRefreshPsaHours_() {
     const selQ = quarters.find(function (q) { return q.quarterKey === effQ; }) || null;
     const isPast = compareFiscalQuarterKeys_(effQ, curQk) < 0;
 
-    const attainment = selQ ? selQ.bonusAttainment : 0;
+    const attainment = selQ
+      ? (wfm25UtilMetricIsProductive_()
+        ? selQ.productiveUtil
+        : selQ.bonusAttainment)
+      : 0;
+    const attainmentStr = selQ
+      ? (wfm25UtilMetricIsProductive_()
+        ? (selQ.productiveUtil != null ? fmtPct(selQ.productiveUtil) : '\u2014')
+        : fmtPct(attainment))
+      : fmtPct(0);
     const attainColor = wfm25WorkerPanelAttainmentTileColor_(selQ);
     const tracking = selQ ? selQ.trackingHours : 0;
     const trackColor = wfm25TrackingKpiColor_(tracking, selQ);
@@ -9133,6 +9558,10 @@ async function _qaRefreshPsaHours_() {
     const targetHoursLabel = selQ && selQ.targetHours > 0
       ? '<div class="wfm25-worker-kpi-sublabel">Target: ' +
           Math.round(Number(selQ.targetHours) || 0).toLocaleString() + 'h</div>'
+      : '';
+    const expectedEoqLabel = selQ
+      ? '<div class="wfm25-worker-kpi-sublabel">Expected EOQ: ' +
+          Math.round(Number(selQ.productiveHours) || 0).toLocaleString() + 'h</div>'
       : '';
     const thirdTileLabel = isPast ? 'Total Worked' : 'Forecast Remaining';
     const thirdTileValue = isPast
@@ -9162,12 +9591,13 @@ async function _qaRefreshPsaHours_() {
     return '<div class="wfm25-worker-kpi-strip qs-summary-strip" role="group" aria-label="Worker KPIs">' +
       '<div class="wfm25-worker-kpi-tile" style="background:' + attainColor.bg + ';color:' + attainColor.fg + '">' +
         '<div class="wfm25-worker-kpi-label">' + escapeHtml_(attainmentLabel) + '</div>' +
-        '<div class="wfm25-worker-kpi-value">' + fmtPct(attainment) + '</div>' +
+        '<div class="wfm25-worker-kpi-value">' + attainmentStr + '</div>' +
       '</div>' +
       '<div class="wfm25-worker-kpi-tile" style="background:' + trackColor.bg + ';color:' + trackColor.fg + '">' +
         '<div class="wfm25-worker-kpi-label">Tracking to Target</div>' +
         '<div class="wfm25-worker-kpi-value">' + trackSign + Math.round(tracking) + 'h</div>' +
         targetHoursLabel +
+        expectedEoqLabel +
       '</div>' +
       '<div class="wfm25-worker-kpi-tile wfm25-worker-kpi-tile--neutral">' +
         '<div class="wfm25-worker-kpi-label">' + escapeHtml_(thirdTileLabel) + '</div>' +
@@ -9762,7 +10192,7 @@ async function _qaRefreshPsaHours_() {
     const bodyCells = quarters.map(function (q) {
       const qk = q.quarterKey;
       const selectedCls = (qk === effQ) ? ' is-selected' : '';
-      let baseUtil = q.icpUtil;
+      let baseUtil = wfm25ActiveUtilFromQuarter_(q);
       const projUtil = hasDraft
         ? wfm25ProjectionUtil_(projection, 'worker', workerName, qk, true)
         : null;
@@ -9771,10 +10201,17 @@ async function _qaRefreshPsaHours_() {
         if (projBase != null) baseUtil = projBase;
       }
       if (!hasDraft || projUtil == null) {
-        const color = utilBandColor_(wfm25QuarterIcpColorRatio_(q, icpTarget));
-        return '<td class="wfm25-worker-qstrip-cell' + selectedCls + '" data-quarter-key="' +
-          escapeHtml_(qk) + '" role="button" tabindex="0" style="background:' + color.bg +
-          ';color:' + color.fg + '">' + fmtPct(baseUtil) + '</td>';
+        if (wfm25UtilMetricIsProductive_()) {
+          return '<td class="wfm25-worker-qstrip-cell wfm25-util-cell--plain' + selectedCls +
+            '" data-quarter-key="' + escapeHtml_(qk) + '" role="button" tabindex="0">' +
+            (baseUtil != null ? fmtPct(baseUtil) : '\u2014') + '</td>';
+        }
+        const color = wfm25UtilBandColor_(baseUtil);
+        const bandCls = (baseUtil != null) ? wfm25UtilBandClass_(baseUtil) : '';
+        return '<td class="wfm25-worker-qstrip-cell' + (bandCls ? ' ' + bandCls : '') +
+          selectedCls + '" data-quarter-key="' + escapeHtml_(qk) +
+          '" role="button" tabindex="0" style="background:' + color.bg +
+          ';color:' + color.fg + '">' + (baseUtil != null ? fmtPct(baseUtil) : '\u2014') + '</td>';
       }
       const arrow = wfm25DraftArrow_(baseUtil, projUtil);
       return '<td class="wfm25-worker-qstrip-cell has-draft' + selectedCls + '" data-quarter-key="' +
@@ -11016,15 +11453,19 @@ async function _qaRefreshPsaHours_() {
     // Compute per-quarter target-based utilization for each team (WFM.25).
     teamList.forEach(function (team) {
       team.quarters = quarterKeys.map(function (qk, qi) {
-        var sumProd = 0, sumTarget = 0;
+        var sumProd = 0, sumTarget = 0, sumProdDen = 0;
         team.workerRows.forEach(function (w) {
           const q = (w.quarters || [])[qi];
-          if (!q || !(Number(q.targetHours) > 0)) return;
-          sumProd  += Number(q.productiveHours) || 0;
-          sumTarget += Number(q.targetHours) || 0;
+          if (!q) return;
+          sumProd += Number(q.productiveHours) || 0;
+          if (Number(q.targetHours) > 0) sumTarget += Number(q.targetHours) || 0;
+          if (Number(q.productiveDenominatorHours) > 0) {
+            sumProdDen += Number(q.productiveDenominatorHours) || 0;
+          }
         });
         const util = sumTarget > 0 ? (sumProd / sumTarget) : null;
-        return { qk: qk, util: util };
+        const productiveUtil = sumProdDen > 0 ? (sumProd / sumProdDen) : null;
+        return { qk: qk, util: util, productiveUtil: productiveUtil };
       });
 
       // Build worker list for zoom-in-place
@@ -11034,7 +11475,10 @@ async function _qaRefreshPsaHours_() {
           manager:   w.manager || '',
           icpTarget: w.icpTarget || team.icpTarget,
           quarters:  (w.quarters || []).map(function (q) {
-            return { util: (q && q.icpUtil != null) ? q.icpUtil : null };
+            return {
+              util: (q && q.icpUtil != null) ? q.icpUtil : null,
+              productiveUtil: (q && q.productiveUtil != null) ? q.productiveUtil : null
+            };
           })
         };
       });
@@ -11046,34 +11490,59 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * Count allocation bands for workers in current scope at current quarter.
+   * Respects WFM25State.utilMetric: ICP bands vs productive rollup (Spec 7 §B5).
    * @param {Object} data
-   * @returns {{over:number, under:number, ontrack:number, qi:number, scopeUtil:number|null, tightestTeam:Object|null}}
+   * @returns {{over:number, under:number, ontrack:number, qi:number, scopeUtil:number|null, tightestTeam:Object|null, allocBandsDisabled:boolean}}
    */
   function wfm25ComputeAllocationSummary_(data) {
     const quarterKeys = (data && data.quarterKeys) || [];
     const qi = wfm25CurQuarterIndex_(quarterKeys);
+    const isProductive = wfm25UtilMetricIsProductive_();
     const thresholds = wfm25AllocThresholds_();
     const scopeWorkers = wfm25ScopeWorkers_(data);
     const counts = { over: 0, under: 0, ontrack: 0 };
     let sumProd = 0;
     let sumTarget = 0;
+    let sumProdDen = 0;
 
-    scopeWorkers.forEach(function (w) {
-      const q = (w.quarters || [])[qi];
-      if (!q) return;
-      const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
-      if (band === 'over') counts.over++;
-      else if (band === 'under') counts.under++;
-      if (q.icpUtil != null && wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--ontarget') {
-        counts.ontrack++;
-      }
-      if (Number(q.targetHours) > 0) {
+    if (!isProductive) {
+      scopeWorkers.forEach(function (w) {
+        const q = (w.quarters || [])[qi];
+        if (!q) return;
+        const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
+        if (band === 'over') counts.over++;
+        else if (band === 'under') counts.under++;
+        if (q.icpUtil != null && wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--green') {
+          counts.ontrack++;
+        }
+        if (Number(q.targetHours) > 0) {
+          sumProd += Number(q.productiveHours) || 0;
+          sumTarget += Number(q.targetHours) || 0;
+        }
+      });
+    } else {
+      scopeWorkers.forEach(function (w) {
+        const q = (w.quarters || [])[qi];
+        if (!q) return;
         sumProd += Number(q.productiveHours) || 0;
-        sumTarget += Number(q.targetHours) || 0;
-      }
-    });
+        if (Number(q.productiveDenominatorHours) > 0) {
+          sumProdDen += Number(q.productiveDenominatorHours) || 0;
+        }
+      });
+    }
 
-    const scopeUtil = sumTarget > 0 ? sumProd / sumTarget : null;
+    let scopeUtil = null;
+    if (isProductive) {
+      if (!WFM25State.expandedTeam) {
+        const orgQ = ((data && data.teamSummary) || [])[qi];
+        scopeUtil = (orgQ && orgQ.productiveUtil != null) ? orgQ.productiveUtil : null;
+      } else if (sumProdDen > 0) {
+        scopeUtil = sumProd / sumProdDen;
+      }
+    } else {
+      scopeUtil = sumTarget > 0 ? sumProd / sumTarget : null;
+    }
+
     let tightestTeam = null;
     let tightestRatio = -Infinity;
 
@@ -11081,11 +11550,20 @@ async function _qaRefreshPsaHours_() {
       const agg = wfm25AggregateByTeam_(data);
       agg.teams.forEach(function (team) {
         const tq = team.quarters[qi];
-        if (!tq || tq.util == null) return;
-        const ratio = team.icpTarget > 0 ? tq.util / team.icpTarget : 0;
-        if (ratio > tightestRatio) {
-          tightestRatio = ratio;
-          tightestTeam = { label: team.label, util: tq.util };
+        if (!tq) return;
+        if (isProductive) {
+          if (tq.productiveUtil == null) return;
+          if (tq.productiveUtil > tightestRatio) {
+            tightestRatio = tq.productiveUtil;
+            tightestTeam = { label: team.label, util: tq.productiveUtil };
+          }
+        } else {
+          if (tq.util == null) return;
+          const ratio = team.icpTarget > 0 ? tq.util / team.icpTarget : 0;
+          if (ratio > tightestRatio) {
+            tightestRatio = ratio;
+            tightestTeam = { label: team.label, util: tq.util };
+          }
         }
       });
     }
@@ -11096,7 +11574,8 @@ async function _qaRefreshPsaHours_() {
       ontrack: counts.ontrack,
       qi: qi,
       scopeUtil: scopeUtil,
-      tightestTeam: tightestTeam
+      tightestTeam: tightestTeam,
+      allocBandsDisabled: isProductive
     };
   }
 
@@ -11108,7 +11587,7 @@ async function _qaRefreshPsaHours_() {
     const chip = document.getElementById('wfm25UtilFilterChip');
     if (!wrap || !chip) return;
     const filter = WFM25State.utilAllocFilter;
-    if (!filter || !WFM25State.scorecardData) {
+    if (!filter || !WFM25State.scorecardData || wfm25UtilMetricIsProductive_()) {
       wrap.hidden = true;
       return;
     }
@@ -11140,32 +11619,45 @@ async function _qaRefreshPsaHours_() {
 
     const teamScope = !!WFM25State.expandedTeam;
     const summary = wfm25ComputeAllocationSummary_(data);
-    const activeFilter = WFM25State.utilAllocFilter;
+    const activeFilter = summary.allocBandsDisabled ? null : WFM25State.utilAllocFilter;
+    const bandTooltip = 'Allocation bands are not yet defined for Productive Utilization.';
 
     const overPressed = activeFilter === 'over';
     const underPressed = activeFilter === 'under';
     const ontrackPressed = activeFilter === 'ontrack';
 
-    const overTile =
-      '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--over"' +
-        ' data-wfm25-alloc-filter="over" aria-pressed="' + (overPressed ? 'true' : 'false') + '">' +
-        '<div class="wfm25-util-banner-label">Over-allocated</div>' +
-        '<div class="wfm25-util-banner-value">' + summary.over + '</div>' +
-      '</button>';
+    const overTile = summary.allocBandsDisabled
+      ? '<div class="wfm25-util-banner-tile wfm25-util-banner-tile--muted wfm25-util-banner-tile--over"' +
+          ' title="' + escapeHtml_(bandTooltip) + '" aria-disabled="true">' +
+          '<div class="wfm25-util-banner-label">Over-allocated</div>' +
+          '<div class="wfm25-util-banner-value">\u2014</div></div>'
+      : '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--over"' +
+          ' data-wfm25-alloc-filter="over" aria-pressed="' + (overPressed ? 'true' : 'false') + '">' +
+          '<div class="wfm25-util-banner-label">Over-allocated</div>' +
+          '<div class="wfm25-util-banner-value">' + summary.over + '</div>' +
+        '</button>';
 
-    const underTile =
-      '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--under"' +
-        ' data-wfm25-alloc-filter="under" aria-pressed="' + (underPressed ? 'true' : 'false') + '">' +
-        '<div class="wfm25-util-banner-label">Under-allocated</div>' +
-        '<div class="wfm25-util-banner-value">' + summary.under + '</div>' +
-      '</button>';
+    const underTile = summary.allocBandsDisabled
+      ? '<div class="wfm25-util-banner-tile wfm25-util-banner-tile--muted wfm25-util-banner-tile--under"' +
+          ' title="' + escapeHtml_(bandTooltip) + '" aria-disabled="true">' +
+          '<div class="wfm25-util-banner-label">Under-allocated</div>' +
+          '<div class="wfm25-util-banner-value">\u2014</div></div>'
+      : '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--under"' +
+          ' data-wfm25-alloc-filter="under" aria-pressed="' + (underPressed ? 'true' : 'false') + '">' +
+          '<div class="wfm25-util-banner-label">Under-allocated</div>' +
+          '<div class="wfm25-util-banner-value">' + summary.under + '</div>' +
+        '</button>';
 
-    const onTrackTile =
-      '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--ontarget"' +
-        ' data-wfm25-alloc-filter="ontrack" aria-pressed="' + (ontrackPressed ? 'true' : 'false') + '">' +
-        '<div class="wfm25-util-banner-label">On Track</div>' +
-        '<div class="wfm25-util-banner-value">' + summary.ontrack + '</div>' +
-      '</button>';
+    const onTrackTile = summary.allocBandsDisabled
+      ? '<div class="wfm25-util-banner-tile wfm25-util-banner-tile--muted wfm25-util-banner-tile--ontarget"' +
+          ' title="' + escapeHtml_(bandTooltip) + '" aria-disabled="true">' +
+          '<div class="wfm25-util-banner-label">On Track</div>' +
+          '<div class="wfm25-util-banner-value">\u2014</div></div>'
+      : '<button type="button" class="wfm25-util-banner-tile wfm25-util-banner-tile--interactive wfm25-util-banner-tile--ontarget"' +
+          ' data-wfm25-alloc-filter="ontrack" aria-pressed="' + (ontrackPressed ? 'true' : 'false') + '">' +
+          '<div class="wfm25-util-banner-label">On Track</div>' +
+          '<div class="wfm25-util-banner-value">' + summary.ontrack + '</div>' +
+        '</button>';
 
     const utilLabel = teamScope ? 'Team Utilization' : 'SLG Utilization';
     const utilTile =
@@ -11236,7 +11728,7 @@ async function _qaRefreshPsaHours_() {
     const qKeys = agg.quarterKeys;
     const curQk = fiscalQuarterKey_(new Date());
     const allocQi = wfm25CurQuarterIndex_(qKeys);
-    const hasAllocFilter = !!WFM25State.utilAllocFilter;
+    const hasAllocFilter = !!WFM25State.utilAllocFilter && !wfm25UtilMetricIsProductive_();
 
     // ── Header ──
     $$('.wfm25-qth', headerRow).forEach(function (el) { el.remove(); });
@@ -11268,7 +11760,7 @@ async function _qaRefreshPsaHours_() {
       // Team aggregate cells
       const teamQCells = team.quarters.map(function (q, qi) {
         const qk = qKeys[qi];
-        let baseUtil = q.util;
+        let baseUtil = wfm25ActiveUtilFromAggCell_(q);
         const projUtil = teamGetsDraft
           ? wfm25ProjectionUtil_(projection, 'orgTeam', team.label, qk, true)
           : null;
@@ -11298,7 +11790,7 @@ async function _qaRefreshPsaHours_() {
           const workerGetsDraft = hasDraft && w.name === selectedWorker;
           const wQCells = w.quarters.map(function (q, qi) {
             const qk = qKeys[qi];
-            let baseUtil = q.util;
+            let baseUtil = wfm25ActiveUtilFromAggCell_(q);
             const projUtil = workerGetsDraft
               ? wfm25ProjectionUtil_(projection, 'worker', w.name, qk, true)
               : null;
@@ -11326,7 +11818,7 @@ async function _qaRefreshPsaHours_() {
     const orgGetsDraft = hasDraft && selectedWorker;
     const orgQCells = qKeys.map(function (qk, qi) {
       const tq = teamSummary[qi];
-      let baseUtil = tq ? tq.icpUtil : null;
+      let baseUtil = tq ? wfm25ActiveUtilFromQuarter_(tq) : null;
       let projUtil = null;
       if (orgGetsDraft) {
         const raw = wfm25ProjectionQuarter_(projection, 'org', null, qk, true);
@@ -11548,7 +12040,7 @@ async function _qaRefreshPsaHours_() {
    */
   function wfm25ClassifyAllocation_(ratioToTarget, thresholds) {
     const r = Number(ratioToTarget) || 0;
-    if (r >= thresholds.over) return 'over';
+    if (r > 1.0) return 'over';
     if (r < thresholds.under) return 'under';
     return 'ontrack';
   }
@@ -11578,7 +12070,7 @@ async function _qaRefreshPsaHours_() {
     if (!q) return false;
     if (filter === 'ontrack') {
       return q.icpUtil != null &&
-        wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--ontarget';
+        wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--green';
     }
     const thresholds = wfm25AllocThresholds_();
     const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
@@ -11715,7 +12207,7 @@ async function _qaRefreshPsaHours_() {
 
   /**
    * Config-driven utilization band edges (% of target). Delegates to shared wfm25UtilBands_().
-   * @returns {{coldMax:number, ontargetMax:number, warmMax:number}}
+   * @returns {{darkred:number, red:number, pink:number, green:number, lightblue:number, blue:number}}
    */
   function wfm25UtilBandEdges_() {
     return wfm25UtilBands_();
@@ -11748,10 +12240,13 @@ async function _qaRefreshPsaHours_() {
     const u = Number(util);
     if (isNaN(u)) return '';
     const e = wfm25UtilBandEdges_();
-    if (u < e.coldMax) return 'wfm25-util-band--cold';
-    if (u < e.ontargetMax) return 'wfm25-util-band--ontarget';
-    if (u < e.warmMax) return 'wfm25-util-band--warm';
-    return 'wfm25-util-band--fire';
+    if (u >= e.darkred) return 'wfm25-util-band--darkred';
+    if (u >= e.red) return 'wfm25-util-band--red';
+    if (u >= e.pink) return 'wfm25-util-band--pink';
+    if (u >= e.green) return 'wfm25-util-band--green';
+    if (u >= e.lightblue) return 'wfm25-util-band--lightblue';
+    if (u >= e.blue) return 'wfm25-util-band--blue';
+    return 'wfm25-util-band--darkblue';
   }
 
   /**
@@ -11780,10 +12275,11 @@ async function _qaRefreshPsaHours_() {
     const u = Number(util);
     if (isNaN(u)) return '';
     const e = wfm25UtilBandEdges_();
-    if (u < e.coldMax) return 'Under';
-    if (u < e.ontargetMax) return 'On target';
-    if (u < e.warmMax) return 'Over';
-    return 'On fire';
+    if (u >= e.darkred) return 'On fire';
+    if (u >= e.pink) return 'Over';
+    if (u >= e.green) return 'On target';
+    if (u >= e.lightblue) return 'Low';
+    return 'Under';
   }
 
   /**
@@ -11816,10 +12312,10 @@ async function _qaRefreshPsaHours_() {
     const e = wfm25UtilBandEdges_();
     let kind = null;
     let label = '';
-    if (u < e.coldMax) {
+    if (u < e.blue) {
       kind = cfg.cold;
       label = 'Under target \u2014 cold';
-    } else if (u > e.warmMax) {
+    } else if (u >= e.darkred) {
       kind = cfg.fire;
       label = 'Well over target \u2014 on fire';
     }
@@ -12466,6 +12962,288 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Build projected-util matrix model from api_getSpecialtyProjectedUtil (prev | cur | next).
+   * @param {Object|null} projectedData
+   * @param {Object<string,string>} teamMap
+   * @returns {Object|null}
+   */
+  function wfm25BuildSpecialtyProjectedUtilMerged_(projectedData, teamMap) {
+    const projected = projectedData || {};
+    const quarterKeys = projected.quarters || [];
+    if (!quarterKeys.length || !(projected.rows || []).length) return null;
+
+    const curQk = projected.currentQuarterKey || quarterKeys[1] || quarterKeys[0];
+    const rows = (projected.rows || []).map(function (row) {
+      const utilByQuarter = row.utilByQuarter || {};
+      const numByQuarter = row.numByQuarter || {};
+      const denByQuarter = row.denByQuarter || {};
+      let sortTotal = 0;
+      quarterKeys.forEach(function (qk) {
+        sortTotal += Number(numByQuarter[qk]) || 0;
+      });
+      return {
+        specialtyPractice: String(row.specialtyPractice || 'Unclassified'),
+        utilByQuarter: utilByQuarter,
+        numByQuarter: numByQuarter,
+        denByQuarter: denByQuarter,
+        totalHours: sortTotal
+      };
+    });
+    rows.sort(function (a, b) {
+      if (a.specialtyPractice === 'Unclassified' && b.specialtyPractice !== 'Unclassified') return 1;
+      if (b.specialtyPractice === 'Unclassified' && a.specialtyPractice !== 'Unclassified') return -1;
+      return b.totalHours - a.totalHours;
+    });
+
+    const grandNumByQuarter = {};
+    const grandDenByQuarter = {};
+    const grandUtilByQuarter = {};
+    quarterKeys.forEach(function (qk) {
+      grandNumByQuarter[qk] = 0;
+      grandDenByQuarter[qk] = 0;
+    });
+    rows.forEach(function (row) {
+      quarterKeys.forEach(function (qk) {
+        grandNumByQuarter[qk] += Number(row.numByQuarter[qk]) || 0;
+        grandDenByQuarter[qk] += Number(row.denByQuarter[qk]) || 0;
+      });
+    });
+    quarterKeys.forEach(function (qk) {
+      const den = Number(grandDenByQuarter[qk]) || 0;
+      const num = Number(grandNumByQuarter[qk]) || 0;
+      grandUtilByQuarter[qk] = den > 0 ? num / den : null;
+    });
+
+    return {
+      colKeys: quarterKeys,
+      curQk: curQk,
+      rows: rows,
+      grandNumByQuarter: grandNumByQuarter,
+      grandDenByQuarter: grandDenByQuarter,
+      grandUtilByQuarter: grandUtilByQuarter,
+      grandTotal: rows.length,
+      teamMap: teamMap || {}
+    };
+  }
+
+  /**
+   * Group projected-util rows under leadership teams with rolled-up num/den per quarter.
+   * @param {Array} rows
+   * @param {string[]} quarterKeys
+   * @param {Object<string,string>} teamMap
+   * @returns {Array<{label:string, rows:Array, utilByQuarter:Object, numByQuarter:Object, denByQuarter:Object, totalHours:number}>}
+   */
+  function wfm25GroupSpecialtyProjectedUtilByTeam_(rows, quarterKeys, teamMap) {
+    const groups = {};
+    (rows || []).forEach(function (row) {
+      const team = wfm25ResolveSpecialtyTeam_(row.specialtyPractice, teamMap);
+      if (!groups[team]) {
+        groups[team] = {
+          label: team,
+          rows: [],
+          numByQuarter: {},
+          denByQuarter: {},
+          utilByQuarter: {},
+          totalHours: 0
+        };
+        quarterKeys.forEach(function (qk) {
+          groups[team].numByQuarter[qk] = 0;
+          groups[team].denByQuarter[qk] = 0;
+        });
+      }
+      groups[team].rows.push(row);
+      groups[team].totalHours += Number(row.totalHours) || 0;
+      quarterKeys.forEach(function (qk) {
+        groups[team].numByQuarter[qk] += Number(row.numByQuarter[qk]) || 0;
+        groups[team].denByQuarter[qk] += Number(row.denByQuarter[qk]) || 0;
+      });
+    });
+
+    Object.keys(groups).forEach(function (label) {
+      const g = groups[label];
+      quarterKeys.forEach(function (qk) {
+        const den = Number(g.denByQuarter[qk]) || 0;
+        const num = Number(g.numByQuarter[qk]) || 0;
+        g.utilByQuarter[qk] = den > 0 ? num / den : null;
+      });
+    });
+
+    const ordered = [];
+    WFM25_SPECIALTY_TEAM_ORDER_.forEach(function (label) {
+      if (groups[label] && groups[label].rows.length) {
+        ordered.push(groups[label]);
+        delete groups[label];
+      }
+    });
+    Object.keys(groups).sort().forEach(function (label) {
+      ordered.push(groups[label]);
+    });
+    return ordered;
+  }
+
+  /**
+   * Render one projected-util matrix cell (% primary, A+F / target sub-line).
+   * @param {Object} opts
+   * @returns {string}
+   */
+  function wfm25SpecialtyProjectedUtilCellHtml_(opts) {
+    const util = opts.util;
+    const num = Number(opts.num) || 0;
+    const den = Number(opts.den) || 0;
+
+    let pctHtml = '\u2014';
+    let bandCls = '';
+    let colorStyle = '';
+    if (util != null) {
+      const color = wfm25UtilBandColor_(util);
+      bandCls = wfm25UtilBandClass_(util);
+      pctHtml = fmtPct(util);
+      // Apply bg + fg together (util cells do both). Fg-only made dark-blue/red/blue
+      // bands invisible (white text on white matrix cell) — FIN was all <85%.
+      colorStyle = ' style="background:' + color.bg + ';color:' + color.fg + '"';
+    }
+
+    let fracHtml = '';
+    if (den > 0) {
+      fracHtml =
+        '<span class="wfm25-specialty-demand-proj-frac muted">' +
+          wfm25FormatDemandHours_(num) + ' / ' + wfm25FormatDemandHours_(den) +
+        '</span>';
+    }
+
+    return '<td class="wfm25-specialty-demand-cell wfm25-specialty-demand-proj-cell">' +
+      '<div class="wfm25-specialty-demand-cell-inner wfm25-specialty-demand-proj-inner">' +
+        '<span class="wfm25-specialty-demand-proj-pct' +
+          (bandCls ? ' ' + bandCls : '') + '"' + colorStyle + '>' +
+          pctHtml +
+        '</span>' +
+        fracHtml +
+      '</div></td>';
+  }
+
+  /**
+   * Build prev | cur | next header cells for projected-util matrix.
+   * @param {HTMLElement} headerRow
+   * @param {Object} merged
+   */
+  function wfm25SpecialtyProjectedUtilHeaderCells_(headerRow, merged) {
+    if (!headerRow || !merged) return;
+    $$('.wfm25-specialty-demand-qth', headerRow).forEach(function (el) { el.remove(); });
+
+    const colKeys = merged.colKeys || [];
+    const curQk = merged.curQk;
+
+    colKeys.forEach(function (qk, i) {
+      const th = document.createElement('th');
+      let label = qk;
+      const cmp = compareFiscalQuarterKeys_(qk, curQk);
+      if (cmp < 0) label = 'Previous (' + qk + ')';
+      else if (cmp === 0) label = 'Current (' + qk + ') \u25c6';
+      else label = 'Next (' + qk + ')';
+
+      let cls = 'wfm25-specialty-demand-qth';
+      if (cmp === 0) cls += ' wfm25-cur-qth';
+      th.className = cls;
+      th.scope = 'col';
+      th.innerHTML =
+        '<div class="wfm25-specialty-demand-th-inner">' +
+          '<span class="wfm25-specialty-demand-th-bar-spacer" aria-hidden="true"></span>' +
+          '<span class="wfm25-specialty-demand-th-label">' + escapeHtml_(label) + '</span>' +
+        '</div>';
+      headerRow.appendChild(th);
+    });
+  }
+
+  /**
+   * Render team-grouped projected-util matrix body (prev | cur | next).
+   * @param {Object} opts
+   * @returns {string}
+   */
+  function wfm25SpecialtyProjectedUtilBodyHtml_(opts) {
+    const colKeys = opts.colKeys || [];
+    const rows = opts.rows || [];
+    const merged = opts.merged || {};
+    const teamMap = opts.teamMap || {};
+    const collapsedTeams = opts.collapsedTeams || new Set();
+    const teamGroups = wfm25GroupSpecialtyProjectedUtilByTeam_(rows, colKeys, teamMap);
+    const html = [];
+
+    const totalCells = colKeys.map(function (qk) {
+      return wfm25SpecialtyProjectedUtilCellHtml_({
+        util: merged.grandUtilByQuarter[qk],
+        num: merged.grandNumByQuarter[qk],
+        den: merged.grandDenByQuarter[qk]
+      });
+    }).join('');
+    html.push(
+      '<tr class="wfm25-specialty-demand-total-row">' +
+        '<td><strong>Total projected util</strong></td>' + totalCells + '</tr>'
+    );
+
+    teamGroups.forEach(function (group) {
+      const isCollapsed = collapsedTeams.has(group.label);
+      const isOther = group.label === 'Other / Unmapped';
+      const teamCls = 'wfm25-specialty-demand-team-row' +
+        (isOther ? ' wfm25-specialty-demand-team-row--other' : '');
+      const teamColor = wfm25TeamColor_(group.label);
+      const teamCells = colKeys.map(function (qk) {
+        return wfm25SpecialtyProjectedUtilCellHtml_({
+          util: group.utilByQuarter[qk],
+          num: group.numByQuarter[qk],
+          den: group.denByQuarter[qk]
+        });
+      }).join('');
+
+      const infoBtn = isOther ? wfm25SpecialtyDemandOtherInfoBtn_() : '';
+      html.push(
+        '<tr class="' + teamCls + '">' +
+          '<td class="wfm25-specialty-demand-team-label">' +
+            '<div class="wfm25-specialty-demand-team-label-inner">' +
+              '<button type="button" class="wfm25-specialty-demand-team-btn"' +
+                ' data-wfm25-sd-team="' + escapeHtml_(group.label) + '"' +
+                ' aria-expanded="' + (!isCollapsed) + '"' +
+                ' aria-label="Toggle ' + escapeHtml_(group.label) + ' specialties">' +
+                '<span class="wfm25-team-swatch" style="background:' + teamColor + '"></span>' +
+                '<span class="wfm25-specialty-demand-team-chev" aria-hidden="true">' +
+                  (isCollapsed ? '\u25b6' : '\u25bc') + '</span>' +
+                '<span class="wfm25-specialty-demand-team-name">' +
+                  escapeHtml_(group.label) + '</span>' +
+              '</button>' +
+              infoBtn +
+            '</div>' +
+          '</td>' +
+          teamCells +
+        '</tr>'
+      );
+
+      if (!isCollapsed) {
+        group.rows.forEach(function (row) {
+          const sp = String(row.specialtyPractice || 'Unclassified');
+          const isUnclassified = sp === 'Unclassified' || sp === 'Student';
+          const rowCls = 'wfm25-specialty-demand-row' +
+            (isUnclassified ? ' wfm25-specialty-demand-row--unclassified' : '');
+          const cells = colKeys.map(function (qk) {
+            return wfm25SpecialtyProjectedUtilCellHtml_({
+              util: row.utilByQuarter[qk],
+              num: row.numByQuarter[qk],
+              den: row.denByQuarter[qk]
+            });
+          }).join('');
+
+          html.push(
+            '<tr class="' + rowCls + '">' +
+              '<td class="wfm25-specialty-demand-label">' + escapeHtml_(sp) + '</td>' +
+              cells +
+            '</tr>'
+          );
+        });
+      }
+    });
+
+    return html.join('');
+  }
+
+  /**
    * Format demand hours for specialty matrix (tabular numerals, rounded).
    * @param {number} hrs
    * @returns {string}
@@ -13028,9 +13806,53 @@ async function _qaRefreshPsaHours_() {
     const headerRow = document.getElementById('wfm25SpecialtyDemandHeaderRow');
     const body = document.getElementById('wfm25SpecialtyDemandBody');
     const caption = document.getElementById('wfm25SpecialtyDemandCaption');
+    const unit = WFM25State.specialtyDemandUnit || 'hours';
 
     const forecast = forecastData || WFM25State.specialtyDemandData;
     const actuals = actualsData || WFM25State.specialtyActualsData;
+
+    wfm25EnsureSpecialtyDemandScopeCaption_();
+    wfm25SyncSpecialtyDemandUnitToggle_();
+
+    if (unit === 'projected-util') {
+      const teamMap = (forecast && forecast.specialtyTeamMap) ||
+        (actuals && actuals.specialtyTeamMap) || {};
+      const projectedMerged = wfm25BuildSpecialtyProjectedUtilMerged_(
+        WFM25State.specialtyProjectedUtilData, teamMap);
+
+      if (!projectedMerged || !projectedMerged.rows.length) {
+        if (empty) {
+          empty.hidden = false;
+          empty.textContent = WFM25State.specialtyProjectedUtilData === null
+            ? 'Failed to load projected utilization data.'
+            : 'No projected utilization data available yet.';
+        }
+        if (layout) layout.hidden = true;
+        return;
+      }
+
+      if (empty) empty.hidden = true;
+      if (layout) layout.hidden = false;
+
+      const demandMerged = wfm25BuildSpecialtyDemandMerged_(forecast, actuals);
+      if (demandMerged) renderWFM25SpecialtyDemandBanner_(demandMerged);
+
+      if (headerRow && body) {
+        wfm25SpecialtyProjectedUtilHeaderCells_(headerRow, projectedMerged);
+        body.innerHTML = wfm25SpecialtyProjectedUtilBodyHtml_({
+          colKeys: projectedMerged.colKeys,
+          rows: projectedMerged.rows,
+          merged: projectedMerged,
+          teamMap: projectedMerged.teamMap,
+          collapsedTeams: WFM25State.specialtyDemandCollapsedTeams
+        });
+        wfm25WireSpecialtyDemandEvents_(body);
+      }
+
+      if (caption) caption.hidden = true;
+      return;
+    }
+
     const merged = wfm25BuildSpecialtyDemandMerged_(forecast, actuals);
 
     if (!merged || !merged.rows.length || !merged.grandTotal) {
@@ -13042,8 +13864,6 @@ async function _qaRefreshPsaHours_() {
     if (empty) empty.hidden = true;
     if (layout) layout.hidden = false;
 
-    wfm25EnsureSpecialtyDemandScopeCaption_();
-    wfm25SyncSpecialtyDemandUnitToggle_();
     renderWFM25SpecialtyDemandBanner_(merged);
 
     if (headerRow && body) {
@@ -13055,7 +13875,7 @@ async function _qaRefreshPsaHours_() {
         grandByCol: merged.grandByCol,
         teamMap: merged.teamMap,
         collapsedTeams: WFM25State.specialtyDemandCollapsedTeams,
-        unit: WFM25State.specialtyDemandUnit || 'hours',
+        unit: unit,
         histQKeys: merged.histQKeys,
         histCount: merged.histCount
       });
@@ -13078,7 +13898,11 @@ async function _qaRefreshPsaHours_() {
     if (layout) layout.hidden = true;
     if (loading) loading.hidden = false;
 
-    if (WFM25State.specialtyDemandData && WFM25State.specialtyActualsData) {
+    const hasDemand = WFM25State.specialtyDemandData && WFM25State.specialtyActualsData;
+    const hasProjected = WFM25State.specialtyProjectedUtilData !== null &&
+      WFM25State.specialtyProjectedUtilData !== undefined;
+
+    if (hasDemand && hasProjected) {
       if (reqId !== WFM25State.specialtyDemandReqId) return;
       if (loading) loading.hidden = true;
       renderWFM25SpecialtyDemand_();
@@ -13093,11 +13917,18 @@ async function _qaRefreshPsaHours_() {
           : call('api_getSpecialtyDemand', params),
         WFM25State.specialtyActualsData
           ? Promise.resolve(WFM25State.specialtyActualsData)
-          : call('api_getSpecialtyActuals', params)
+          : call('api_getSpecialtyActuals', params),
+        hasProjected
+          ? Promise.resolve(WFM25State.specialtyProjectedUtilData)
+          : call('api_getSpecialtyProjectedUtil', params).catch(function (err) {
+              console.warn('[WFM.25] api_getSpecialtyProjectedUtil failed:', err);
+              return null;
+            })
       ]);
       if (reqId !== WFM25State.specialtyDemandReqId) return;
       WFM25State.specialtyDemandData = results[0];
       WFM25State.specialtyActualsData = results[1];
+      WFM25State.specialtyProjectedUtilData = results[2];
       if (loading) loading.hidden = true;
       renderWFM25SpecialtyDemand_();
     } catch (err) {
@@ -13809,12 +14640,10 @@ async function _qaRefreshPsaHours_() {
    * @param {'capacity'|'staffing'|'admin'} view
    */
   function wfm25ShowView_(view) {
-    const capacity = document.getElementById('capacityCanvas');
-    const capBody = document.getElementById('wfm25CapacityBody');
+    const capView = document.getElementById('wfm25CapacityView');
     const staffing = document.getElementById('staffingCanvas');
     const admin = document.getElementById('adminCanvas');
-    if (capacity) capacity.hidden = (view !== 'capacity');
-    if (capBody) capBody.hidden = (view !== 'capacity');
+    if (capView) capView.hidden = (view !== 'capacity');
     if (staffing) staffing.hidden = (view !== 'staffing');
     if (admin) admin.hidden = (view !== 'admin');
     WFM25State.activeView = view;
@@ -15567,7 +16396,11 @@ async function _qaRefreshPsaHours_() {
     // ── Landing breadcrumb (role-aware) ──
     WFM25State.landingBreadcrumb = 'SLG Org';
     WFM25State.scopeMode = 'all';
+    WFM25State.utilMetric = 'icp';
+    WFM25State.includeOnLeave = includeOnLeaveEffectiveClient_(ref);
     wfm25SyncScopeToggleUi_();
+    wfm25SyncOnLeaveToggleUi_();
+    wfm25SyncUtilMetricToggleUi_();
     wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
 
     // ── Left icon strip: Capacity ↔ Staffing ↔ Admin ──
@@ -15590,8 +16423,10 @@ async function _qaRefreshPsaHours_() {
     }
 
     // ── Tab switching ──
-    $$('.wfm25-tab').forEach(function (btn) {
-      btn.addEventListener('click', function () {
+    wfm25InitCapacityTabBar_();
+    $$('#capacityCanvas .wfm25-tab[data-wfm25-tab]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        if (e.target.closest('.wfm25-tab-info-btn')) return;
         wfm25ActivateTab_(btn.dataset.wfm25Tab);
       });
     });
@@ -15600,6 +16435,20 @@ async function _qaRefreshPsaHours_() {
     $$('[data-wfm25-scope]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         wfm25SetScopeMode_(btn.dataset.wfm25Scope);
+      });
+    });
+
+    // ── On-Leave toggle (Exclude / Include) ──
+    $$('[data-wfm25-onleave]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25SetOnLeaveMode_(btn.dataset.wfm25Onleave === 'include');
+      });
+    });
+
+    // ── Utilization metric toggle (ICP / Productive) — client re-paint only ──
+    $$('[data-wfm25-util-metric]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wfm25SetUtilMetric_(btn.dataset.wfm25UtilMetric);
       });
     });
 

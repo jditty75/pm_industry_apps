@@ -387,6 +387,16 @@ var CoreConfig = (function () {
     if (!cfg.report.distribution.logSheet)
       cfg.report.distribution.logSheet = 'ReportDistributionLog';
 
+    // V2 monthly report product scope (no-op unless enabled in app config).
+    cfg.report.productScope = cfg.report.productScope || {};
+    cfg.report.productScope.enabled = cfg.report.productScope.enabled === true;
+    if (!Array.isArray(cfg.report.productScope.includeAreas))
+      cfg.report.productScope.includeAreas = [];
+    if (!Array.isArray(cfg.report.productScope.nameTokens))
+      cfg.report.productScope.nameTokens = [];
+    if (typeof cfg.report.productScope.aliases !== 'object' || cfg.report.productScope.aliases === null)
+      cfg.report.productScope.aliases = {};
+
     // -------------------------------------------------------------------------
     // Data freshness (N4)
     // -------------------------------------------------------------------------
@@ -615,6 +625,8 @@ var CoreConfig = (function () {
       cfg.ui.productFilter.aliases = {};
     if (typeof cfg.ui.productFilter.nameTokens !== 'object' || cfg.ui.productFilter.nameTokens === null)
       cfg.ui.productFilter.nameTokens = {};
+    if (cfg.ui.productFilter.hidden === undefined)
+      cfg.ui.productFilter.hidden = false;
 
     // -------------------------------------------------------------------------
     // Trends (T1)

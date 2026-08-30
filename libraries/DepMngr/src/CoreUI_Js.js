@@ -273,7 +273,7 @@ function _CoreUI_Js_getJsBundle() {
   '    }',
   '  }',
   '',
-  '  if (APP_UI_CONFIG.productFilter && APP_UI_CONFIG.productFilter.enabled) {',
+  '  if (APP_UI_CONFIG.productFilter && APP_UI_CONFIG.productFilter.enabled && !APP_UI_CONFIG.productFilter.hidden) {',
   '    var productInner = document.getElementById(\'header-product-control\');',
   '    if (productInner) {',
   '      renderProductFilterDropdown(productInner);',

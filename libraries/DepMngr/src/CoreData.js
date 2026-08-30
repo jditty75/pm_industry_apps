@@ -4484,6 +4484,88 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * V2 monthly report product scope: union filter across configured areas/tokens.
+   * No-op when cfg.report.productScope.enabled !== true or criteria are empty.
+   * Fail-open when product-function read fails (name-token / row-area matching still applies).
+   *
+   * @param {Array<Object>} rows
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   */
+  function filterRowsByReportProductScope_(rows, cfg) {
+    var scope = (cfg && cfg.report && cfg.report.productScope) || {};
+    if (scope.enabled !== true) return rows;
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+
+    var includeAreas = Array.isArray(scope.includeAreas) ? scope.includeAreas : [];
+    var nameTokens = Array.isArray(scope.nameTokens) ? scope.nameTokens : [];
+    var aliases = scope.aliases || {};
+    if (!includeAreas.length && !nameTokens.length &&
+        (!aliases || !Object.keys(aliases).length)) {
+      return rows;
+    }
+
+    var areaSet = {};
+    includeAreas.forEach(function (area) {
+      var normalized = String(area || '').trim().toLowerCase();
+      if (normalized) areaSet[normalized] = true;
+    });
+    Object.keys(aliases).forEach(function (key) {
+      var nk = String(key || '').trim().toLowerCase();
+      if (nk) areaSet[nk] = true;
+      var nv = String(aliases[key] || '').trim().toLowerCase();
+      if (nv) areaSet[nv] = true;
+    });
+
+    var tokensLower = nameTokens.map(function (token) {
+      return String(token || '').trim().toLowerCase();
+    }).filter(function (t) { return !!t; });
+
+    var allowedByPf = {};
+    try {
+      var pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
+      pfRows.forEach(function (pf) {
+        var pa = String(pf.productArea || '').trim().toLowerCase();
+        if (pa && areaSet[pa] && pf.deploymentFk) {
+          allowedByPf[_canonicalId_(pf.deploymentFk)] = true;
+        }
+      });
+    } catch (e) {
+      Logger.log('filterRowsByReportProductScope_: PF read failed: ' + e);
+    }
+
+    function matchesNameToken_(row) {
+      if (!tokensLower.length) return false;
+      var depName = String(row.deploymentName || row.name || '').toLowerCase();
+      if (!depName) return false;
+      for (var ti = 0; ti < tokensLower.length; ti++) {
+        if (depName.indexOf(tokensLower[ti]) >= 0) return true;
+      }
+      return false;
+    }
+
+    function matchesAreaOnRow_(row) {
+      if (!Object.keys(areaSet).length) return false;
+      var rowArea = String(row.productArea || '').trim().toLowerCase();
+      if (rowArea && areaSet[rowArea]) return true;
+      var rowAreas = row.productAreas;
+      if (Array.isArray(rowAreas)) {
+        for (var ai = 0; ai < rowAreas.length; ai++) {
+          var a = String(rowAreas[ai] || '').trim().toLowerCase();
+          if (a && areaSet[a]) return true;
+        }
+      }
+      return false;
+    }
+
+    return rows.filter(function (r) {
+      return allowedByPf[_canonicalId_(r.deploymentId)] ||
+        matchesAreaOnRow_(r) ||
+        matchesNameToken_(r);
+    });
+  }
+
+  /**
    * Ensures StudentDeploymentData sheet exists with the V1 column schema.
    * Idempotent. Returns the Sheet object.
    *
@@ -5004,6 +5086,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // S1: Student data layer
     filterDeploymentsByStudent_: filterDeploymentsByStudent_,
     filterDeploymentsByProduct_: filterDeploymentsByProduct_,
+    filterRowsByReportProductScope_: filterRowsByReportProductScope_,
     buildStudentTabData_:        buildStudentTabData_,
     saveStudentDeploymentFields: saveStudentDeploymentFields,
 

@@ -373,9 +373,10 @@ var CoreAnalytics = (function () {
    *   }
    *
    * @param {AppConfig} config
+   * @param {Object=} opts  { applyReportProductScope?: boolean }
    * @return {Object}
    */
-  function getHealthBreakdown(config) {
+  function getHealthBreakdown(config, opts) {
     var cfg = CoreConfig.withDefaults(config);
     var tz = Session.getScriptTimeZone();
     var now = new Date();
@@ -386,6 +387,9 @@ var CoreAnalytics = (function () {
     var allEffective = CoreData.getAllEffectiveDeployments(cfg);
     // S1: exclude Student deployments from health breakdown display (HENP only).
     allEffective = CoreData.filterDeploymentsByStudent_(allEffective, 'exclude', cfg);
+    if (opts && opts.applyReportProductScope === true) {
+      allEffective = CoreData.filterRowsByReportProductScope_(allEffective, cfg);
+    }
     var expectedTotal = allEffective.length;
     var counts = { Green: 0, Red: 0, Yellow: 0 };
     allEffective.forEach(function (row) {
@@ -477,13 +481,17 @@ var CoreAnalytics = (function () {
    * (Deployment_Partner_Name__c) from effective deployments.
    *
    * @param {AppConfig} config
+   * @param {Object=} opts  { applyReportProductScope?: boolean }
    * @return {Object}
    */
-  function getPartnerBreakdown(config) {
+  function getPartnerBreakdown(config, opts) {
     var cfg = CoreConfig.withDefaults(config);
     var rows = CoreData.getAllEffectiveDeployments(cfg);
     // S1: exclude Student deployments from partner breakdown display (HENP only).
     rows = CoreData.filterDeploymentsByStudent_(rows, 'exclude', cfg);
+    if (opts && opts.applyReportProductScope === true) {
+      rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    }
     var totalDeployments = rows.length;
 
     var partnerCounts = {};
@@ -529,13 +537,17 @@ var CoreAnalytics = (function () {
    * from effective deployments.
    *
    * @param {AppConfig} config
+   * @param {Object=} opts  { applyReportProductScope?: boolean }
    * @return {Object}
    */
-  function getApproachBreakdown(config) {
+  function getApproachBreakdown(config, opts) {
     var cfg = CoreConfig.withDefaults(config);
     var effectiveRows = CoreData.getAllEffectiveDeployments(cfg);
     // S1: exclude Student deployments from approach breakdown display (HENP only).
     effectiveRows = CoreData.filterDeploymentsByStudent_(effectiveRows, 'exclude', cfg);
+    if (opts && opts.applyReportProductScope === true) {
+      effectiveRows = CoreData.filterRowsByReportProductScope_(effectiveRows, cfg);
+    }
     // C13: filter to Active only; SFDC path already returns Active-only, but
     // the legacy path may include non-Active rows — be explicit.
     var activeRows = effectiveRows.filter(function (r) {

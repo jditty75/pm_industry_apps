@@ -471,6 +471,79 @@
         border: 1px solid #e5e7eb;
         background: #ffffff;
       }
+      #agendaReviewFrame {
+        width: 100%;
+        height: 40vh;
+        border-radius: var(--radius-md);
+        border: 1px solid #e5e7eb;
+        background: #ffffff;
+      }
+      .review-field {
+        margin-bottom: 10px;
+      }
+      .review-field label {
+        display: block;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .review-field input[type="text"] {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        box-sizing: border-box;
+      }
+      .review-recipient-list {
+        max-height: 120px;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 6px;
+        background: #f9fafb;
+      }
+      .review-recipient-section {
+        margin-bottom: 8px;
+      }
+      .review-recipient-section > label {
+        display: block;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .review-recipient-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        font-size: 0.82rem;
+      }
+      .review-recipient-row label {
+        flex: 1;
+        cursor: pointer;
+        margin: 0;
+        font-weight: 400;
+        color: #374151;
+      }
+      .review-recipient-row .recipient-role {
+        font-size: 0.72rem;
+        color: #9ca3af;
+      }
+      .review-add-email {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .review-add-email input {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        font-size: 0.82rem;
+      }
       @media (max-width: 640px) {
         #shell {
           border-radius: 18px;
@@ -614,6 +687,7 @@
 
       <div class="main-actions">
         <button class="btn btn-primary" onclick="buildPreview()">Preview Agenda</button>
+        <button class="btn btn-secondary" onclick="viewCurrentAgenda()">View Current Agenda</button>
         <button class="btn btn-secondary" onclick="saveAll()">Save Selections &amp; Agenda</button>
         <button class="btn btn-secondary" onclick="openManualModal()">Add Manual Item</button>
         <button class="btn btn-ghost" onclick="openAdminPanel()">Admin</button>
@@ -822,12 +896,52 @@
               <div class="admin-actions">
                 <button class="btn btn-secondary" onclick="saveAdminDates()">Save Dates</button>
                 <button class="btn btn-secondary" onclick="openReorderPanel()">Reorder Agenda</button>
-                <button class="btn btn-secondary" onclick="sendAgenda()">Send Agenda</button>
-                <button class="btn btn-secondary" onclick="sendReminder()">Send Reminder</button>
+                <button class="btn btn-secondary" onclick="openAgendaReview()">Send Agenda</button>
+                <button class="btn btn-secondary" onclick="openReminderReview()">Send Reminder</button>
                 <button class="btn btn-primary" onclick="confirmCloseMeeting()">Close Meeting</button>
               </div>
               <div class="modal-footer">
                 <button class="btn btn-ghost" onclick="closeAdminPanel()">Close</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Email Review Modal (agenda + reminder) -->
+          <div id="agendaReviewModalBackdrop" class="modal-backdrop">
+            <div class="modal" style="max-width:720px;">
+              <h3 id="emailReviewTitle">Review Before Sending</h3>
+              <div class="modal-subtitle" id="emailReviewSubtitle">
+                Edit the subject and recipients for this send. The email body is read-only.
+              </div>
+              <div class="review-field">
+                <label for="agendaReviewSubject">Subject</label>
+                <input type="text" id="agendaReviewSubject" placeholder="Email subject">
+              </div>
+              <div class="review-field">
+                <div class="review-recipient-section">
+                  <label>To (Required)</label>
+                  <div id="emailReviewToList" class="review-recipient-list"></div>
+                </div>
+                <div class="review-recipient-section">
+                  <label>CC (Optional)</label>
+                  <div id="emailReviewCcList" class="review-recipient-list"></div>
+                </div>
+                <div class="review-add-email">
+                  <input type="email" id="agendaReviewAddEmail" placeholder="Add email for this send only">
+                  <select id="emailReviewAddGroup" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:0.82rem;">
+                    <option value="to">To (Required)</option>
+                    <option value="cc">CC (Optional)</option>
+                  </select>
+                  <button class="btn btn-secondary" type="button" onclick="addEmailReviewRecipient()">Add</button>
+                </div>
+              </div>
+              <div class="review-field">
+                <label id="emailReviewBodyLabel">Email Body Preview</label>
+                <iframe id="agendaReviewFrame"></iframe>
+              </div>
+              <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeAgendaReview()">Cancel</button>
+                <button class="btn btn-primary" onclick="continueEmailSend()">Continue to Send</button>
               </div>
             </div>
           </div>
@@ -2716,7 +2830,21 @@ ${existing.futureState || ''}</textarea>
               .withFailureHandler(err => {
                 alert('Error building agenda preview: ' + err.message);
               })
-              .buildAgendaEmailHtml_();
+              .getAgendaBodyHtml();
+          }
+
+          function viewCurrentAgenda() {
+            google.script.run
+              .withSuccessHandler(function (html) {
+                var w = window.open('', '_blank');
+                w.document.open();
+                w.document.write(html);
+                w.document.close();
+              })
+              .withFailureHandler(function (err) {
+                alert('Error opening agenda: ' + err.message);
+              })
+              .getAgendaBodyHtml();
           }
 
           function saveAll() {
@@ -2739,43 +2867,196 @@ ${existing.futureState || ''}</textarea>
           }
 
           function sendAgenda() {
+            openAgendaReview();
+          }
+
+          let emailReviewMode = 'agenda';
+          /** @type {Array<{email:string,name:string,role:string,adHoc:boolean,included:boolean}>} */
+          let emailReviewTo = [];
+          /** @type {Array<{email:string,name:string,role:string,adHoc:boolean,included:boolean}>} */
+          let emailReviewCc = [];
+
+          function mapDraftRecipient(r) {
+            return {
+              email: r.email,
+              name: r.name || '',
+              role: r.role || '',
+              adHoc: false,
+              included: !!r.active
+            };
+          }
+
+          function openEmailReview(mode) {
+            emailReviewMode = mode;
+            const isAgenda = mode === 'agenda';
+            document.getElementById('emailReviewTitle').textContent =
+              isAgenda ? 'Review Agenda Before Sending' : 'Review Reminder Before Sending';
+            document.getElementById('emailReviewSubtitle').textContent =
+              'Edit the subject and recipients for this send. The email body is read-only.';
+            document.getElementById('emailReviewBodyLabel').textContent =
+              isAgenda ? 'Agenda Body Preview' : 'Reminder Body Preview';
+
             google.script.run
-              .withSuccessHandler(count => {
-                if (!confirm('Send to ' + count + ' recipients via BCC?')) return;
-                google.script.run
-                  .withSuccessHandler(res => {
-                    alert('Agenda email sent to ' + res.recipientCount + ' recipients.');
-                    loadMeetingState();
-                  })
-                  .withFailureHandler(err => {
-                    alert('Error sending agenda email: ' + err.message);
-                  })
-                  .sendAgendaEmail();
+              .withSuccessHandler(draft => {
+                document.getElementById('agendaReviewSubject').value = draft.subject || '';
+                emailReviewTo = (draft.to || []).map(mapDraftRecipient);
+                emailReviewCc = (draft.cc || []).map(mapDraftRecipient);
+                renderEmailReviewRecipients();
+                const frame = document.getElementById('agendaReviewFrame');
+                frame.srcdoc = draft.bodyHtml || '';
+                document.getElementById('agendaReviewAddEmail').value = '';
+                document.getElementById('emailReviewAddGroup').value = 'to';
+                document.getElementById('agendaReviewModalBackdrop').style.display = 'flex';
               })
               .withFailureHandler(err => {
-                alert('Error checking recipients: ' + err.message);
+                alert('Error loading send draft: ' + err.message);
               })
-              .getRecipientCount();
+              [isAgenda ? 'getAgendaSendDraft' : 'getReminderSendDraft']();
+          }
+
+          function openAgendaReview() {
+            openEmailReview('agenda');
+          }
+
+          function openReminderReview() {
+            openEmailReview('reminder');
+          }
+
+          function closeAgendaReview() {
+            document.getElementById('agendaReviewModalBackdrop').style.display = 'none';
+          }
+
+          function renderEmailReviewGroup(group, recipients, containerId) {
+            const list = document.getElementById(containerId);
+            list.innerHTML = '';
+            if (!recipients.length) {
+              const empty = document.createElement('div');
+              empty.style.cssText = 'padding:6px 8px;font-size:0.78rem;color:#9ca3af;';
+              empty.textContent = 'No recipients in this group.';
+              list.appendChild(empty);
+              return;
+            }
+            recipients.forEach((r, idx) => {
+              const row = document.createElement('div');
+              row.className = 'review-recipient-row';
+              const label = r.name ? r.name + ' &lt;' + r.email + '&gt;' : r.email;
+              const roleHtml = r.role ? '<span class="recipient-role">' + r.role + '</span>' : '';
+              row.innerHTML =
+                '<input type="checkbox" id="emailRecipient_' + group + '_' + idx + '"' +
+                (r.included ? ' checked' : '') +
+                ' onchange="toggleEmailReviewRecipient(\'' + group + '\', ' + idx + ', this.checked)">' +
+                '<label for="emailRecipient_' + group + '_' + idx + '">' + label + '</label>' +
+                roleHtml +
+                (r.adHoc
+                  ? '<button type="button" class="btn btn-ghost" style="padding:2px 6px;font-size:0.72rem;" onclick="removeEmailReviewRecipient(\'' + group + '\', ' + idx + ')">Remove</button>'
+                  : '');
+              list.appendChild(row);
+            });
+          }
+
+          function renderEmailReviewRecipients() {
+            renderEmailReviewGroup('to', emailReviewTo, 'emailReviewToList');
+            renderEmailReviewGroup('cc', emailReviewCc, 'emailReviewCcList');
+          }
+
+          function getEmailReviewGroupArray(group) {
+            return group === 'cc' ? emailReviewCc : emailReviewTo;
+          }
+
+          function toggleEmailReviewRecipient(group, idx, checked) {
+            const arr = getEmailReviewGroupArray(group);
+            if (arr[idx]) {
+              arr[idx].included = checked;
+            }
+          }
+
+          function emailExistsInReview(email) {
+            const lower = email.toLowerCase();
+            return emailReviewTo.some(r => r.email.toLowerCase() === lower) ||
+              emailReviewCc.some(r => r.email.toLowerCase() === lower);
+          }
+
+          function addEmailReviewRecipient() {
+            const input = document.getElementById('agendaReviewAddEmail');
+            const email = (input.value || '').trim();
+            if (!email) return;
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+              alert('Enter a valid email address.');
+              return;
+            }
+            if (emailExistsInReview(email)) {
+              alert('That email is already in the list.');
+              return;
+            }
+            const group = document.getElementById('emailReviewAddGroup').value === 'cc' ? 'cc' : 'to';
+            const entry = {
+              email: email,
+              name: '',
+              role: group === 'cc' ? 'Optional' : 'Required',
+              adHoc: true,
+              included: true
+            };
+            getEmailReviewGroupArray(group).push(entry);
+            input.value = '';
+            renderEmailReviewRecipients();
+          }
+
+          function removeEmailReviewRecipient(group, idx) {
+            getEmailReviewGroupArray(group).splice(idx, 1);
+            renderEmailReviewRecipients();
+          }
+
+          function continueEmailSend() {
+            const toIncluded = emailReviewTo
+              .filter(r => r.included)
+              .map(r => r.email);
+            const ccIncluded = emailReviewCc
+              .filter(r => r.included)
+              .map(r => r.email);
+            if (!toIncluded.length && !ccIncluded.length) {
+              alert('Select at least one recipient.');
+              return;
+            }
+            const subject = document.getElementById('agendaReviewSubject').value.trim();
+            if (!subject) {
+              alert('Enter a subject line.');
+              return;
+            }
+            if (!toIncluded.length && ccIncluded.length) {
+              alert('No Required recipients — CC only.');
+            }
+            if (!confirm(
+              'Send to ' + toIncluded.length + ' To / ' + ccIncluded.length +
+              ' CC recipient(s)? This cannot be undone.'
+            )) {
+              return;
+            }
+            const sendFn = emailReviewMode === 'reminder'
+              ? 'sendAgendaReminderEmail'
+              : 'sendAgendaEmail';
+            const label = emailReviewMode === 'reminder' ? 'Reminder' : 'Agenda';
+            google.script.run
+              .withSuccessHandler(res => {
+                alert(
+                  label + ' sent to ' + res.toCount + ' To / ' + res.ccCount +
+                  ' CC recipient(s).'
+                );
+                closeAgendaReview();
+                closeAdminPanel();
+                loadMeetingState();
+              })
+              .withFailureHandler(err => {
+                alert('Error sending email: ' + err.message);
+              })
+              [sendFn]({
+                subject: subject,
+                to: toIncluded,
+                cc: ccIncluded
+              });
           }
 
           function sendReminder() {
-            google.script.run
-              .withSuccessHandler(count => {
-                if (!confirm('Send reminder to ' + count + ' recipients via BCC?')) return;
-                google.script.run
-                  .withSuccessHandler(res => {
-                    alert('Reminder email sent to ' + res.recipientCount + ' recipients.');
-                    loadMeetingState();
-                  })
-                  .withFailureHandler(err => {
-                    alert('Error sending reminder email: ' + err.message);
-                  })
-                  .sendAgendaReminderEmail();
-              })
-              .withFailureHandler(err => {
-                alert('Error checking recipients: ' + err.message);
-              })
-              .getRecipientCount();
+            openReminderReview();
           }
 
           function renderReorderList() {

@@ -62,30 +62,51 @@ function isRecipientActive_(val) {
 }
 
 /**
- * Load active recipients from the Recipients sheet.
- * @return {Array<{name:string,email:string,role:string}>}
+ * Derive To/CC routing from Recipients.Role (fail-safe: non-Optional → To).
+ * @param {string} role
+ * @return {'TO'|'CC'}
  */
-function getRecipients_() {
+function getRecipientRouting_(role) {
+  return String(role || '').trim().toLowerCase() === 'optional' ? 'CC' : 'TO';
+}
+
+/**
+ * Load all recipients from the Recipients sheet (with Active flag and routing).
+ * @return {Array<{name:string,email:string,role:string,active:boolean,routing:'TO'|'CC'}>}
+ */
+function getAllRecipients_() {
   var rows;
   try {
     rows = getSheetData_('Recipients');
   } catch (e) {
-    Logger.log('getRecipients_: ' + e.message);
+    Logger.log('getAllRecipients_: ' + e.message);
     return [];
   }
 
   return rows
     .filter(function (r) {
-      var email = String(r['Email'] || '').trim();
-      return email && isRecipientActive_(r['Active']);
+      return String(r['Email'] || '').trim();
     })
     .map(function (r) {
+      var role = String(r['Role'] || '').trim();
       return {
         name: String(r['Name'] || '').trim(),
         email: String(r['Email'] || '').trim(),
-        role: String(r['Role'] || '').trim()
+        role: role,
+        active: isRecipientActive_(r['Active']),
+        routing: getRecipientRouting_(role)
       };
     });
+}
+
+/**
+ * Load active recipients from the Recipients sheet.
+ * @return {Array<{name:string,email:string,role:string,active:boolean,routing:'TO'|'CC'}>}
+ */
+function getRecipients_() {
+  return getAllRecipients_().filter(function (r) {
+    return r.active;
+  });
 }
 
 /**
@@ -299,11 +320,25 @@ function buildAgendaEmailHtml_() {
     neutralCsat: escapeHtml_(kpiLabels.neutralCsat)
   };
   t.groups = groups;
+  t.portfolioTotalsLabel = escapeHtml_(
+    getSetting_('Portfolio Totals Label') || 'Portfolio Totals'
+  );
+  t.agendaItemsLabel = escapeHtml_(
+    getSetting_('Agenda Items Label') || 'Agenda Items'
+  );
   t.generatedAt = escapeHtml_(
     Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss z')
   );
 
   return t.evaluate().getContent();
+}
+
+/**
+ * Client-callable getter for the current agenda email HTML body.
+ * @return {string}
+ */
+function getAgendaBodyHtml() {
+  return buildAgendaEmailHtml_();
 }
 
 /**
@@ -361,32 +396,158 @@ function getRecipientCount() {
 }
 
 /**
- * Send agenda email via Gmail (To: sender, BCC: active recipients).
- * @return {{sent:boolean,recipientCount:number}}
+ * Normalize an email address list from client overrides.
+ * @param {string[]|undefined} emails
+ * @return {string[]}
  */
-function sendAgendaEmail() {
-  var recipients = getRecipients_();
-  if (!recipients.length) {
-    throw new Error('No active recipients found. Add recipients to the Recipients sheet.');
+function normalizeEmailList_(emails) {
+  return (emails || [])
+    .map(function (e) { return String(e || '').trim(); })
+    .filter(function (e) { return e; });
+}
+
+/**
+ * Split recipients into To and CC draft groups by routing.
+ * @param {Array<{name:string,email:string,role:string,active:boolean,routing:'TO'|'CC'}>} recipients
+ * @return {{to:Array<{name:string,email:string,role:string,active:boolean}>,cc:Array<{name:string,email:string,role:string,active:boolean}>}}
+ */
+function groupRecipientsForDraft_(recipients) {
+  var to = [];
+  var cc = [];
+  (recipients || []).forEach(function (r) {
+    var entry = {
+      name: r.name,
+      email: r.email,
+      role: r.role,
+      active: r.active
+    };
+    if (r.routing === 'CC') {
+      cc.push(entry);
+    } else {
+      to.push(entry);
+    }
+  });
+  return { to: to, cc: cc };
+}
+
+/**
+ * Build To/CC lists from active sheet recipients by Role routing.
+ * @return {{to:string[],cc:string[]}}
+ */
+function splitActiveRecipientsByRouting_() {
+  var to = [];
+  var cc = [];
+  getRecipients_().forEach(function (r) {
+    if (r.routing === 'CC') {
+      cc.push(r.email);
+    } else {
+      to.push(r.email);
+    }
+  });
+  return { to: to, cc: cc };
+}
+
+/**
+ * Send HTML email via Gmail with To/CC routing (no BCC).
+ * @param {string[]} toEmails
+ * @param {string[]} ccEmails
+ * @param {string} subject
+ * @param {string} htmlBody
+ * @param {string} plainFallback
+ */
+function sendRoutedEmail_(toEmails, ccEmails, subject, htmlBody, plainFallback) {
+  var toCsv = (toEmails || []).join(',');
+  var ccCsv = (ccEmails || []).join(',');
+  var opts = {
+    htmlBody: htmlBody,
+    name: 'HC Wellness Solution'
+  };
+  if (ccCsv) {
+    opts.cc = ccCsv;
   }
 
-  var bcc = recipients.map(function (r) { return r.email; }).join(',');
-  var me = Session.getActiveUser().getEmail();
+  var toField = toCsv;
+  if (!toField && ccCsv) {
+    toField = 'undisclosed-recipients:;';
+  }
+
+  try {
+    GmailApp.sendEmail(toField, subject, plainFallback, opts);
+  } catch (e) {
+    Logger.log('sendRoutedEmail_: ' + e.message);
+    throw e;
+  }
+}
+
+/**
+ * Build draft payload for the agenda pre-send review modal.
+ * @return {{subject:string,to:Array<Object>,cc:Array<Object>,bodyHtml:string}}
+ */
+function getAgendaSendDraft() {
   var subjectSetting = getSetting_('Agenda Email Subject');
   var subject = applyTokens_(subjectSetting || 'HC Wellness Leadership Agenda');
+  var grouped = groupRecipientsForDraft_(getAllRecipients_());
+  var bodyHtml = buildAgendaEmailHtml_();
+
+  return {
+    subject: subject,
+    to: grouped.to,
+    cc: grouped.cc,
+    bodyHtml: bodyHtml
+  };
+}
+
+/**
+ * Build draft payload for the reminder pre-send review modal.
+ * @return {{subject:string,to:Array<Object>,cc:Array<Object>,bodyHtml:string}}
+ */
+function getReminderSendDraft() {
+  var subjectSetting = getSetting_('Reminder Email Subject');
+  var subject = applyTokens_(
+    subjectSetting || 'Reminder: Submit HC Wellness Agenda Items'
+  );
+  var grouped = groupRecipientsForDraft_(getAllRecipients_());
+  var bodyHtml = buildReminderEmailHtml_();
+
+  return {
+    subject: subject,
+    to: grouped.to,
+    cc: grouped.cc,
+    bodyHtml: bodyHtml
+  };
+}
+
+/**
+ * Send agenda email via Gmail with To/CC routing from Recipients.Role.
+ * @param {{subject?:string,to?:string[],cc?:string[]}} [overrides]
+ * @return {{sent:boolean,recipientCount:number,toCount:number,ccCount:number}}
+ */
+function sendAgendaEmail(overrides) {
+  overrides = overrides || {};
+
+  var toEmails;
+  var ccEmails;
+  if (overrides.to || overrides.cc) {
+    toEmails = normalizeEmailList_(overrides.to);
+    ccEmails = normalizeEmailList_(overrides.cc);
+  } else {
+    var split = splitActiveRecipientsByRouting_();
+    toEmails = split.to;
+    ccEmails = split.cc;
+  }
+
+  if (!toEmails.length && !ccEmails.length) {
+    throw new Error('No recipients selected. Add recipients to the Recipients sheet.');
+  }
+
+  var subjectSetting = getSetting_('Agenda Email Subject');
+  var subject = overrides.subject
+    ? String(overrides.subject)
+    : applyTokens_(subjectSetting || 'HC Wellness Leadership Agenda');
   var htmlBody = buildAgendaEmailHtml_();
   var plainFallback = 'Please view this message in HTML format to see the Healthcare Wellness Leadership Agenda.';
 
-  try {
-    GmailApp.sendEmail(me, subject, plainFallback, {
-      htmlBody: htmlBody,
-      bcc: bcc,
-      name: 'HC Wellness Solution'
-    });
-  } catch (e) {
-    Logger.log('sendAgendaEmail: ' + e.message);
-    throw e;
-  }
+  sendRoutedEmail_(toEmails, ccEmails, subject, htmlBody, plainFallback);
 
   setSetting_(
     'Agenda Sent At',
@@ -394,47 +555,63 @@ function sendAgendaEmail() {
   );
   setSetting_('Meeting Status', 'AGENDA_SENT');
 
-  logSend_('AGENDA', recipients.length);
-  return { sent: true, recipientCount: recipients.length };
+  var total = toEmails.length + ccEmails.length;
+  logSend_('AGENDA', total);
+  return {
+    sent: true,
+    recipientCount: total,
+    toCount: toEmails.length,
+    ccCount: ccEmails.length
+  };
 }
 
 /**
- * Send agenda submission reminder email via Gmail.
- * @return {{sent:boolean,recipientCount:number}}
+ * Send agenda submission reminder email via Gmail with To/CC routing.
+ * @param {{subject?:string,to?:string[],cc?:string[]}} [overrides]
+ * @return {{sent:boolean,recipientCount:number,toCount:number,ccCount:number}}
  */
-function sendAgendaReminderEmail() {
-  var recipients = getRecipients_();
-  if (!recipients.length) {
-    throw new Error('No active recipients found. Add recipients to the Recipients sheet.');
+function sendAgendaReminderEmail(overrides) {
+  overrides = overrides || {};
+
+  var toEmails;
+  var ccEmails;
+  if (overrides.to || overrides.cc) {
+    toEmails = normalizeEmailList_(overrides.to);
+    ccEmails = normalizeEmailList_(overrides.cc);
+  } else {
+    var split = splitActiveRecipientsByRouting_();
+    toEmails = split.to;
+    ccEmails = split.cc;
   }
 
-  var bcc = recipients.map(function (r) { return r.email; }).join(',');
-  var me = Session.getActiveUser().getEmail();
+  if (!toEmails.length && !ccEmails.length) {
+    throw new Error('No recipients selected. Add recipients to the Recipients sheet.');
+  }
+
   var subjectSetting = getSetting_('Reminder Email Subject');
-  var subject = applyTokens_(
-    subjectSetting || 'Reminder: Submit HC Wellness Agenda Items'
-  );
+  var subject = overrides.subject
+    ? String(overrides.subject)
+    : applyTokens_(
+      subjectSetting || 'Reminder: Submit HC Wellness Agenda Items'
+    );
   var htmlBody = buildReminderEmailHtml_();
   var plainFallback = 'Please view this message in HTML format for agenda submission details.';
 
-  try {
-    GmailApp.sendEmail(me, subject, plainFallback, {
-      htmlBody: htmlBody,
-      bcc: bcc,
-      name: 'HC Wellness Solution'
-    });
-  } catch (e) {
-    Logger.log('sendAgendaReminderEmail: ' + e.message);
-    throw e;
-  }
+  sendRoutedEmail_(toEmails, ccEmails, subject, htmlBody, plainFallback);
 
   setSetting_(
     'Reminder Sent At',
     Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss')
   );
 
-  logSend_('REMINDER', recipients.length);
-  return { sent: true, recipientCount: recipients.length };
+  var total = toEmails.length + ccEmails.length;
+  logSend_('REMINDER', total);
+  return {
+    sent: true,
+    recipientCount: total,
+    toCount: toEmails.length,
+    ccCount: ccEmails.length
+  };
 }
 
 /**

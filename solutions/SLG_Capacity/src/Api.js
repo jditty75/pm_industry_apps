@@ -535,7 +535,9 @@ function api_getResourceDetailV2(params) {
     weeksOut = actualsCells.weeks;
     weeklyProjectsOut = actualsCells.weeklyProjects;
     projectsOut = rollupWeeklyProjectsToQuarter_(weeklyProjectsOut);
-    const historyRollups = buildResourceHistoryRollups_(resourceName, selectedQuarter);
+    const historyRollups = buildResourceHistoryRollups_(
+      resourceName, selectedQuarter, w.employeeId
+    );
     roleCategoryRollup = historyRollups.roleCategoryRollup;
     specialtyPracticeRollup = historyRollups.specialtyPracticeRollup;
   } else {
@@ -692,53 +694,75 @@ function rollupWeeklyProjectsToQuarter_(weeklyProjects) {
 }
 
 /**
- * Past-quarter Specialty + role-category rollups from Actuals_History (WoW actuals).
+ * Past-quarter role-category and specialty rollups from Actuals_Normalized.
  * Projects card for past quarters uses rollupWeeklyProjectsToQuarter_ instead.
+ * Actuals_Historical is reserved for Mix & Trend / older-quarter surfaces.
  * @param {string} resourceName
  * @param {string} fiscalQuarter
+ * @param {string} [employeeId]
  * @return {{specialtyPracticeRollup:Array, roleCategoryRollup:Array, projects:Array}}
  */
-function buildResourceHistoryRollups_(resourceName, fiscalQuarter) {
-  var rows = readTable_(ACTUALS_HISTORY) || [];
-  var specialtyHours = {};
+function buildResourceHistoryRollups_(resourceName, fiscalQuarter, employeeId) {
+  employeeId = String(employeeId || '').trim();
+  resourceName = String(resourceName || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+
+  return {
+    specialtyPracticeRollup: buildSpecialtyPracticeRollupFromActuals_(
+      resourceName, fiscalQuarter, employeeId
+    ),
+    roleCategoryRollup: buildRoleCategoryRollupFromActuals_(
+      resourceName, fiscalQuarter, employeeId
+    ),
+    projects: []
+  };
+}
+
+/**
+ * Past-quarter role category rollup from Actuals_Normalized (matches Projects / Total Worked).
+ * @param {string} resourceName
+ * @param {string} fiscalQuarter
+ * @param {string} [employeeId]
+ * @return {Array<{roleCategory:string, currentQuarterHours:number}>}
+ * @private
+ */
+function buildRoleCategoryRollupFromActuals_(resourceName, fiscalQuarter, employeeId) {
+  employeeId = String(employeeId || '').trim();
+  resourceName = String(resourceName || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+
   var roleCatHours = {};
-  var projectHours = {};
-  var projectRoleVotes = {};
-
-  rows.forEach(function (r) {
-    if (String(r.resource_name || '') !== resourceName) return;
-    if (String(r.fiscal_quarter || '').trim() !== fiscalQuarter) return;
-    var hrs = Number(r.icp_hours) || 0;
-    if (!hrs) return;
-    var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
-    specialtyHours[sp] = (specialtyHours[sp] || 0) + hrs;
-    var rc = String(r.project_role_category || '').trim() || 'Unclassified';
-    roleCatHours[rc] = (roleCatHours[rc] || 0) + hrs;
-    var proj = String(r.project || '').trim();
-    if (!proj) return;
-    projectHours[proj] = (projectHours[proj] || 0) + hrs;
-    if (!projectRoleVotes[proj]) projectRoleVotes[proj] = {};
-    projectRoleVotes[proj][rc] = (projectRoleVotes[proj][rc] || 0) + hrs;
-  });
-
-  function pickTopRole_(proj) {
-    var votes = projectRoleVotes[proj] || {};
-    var keys = Object.keys(votes);
-    if (!keys.length) return 'Unclassified';
-    keys.sort(function (a, b) { return (votes[b] || 0) - (votes[a] || 0); });
-    return keys[0];
+  var normRows = [];
+  try {
+    normRows = cachedRead_(ACTUALS_NORM) || [];
+  } catch (e) {
+    normRows = [];
   }
 
-  var specialtyPracticeRollup = Object.keys(specialtyHours).map(function (sp) {
-    return {
-      specialtyPractice: sp,
-      currentQuarterHours: Number(specialtyHours[sp]) || 0
-    };
-  }).sort(function (a, b) {
-    return b.currentQuarterHours - a.currentQuarterHours;
+  normRows.forEach(function (r) {
+    var eid = String(r.employee_id || '').trim();
+    var name = String(r.resource_name || '').trim();
+    if (employeeId) {
+      if (eid !== employeeId && name !== resourceName) return;
+    } else if (name !== resourceName) {
+      return;
+    }
+
+    var wk = '';
+    if (r.week_start) {
+      try { wk = weekKey_(r.week_start); } catch (e2) { wk = ''; }
+    }
+    if (!wk && r.week_key) wk = String(r.week_key).trim();
+    if (!wk) return;
+    if (fiscalQuarterKeyFromWeekKey_(wk) !== fiscalQuarter) return;
+
+    var hrs = Number(r.actual_icp_hours) || 0;
+    if (!hrs) return;
+    var rc = String(r.project_role_category || '').trim() || 'Unclassified';
+    roleCatHours[rc] = (roleCatHours[rc] || 0) + hrs;
   });
 
-  var roleCategoryRollup = Object.keys(roleCatHours).map(function (rc) {
+  return Object.keys(roleCatHours).map(function (rc) {
     return {
       roleCategory: rc,
       currentQuarterHours: Number(roleCatHours[rc]) || 0
@@ -746,23 +770,60 @@ function buildResourceHistoryRollups_(resourceName, fiscalQuarter) {
   }).sort(function (a, b) {
     return b.currentQuarterHours - a.currentQuarterHours;
   });
+}
 
-  var projects = Object.keys(projectHours).sort().map(function (proj) {
-    return {
-      project: proj,
-      account_name: '',
-      project_name: proj,
-      roleCategory: pickTopRole_(proj),
-      weekly: [],
-      quarterHours: Number(projectHours[proj]) || 0
-    };
+/**
+ * Past-quarter specialty practice rollup from Actuals_Normalized (matches Projects / Total Worked).
+ * @param {string} resourceName
+ * @param {string} fiscalQuarter
+ * @param {string} [employeeId]
+ * @return {Array<{specialtyPractice:string, currentQuarterHours:number}>}
+ * @private
+ */
+function buildSpecialtyPracticeRollupFromActuals_(resourceName, fiscalQuarter, employeeId) {
+  employeeId = String(employeeId || '').trim();
+  resourceName = String(resourceName || '').trim();
+  fiscalQuarter = String(fiscalQuarter || '').trim();
+
+  var specialtyHours = {};
+  var normRows = [];
+  try {
+    normRows = cachedRead_(ACTUALS_NORM) || [];
+  } catch (e) {
+    normRows = [];
+  }
+
+  normRows.forEach(function (r) {
+    var eid = String(r.employee_id || '').trim();
+    var name = String(r.resource_name || '').trim();
+    if (employeeId) {
+      if (eid !== employeeId && name !== resourceName) return;
+    } else if (name !== resourceName) {
+      return;
+    }
+
+    var wk = '';
+    if (r.week_start) {
+      try { wk = weekKey_(r.week_start); } catch (e2) { wk = ''; }
+    }
+    if (!wk && r.week_key) wk = String(r.week_key).trim();
+    if (!wk) return;
+    if (fiscalQuarterKeyFromWeekKey_(wk) !== fiscalQuarter) return;
+
+    var hrs = Number(r.actual_icp_hours) || 0;
+    if (!hrs) return;
+    var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
+    specialtyHours[sp] = (specialtyHours[sp] || 0) + hrs;
   });
 
-  return {
-    specialtyPracticeRollup: specialtyPracticeRollup,
-    roleCategoryRollup: roleCategoryRollup,
-    projects: projects
-  };
+  return Object.keys(specialtyHours).map(function (sp) {
+    return {
+      specialtyPractice: sp,
+      currentQuarterHours: Number(specialtyHours[sp]) || 0
+    };
+  }).sort(function (a, b) {
+    return b.currentQuarterHours - a.currentQuarterHours;
+  });
 }
 
 /**
@@ -1120,6 +1181,170 @@ function buildWorkerSpecialtyPracticeMap_(allocRows) {
     out[res] = keys[0] || 'Unclassified';
   });
   return out;
+}
+
+/**
+ * Dominant specialty_practice per worker from Actuals_History (SLG-scoped).
+ * Uses the most recent fiscal quarter with hours, then highest icp_hours specialty
+ * in that quarter — same row access as api_getSpecialtyActuals.
+ * @param {Array<Object>} histRows
+ * @return {{byResourceName: Object<string,string>, byEmployeeId: Object<string,string>}}
+ */
+function buildWorkerSpecialtyHistoryMap_(histRows) {
+  var byRes = {};
+  var byEid = {};
+
+  function addVote_(bucket, key, fq, sp, hrs) {
+    if (!key) return;
+    if (!bucket[key]) bucket[key] = {};
+    if (!bucket[key][fq]) bucket[key][fq] = {};
+    bucket[key][fq][sp] = (bucket[key][fq][sp] || 0) + hrs;
+  }
+
+  (histRows || []).forEach(function (r) {
+    if (!specialtyActualsRowInSlgScope_(r)) return;
+    var fq = String(r.fiscal_quarter || '').trim();
+    if (!fq) return;
+    var hrs = Number(r.icp_hours) || 0;
+    if (!hrs) return;
+    var sp = String(r.specialty_practice || '').trim() || 'Unclassified';
+    addVote_(byRes, String(r.resource_name || '').trim(), fq, sp, hrs);
+    addVote_(byEid, String(r.employee_id || '').trim(), fq, sp, hrs);
+  });
+
+  function pickDominantRecent_(votesByQuarter) {
+    var qks = Object.keys(votesByQuarter || {}).sort(compareFiscalQuarterKeys_);
+    if (!qks.length) return '';
+    var spVotes = votesByQuarter[qks[qks.length - 1]];
+    var keys = Object.keys(spVotes || {});
+    keys.sort(function (a, b) { return (spVotes[b] || 0) - (spVotes[a] || 0); });
+    return keys[0] || '';
+  }
+
+  var outRes = {};
+  var outEid = {};
+  Object.keys(byRes).forEach(function (k) { outRes[k] = pickDominantRecent_(byRes[k]); });
+  Object.keys(byEid).forEach(function (k) { outEid[k] = pickDominantRecent_(byEid[k]); });
+  return { byResourceName: outRes, byEmployeeId: outEid };
+}
+
+/**
+ * Profile fields for Config_Resource_Type practice fallback.
+ * @param {string} resourceName
+ * @param {string} employeeId
+ * @param {Object} resIndex
+ * @param {Object<string,Object>} forecastWorkerByEid
+ * @return {Object}
+ */
+function buildWorkerSpecialtyProfileRow_(resourceName, employeeId, resIndex, forecastWorkerByEid) {
+  var res = String(resourceName || '').trim();
+  var eid = String(employeeId || '').trim();
+  var info = (resIndex && resIndex[res]) || {};
+  var fw = (eid && forecastWorkerByEid && forecastWorkerByEid[eid]) || {};
+  return {
+    role_category: info.role_category || '',
+    job_profile: info.job_profile || fw.jobProfile || '',
+    project_role: info.project_role || '',
+    resource_type: info.resource_type || ''
+  };
+}
+
+/**
+ * Resolve worker specialty_practice: ALLOC_NORM primary, then history, then job profile.
+ * Primary map entries are never overridden.
+ * @param {string} resourceName
+ * @param {string} employeeId
+ * @param {Object<string,string>} primaryMap
+ * @param {{byResourceName:Object, byEmployeeId:Object}} histMap
+ * @param {Object} profileRow
+ * @return {string}
+ */
+function resolveWorkerSpecialtyPractice_(resourceName, employeeId, primaryMap, histMap, profileRow) {
+  var res = String(resourceName || '').trim();
+  if (res && primaryMap && primaryMap[res]) return primaryMap[res];
+
+  var eid = String(employeeId || '').trim();
+  if (histMap) {
+    if (eid && histMap.byEmployeeId[eid]) return histMap.byEmployeeId[eid];
+    if (res && histMap.byResourceName[res]) return histMap.byResourceName[res];
+  }
+
+  if (profileRow && typeof _resolvePracticeForRow_ === 'function') {
+    if (!resolveWorkerSpecialtyPractice_._rtRichMap) {
+      resolveWorkerSpecialtyPractice_._rtRichMap = readConfigResourceTypeRich_();
+    }
+    var practice = _resolvePracticeForRow_(profileRow, resolveWorkerSpecialtyPractice_._rtRichMap);
+    if (practice) return practice;
+  }
+
+  return 'Unclassified';
+}
+
+/**
+ * Same as resolveWorkerSpecialtyPractice_ but returns {specialty, source} for diagnostics.
+ * @param {string} resourceName
+ * @param {string} employeeId
+ * @param {Object<string,string>} primaryMap
+ * @param {{byResourceName:Object, byEmployeeId:Object}} histMap
+ * @param {Object} profileRow
+ * @return {{specialty:string, source:string}}
+ */
+function resolveWorkerSpecialtyPracticeWithSource_(resourceName, employeeId, primaryMap, histMap, profileRow) {
+  var res = String(resourceName || '').trim();
+  if (res && primaryMap && primaryMap[res]) {
+    return { specialty: primaryMap[res], source: 'alloc_norm' };
+  }
+
+  var eid = String(employeeId || '').trim();
+  if (histMap) {
+    if (eid && histMap.byEmployeeId[eid]) {
+      return { specialty: histMap.byEmployeeId[eid], source: 'actuals_history' };
+    }
+    if (res && histMap.byResourceName[res]) {
+      return { specialty: histMap.byResourceName[res], source: 'actuals_history' };
+    }
+  }
+
+  if (profileRow && typeof _resolvePracticeForRow_ === 'function') {
+    if (!resolveWorkerSpecialtyPractice_._rtRichMap) {
+      resolveWorkerSpecialtyPractice_._rtRichMap = readConfigResourceTypeRich_();
+    }
+    var practice = _resolvePracticeForRow_(profileRow, resolveWorkerSpecialtyPractice_._rtRichMap);
+    if (practice) return { specialty: practice, source: 'job_profile' };
+  }
+
+  return { specialty: 'Unclassified', source: 'unclassified' };
+}
+
+/**
+ * Shared ALLOC_NORM + Actuals_History + profile context for worker→specialty resolution.
+ * @param {Array<Object>} allocRows
+ * @param {Array<Object>} forecastWorkers
+ * @return {{
+ *   primaryMap: Object<string,string>,
+ *   histMap: {byResourceName:Object, byEmployeeId:Object},
+ *   resIndex: Object,
+ *   forecastWorkerByEid: Object<string,Object>
+ * }}
+ */
+function buildWorkerSpecialtyPracticeContext_(allocRows, forecastWorkers) {
+  var histRows = [];
+  try {
+    histRows = readTable_(ACTUALS_HISTORY) || [];
+  } catch (e) {
+    histRows = [];
+  }
+  var forecastWorkerByEid = {};
+  (forecastWorkers || []).forEach(function (w) {
+    var eid = String(w.employeeId || '').trim();
+    if (eid) forecastWorkerByEid[eid] = w;
+  });
+  return {
+    primaryMap: buildWorkerSpecialtyPracticeMap_(allocRows),
+    histMap: buildWorkerSpecialtyHistoryMap_(histRows),
+    resIndex: _resourceIndex_(allocRows),
+    forecastWorkerByEid: forecastWorkerByEid
+  };
 }
 
 /**
@@ -2844,6 +3069,7 @@ function api_getSpecialtyActuals(params) {
  * WFM.25 Pass 3B: org-level forecast demand hours by specialty practice × fiscal quarter.
  * Read-only aggregation over computeWeeklyForecast_ productive hours; no reconciliation changes.
  * SLG delivery scope only (reuses worker-scope classification).
+ * Worker→specialty uses ALLOC_NORM primary with Actuals_History + job-profile fallbacks.
  * @param {Object} params same filter shape as api_getForecastTable
  * @return {{
  *   quarters: string[],
@@ -2879,7 +3105,7 @@ function api_getSpecialtyDemand(params) {
   } catch (e) {
     allocRows = [];
   }
-  var workerSpMap = buildWorkerSpecialtyPracticeMap_(allocRows);
+  var spCtx = buildWorkerSpecialtyPracticeContext_(allocRows, forecast.workers);
 
   var bucket = {};
   var grandTotalByQuarter = {};
@@ -2887,7 +3113,15 @@ function api_getSpecialtyDemand(params) {
   var grandTotal = 0;
 
   (forecast.workers || []).forEach(function (worker) {
-    var sp = workerSpMap[worker.resource] || 'Unclassified';
+    var sp = resolveWorkerSpecialtyPractice_(
+      worker.resource,
+      worker.employeeId,
+      spCtx.primaryMap,
+      spCtx.histMap,
+      buildWorkerSpecialtyProfileRow_(
+        worker.resource, worker.employeeId, spCtx.resIndex, spCtx.forecastWorkerByEid
+      )
+    );
     if (!bucket[sp]) {
       bucket[sp] = {};
       quarterKeys.forEach(function (qk) { bucket[sp][qk] = 0; });
@@ -2932,10 +3166,129 @@ function api_getSpecialtyDemand(params) {
 }
 
 /**
+ * Whether a util-row worker counts toward Specialty Utilization.
+ * On-leave workers are always included (readExclusions_(true)); force-exclude still honored.
+ * @param {string} resourceName
+ * @param {Object} params
+ * @param {Object} resIndex
+ * @return {boolean}
+ */
+function _specialtyProjectedUtilWorkerInScope_(resourceName, params, resIndex) {
+  var res = String(resourceName || '').trim();
+  if (!res) return false;
+
+  if (readExclusions_(true).has(_exclusionKey_(res))) return false;
+
+  var info = (resIndex && resIndex[res]) || {};
+  if (!_workerClassInScope_(info.worker_class || '', 'SLG')) return false;
+
+  var teamLabelFilter = params.teamLabel ? String(params.teamLabel).trim() : '';
+  if (teamLabelFilter) {
+    var rtTeamMap = typeof _readResourceTypeTeamMap_ === 'function'
+      ? _readResourceTypeTeamMap_() : {};
+    var roleTeamLabels = typeof readRoleTeamLabels_ === 'function'
+      ? readRoleTeamLabels_() : {};
+    var ctx = (typeof resolveTeamLabel_ === 'function')
+      ? resolveTeamLabel_.buildCtx_(roleTeamLabels, rtTeamMap) : null;
+    var teamLabel = ctx
+      ? resolveTeamLabel_({
+          worker_class: info.worker_class || '',
+          icp_role: info.icp || '',
+          role_category: info.role_category || '',
+          job_profile: info.job_profile || '',
+          project_role: info.project_role || '',
+          resource_type: info.resource_type || ''
+        }, ctx)
+      : 'Unclassified';
+    if (teamLabel !== teamLabelFilter) return false;
+  }
+
+  if (!teamLabelFilter && params.teams && params.teams.length) {
+    var mgrRows = readConfigSlgManagers_();
+    var managerDescendants = buildManagerDescendants_(mgrRows);
+    var managersByName = {};
+    mgrRows.forEach(function (r) { managersByName[r.manager_name] = r; });
+    var effectiveManagers = buildEffectiveManagers_(
+      params.teams[0],
+      !!params.includeMyManagers,
+      managersByName,
+      managerDescendants
+    );
+    if (effectiveManagers) {
+      var mgrNorm = normalizeManagerName_(info.manager_org || '');
+      if (!effectiveManagers[mgrNorm]) return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Employee IDs for Specialty Utilization: all SLG-scoped util-target workers,
+ * always including on-leave (independent of session On-Leave toggle).
+ * @param {Object} params
+ * @param {Object<string,boolean>} quarterKeySet
+ * @param {Array<Object>} utilRows
+ * @param {Object} resIndex
+ * @return {{
+ *   targetedEmployeeIds: Object<string,boolean>,
+ *   forecastWorkerByEid: Object<string,Object>,
+ *   forecastWorkers: Array<Object>
+ * }}
+ */
+function _buildSpecialtyProjectedUtilEmployeeIds_(params, quarterKeySet, utilRows, resIndex) {
+  var forecast = computeWeeklyForecast_({
+    viewMode: params.viewMode,
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: 'SLG',
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff,
+    includeOnLeave: true
+  });
+
+  var forecastWorkerByEid = {};
+  (forecast.workers || []).forEach(function (w) {
+    var eid = String(w.employeeId || '').trim();
+    if (eid) forecastWorkerByEid[eid] = w;
+  });
+
+  var targetedEmployeeIds = {};
+  (utilRows || []).forEach(function (r) {
+    var qk = String(r.fiscal_quarter || '').trim();
+    if (!quarterKeySet[qk]) return;
+    var target = Number(r.target_hours) || 0;
+    if (target <= 0) return;
+    var eid = String(r.employee_id || '').trim();
+    var res = String(r.resource_name || '').trim();
+    if (!eid || !res) return;
+    if (!_specialtyProjectedUtilWorkerInScope_(res, params, resIndex)) return;
+    targetedEmployeeIds[eid] = true;
+    if (!forecastWorkerByEid[eid]) {
+      var info = (resIndex && resIndex[res]) || {};
+      forecastWorkerByEid[eid] = {
+        resource: res,
+        employeeId: eid,
+        jobProfile: info.job_profile || ''
+      };
+    }
+  });
+
+  return {
+    targetedEmployeeIds: targetedEmployeeIds,
+    forecastWorkerByEid: forecastWorkerByEid,
+    forecastWorkers: forecast.workers || []
+  };
+}
+
+/**
  * WFM.25 Pass 3D: org-level projected utilization by specialty practice × fiscal quarter.
  * Numerator = reconciled WoW ICP hours (actual for closed quarters, A+F for current/next).
  * Denominator = Utilization_Quarterly target_hours (workers with target > 0 only).
- * SLG delivery scope only; same worker→specialty map as api_getSpecialtyDemand.
+ * SLG delivery scope only; worker→specialty map uses ALLOC_NORM primary with
+ * Actuals_History + job-profile fallbacks for targeted workers without current actuals.
+ * On-leave workers are always included (independent of the PSA On-Leave toggle).
  * @param {Object} [params] same filter shape as api_getSpecialtyDemand
  * @return {{
  *   quarters: string[],
@@ -2957,34 +3310,14 @@ function api_getSpecialtyProjectedUtil(params) {
   var quarterKeySet = {};
   quarterKeys.forEach(function (qk) { quarterKeySet[qk] = true; });
 
-  var forecast = computeWeeklyForecast_({
-    viewMode: params.viewMode,
-    scenarioId: params.scenarioId,
-    teams: params.teams,
-    teamLabel: params.teamLabel,
-    workerScope: 'SLG',
-    includeMyManagers: params.includeMyManagers,
-    includeTimeOff: params.includeTimeOff,
-    includeOnLeave: params.includeOnLeave
-  });
-  var slgEmployeeIds = {};
-  (forecast.workers || []).forEach(function (w) {
-    var eid = String(w.employeeId || '').trim();
-    if (eid) slgEmployeeIds[eid] = true;
-  });
-
   var allocRows = [];
   try {
     allocRows = cachedRead_(ALLOC_NORM);
   } catch (e) {
     allocRows = [];
   }
-  var workerSpMap = buildWorkerSpecialtyPracticeMap_(allocRows);
+  var resIndex = _resourceIndex_(allocRows);
 
-  _wowQuarterTargetIndex_();
-
-  var numBucket = {};
-  var denBucket = {};
   var utilRows = [];
   try {
     utilRows = cachedRead_(CFG_UTIL_QUARTERLY);
@@ -2992,18 +3325,38 @@ function api_getSpecialtyProjectedUtil(params) {
     utilRows = [];
   }
 
+  var utilScope = _buildSpecialtyProjectedUtilEmployeeIds_(
+    params, quarterKeySet, utilRows, resIndex
+  );
+  var targetedEmployeeIds = utilScope.targetedEmployeeIds;
+  var forecastWorkerByEid = utilScope.forecastWorkerByEid;
+  var spCtx = buildWorkerSpecialtyPracticeContext_(
+    allocRows, Object.values(forecastWorkerByEid)
+  );
+
+  _wowQuarterTargetIndex_();
+
+  var numBucket = {};
+  var denBucket = {};
+
   utilRows.forEach(function (r) {
     var qk = String(r.fiscal_quarter || '').trim();
     if (!quarterKeySet[qk]) return;
 
     var eid = String(r.employee_id || '').trim();
-    if (!eid || !slgEmployeeIds[eid]) return;
+    if (!eid || !targetedEmployeeIds[eid]) return;
 
     var target = Number(r.target_hours) || 0;
     if (target <= 0) return;
 
     var res = String(r.resource_name || '').trim();
-    var sp = workerSpMap[res] || 'Unclassified';
+    var sp = resolveWorkerSpecialtyPractice_(
+      res,
+      eid,
+      spCtx.primaryMap,
+      spCtx.histMap,
+      buildWorkerSpecialtyProfileRow_(res, eid, spCtx.resIndex, forecastWorkerByEid)
+    );
 
     if (!numBucket[sp]) {
       numBucket[sp] = {};

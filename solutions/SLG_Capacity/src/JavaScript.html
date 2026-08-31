@@ -885,13 +885,20 @@
   function applyAutoManagerDefaults_() {
     const ref = State.ref || {};
     const matched = ref.matchedManager || null;
+    const myTeamScope = (typeof WFM25_SHELL !== 'undefined' && WFM25_SHELL &&
+      typeof WFM25State !== 'undefined' && WFM25State.scopeMode === 'myTeam');
 
     // Never set a team filter on boot — the manager hierarchy is the scope.
     State.filters.teamLabel = null;
 
-    if (ref.userIsAdmin || !matched) {
+    if (myTeamScope && matched) {
+      // WFM.25 My Team: always scope to the matched manager + full descendant tree.
+      State.filters.managers = [matched];
+      State.filters.includeMyManagers = true;
+    } else if (ref.userIsAdmin || !matched) {
       // Admin (Jeff, Windsel) or unrecognized → all workers, all teams, no filter.
       State.filters.managers = [];
+      if (myTeamScope) State.filters.includeMyManagers = false;
     } else {
       // Recognized manager → boot into their FULL org (self + descendants).
       State.filters.managers = [matched];
@@ -8258,6 +8265,33 @@ async function _qaRefreshPsaHours_() {
   }
 
   /**
+   * Whether My Team scope can be resolved for the signed-in user.
+   * @returns {boolean}
+   */
+  function wfm25MyTeamScopeResolved_() {
+    if (WFM25State.scopeMode !== 'myTeam') return true;
+    const ref = State.ref || {};
+    return !!(ref.matchedManager);
+  }
+
+  /**
+   * Re-fetch capacity tab data after scope or filter changes.
+   * @returns {Promise<void>}
+   */
+  async function wfm25ReloadActiveCapacityTab_() {
+    const tab = WFM25State.activeTab;
+    if (tab === 'hours-budget') {
+      await loadWFM25HoursCapacity_();
+    } else if (tab === 'mix-trend') {
+      await loadWFM25MixTrend_();
+    } else if (tab === 'specialty-demand') {
+      await loadWFM25SpecialtyDemand_();
+    } else {
+      await loadWFM25Utilization_();
+    }
+  }
+
+  /**
    * Apply global scope mode and re-fetch the active surface.
    * @param {'all'|'myTeam'} mode
    */
@@ -8267,7 +8301,11 @@ async function _qaRefreshPsaHours_() {
     WFM25State.scopeMode = mode;
     if (mode === 'myTeam') {
       applyAutoManagerDefaults_();
+    } else {
+      State.filters.managers = [];
+      State.filters.includeMyManagers = false;
     }
+    WFM25State.expandedTeam = null;
     WFM25State.landingBreadcrumb = 'SLG Org';
     wfm25SyncScopeToggleUi_();
     wfm25InvalidateScopeCaches_();
@@ -8289,12 +8327,9 @@ async function _qaRefreshPsaHours_() {
       wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat(['Admin']));
       return;
     }
-    if (WFM25State.expandedTeam) {
-      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_().concat([WFM25State.expandedTeam]));
-    } else {
-      wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
-    }
-    await wfm25ActivateTab_(WFM25State.activeTab);
+    wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
+    wfm25ActivateTab_(WFM25State.activeTab);
+    await wfm25ReloadActiveCapacityTab_();
   }
 
   /**
@@ -11498,7 +11533,6 @@ async function _qaRefreshPsaHours_() {
     const quarterKeys = (data && data.quarterKeys) || [];
     const qi = wfm25CurQuarterIndex_(quarterKeys);
     const isProductive = wfm25UtilMetricIsProductive_();
-    const thresholds = wfm25AllocThresholds_();
     const scopeWorkers = wfm25ScopeWorkers_(data);
     const counts = { over: 0, under: 0, ontrack: 0 };
     let sumProd = 0;
@@ -11508,11 +11542,10 @@ async function _qaRefreshPsaHours_() {
     if (!isProductive) {
       scopeWorkers.forEach(function (w) {
         const q = (w.quarters || [])[qi];
-        if (!q) return;
-        const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
-        if (band === 'over') counts.over++;
-        else if (band === 'under') counts.under++;
-        if (q.icpUtil != null && wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--green') {
+        if (!q || q.icpUtil == null) return;
+        if (q.icpUtil > 1.0) counts.over++;
+        else if (q.icpUtil < 0.95) counts.under++;
+        if (wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--green') {
           counts.ontrack++;
         }
         if (Number(q.targetHours) > 0) {
@@ -11686,6 +11719,10 @@ async function _qaRefreshPsaHours_() {
       btn.addEventListener('click', function () {
         const key = btn.dataset.wfm25AllocFilter;
         WFM25State.utilAllocFilter = (WFM25State.utilAllocFilter === key) ? null : key;
+        if (WFM25State.utilAllocFilter) {
+          WFM25State.expandedTeam = null;
+          wfm25SetBreadcrumb_(wfm25ScopeBreadcrumbPrefix_());
+        }
         if (WFM25State.scorecardData) {
           renderWFM25UtilTable_(WFM25State.scorecardData);
         }
@@ -11709,6 +11746,45 @@ async function _qaRefreshPsaHours_() {
   // ── Render Utilization table ──────────────────────────────────
 
   /**
+   * Build one utilization worker row (shared by team expand + alloc-filter flat list).
+   * @param {Object} workerRow scorecard worker
+   * @param {string} teamLabel
+   * @param {string[]} qKeys
+   * @param {Object|null} projection
+   * @param {boolean} hasDraft
+   * @param {string|null} selectedWorker
+   * @param {string|null} teamPrefix optional team label prefix in name cell
+   * @returns {string}
+   */
+  function wfm25BuildUtilWorkerRowHtml_(workerRow, teamLabel, qKeys, projection, hasDraft, selectedWorker, teamPrefix) {
+    const wName = workerRow.worker || '\u2014';
+    const workerGetsDraft = hasDraft && wName === selectedWorker;
+    const wQCells = (workerRow.quarters || []).map(function (q, qi) {
+      const qk = qKeys[qi];
+      let baseUtil = wfm25ActiveUtilFromQuarter_(q);
+      const projUtil = workerGetsDraft
+        ? wfm25ProjectionUtil_(projection, 'worker', wName, qk, true)
+        : null;
+      if (workerGetsDraft && projUtil != null) {
+        const projBase = wfm25ProjectionUtil_(projection, 'worker', wName, qk, false);
+        if (projBase != null) baseUtil = projBase;
+      }
+      const icpTarget = workerRow.icpTarget || 0.75;
+      return wfm25RenderUtilCell_(baseUtil, projUtil, icpTarget, 'wfm25-util-cell--drill', qk);
+    }).join('');
+    const nameCell = teamPrefix
+      ? '<span class="muted wfm25-alloc-filter-team">' + escapeHtml_(teamPrefix) + '</span> ' +
+        escapeHtml_(wName)
+      : escapeHtml_(wName);
+    return '<tr class="wfm25-worker-row' +
+      (wName === selectedWorker ? ' wfm25-worker-row-selected' : '') + '"' +
+      ' data-wfm25-worker="' + escapeHtml_(wName) + '"' +
+      ' data-wfm25-team="' + escapeHtml_(teamLabel) + '">' +
+      '<td>' + nameCell + '</td>' +
+      wQCells + '</tr>';
+  }
+
+  /**
    * Render the org-team utilization aggregate table.
    * Rows = teams; columns = fiscal quarter keys from the API.
    * Clicking a team row expands worker rows inline (only one team at a time).
@@ -11723,6 +11799,12 @@ async function _qaRefreshPsaHours_() {
     if (!headerRow || !body) return;
 
     renderWFM25UtilAllocationBanner_(data);
+
+    if (!wfm25MyTeamScopeResolved_()) {
+      body.innerHTML = '<tr><td colspan="5" class="muted" style="padding:14px">' +
+        'No team could be resolved for your account. You may not be listed as a manager \u2014 contact an admin.</td></tr>';
+      return;
+    }
 
     const agg   = wfm25AggregateByTeam_(data);
     const qKeys = agg.quarterKeys;
@@ -11752,6 +11834,28 @@ async function _qaRefreshPsaHours_() {
     const selectedWorker = WFM25State.selectedWorker;
     const selectedTeam = WFM25State.selectedWorkerTeam;
 
+    if (hasAllocFilter) {
+      const scopeWorkers = (data && data.workers) || [];
+      const filteredWorkers = scopeWorkers.filter(function (w) {
+        return wfm25WorkerMatchesAllocFilter_(w, allocQi);
+      });
+      filteredWorkers.sort(function (a, b) {
+        const ta = a.teamLabel || 'Unknown';
+        const tb = b.teamLabel || 'Unknown';
+        return ta.localeCompare(tb) || String(a.worker || '').localeCompare(String(b.worker || ''));
+      });
+      if (!filteredWorkers.length) {
+        body.innerHTML = '<tr><td colspan="' + (1 + qKeys.length) +
+          '" class="muted" style="padding:14px">No workers match this allocation filter in the current scope.</td></tr>';
+        return;
+      }
+      filteredWorkers.forEach(function (workerRow) {
+        const teamLabel = workerRow.teamLabel || 'Unknown';
+        rows.push(wfm25BuildUtilWorkerRowHtml_(
+          workerRow, teamLabel, qKeys, projection, hasDraft, selectedWorker, teamLabel
+        ));
+      });
+    } else {
     agg.teams.forEach(function (team) {
       const isExpanded = WFM25State.expandedTeam === team.label;
       const teamGetsDraft = hasDraft && selectedTeam === team.label;
@@ -11784,35 +11888,20 @@ async function _qaRefreshPsaHours_() {
           const workerRow = (data.workers || []).find(function (wr) {
             return wr.worker === w.name;
           });
-          if (hasAllocFilter && workerRow && !wfm25WorkerMatchesAllocFilter_(workerRow, allocQi)) {
-            return;
-          }
-          const workerGetsDraft = hasDraft && w.name === selectedWorker;
-          const wQCells = w.quarters.map(function (q, qi) {
-            const qk = qKeys[qi];
-            let baseUtil = wfm25ActiveUtilFromAggCell_(q);
-            const projUtil = workerGetsDraft
-              ? wfm25ProjectionUtil_(projection, 'worker', w.name, qk, true)
-              : null;
-            if (workerGetsDraft && projUtil != null) {
-              const projBase = wfm25ProjectionUtil_(projection, 'worker', w.name, qk, false);
-              if (projBase != null) baseUtil = projBase;
-            }
-            return wfm25RenderUtilCell_(baseUtil, projUtil, w.icpTarget, 'wfm25-util-cell--drill', qk);
-          }).join('');
-          rows.push(
-            '<tr class="wfm25-worker-row' +
-            (w.name === selectedWorker ? ' wfm25-worker-row-selected' : '') + '"' +
-            ' data-wfm25-worker="' + escapeHtml_(w.name) + '"' +
-            ' data-wfm25-team="' + escapeHtml_(team.label) + '">' +
-            '<td>' + escapeHtml_(w.name) + '</td>' +
-            wQCells + '</tr>'
-          );
+          if (!workerRow) return;
+          rows.push(wfm25BuildUtilWorkerRowHtml_(
+            workerRow, team.label, qKeys, projection, hasDraft, selectedWorker, null
+          ));
         });
       }
     });
+    }
 
-    const totalCount = wfm25CountScopedTeamWorkers_(null, data, allocQi);
+    const totalCount = hasAllocFilter
+      ? ((data && data.workers) || []).filter(function (w) {
+        return wfm25WorkerMatchesAllocFilter_(w, allocQi);
+      }).length
+      : wfm25CountScopedTeamWorkers_(null, data, allocQi);
     const teamSummary = (data && data.teamSummary) || [];
     const orgIcpTarget = agg.teams.length ? agg.teams[0].icpTarget : 0.75;
     const orgGetsDraft = hasDraft && selectedWorker;
@@ -11926,6 +12015,11 @@ async function _qaRefreshPsaHours_() {
   async function loadWFM25Utilization_() {
     wfm25SetUtilLoading_(true);
     try {
+      if (!wfm25MyTeamScopeResolved_()) {
+        renderWFM25UtilTable_({ quarterKeys: [], workers: [], teamSummary: [] });
+        wfm25SetUtilLoading_(false);
+        return;
+      }
       // Use SLG worker scope (same default as Dashboard; directors scoped via State.filters)
       const params = buildServerParams_({ workerScope: 'SLG' });
       const results = await Promise.all([
@@ -12067,14 +12161,13 @@ async function _qaRefreshPsaHours_() {
     const filter = WFM25State.utilAllocFilter;
     if (!filter) return true;
     const q = (worker.quarters || [])[qi];
-    if (!q) return false;
+    if (!q || q.icpUtil == null) return false;
     if (filter === 'ontrack') {
-      return q.icpUtil != null &&
-        wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--green';
+      return wfm25UtilBandClass_(q.icpUtil) === 'wfm25-util-band--green';
     }
-    const thresholds = wfm25AllocThresholds_();
-    const band = wfm25ClassifyAllocation_(q.ratioToTarget, thresholds);
-    return band === filter;
+    if (filter === 'over') return q.icpUtil > 1.0;
+    if (filter === 'under') return q.icpUtil < 0.95;
+    return false;
   }
 
   /**
@@ -12137,19 +12230,13 @@ async function _qaRefreshPsaHours_() {
       const quarters = quarterKeys.map(function (qk, qi) {
         let sumProd = 0;
         let sumAvail = 0;
-        let sumUtilProd = 0;
-        let sumUtilTarget = 0;
         team.workerRows.forEach(function (w) {
           const q = (w.quarters || [])[qi];
           if (!q) return;
           sumProd += Number(q.productiveHours) || 0;
           sumAvail += Number(q.icpAvailableHours) || 0;
-          if (Number(q.targetHours) > 0) {
-            sumUtilProd += Number(q.productiveHours) || 0;
-            sumUtilTarget += Number(q.targetHours) || 0;
-          }
         });
-        const util = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
+        const util = sumAvail > 0 ? sumProd / sumAvail : null;
         return {
           qk: qk,
           planned: sumProd,
@@ -12173,19 +12260,13 @@ async function _qaRefreshPsaHours_() {
       quarters: quarterKeys.map(function (qk, qi) {
         let sumProd = 0;
         let sumAvail = 0;
-        let sumUtilProd = 0;
-        let sumUtilTarget = 0;
         workers.forEach(function (w) {
           const q = (w.quarters || [])[qi];
           if (!q) return;
           sumProd += Number(q.productiveHours) || 0;
           sumAvail += Number(q.icpAvailableHours) || 0;
-          if (Number(q.targetHours) > 0) {
-            sumUtilProd += Number(q.productiveHours) || 0;
-            sumUtilTarget += Number(q.targetHours) || 0;
-          }
         });
-        const util = sumUtilTarget > 0 ? sumUtilProd / sumUtilTarget : null;
+        const util = sumAvail > 0 ? sumProd / sumAvail : null;
         return {
           qk: qk,
           planned: sumProd,
@@ -12758,7 +12839,7 @@ async function _qaRefreshPsaHours_() {
 
   const WFM25_SD_SCOPE_CAPTION_ =
     'SLG delivery only \u2014 Corporate & cross-org (Workday Regions) resources are ' +
-    'excluded. See Mix & Trend for those.';
+    'excluded. See Mix & Trend for those. On-leave workers are included in all totals.';
 
   /**
    * Resolve a specialty practice to a leadership team label using config map.

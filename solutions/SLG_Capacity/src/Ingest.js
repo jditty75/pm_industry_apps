@@ -1116,7 +1116,8 @@ function writeConsolidatedActuals_(values) {
     out.push(ACTUALS_HEADERS.map(function (h) {
       if (h === 'actual_icp_hours') return Number(row[idx[h]]) || 0;
       if (h === 'week_start') return row[idx[h]]; // Date, Saturday anchor
-      if (h === 'project' || h === 'project_role_category') {
+      if (h === 'project' || h === 'project_role_category'
+          || h === 'specialty_practice' || h === 'sub_specialty_practice') {
         var v = idx[h] !== undefined ? String(row[idx[h]] || '').trim() : '';
         return v || 'Unclassified';
       }

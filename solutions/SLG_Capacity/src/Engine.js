@@ -475,13 +475,19 @@ function buildManagerDescendants_(mgrRows) {
  * even though it is no longer read.
  */
 function buildEffectiveManagers_(selectedName, includeMyManagers, managersByName, managerDescendants) {
-  var name = (selectedName || '').trim();
+  var raw = (selectedName || '').trim();
+  if (!raw) return null;
+  var name = (typeof normalizeManagerName_ === 'function')
+    ? normalizeManagerName_(raw) : raw;
   if (!name) return null;
   var set = {};
   set[name] = true;
   if (includeMyManagers) {
-    var desc = managerDescendants[name] || [];
-    desc.forEach(function (m) { set[m] = true; });
+    var desc = (managerDescendants && (managerDescendants[raw] || managerDescendants[name])) || [];
+    desc.forEach(function (m) {
+      var nm = (typeof normalizeManagerName_ === 'function') ? normalizeManagerName_(m) : m;
+      if (nm) set[nm] = true;
+    });
   }
   return set;
 }

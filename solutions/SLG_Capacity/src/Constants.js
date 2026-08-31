@@ -221,6 +221,8 @@ const ACTUALS_HEADERS = [
   'project',       // WP2.0: project dimension from Actuals_Current_Normalized
   'project_role_category', // WP2.0: role category from Actuals_Current_Normalized
   'actual_icp_hours', // number — the actual ICP hours for that worker×week×project
+  'specialty_practice',     // from Actuals_Current_Normalized (verbatim; 'Unclassified' if blank)
+  'sub_specialty_practice', // from Actuals_Current_Normalized (verbatim; 'Unclassified' if blank)
   'source_row'     // number — source row index (diagnostics)
 ];
 

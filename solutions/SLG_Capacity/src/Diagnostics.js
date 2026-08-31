@@ -6435,3 +6435,210 @@ function _dbg_traceWFM25SparklineIcpUtil_(workerName, fiscalQuarter) {
     Logger.log('  DIAGNOSIS: icpUtil populated for worked weeks — if sparkline blank, check client filter/color');
   }
 }
+
+/**
+ * WFM.25 Pass 3D: verify specialty projected-util fallback + always-include on-leave.
+ * Logs before/after team num/den (Technical, Functional, FIN), anchor specialty/team,
+ * and compares legacy scope (forecast + session on-leave policy) vs endpoint scope.
+ * @param {Object} [params] api_getSpecialtyProjectedUtil filter params (includeOnLeave ignored by endpoint)
+ */
+function _dbg_specialtyProjectedUtilFallback_(params) {
+  _dbg_requireAdmin_();
+  params = params || {};
+  var TRACE_Q = 'FY27-Q3';
+  var TECH_TEAM = 'Technical Consulting';
+  var FIN_TEAM = 'Functional Consulting';
+  var FIN_SP = 'FIN';
+
+  var quarterKeys = scorecardWindowKeys_();
+  var curQ = fiscalQuarterKey_(new Date());
+  var quarterKeySet = {};
+  quarterKeys.forEach(function (qk) { quarterKeySet[qk] = true; });
+
+  var allocRows = [];
+  try {
+    allocRows = cachedRead_(ALLOC_NORM);
+  } catch (e) {
+    allocRows = [];
+  }
+  var resIndex = _resourceIndex_(allocRows);
+
+  var utilRows = [];
+  try {
+    utilRows = cachedRead_(CFG_UTIL_QUARTERLY);
+  } catch (e2) {
+    utilRows = [];
+  }
+
+  var utilScope = _buildSpecialtyProjectedUtilEmployeeIds_(
+    params, quarterKeySet, utilRows, resIndex
+  );
+  var newTargetedIds = utilScope.targetedEmployeeIds;
+  var forecastWorkerByEid = utilScope.forecastWorkerByEid;
+  var spCtx = buildWorkerSpecialtyPracticeContext_(
+    allocRows, Object.values(forecastWorkerByEid)
+  );
+  var teamMap = buildSpecialtyTeamMap_();
+
+  var legacyForecast = computeWeeklyForecast_({
+    viewMode: params.viewMode || 'Committed',
+    scenarioId: params.scenarioId,
+    teams: params.teams,
+    teamLabel: params.teamLabel,
+    workerScope: 'SLG',
+    includeMyManagers: params.includeMyManagers,
+    includeTimeOff: params.includeTimeOff,
+    includeOnLeave: params.includeOnLeave
+  });
+  var legacyEmployeeIds = {};
+  (legacyForecast.workers || []).forEach(function (w) {
+    var eid = String(w.employeeId || '').trim();
+    if (eid) legacyEmployeeIds[eid] = true;
+  });
+
+  _wowQuarterTargetIndex_();
+
+  function addTeamTotals_(teamLabel, target, numVal, buckets) {
+    if (teamLabel === TECH_TEAM) {
+      buckets.den += target;
+      buckets.num += numVal;
+    }
+  }
+
+  function addFinTeamTotals_(teamLabel, target, numVal, buckets) {
+    if (teamLabel === FIN_TEAM) {
+      buckets.den += target;
+      buckets.num += numVal;
+    }
+  }
+
+  function addFinSpTotals_(sp, target, numVal, buckets) {
+    if (sp === FIN_SP) {
+      buckets.den += target;
+      buckets.num += numVal;
+    }
+  }
+
+  var oldTech = { num: 0, den: 0 };
+  var newTech = { num: 0, den: 0 };
+  var oldFinSp = { num: 0, den: 0 };
+  var newFinSp = { num: 0, den: 0 };
+  var oldFinTeam = { num: 0, den: 0 };
+  var newFinTeam = { num: 0, den: 0 };
+  var fallbacks = [];
+  var anchorByName = {};
+
+  utilRows.forEach(function (r) {
+    var qk = String(r.fiscal_quarter || '').trim();
+    if (qk !== TRACE_Q) return;
+
+    var eid = String(r.employee_id || '').trim();
+    var res = String(r.resource_name || '').trim();
+    var target = Number(r.target_hours) || 0;
+
+    if (target > 0 && res) {
+      anchorByName[res] = {
+        resource: res,
+        employeeId: eid,
+        target: target,
+        inNewScope: !!(eid && newTargetedIds[eid]),
+        inLegacyScope: !!(eid && legacyEmployeeIds[eid])
+      };
+    }
+
+    var profileRow = buildWorkerSpecialtyProfileRow_(
+      res, eid, spCtx.resIndex, forecastWorkerByEid
+    );
+    var oldSp = spCtx.primaryMap[res] || 'Unclassified';
+    var resolved = resolveWorkerSpecialtyPracticeWithSource_(
+      res, eid, spCtx.primaryMap, spCtx.histMap, profileRow
+    );
+    var newSp = resolved.specialty;
+    var newTeam = resolveSpecialtyTeamLabel_(newSp, teamMap);
+    var oldTeam = resolveSpecialtyTeamLabel_(oldSp, teamMap);
+
+    var num;
+    if (compareFiscalQuarterKeys_(qk, curQ) < 0) {
+      num = quarterActualIcpFromWoW_(eid, qk);
+    } else {
+      num = quarterForecastIcpFromWoW_(eid, qk);
+    }
+    var numVal = num != null ? num : 0;
+
+    if (eid && legacyEmployeeIds[eid] && target > 0) {
+      addTeamTotals_(oldTeam, target, numVal, oldTech);
+      addFinSpTotals_(oldSp, target, numVal, oldFinSp);
+      addFinTeamTotals_(oldTeam, target, numVal, oldFinTeam);
+    }
+    if (eid && newTargetedIds[eid] && target > 0) {
+      addTeamTotals_(newTeam, target, numVal, newTech);
+      addFinSpTotals_(newSp, target, numVal, newFinSp);
+      addFinTeamTotals_(newTeam, target, numVal, newFinTeam);
+    }
+
+    if (anchorByName[res] && newTargetedIds[eid]) {
+      anchorByName[res].oldSp = oldSp;
+      anchorByName[res].newSp = newSp;
+      anchorByName[res].team = newTeam;
+      anchorByName[res].source = resolved.source;
+      anchorByName[res].num = numVal;
+    }
+
+    if (newTargetedIds[eid] && target > 0 && !spCtx.primaryMap[res]) {
+      fallbacks.push({
+        resource: res,
+        employeeId: eid,
+        target: target,
+        num: numVal,
+        oldSp: oldSp,
+        newSp: newSp,
+        team: newTeam,
+        source: resolved.source
+      });
+    }
+  });
+
+  Logger.log('_dbg_specialtyProjectedUtilFallback_: ' + TRACE_Q);
+  Logger.log('  endpoint always includes on-leave (Option 1; PSA toggle unchanged)');
+  Logger.log('  legacy scope includeOnLeave=' + includeOnLeaveEffective_(params.includeOnLeave) +
+    ' (old primary-only + session policy)');
+  Logger.log('  ' + TECH_TEAM + ' BEFORE: num=' + Math.round(oldTech.num) +
+    ' den=' + Math.round(oldTech.den));
+  Logger.log('  ' + TECH_TEAM + ' AFTER:  num=' + Math.round(newTech.num) +
+    ' den=' + Math.round(newTech.den));
+  Logger.log('  ' + FIN_TEAM + ' BEFORE: num=' + Math.round(oldFinTeam.num) +
+    ' den=' + Math.round(oldFinTeam.den));
+  Logger.log('  ' + FIN_TEAM + ' AFTER:  num=' + Math.round(newFinTeam.num) +
+    ' den=' + Math.round(newFinTeam.den));
+  Logger.log('  FIN specialty BEFORE: num=' + Math.round(oldFinSp.num) +
+    ' den=' + Math.round(oldFinSp.den));
+  Logger.log('  FIN specialty AFTER:  num=' + Math.round(newFinSp.num) +
+    ' den=' + Math.round(newFinSp.den));
+
+  var anchors = [
+    'Jessica Connaghan', 'Katharine Winter-Cevallos', 'Kait Sakey', 'Bradley Hoenshell'
+  ];
+  anchors.forEach(function (name) {
+    var hit = anchorByName[name];
+    if (!hit) {
+      Logger.log('  ' + name + ': (no Utilization_Quarterly row with target>0 for ' + TRACE_Q + ')');
+      return;
+    }
+    if (!hit.inNewScope) {
+      Logger.log('  ' + name + ': EXCLUDED from endpoint (failed SLG/force-exclude/manager filter)');
+      return;
+    }
+    Logger.log('  ' + name + ': source=' + (hit.source || '?') +
+      ' specialty=' + (hit.newSp || '?') +
+      ' team=' + (hit.team || '?') +
+      ' target=' + hit.target + ' num=' + Math.round(hit.num || 0) +
+      (hit.inLegacyScope ? '' : ' [on-leave: in endpoint only]'));
+  });
+
+  Logger.log('  All unmapped in-scope targeted workers (' + fallbacks.length + '):');
+  fallbacks.forEach(function (f) {
+    Logger.log('    ' + f.resource + ' | source=' + f.source +
+      ' | specialty=' + f.newSp + ' | team=' + f.team +
+      ' | target=' + f.target + ' num=' + Math.round(f.num));
+  });
+}

@@ -1168,3 +1168,638 @@ function listSendAsAliases() {
   }
   return out;
 }
+/**
+ * DEBUG: Portfolio Momentum source data for AI / EVI product-mode apps.
+ *
+ * Run from the app project, not CoreLib.
+ *
+ * For AI_DM:
+ *   debugPortfolioMomentumSourceData_();
+ *
+ * For EVI_DM:
+ *   debugPortfolioMomentumSourceData_();
+ *
+ * This does not modify data.
+ */
+function debugPortfolioMomentumSourceData() {
+  var cfg = APP_CONFIG;
+  var momentum = cfg.momentum || {};
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var pfSheetName = (cfg.sheets && cfg.sheets.sfdcDeploymentProductFunctions) || 'SFDC_DeploymentProductFunctions';
+  var depSheetName = (cfg.sheets && cfg.sheets.deployments) || 'SFDC_Deployments';
+
+  Logger.log('============================================================');
+  Logger.log('DEBUG Portfolio Momentum Source Data');
+  Logger.log('appId=' + (cfg.appId || ''));
+  Logger.log('pfSheetName=' + pfSheetName);
+  Logger.log('depSheetName=' + depSheetName);
+  Logger.log('momentum=' + JSON.stringify(momentum));
+  Logger.log('============================================================');
+
+  var pfSheet = ss.getSheetByName(pfSheetName);
+  var depSheet = ss.getSheetByName(depSheetName);
+
+  if (!pfSheet) {
+    Logger.log('ERROR: Missing sheet: ' + pfSheetName);
+    return;
+  }
+  if (!depSheet) {
+    Logger.log('ERROR: Missing sheet: ' + depSheetName);
+    return;
+  }
+
+  Logger.log('PF lastRow=' + pfSheet.getLastRow() + ', lastCol=' + pfSheet.getLastColumn());
+  Logger.log('DEP lastRow=' + depSheet.getLastRow() + ', lastCol=' + depSheet.getLastColumn());
+
+  if (pfSheet.getLastRow() < 2) {
+    Logger.log('ERROR: PF sheet has no data rows.');
+    return;
+  }
+  if (depSheet.getLastRow() < 2) {
+    Logger.log('ERROR: Deployments sheet has no data rows.');
+    return;
+  }
+
+  var pfValues = pfSheet.getRange(1, 1, pfSheet.getLastRow(), pfSheet.getLastColumn()).getValues();
+  var depValues = depSheet.getRange(1, 1, depSheet.getLastRow(), depSheet.getLastColumn()).getValues();
+
+  var pfHeaders = pfValues[0].map(function(h) { return String(h || '').trim(); });
+  var depHeaders = depValues[0].map(function(h) { return String(h || '').trim(); });
+
+  Logger.log('PF headers: ' + JSON.stringify(pfHeaders));
+  Logger.log('DEP headers: ' + JSON.stringify(depHeaders));
+
+  function findCol_(headers, keywords, fallback) {
+    for (var i = 0; i < headers.length; i++) {
+      var h = String(headers[i] || '').toLowerCase()
+        .replace(/__c$/i, '')
+        .replace(/_/g, ' ')
+        .trim();
+
+      for (var j = 0; j < keywords.length; j++) {
+        if (h.indexOf(String(keywords[j]).toLowerCase()) >= 0) return i;
+      }
+    }
+    return (fallback >= 0 && fallback < headers.length) ? fallback : -1;
+  }
+
+  function findDeploymentFkCol_(headers, fallback) {
+    var lower = headers.map(function(h) { return String(h || '').toLowerCase(); });
+    for (var i = 0; i < lower.length; i++) {
+      var h = lower[i];
+      if (h.indexOf('deployment') !== -1 && h.indexOf('.') === -1) return i;
+    }
+    return (fallback >= 0 && fallback < headers.length) ? fallback : -1;
+  }
+
+  function normalizeDate_(raw) {
+    if (!raw) return null;
+
+    if (raw instanceof Date) {
+      if (isNaN(raw.getTime())) return null;
+      return Utilities.formatDate(raw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+
+    var s = String(raw).trim();
+    if (!s) return null;
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    }
+
+    return null;
+  }
+
+  function matchesLikePattern_(value, pattern) {
+    var v = String(value || '').trim().toLowerCase();
+    var p = String(pattern || '').trim().toLowerCase();
+
+    if (!p) return true;
+    if (p.indexOf('%') < 0) return v === p;
+
+    var parts = p.split('%').filter(function(x) { return x.length > 0; });
+    if (!parts.length) return true;
+
+    var idx = 0;
+    for (var i = 0; i < parts.length; i++) {
+      var found = v.indexOf(parts[i], idx);
+      if (found < 0) return false;
+      idx = found + parts[i].length;
+    }
+    return true;
+  }
+
+  function fyFromDateStr_(dateStr) {
+    if (!dateStr) return null;
+    var parts = String(dateStr).split('-');
+    if (parts.length < 2) return null;
+    var y = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10) - 1;
+    if (isNaN(y) || isNaN(m)) return null;
+    var fyYear = (m >= 1) ? y + 1 : y;
+    return 'FY' + String(fyYear).slice(-2);
+  }
+
+  function listify_(v) {
+    if (v == null) return [];
+    return Array.isArray(v) ? v : [v];
+  }
+
+  var colPfId = findCol_(pfHeaders, ['id'], 0);
+  var colPfDeployment = findDeploymentFkCol_(pfHeaders, 1);
+  var colPfProductArea = findCol_(pfHeaders, ['product area', 'product_area'], 2);
+  var colPfFunction = findCol_(pfHeaders, ['function'], 3);
+  var colPfTarget = findCol_(pfHeaders, ['production move date target', 'move date target', 'target'], 4);
+  var colPfActual = findCol_(pfHeaders, ['production move date actual', 'move date actual', 'actual'], 5);
+  var colPfDeploymentName = findCol_(pfHeaders, ['deployment__r.name', 'deployment name'], -1);
+
+  Logger.log('PF column detection:');
+  Logger.log('  Id=' + colPfId + ' / ' + pfHeaders[colPfId]);
+  Logger.log('  Deployment__c=' + colPfDeployment + ' / ' + pfHeaders[colPfDeployment]);
+  Logger.log('  Product_Area__c=' + colPfProductArea + ' / ' + pfHeaders[colPfProductArea]);
+  Logger.log('  Function__c=' + colPfFunction + ' / ' + pfHeaders[colPfFunction]);
+  Logger.log('  Target Date=' + colPfTarget + ' / ' + pfHeaders[colPfTarget]);
+  Logger.log('  Actual Date=' + colPfActual + ' / ' + pfHeaders[colPfActual]);
+  Logger.log('  Direct Deployment Name=' + colPfDeploymentName + ' / ' + (colPfDeploymentName >= 0 ? pfHeaders[colPfDeploymentName] : '(not found)'));
+
+  var colDepId = findCol_(depHeaders, ['id'], 0);
+  var colDepName = findCol_(depHeaders, ['name'], 1);
+  var colDepAccount = findCol_(depHeaders, ['customer__r.name', 'account name'], 3);
+  var colDepIndustry = findCol_(depHeaders, ['customer__r.industry', 'industry'], 4);
+  var colDepStatus = findCol_(depHeaders, ['overall status', 'overall_status'], 13);
+
+  Logger.log('Deployment column detection:');
+  Logger.log('  Id=' + colDepId + ' / ' + depHeaders[colDepId]);
+  Logger.log('  Name=' + colDepName + ' / ' + depHeaders[colDepName]);
+  Logger.log('  Account=' + colDepAccount + ' / ' + depHeaders[colDepAccount]);
+  Logger.log('  Industry=' + colDepIndustry + ' / ' + depHeaders[colDepIndustry]);
+  Logger.log('  Status=' + colDepStatus + ' / ' + depHeaders[colDepStatus]);
+
+  var depLookup = {};
+  var depLookup15 = {};
+
+  for (var d = 1; d < depValues.length; d++) {
+    var depRow = depValues[d];
+    var depId = colDepId >= 0 ? String(depRow[colDepId] || '').trim() : '';
+    if (!depId) continue;
+
+    var depObj = {
+      id: depId,
+      name: colDepName >= 0 ? String(depRow[colDepName] || '').trim() : '',
+      account: colDepAccount >= 0 ? String(depRow[colDepAccount] || '').trim() : '',
+      industry: colDepIndustry >= 0 ? String(depRow[colDepIndustry] || '').trim() : '',
+      status: colDepStatus >= 0 ? String(depRow[colDepStatus] || '').trim() : ''
+    };
+
+    depLookup[depId] = depObj;
+    depLookup15[depId.slice(0, 15)] = depObj;
+  }
+
+  Logger.log('Deployment lookup size 18-char=' + Object.keys(depLookup).length);
+  Logger.log('Deployment lookup size 15-char=' + Object.keys(depLookup15).length);
+
+  var filter = momentum.productFilter || {};
+  var areaList = listify_(filter.Product_Area__c);
+  var nameList = listify_(filter.Deployment_Name);
+  var chartLegend = listify_(momentum.chartLegend);
+
+  Logger.log('Configured Product_Area__c filters: ' + JSON.stringify(areaList));
+  Logger.log('Configured Deployment_Name filters: ' + JSON.stringify(nameList));
+  Logger.log('Configured chartLegend: ' + JSON.stringify(chartLegend));
+
+  var stats = {
+    totalRows: 0,
+    hasDeploymentId: 0,
+    missingDeploymentId: 0,
+    lookupHit18: 0,
+    lookupHit15: 0,
+    lookupMiss: 0,
+    actualDatePresent: 0,
+    actualDateMissing: 0,
+    productAreaMatch: 0,
+    deploymentNameMatch: 0,
+    eitherFilterMatch: 0,
+    seriesResolved: 0,
+    countedByCoreRules: 0
+  };
+
+  var productAreasSeen = {};
+  var functionsSeen = {};
+  var deploymentNamesSeen = {};
+  var actualRawSamples = {};
+  var actualParsedSamples = {};
+  var fyCounts = {};
+  var countedRows = [];
+  var skippedRows = [];
+
+  function productAreaMatches_(pa) {
+    var normalized = String(pa || '').trim().toLowerCase();
+    for (var i = 0; i < areaList.length; i++) {
+      if (normalized === String(areaList[i] || '').trim().toLowerCase()) return true;
+    }
+    return false;
+  }
+
+  function deploymentNameMatches_(name) {
+    for (var i = 0; i < nameList.length; i++) {
+      if (matchesLikePattern_(name, nameList[i])) return true;
+    }
+    return false;
+  }
+
+  function resolveSeries_(productArea, deploymentName) {
+    if (!chartLegend.length) return null;
+    if (chartLegend.length === 1) return chartLegend[0];
+
+    var depNameLower = String(deploymentName || '').toLowerCase();
+    var productAreaLower = String(productArea || '').toLowerCase();
+
+    for (var i = 0; i < chartLegend.length; i++) {
+      var series = String(chartLegend[i] || '').trim();
+      var key = series.toLowerCase();
+      if (!key) continue;
+      if (depNameLower.indexOf(key) >= 0 || productAreaLower.indexOf(key) >= 0) {
+        return series;
+      }
+    }
+    return null;
+  }
+
+  for (var r = 1; r < pfValues.length; r++) {
+    stats.totalRows++;
+
+    var pfRow = pfValues[r];
+
+    var pfId = colPfId >= 0 ? String(pfRow[colPfId] || '').trim() : '';
+    var deploymentId = colPfDeployment >= 0 ? String(pfRow[colPfDeployment] || '').trim() : '';
+    var deploymentId15 = deploymentId ? deploymentId.slice(0, 15) : '';
+
+    if (deploymentId) stats.hasDeploymentId++;
+    else stats.missingDeploymentId++;
+
+    var depCtx = deploymentId ? depLookup[deploymentId] : null;
+    var depCtx15 = (!depCtx && deploymentId15) ? depLookup15[deploymentId15] : null;
+
+    if (depCtx) stats.lookupHit18++;
+    else if (depCtx15) stats.lookupHit15++;
+    else stats.lookupMiss++;
+
+    var lookupCtx = depCtx || depCtx15 || {};
+
+    var productArea = colPfProductArea >= 0 ? String(pfRow[colPfProductArea] || '').trim() : '';
+    var func = colPfFunction >= 0 ? String(pfRow[colPfFunction] || '').trim() : '';
+
+    var directDeploymentName = colPfDeploymentName >= 0 ? String(pfRow[colPfDeploymentName] || '').trim() : '';
+    var resolvedDeploymentName = directDeploymentName || lookupCtx.name || '';
+
+    var rawActual = colPfActual >= 0 ? pfRow[colPfActual] : '';
+    var parsedActual = normalizeDate_(rawActual);
+
+    if (parsedActual) stats.actualDatePresent++;
+    else stats.actualDateMissing++;
+
+    if (productArea) productAreasSeen[productArea] = (productAreasSeen[productArea] || 0) + 1;
+    if (func) functionsSeen[func] = (functionsSeen[func] || 0) + 1;
+    if (resolvedDeploymentName) deploymentNamesSeen[resolvedDeploymentName] = (deploymentNamesSeen[resolvedDeploymentName] || 0) + 1;
+
+    var rawActualKey = String(rawActual || '(blank)');
+    actualRawSamples[rawActualKey] = (actualRawSamples[rawActualKey] || 0) + 1;
+
+    var parsedActualKey = parsedActual || '(unparsed/blank)';
+    actualParsedSamples[parsedActualKey] = (actualParsedSamples[parsedActualKey] || 0) + 1;
+
+    var paMatch = productAreaMatches_(productArea);
+    var nameMatch = deploymentNameMatches_(resolvedDeploymentName);
+    var eitherMatch = paMatch || nameMatch;
+    var series = resolveSeries_(productArea, resolvedDeploymentName);
+    var counted = !!(deploymentId && parsedActual && eitherMatch && series);
+
+    if (paMatch) stats.productAreaMatch++;
+    if (nameMatch) stats.deploymentNameMatch++;
+    if (eitherMatch) stats.eitherFilterMatch++;
+    if (series) stats.seriesResolved++;
+    if (counted) stats.countedByCoreRules++;
+
+    if (counted) {
+      var fy = fyFromDateStr_(parsedActual) || 'Unknown FY';
+      if (!fyCounts[fy]) fyCounts[fy] = {};
+      if (!fyCounts[fy][series]) fyCounts[fy][series] = 0;
+      fyCounts[fy][series]++;
+
+      countedRows.push({
+        sheetRow: r + 1,
+        pfId: pfId,
+        deploymentId: deploymentId,
+        deploymentName: resolvedDeploymentName,
+        account: lookupCtx.account || '',
+        industry: lookupCtx.industry || '',
+        status: lookupCtx.status || '',
+        productArea: productArea,
+        functionName: func,
+        rawActual: String(rawActual || ''),
+        parsedActual: parsedActual,
+        fy: fy,
+        productAreaMatch: paMatch,
+        deploymentNameMatch: nameMatch,
+        series: series
+      });
+    } else {
+      skippedRows.push({
+        sheetRow: r + 1,
+        pfId: pfId,
+        deploymentId: deploymentId,
+        deploymentName: resolvedDeploymentName,
+        productArea: productArea,
+        functionName: func,
+        rawActual: String(rawActual || ''),
+        parsedActual: parsedActual || '',
+        productAreaMatch: paMatch,
+        deploymentNameMatch: nameMatch,
+        eitherFilterMatch: eitherMatch,
+        series: series || '',
+        skipReason: !deploymentId ? 'missing deployment id'
+          : !parsedActual ? 'missing/unparsed actual date'
+          : !eitherMatch ? 'does not match product area or deployment name filter'
+          : !series ? 'matched filter but could not resolve chart series'
+          : 'unknown'
+      });
+    }
+  }
+
+  Logger.log('============================================================');
+  Logger.log('SUMMARY STATS');
+  Logger.log(JSON.stringify(stats, null, 2));
+
+  Logger.log('============================================================');
+  Logger.log('FY COUNTS FOR COUNTED ROWS');
+  Logger.log(JSON.stringify(fyCounts, null, 2));
+
+  Logger.log('============================================================');
+  Logger.log('PRODUCT AREAS SEEN');
+  Object.keys(productAreasSeen).sort().forEach(function(k) {
+    Logger.log(productAreasSeen[k] + ' | ' + k);
+  });
+
+  Logger.log('============================================================');
+  Logger.log('FUNCTIONS SEEN');
+  Object.keys(functionsSeen).sort().forEach(function(k) {
+    Logger.log(functionsSeen[k] + ' | ' + k);
+  });
+
+  Logger.log('============================================================');
+  Logger.log('DEPLOYMENT NAMES SEEN VIA LOOKUP');
+  Object.keys(deploymentNamesSeen).sort().forEach(function(k) {
+    Logger.log(deploymentNamesSeen[k] + ' | ' + k);
+  });
+
+  Logger.log('============================================================');
+  Logger.log('RAW ACTUAL DATE VALUES');
+  Object.keys(actualRawSamples).sort().forEach(function(k) {
+    Logger.log(actualRawSamples[k] + ' | ' + k);
+  });
+
+  Logger.log('============================================================');
+  Logger.log('PARSED ACTUAL DATE VALUES');
+  Object.keys(actualParsedSamples).sort().forEach(function(k) {
+    Logger.log(actualParsedSamples[k] + ' | ' + k);
+  });
+
+  Logger.log('============================================================');
+  Logger.log('COUNTED ROWS');
+  countedRows.forEach(function(row) {
+    Logger.log(JSON.stringify(row));
+  });
+
+  Logger.log('============================================================');
+  Logger.log('SKIPPED ROWS');
+  skippedRows.forEach(function(row) {
+    Logger.log(JSON.stringify(row));
+  });
+
+  Logger.log('============================================================');
+  Logger.log('DEBUG COMPLETE');
+}
+/**
+ * DEBUG: Portfolio Momentum fastest-growing-industry inputs.
+ *
+ * Run from AI_DM or EVI_DM Apps Script project.
+ * Does not modify data.
+ */
+function debugPortfolioMomentumIndustryGrowth() {
+  var cfg = APP_CONFIG;
+
+  Logger.log('============================================================');
+  Logger.log('DEBUG Portfolio Momentum Industry Growth');
+  Logger.log('appId=' + (cfg.appId || ''));
+  Logger.log('momentum=' + JSON.stringify(cfg.momentum || {}));
+  Logger.log('============================================================');
+
+  var dataset = CoreLib.CorePortfolioMomentum.queryMomentumDataset(cfg);
+
+  if (!dataset) {
+    Logger.log('ERROR: queryMomentumDataset returned null.');
+    return;
+  }
+
+  Logger.log('dataset.mode=' + dataset.mode);
+  Logger.log('dataset.series=' + JSON.stringify(dataset.series || []));
+  Logger.log('dataset.stats=' + JSON.stringify(dataset.stats || {}, null, 2));
+
+  var groups = dataset.groups || {};
+  var groupKeys = Object.keys(groups);
+
+  Logger.log('deduped group count=' + groupKeys.length);
+
+  var now = new Date();
+
+  function wyFyFromDate_(date) {
+    var m = date.getMonth();
+    var y = date.getFullYear();
+    var fyYear = (m >= 1) ? y + 1 : y;
+    return {
+      fyYear: fyYear,
+      label: 'FY' + String(fyYear).slice(-2)
+    };
+  }
+
+  function fyLabelFromDateStr_(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    var parts = dateStr.split('-');
+    if (parts.length < 2) return null;
+    var y = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10) - 1;
+    if (isNaN(y) || isNaN(m)) return null;
+    var fyYear = (m >= 1) ? y + 1 : y;
+    return 'FY' + String(fyYear).slice(-2);
+  }
+
+  function fyYearFromLabel_(label) {
+    return parseInt('20' + String(label).slice(2), 10);
+  }
+
+  var currentFyInfo = wyFyFromDate_(now);
+  var currentFyLabel = currentFyInfo.label;
+  var currentFyYear = currentFyInfo.fyYear;
+  var historicalYears = 5;
+  var oldestAllowedFyYear = currentFyYear - historicalYears;
+
+  Logger.log('currentFyLabel=' + currentFyLabel);
+  Logger.log('currentFyYear=' + currentFyYear);
+  Logger.log('oldestAllowedFyYear=' + oldestAllowedFyYear);
+
+  var allFyIndustryCounts = {};
+  var historicalIndustryCounts = {};
+  var currentFyIndustryCounts = {};
+  var missingIndustryGroups = [];
+  var invalidDateGroups = [];
+
+  groupKeys.forEach(function(groupKey) {
+    var g = groups[groupKey];
+    var fyLabel = fyLabelFromDateStr_(g.earliestDate);
+
+    if (!fyLabel) {
+      if (invalidDateGroups.length < 20) {
+        invalidDateGroups.push({
+          groupKey: groupKey,
+          earliestDate: g.earliestDate,
+          series: g.series,
+          industry: g.industry,
+          source: g.source
+        });
+      }
+      return;
+    }
+
+    var fyYear = fyYearFromLabel_(fyLabel);
+    var industry = String(g.industry || '').trim();
+
+    if (!industry) {
+      if (missingIndustryGroups.length < 20) {
+        missingIndustryGroups.push({
+          groupKey: groupKey,
+          earliestDate: g.earliestDate,
+          fyLabel: fyLabel,
+          series: g.series,
+          deploymentName: g.deploymentName,
+          source: g.source
+        });
+      }
+      industry = 'Unknown';
+    }
+
+    if (!allFyIndustryCounts[fyLabel]) allFyIndustryCounts[fyLabel] = {};
+    allFyIndustryCounts[fyLabel][industry] = (allFyIndustryCounts[fyLabel][industry] || 0) + 1;
+
+    if (fyLabel === currentFyLabel) {
+      currentFyIndustryCounts[industry] = (currentFyIndustryCounts[industry] || 0) + 1;
+    } else if (fyYear >= oldestAllowedFyYear && fyYear < currentFyYear) {
+      if (!historicalIndustryCounts[fyLabel]) historicalIndustryCounts[fyLabel] = {};
+      historicalIndustryCounts[fyLabel][industry] = (historicalIndustryCounts[fyLabel][industry] || 0) + 1;
+    }
+  });
+
+  Logger.log('============================================================');
+  Logger.log('ALL FY INDUSTRY COUNTS');
+  Object.keys(allFyIndustryCounts).sort(function(a, b) {
+    return fyYearFromLabel_(a) - fyYearFromLabel_(b);
+  }).forEach(function(fy) {
+    Logger.log(fy + ': ' + JSON.stringify(allFyIndustryCounts[fy]));
+  });
+
+  Logger.log('============================================================');
+  Logger.log('HISTORICAL INDUSTRY COUNTS USED FOR KPI 4');
+  Object.keys(historicalIndustryCounts).sort(function(a, b) {
+    return fyYearFromLabel_(a) - fyYearFromLabel_(b);
+  }).forEach(function(fy) {
+    Logger.log(fy + ': ' + JSON.stringify(historicalIndustryCounts[fy]));
+  });
+
+  Logger.log('============================================================');
+  Logger.log('CURRENT FY INDUSTRY COUNTS');
+  Logger.log(JSON.stringify(currentFyIndustryCounts, null, 2));
+
+  Logger.log('============================================================');
+  Logger.log('MISSING INDUSTRY GROUP SAMPLES');
+  missingIndustryGroups.forEach(function(x) {
+    Logger.log(JSON.stringify(x));
+  });
+
+  Logger.log('============================================================');
+  Logger.log('INVALID DATE GROUP SAMPLES');
+  invalidDateGroups.forEach(function(x) {
+    Logger.log(JSON.stringify(x));
+  });
+
+  Logger.log('============================================================');
+  Logger.log('MANUAL INDUSTRY CAGR RANKING');
+
+  var labels = Object.keys(historicalIndustryCounts).sort(function(a, b) {
+    return fyYearFromLabel_(a) - fyYearFromLabel_(b);
+  });
+
+  Logger.log('historical labels=' + JSON.stringify(labels));
+
+  var industries = {};
+  labels.forEach(function(fy) {
+    Object.keys(historicalIndustryCounts[fy] || {}).forEach(function(ind) {
+      if (ind && ind !== 'Unknown') industries[ind] = true;
+    });
+  });
+
+  var ranked = [];
+
+  Object.keys(industries).forEach(function(industry) {
+    var counts = labels.map(function(fy) {
+      return (historicalIndustryCounts[fy] && historicalIndustryCounts[fy][industry]) || 0;
+    });
+
+    var first = counts.length ? counts[0] : 0;
+    var last = counts.length ? counts[counts.length - 1] : 0;
+    var gaps = Math.max(0, counts.length - 1);
+
+    var cagr = null;
+    var reason = '';
+
+    if (labels.length < 2) {
+      reason = 'not enough historical FY labels';
+    } else if (first === 0) {
+      reason = 'first historical FY count is zero, current CAGR helper returns 0';
+      cagr = 0;
+    } else {
+      cagr = Math.pow(last / first, 1 / gaps) - 1;
+      reason = 'ok';
+    }
+
+    ranked.push({
+      industry: industry,
+      countsByFy: labels.reduce(function(acc, fy, idx) {
+        acc[fy] = counts[idx];
+        return acc;
+      }, {}),
+      first: first,
+      last: last,
+      gaps: gaps,
+      cagr: cagr,
+      cagrPct: cagr == null ? null : Math.round(cagr * 10000) / 100,
+      reason: reason
+    });
+  });
+
+  ranked.sort(function(a, b) {
+    var ac = a.cagr == null ? -999999 : a.cagr;
+    var bc = b.cagr == null ? -999999 : b.cagr;
+    if (bc !== ac) return bc - ac;
+    return String(a.industry).localeCompare(String(b.industry));
+  });
+
+  ranked.forEach(function(row) {
+    Logger.log(JSON.stringify(row));
+  });
+
+  Logger.log('============================================================');
+  Logger.log('DEBUG COMPLETE');
+}

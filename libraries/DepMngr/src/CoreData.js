@@ -418,7 +418,7 @@ var CoreData = (function () {
         overrideAccount:       idxAcct     >= 0 ? (row[idxAcct] || '') : '',
         overrideName:          idxDepName  >= 0 ? (row[idxDepName] || '') : '',
         overrideCurrentUpdate: idxCurrUpd  >= 0 ? (row[idxCurrUpd] || '') : '',
-        exclude:               idxExclude  >= 0 ? Boolean(row[idxExclude]) : false,
+        exclude:               idxExclude  >= 0 ? _boolFromSheetCell_(row[idxExclude]) : false,
         lastEditedBy:          idxUser     >= 0 ? (row[idxUser] || '') : '',
         lastEditedAt:          (idxTime    >= 0 && row[idxTime]) ? CoreUtils.formatDateToIsoString(row[idxTime]) : '',
         classification:        normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
@@ -483,7 +483,7 @@ var CoreData = (function () {
       var acct = String(row[idxAcct] || '').trim();
       if (!acct) return;
       map[acct] = {
-        exclude:         idxExclude >= 0 ? Boolean(row[idxExclude]) : false,
+        exclude:         idxExclude >= 0 ? _boolFromSheetCell_(row[idxExclude]) : false,
         overrideDate:    idxDate    >= 0 ? row[idxDate] : null,
         overridePartner: idxPartner >= 0 ? (row[idxPartner] || '') : '',
         lastEditedBy:    idxUser    >= 0 ? (row[idxUser] || '') : '',
@@ -505,6 +505,126 @@ var CoreData = (function () {
     var s = String(v || '').trim().toLowerCase();
     if (s === 'structural') return 'Structural';
     return 'Monthly';
+  }
+
+  /** @const {Array<string>} DeploymentOverrides sheet column headers (write order). */
+  var _DEPLOYMENT_OVERRIDE_HEADERS_ = [
+    'DeploymentID',
+    'Override_Health',
+    'Override_MTPDate',
+    'Override_Stage',
+    'Override_Account',
+    'Override_Deployment',
+    'Override_CurrentUpdate',
+    'Exclude_From_Report',
+    'LastEditedBy',
+    'LastEditedAt',
+    'Classification'
+  ];
+
+  /** @const {Array<string>} GoLivesOverrides sheet column headers (write order). */
+  var _GOLIVES_OVERRIDE_HEADERS_ = [
+    'AccountName',
+    'Exclude_From_Report',
+    'Override_GoLiveDate',
+    'Override_Partner',
+    'LastEditedBy',
+    'LastEditedAt',
+    'Classification'
+  ];
+
+  /**
+   * Coerces a sheet cell value to boolean (checkbox, TRUE/FALSE strings, 1/0).
+   * @param {*} v
+   * @return {boolean}
+   * @private
+   */
+  function _boolFromSheetCell_(v) {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0 || v === '' || v == null) return false;
+    var s = String(v).trim().toLowerCase();
+    return s === 'true' || s === 'yes' || s === 'y' || s === '1';
+  }
+
+  /**
+   * Returns the 0-based column index for a header name in a header row (-1 if absent).
+   * @param {Array<*>} headers
+   * @param {string} headerName
+   * @return {number}
+   * @private
+   */
+  function _getSheetColumnIndex_(headers, headerName) {
+    if (!Array.isArray(headers)) return -1;
+    return headers.indexOf(String(headerName || '').trim());
+  }
+
+  /**
+   * Ensures a sheet header row contains all required columns (appends missing ones).
+   * Idempotent — safe to call on every override write.
+   * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+   * @param {Array<string>} requiredHeaders
+   * @return {Array<string>} current header row after ensure
+   * @private
+   */
+  function _ensureSheetHeaders_(sheet, requiredHeaders) {
+    var lastCol = Math.max(sheet.getLastColumn(), 1);
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+      .map(function (h) { return String(h || '').trim(); });
+    var changed = false;
+    (requiredHeaders || []).forEach(function (header) {
+      if (_getSheetColumnIndex_(headers, header) < 0) {
+        headers.push(header);
+        changed = true;
+      }
+    });
+    if (changed) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    }
+    return headers;
+  }
+
+  /**
+   * Drops rows flagged excludeFromReport (monthly HTML report opt-in).
+   * @param {Array<Object>} rows
+   * @return {Array<Object>}
+   */
+  function filterRowsExcludedFromReport_(rows) {
+    if (!Array.isArray(rows) || !rows.length) return rows || [];
+    return rows.filter(function (r) { return !r.excludeFromReport; });
+  }
+
+  /**
+   * Merges deployment + Go-Lives override fields onto go-live rows for report/UI parity.
+   * Option B precedence: excluded when row, deployment override, or go-live override is flagged.
+   *
+   * @param {Array<Object>} rows
+   * @param {Object} deploymentOverridesMap  keyed by deploymentId (getDeploymentOverridesMap_)
+   * @param {Object} goLivesOverridesMap     keyed by accountName (getGoLivesOverridesMap_)
+   * @return {Array<Object>}
+   * @private
+   */
+  function _enrichGoLiveRowsWithOverrides_(rows, deploymentOverridesMap, goLivesOverridesMap) {
+    if (!Array.isArray(rows) || !rows.length) return rows || [];
+
+    var depMap = deploymentOverridesMap || {};
+    var glMap = goLivesOverridesMap || {};
+
+    return rows.map(function (row) {
+      var depId = row.deploymentId || '';
+      var acct = row.accountName || '';
+      var depOv = depId ? (depMap[depId] || {}) : {};
+      var glOv = acct ? (glMap[acct] || {}) : {};
+      var excluded = !!(
+        row.excludeFromReport ||
+        depOv.exclude ||
+        glOv.exclude
+      );
+      return Object.assign({}, row, {
+        partner:           glOv.overridePartner || row.partner || '',
+        currentUpdate:     depOv.overrideCurrentUpdate || row.currentUpdate || '',
+        excludeFromReport: excluded
+      });
+    });
   }
 
   /**
@@ -906,6 +1026,9 @@ function _sfdcDataVersion_(cfg) {
     var colBillingCity    = detect_(['billingcity', 'billing_city'],                           9);
     var colStartDate      = detect_(['deployment_start_date'],                                10);
     var colMtpDate        = detect_(['current_mtp_date'],                                     11);
+    var colFirstMtpActual = detect_(['first_move_to_production_date_actual',
+                                     'move_to_production_date_actual',
+                                     'first_mtp_date_actual'],                               -1);
     var colFirstMtp       = detect_(['first_move_to_production', 'first_mtp'],                12);
     var colStatus         = detect_(['overall_status'],                                       13);
     var colPhase          = detect_(['deployment_phase'],                                     14);
@@ -966,6 +1089,7 @@ function _sfdcDataVersion_(cfg) {
         deploymentStartDate: cellStr_(colStartDate),
         mtpDate:             cellStr_(colMtpDate),
         firstMtpDate:        cellStr_(colFirstMtp),
+        firstMtpDateActual:  cellDate_(colFirstMtpActual),
         overallStatus:       cellStr_(colStatus),
         phase:               cellStr_(colPhase),
         stage:               cellStr_(colStage),
@@ -1281,7 +1405,7 @@ function _sfdcDataVersion_(cfg) {
         isPhased:          enrichment.isPhased,
         nextGoLiveDate:    nextGoLiveDate,
         mtpDate:           nextGoLiveDate,  // backward compat alias
-        excludeFromReport: !!ov.exclude,
+        excludeFromReport: !!(ov.exclude || dep.excludeFromReport),
         reviewUsername:    ov.lastEditedBy || dep.reviewUsername || '',
         reviewTimestamp:   ov.lastEditedAt || dep.reviewTimestamp || ''
       });
@@ -1327,7 +1451,7 @@ function _sfdcDataVersion_(cfg) {
         isPhased:          false,
         nextGoLiveDate:    mtpDate,
         mtpDate:           mtpDate,
-        excludeFromReport: !!ov.exclude,
+        excludeFromReport: !!(ov.exclude || dep.excludeFromReport),
         reviewUsername:    ov.lastEditedBy || dep.reviewUsername || '',
         reviewTimestamp:   ov.lastEditedAt || dep.reviewTimestamp || ''
       });
@@ -1340,6 +1464,12 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from non-Student surfaces (HENP only).
     results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+
+    results = _enrichGoLiveRowsWithOverrides_(
+      results,
+      getDeploymentOverridesMap_(cfg),
+      getGoLivesOverridesMap_(cfg)
+    );
 
     Logger.log('CoreData.getUpcomingGoLives: ' + results.length + ' upcoming rows ' +
                '(pass1=' + Object.keys(seenDeploymentIds).length + ', ' +
@@ -1438,28 +1568,12 @@ function _sfdcDataVersion_(cfg) {
       var enrichment   = enrichmentMap[dep.deploymentId];
       var allRecentDates = enrichment ? (enrichment.recentDates || []) : [];
 
-      // --- Date-level window filter ---
-      // Keep only Actual dates that fall within [windowStartKey, todayKey].
-      var filteredRecentDates = allRecentDates.filter(function (rd) {
-        return rd.date >= windowStartKey && rd.date <= todayKey;
-      });
+      // --- Date-level window filter (normalized keys; phased/multi-date aware) ---
+      var recentMatch = _latestRecentDateInRange_(dep, allRecentDates, windowStartKey, todayKey);
+      if (!recentMatch) return;
 
-      // Fallback: if no product-function Actual dates landed in the window, try
-      // the deployment-level First_Move_to_Production_Date_Actual__c field.
-      if (filteredRecentDates.length === 0 && dep.firstMtpDateActual) {
-        var fb = dep.firstMtpDateActual;
-        if (fb >= windowStartKey && fb <= todayKey) {
-          filteredRecentDates = [{ date: fb, products: [] }];
-        }
-      }
-
-      // Skip deployments with no in-window dates.
-      if (filteredRecentDates.length === 0) return;
-
-      // lastGoLiveDate = max in-window date (not the all-time last Actual date).
-      var lastGoLiveDate = filteredRecentDates.reduce(function (max, rd) {
-        return rd.date > max ? rd.date : max;
-      }, '');
+      var filteredRecentDates = recentMatch.filteredRecentDates;
+      var lastGoLiveDate = recentMatch.lastGoLiveDate;
 
       results.push({
         deploymentId:   dep.deploymentId,
@@ -1483,6 +1597,12 @@ function _sfdcDataVersion_(cfg) {
 
     // S1: exclude Student deployments from non-Student surfaces (HENP only).
     results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+
+    results = _enrichGoLiveRowsWithOverrides_(
+      results,
+      getDeploymentOverridesMap_(cfg),
+      getGoLivesOverridesMap_(cfg)
+    );
 
     Logger.log('CoreData.getRecentGoLives: ' + results.length +
                ' deployments with in-window go-live dates (last ' +
@@ -1675,6 +1795,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var sheet = ss.getSheetByName(cfg.sheets.deploymentOverrides);
     if (!sheet) throw new Error('DeploymentOverrides sheet not found: ' + cfg.sheets.deploymentOverrides);
 
+    var headers = _ensureSheetHeaders_(sheet, _DEPLOYMENT_OVERRIDE_HEADERS_);
+
     // Capture before-snapshot for audit
     var before = snapshotDeploymentOverride_(cfg, canonicalId);
     var accountName = lookupAccountForDeployment_(cfg, canonicalId);
@@ -1702,12 +1824,14 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       sheet.getRange(rowIndex, 1).setValue(canonicalId);
     }
 
-    var headers = values[0] || sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var setCell = function (header, value) {
       var col = headers.indexOf(header);
-      if (col >= 0 && value !== undefined) {
-        sheet.getRange(rowIndex, col + 1).setValue(value);
+      if (col < 0 || value === undefined) return;
+      if (header === 'Exclude_From_Report') {
+        sheet.getRange(rowIndex, col + 1).setValue(!!value);
+        return;
       }
+      sheet.getRange(rowIndex, col + 1).setValue(value);
     };
 
     setCell('Override_Health', overrideData.overrideHealth);
@@ -1770,6 +1894,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var sheet = ss.getSheetByName(cfg.sheets.goLivesOverrides);
     if (!sheet) throw new Error('GoLivesOverrides sheet not found: ' + cfg.sheets.goLivesOverrides);
 
+    var headers = _ensureSheetHeaders_(sheet, _GOLIVES_OVERRIDE_HEADERS_);
+
     var before = snapshotGoLivesOverride_(cfg, accountName);
 
     var values = sheet.getDataRange().getValues();
@@ -1785,12 +1911,14 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       sheet.getRange(rowIndex, 1).setValue(accountName);
     }
 
-    var headers = values[0] || sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var setCell = function (header, value) {
       var col = headers.indexOf(header);
-      if (col >= 0 && value !== undefined) {
-        sheet.getRange(rowIndex, col + 1).setValue(value);
+      if (col < 0 || value === undefined) return;
+      if (header === 'Exclude_From_Report') {
+        sheet.getRange(rowIndex, col + 1).setValue(!!value);
+        return;
       }
+      sheet.getRange(rowIndex, col + 1).setValue(value);
     };
 
     setCell('Override_GoLiveDate', overrideData.overrideDate ? new Date(overrideData.overrideDate) : '');
@@ -4157,6 +4285,117 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Normalizes a date value to a YYYY-MM-DD key in the script timezone.
+   * Returns '' for blank or unparseable values (same parsing rules as formatShortDate_).
+   * @param {*} val
+   * @return {string}
+   * @private
+   */
+  function _toDateKey_(val) {
+    if (val == null || val === '') return '';
+    var key = formatShortDate_(val);
+    return (key && key !== '\u2014') ? key : '';
+  }
+
+  /**
+   * True when dateKey falls in [startKey, endKey] (inclusive), using YYYY-MM-DD keys.
+   * @param {string} dateKey
+   * @param {string} startKey
+   * @param {string} endKey
+   * @return {boolean}
+   * @private
+   */
+  function _dateKeyInRange_(dateKey, startKey, endKey) {
+    if (!dateKey || !startKey || !endKey) return false;
+    return dateKey >= startKey && dateKey <= endKey;
+  }
+
+  /**
+   * Earliest upcoming go-live date for a getUpcomingGoLives row within an inclusive
+   * YYYY-MM-DD window. Checks upcomingDates[] first (phased/multi-date), then
+   * nextGoLiveDate / mtpDate — matching Go Lives tab date sources.
+   * @param {Object} row
+   * @param {string} startKey 'YYYY-MM-DD'
+   * @param {string} endKey   'YYYY-MM-DD'
+   * @return {string|null} earliest in-window date key, or null
+   * @private
+   */
+  function _earliestUpcomingDateInRange_(row, startKey, endKey) {
+    if (!row) return null;
+    var keys = [];
+    (row.upcomingDates || []).forEach(function (ud) {
+      if (!ud || !ud.date) return;
+      var k = _toDateKey_(ud.date);
+      if (k && _dateKeyInRange_(k, startKey, endKey)) keys.push(k);
+    });
+    var primary = _toDateKey_(row.nextGoLiveDate || row.mtpDate);
+    if (primary && _dateKeyInRange_(primary, startKey, endKey)) keys.push(primary);
+    if (keys.length === 0) return null;
+    keys.sort();
+    return keys[0];
+  }
+
+  /**
+   * Filters recentDates[] to in-window entries with normalized YYYY-MM-DD keys.
+   * @param {Array<Object>} recentDates
+   * @param {string} startKey 'YYYY-MM-DD'
+   * @param {string} endKey   'YYYY-MM-DD'
+   * @return {Array<{date:string, products:Array}>}
+   * @private
+   */
+  function _filterRecentDatesInWindow_(recentDates, startKey, endKey) {
+    var out = [];
+    (recentDates || []).forEach(function (rd) {
+      if (!rd || rd.date == null || rd.date === '') return;
+      var k = _toDateKey_(rd.date);
+      if (k && _dateKeyInRange_(k, startKey, endKey)) {
+        out.push({ date: k, products: rd.products || [] });
+      }
+    });
+    return out;
+  }
+
+  /**
+   * Deployment-level fallback for recent go-live when product-function Actual dates
+   * are absent. Prefers First_Move_to_Production_Date_Actual__c, then first MTP,
+   * then completion date — all normalized via _toDateKey_().
+   * @param {Object} dep
+   * @return {string}
+   * @private
+   */
+  function _deploymentRecentFallbackDateKey_(dep) {
+    if (!dep) return '';
+    return _toDateKey_(dep.firstMtpDateActual || dep.firstMtpDate || dep.completionDate);
+  }
+
+  /**
+   * Latest in-window recent go-live for a deployment. Checks recentDates[] first
+   * (phased/multi-date), then deployment-level Actual/first-MTP/completion fallback.
+   * @param {Object} dep
+   * @param {Array<Object>} allRecentDates enrichment.recentDates (may be empty)
+   * @param {string} startKey 'YYYY-MM-DD'
+   * @param {string} endKey   'YYYY-MM-DD'
+   * @return {{filteredRecentDates:Array<Object>, lastGoLiveDate:string}|null}
+   * @private
+   */
+  function _latestRecentDateInRange_(dep, allRecentDates, startKey, endKey) {
+    var filtered = _filterRecentDatesInWindow_(allRecentDates, startKey, endKey);
+    if (filtered.length > 0) {
+      var keys = filtered.map(function (rd) { return rd.date; });
+      keys.sort();
+      return { filteredRecentDates: filtered, lastGoLiveDate: keys[keys.length - 1] };
+    }
+    var fb = _deploymentRecentFallbackDateKey_(dep);
+    if (fb && _dateKeyInRange_(fb, startKey, endKey)) {
+      return {
+        filteredRecentDates: [{ date: fb, products: [] }],
+        lastGoLiveDate:      fb
+      };
+    }
+    return null;
+  }
+
+  /**
    * Adds N calendar days to a YYYY-MM-DD key string and returns a new key.
    * @param {string} yearMonthDay 'YYYY-MM-DD'
    * @param {number} days
@@ -4232,19 +4471,23 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       Logger.log('_computeOverviewSnapshot_: getUpcomingGoLives threw — upcoming card will render empty. Error: ' + err);
     }
     var thirtyAhead = _addDaysToKey_(todayKey, 30);
-    var upcomingIn30 = upcomingGoLivesPayload.filter(function(r) {
-      if (!r || !r.nextGoLiveDate) return false;
-      return r.nextGoLiveDate >= todayKey && r.nextGoLiveDate <= thirtyAhead;
+    var upcomingIn30 = [];
+    upcomingGoLivesPayload.forEach(function (r) {
+      var inWindowDate = _earliestUpcomingDateInRange_(r, todayKey, thirtyAhead);
+      if (inWindowDate) {
+        upcomingIn30.push({ row: r, inWindowDate: inWindowDate });
+      }
     });
-    upcomingIn30.sort(function(a, b) {
-      return a.nextGoLiveDate < b.nextGoLiveDate ? -1 : a.nextGoLiveDate > b.nextGoLiveDate ? 1 : 0;
+    upcomingIn30.sort(function (a, b) {
+      return a.inWindowDate < b.inWindowDate ? -1 : a.inWindowDate > b.inWindowDate ? 1 : 0;
     });
-    var upcomingItems = upcomingIn30.slice(0, 5).map(function(r) {
+    var upcomingItems = upcomingIn30.slice(0, 5).map(function (entry) {
+      var r = entry.row;
       return {
         deploymentId:   r.deploymentId || '',
         accountName:    r.accountName  || '',
         deploymentName: r.deploymentName || '',
-        currentMtp:     r.nextGoLiveDate || ''
+        currentMtp:     entry.inWindowDate || ''
       };
     });
     var upcomingGoLivesBlock = { total: upcomingIn30.length, items: upcomingItems };
@@ -4298,7 +4541,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa       = (productOpts && productOpts.product) || 'all';
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
-    var cacheKey = _perfKey_(cfg, 'overviewData:v2');
+    var cacheKey = _perfKey_(cfg, 'overviewData:v3');
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
 
@@ -4480,6 +4723,88 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     return rows.filter(function (r) {
       return allowed[_canonicalId_(r.deploymentId)] || matchesNameToken_(r);
+    });
+  }
+
+  /**
+   * V2 monthly report product scope: union filter across configured areas/tokens.
+   * No-op when cfg.report.productScope.enabled !== true or criteria are empty.
+   * Fail-open when product-function read fails (name-token / row-area matching still applies).
+   *
+   * @param {Array<Object>} rows
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   */
+  function filterRowsByReportProductScope_(rows, cfg) {
+    var scope = (cfg && cfg.report && cfg.report.productScope) || {};
+    if (scope.enabled !== true) return rows;
+    if (!Array.isArray(rows) || rows.length === 0) return rows;
+
+    var includeAreas = Array.isArray(scope.includeAreas) ? scope.includeAreas : [];
+    var nameTokens = Array.isArray(scope.nameTokens) ? scope.nameTokens : [];
+    var aliases = scope.aliases || {};
+    if (!includeAreas.length && !nameTokens.length &&
+        (!aliases || !Object.keys(aliases).length)) {
+      return rows;
+    }
+
+    var areaSet = {};
+    includeAreas.forEach(function (area) {
+      var normalized = String(area || '').trim().toLowerCase();
+      if (normalized) areaSet[normalized] = true;
+    });
+    Object.keys(aliases).forEach(function (key) {
+      var nk = String(key || '').trim().toLowerCase();
+      if (nk) areaSet[nk] = true;
+      var nv = String(aliases[key] || '').trim().toLowerCase();
+      if (nv) areaSet[nv] = true;
+    });
+
+    var tokensLower = nameTokens.map(function (token) {
+      return String(token || '').trim().toLowerCase();
+    }).filter(function (t) { return !!t; });
+
+    var allowedByPf = {};
+    try {
+      var pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
+      pfRows.forEach(function (pf) {
+        var pa = String(pf.productArea || '').trim().toLowerCase();
+        if (pa && areaSet[pa] && pf.deploymentFk) {
+          allowedByPf[_canonicalId_(pf.deploymentFk)] = true;
+        }
+      });
+    } catch (e) {
+      Logger.log('filterRowsByReportProductScope_: PF read failed: ' + e);
+    }
+
+    function matchesNameToken_(row) {
+      if (!tokensLower.length) return false;
+      var depName = String(row.deploymentName || row.name || '').toLowerCase();
+      if (!depName) return false;
+      for (var ti = 0; ti < tokensLower.length; ti++) {
+        if (depName.indexOf(tokensLower[ti]) >= 0) return true;
+      }
+      return false;
+    }
+
+    function matchesAreaOnRow_(row) {
+      if (!Object.keys(areaSet).length) return false;
+      var rowArea = String(row.productArea || '').trim().toLowerCase();
+      if (rowArea && areaSet[rowArea]) return true;
+      var rowAreas = row.productAreas;
+      if (Array.isArray(rowAreas)) {
+        for (var ai = 0; ai < rowAreas.length; ai++) {
+          var a = String(rowAreas[ai] || '').trim().toLowerCase();
+          if (a && areaSet[a]) return true;
+        }
+      }
+      return false;
+    }
+
+    return rows.filter(function (r) {
+      return allowedByPf[_canonicalId_(r.deploymentId)] ||
+        matchesAreaOnRow_(r) ||
+        matchesNameToken_(r);
     });
   }
 
@@ -5004,6 +5329,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // S1: Student data layer
     filterDeploymentsByStudent_: filterDeploymentsByStudent_,
     filterDeploymentsByProduct_: filterDeploymentsByProduct_,
+    filterRowsByReportProductScope_: filterRowsByReportProductScope_,
+    filterRowsExcludedFromReport_: filterRowsExcludedFromReport_,
     buildStudentTabData_:        buildStudentTabData_,
     saveStudentDeploymentFields: saveStudentDeploymentFields,
 

@@ -1728,6 +1728,24 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   /** @const {number} V2.1: max visible rows per Partner/Approach breakdown column. */
   var V2_BREAKDOWN_TOP_N_ = 10;
 
+  /** @const {Object} V2 monthly report analytics opts (product scope + exclusions). */
+  var V2_REPORT_SCOPE_OPTS_ = {
+    applyReportProductScope: true,
+    applyReportExclusions:   true
+  };
+
+  /**
+   * V2 monthly report product scope filter (delegates to CoreData).
+   * @param {Array<Object>} rows
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function _filterRowsByReportProductScopeV2_(rows, config) {
+    var cfg = CoreConfig.withDefaults(config);
+    return CoreData.filterRowsByReportProductScope_(rows, cfg);
+  }
+
   /**
    * N8 V2: Gmail-targeted div bar (no nested-table bar hack).
    * V2.1: label row uses table layout (Gmail-safe; no flex).
@@ -1878,6 +1896,8 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   function renderRedYellowSectionV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var rows = CoreReportHelpers.getEffectiveRedYellowForExport_(cfg);
+    rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    rows = CoreData.filterRowsExcludedFromReport_(rows);
     if (!rows || !rows.length) {
       return wrapSectionV2_('Red / Yellow Deployments',
         '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
@@ -2061,10 +2081,13 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var cfg = CoreConfig.withDefaults(config);
     var recentDays = cfg.report.recentWindowDays != null ? cfg.report.recentWindowDays : 30;
     var rows = CoreData.getRecentGoLives(cfg, null, recentDays) || [];
-    rows = rows.filter(function (r) { return !r.excludeFromReport; });
+    rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    rows = CoreData.filterRowsExcludedFromReport_(rows);
 
     var effectiveByDeploymentId = {};
-    CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+    _filterRowsByReportProductScopeV2_(
+      CoreData.getAllEffectiveDeployments(cfg), cfg
+    ).forEach(function (r) {
       if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
     });
 
@@ -2097,10 +2120,13 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var upcomingDays = cfg.report.upcomingWindowDays != null ? cfg.report.upcomingWindowDays : 60;
     var rows = CoreData.getUpcomingGoLives(cfg, null) || [];
     rows = _filterUpcomingGoLivesForReportV2_(rows, upcomingDays);
-    rows = rows.filter(function (r) { return !r.excludeFromReport; });
+    rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    rows = CoreData.filterRowsExcludedFromReport_(rows);
 
     var effectiveByDeploymentId = {};
-    CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
+    _filterRowsByReportProductScopeV2_(
+      CoreData.getAllEffectiveDeployments(cfg), cfg
+    ).forEach(function (r) {
       if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
     });
 
@@ -2249,7 +2275,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var result;
     var healthHistory;
     try {
-      result = CoreAnalytics.getHealthBreakdown(cfg);
+      result = CoreAnalytics.getHealthBreakdown(cfg, V2_REPORT_SCOPE_OPTS_);
       healthHistory = CoreAnalytics.getHealthHistory(cfg);
     } catch (err) {
       Logger.log('CoreReport.renderHealthBreakdownSectionV2_: failed: ' + err);
@@ -2324,7 +2350,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var cfg = CoreConfig.withDefaults(config);
     var result;
     try {
-      result = CoreAnalytics.getPartnerBreakdown(cfg);
+      result = CoreAnalytics.getPartnerBreakdown(cfg, V2_REPORT_SCOPE_OPTS_);
     } catch (err) {
       Logger.log('CoreReport._buildPartnerBreakdownContentV2_: failed: ' + err);
       return '<p style="font-size:11px; color:#cc0000;">\u26A0 Partner Breakdown unavailable: ' +
@@ -2371,7 +2397,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var cfg = CoreConfig.withDefaults(config);
     var result;
     try {
-      result = CoreAnalytics.getApproachBreakdown(cfg);
+      result = CoreAnalytics.getApproachBreakdown(cfg, V2_REPORT_SCOPE_OPTS_);
     } catch (err) {
       Logger.log('CoreReport._buildApproachBreakdownContentV2_: failed: ' + err);
       return '<p style="font-size:11px; color:#cc0000;">\u26A0 Approach Breakdown unavailable: ' +

@@ -1,17 +1,13 @@
 /**
- * SLG Deployment Health – Top-level code wired to CoreLib.
+ * AI Deployment Health – Top-level code wired to CoreLib.
  *
  * Responsibilities:
  * - UI menu and "Open Web App" entry.
- * - SLG-specific TABLES + BAR_CONFIG configuration.
- * - Thin wrappers to CoreLib for:
- *   - updateHealthAnalytics_ (snapshot-based analytics)
- *   - previewHtml (inline HTML preview)
- *   - exportHtmlToDrive (inline + Outlook HTML export)
- * - Optional debug helpers for table detection.
+ * - AI_DM-specific TABLES + BAR_CONFIG configuration.
+ * - Thin wrappers to CoreLib for analytics, report preview, and export.
  *
  * NOTE:
- * - Requires APP_CONFIG from Config_SLG.gs
+ * - Requires APP_CONFIG from Config_AI.js
  * - Requires CoreLib library added to project.
  */
 
@@ -19,9 +15,8 @@
 // 1. CONFIG-LIKE CONSTANTS (TABLES, BAR_CONFIG, WEB_APP_URL)
 // ============================================================================
 
-// Set this to your deployed Web App URL for SLG
-var WEB_APP_URL =
-  'https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec';
+// TODO: Set to deployed AI_DM Web App URL after Jeff deploys the web app.
+var WEB_APP_URL = '';
 
 /**
  * TABLES:
@@ -112,7 +107,7 @@ var BAR_CONFIG = {
 
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
-  var menu = ui.createMenu('📊 SLG Deployment Health Tools')
+  var menu = ui.createMenu('📊 AI Deployment Health Tools')
     .addItem('🌐 Open Web App', 'openWebApp')
     .addSeparator()
     .addItem('▶ Preview HTML report', 'previewHtml')
@@ -209,7 +204,7 @@ function openWebApp() {
 
   var html =
     '<html><body style="font-family:Arial,sans-serif; font-size:12px; padding:16px;">' +
-    '<p>The SLG Deployment Health Web App will open in a new tab.</p>' +
+    '<p>The AI Deployment Health Web App will open in a new tab.</p>' +
     '<p><a href="' + url + '" target="_blank">Open Web App</a></p>' +
     '<script>' +
     'try { window.open("' + url + '", "_blank"); } catch (e) {}' +

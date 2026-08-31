@@ -257,6 +257,25 @@ var APP_CONFIG = {
   },
 
   // ---------------------------------------------------------------------------
+  // N4: Salesforce Connector data freshness monitoring.
+  // ---------------------------------------------------------------------------
+  freshness: {
+    enabled: true,
+    refreshCycleHours: 8,
+    graceHours: 1,
+    warningHours: 12,
+    criticalHours: 24,
+    logSheet: 'Auto Refresh Execution Log',
+    expectedSheets: [
+      'SFDC_Deployments',
+      'SFDC_DeploymentProductFunctions',
+      'SFDC_DeploymentContacts',
+      'SFDC_DeploymentHistory'
+    ],
+    alertRecipient: 'jeffrey.ditty@workday.com'
+  },
+
+  // ---------------------------------------------------------------------------
   // T1: Trends tab configuration.
   // ---------------------------------------------------------------------------
   trends: {

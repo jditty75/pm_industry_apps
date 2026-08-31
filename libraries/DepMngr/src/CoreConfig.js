@@ -445,6 +445,15 @@ var CoreConfig = (function () {
     if (!cfg.freshness.watchSheet) cfg.freshness.watchSheet = 'SFDC_Deployments';
     if (!cfg.freshness.alertRecipient) cfg.freshness.alertRecipient = 'jeffrey.ditty@workday.com';
     if (!cfg.freshness.logSheet) cfg.freshness.logSheet = 'Auto Refresh Execution Log';
+    if (cfg.freshness.warningHours === undefined || cfg.freshness.warningHours === null) {
+      cfg.freshness.warningHours = 12;
+    }
+    if (cfg.freshness.criticalHours === undefined || cfg.freshness.criticalHours === null) {
+      cfg.freshness.criticalHours = 24;
+    }
+    if (!Array.isArray(cfg.freshness.expectedSheets)) {
+      cfg.freshness.expectedSheets = [];
+    }
 
     // -------------------------------------------------------------------------
     // MDS/PGL notifications (N7)

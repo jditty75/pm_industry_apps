@@ -532,7 +532,7 @@ function _warmCaches() {
  * @return {Object}
  */
 function getDataFreshnessForUI() {
-  return CoreLib.CoreData.getDataFreshness(APP_CONFIG);
+  return CoreLib.CoreFreshnessMonitor.getFreshnessForUI(APP_CONFIG);
 }
 
 /**

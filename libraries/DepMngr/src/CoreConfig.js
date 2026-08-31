@@ -143,13 +143,38 @@
  */
 
 /**
+ * @typedef {Object} MomentumProductFilterConfig
+ * Product-scope filter for EVI/AI momentum mode.
+ * @property {string|Array<string>} Product_Area__c   Exact Product_Area__c match(es).
+ * @property {string|Array<string>} Deployment_Name   SQL-like patterns (% wildcards).
+ */
+
+/**
+ * @typedef {Object} MomentumKpiLabelsConfig
+ * @property {string} label1  Total go-lives tile label ({FY} token supported).
+ * @property {string} label2  Distinct accounts tile label ({FY} token supported).
+ * @property {string} label3  Avg annual growth tile label.
+ * @property {string} label4  Fastest-growing tile label.
+ */
+
+/**
  * @typedef {Object} MomentumConfig
  * P2: Portfolio Momentum sub-view config.
- * @property {boolean}              enabled           Set true to show the Momentum sub-view.
- * @property {Array<string>}        platforms         Ordered platform codes, e.g. ['HCM','FIN','PAY'].
- * @property {Object<string,Array>} productAreaMapping Code → array of Product_Area__c values.
- * @property {number}               historicalYears   FYs of history to show (default 6).
- * @property {MomentumChartConfig}  chart             Chart appearance config.
+ *
+ * Platform mode (HC/SLG/HENP): platforms + productAreaMapping.
+ * Product mode (EVI/AI): productFilter + chartLegend + kpiLabels.
+ *
+ * @property {boolean}                      enabled             Set true to show the Momentum sub-view.
+ * @property {Array<string>}                platforms           Platform codes, e.g. ['HCM','FIN','PAY'].
+ * @property {Object<string,Array>}         productAreaMapping  Code → array of Product_Area__c values.
+ * @property {MomentumProductFilterConfig}  productFilter       EVI/AI product scope filter.
+ * @property {string}                       dataSource          SFDC object key, e.g. Deployment_Product_Function__c.
+ * @property {MomentumKpiLabelsConfig}      kpiLabels           Custom KPI tile labels.
+ * @property {Array<string>}                chartLegend         Chart legend series labels.
+ * @property {string|number}                timeRange           e.g. "LAST_N_YEARS:5" or numeric years.
+ * @property {string}                       growthMetricSeries  Series code for KPI 3 in platform mode.
+ * @property {number}                       historicalYears     FYs of history (fallback when timeRange unset).
+ * @property {MomentumChartConfig}          chart               Chart appearance config.
  */
 
 /**
@@ -640,6 +665,31 @@ var CoreConfig = (function () {
     }
     if (cfg.sheets && !cfg.sheets.deploymentHistory) {
       cfg.sheets.deploymentHistory = 'SFDC_DeploymentHistory';
+    }
+
+    // -------------------------------------------------------------------------
+    // Portfolio Momentum (P2)
+    // -------------------------------------------------------------------------
+    cfg.momentum = cfg.momentum || {};
+    if (cfg.momentum.enabled === undefined) cfg.momentum.enabled = false;
+    if (!Array.isArray(cfg.momentum.platforms)) cfg.momentum.platforms = [];
+    if (!cfg.momentum.productAreaMapping || typeof cfg.momentum.productAreaMapping !== 'object') {
+      cfg.momentum.productAreaMapping = {};
+    }
+    if (!cfg.momentum.productFilter || typeof cfg.momentum.productFilter !== 'object') {
+      cfg.momentum.productFilter = {};
+    }
+    if (!Array.isArray(cfg.momentum.chartLegend)) cfg.momentum.chartLegend = [];
+    if (!cfg.momentum.kpiLabels || typeof cfg.momentum.kpiLabels !== 'object') {
+      cfg.momentum.kpiLabels = null;
+    }
+    if (cfg.momentum.historicalYears === undefined) cfg.momentum.historicalYears = 5;
+    cfg.momentum.chart = cfg.momentum.chart || {};
+    if (!cfg.momentum.chart.colors || typeof cfg.momentum.chart.colors !== 'object') {
+      cfg.momentum.chart.colors = {};
+    }
+    if (cfg.momentum.chart.inProgressOpacity === undefined) {
+      cfg.momentum.chart.inProgressOpacity = 0.55;
     }
 
     return cfg;

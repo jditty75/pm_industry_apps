@@ -258,6 +258,30 @@ var APP_CONFIG = {
   },
 
   momentum: {
-    enabled: false
+    enabled: true,
+    productFilter: {
+      Product_Area__c: ['Workday HiredScore', 'Workday Paradox'],
+      Deployment_Name: ['%Paradox%', '%HiredScore%', '%Hiredscore%']
+    },
+    dataSource: 'Deployment_Product_Function__c',
+    dateStrategy: 'actualThenTarget',
+    includeStandaloneDeployments: true,
+    periodView: 'previousFyAndCurrentHalves',
+    industryGrowthStrategy: 'currentVsPreviousFyDelta',
+    kpiLabels: {
+      label1: 'Total {FY} Go-Lives',
+      label2: 'Distinct Accounts {FY}',
+      label3: 'AI Avg Annual Growth (%)',
+      label4: 'Fastest Growing Industry'
+    },
+    chartLegend: ['Paradox', 'HiredScore'],
+    timeRange: 'LAST_N_YEARS:5',
+    chart: {
+      colors: {
+        Paradox: '#0F4C81',
+        HiredScore: '#F46821'
+      },
+      inProgressOpacity: 0.55
+    }
   }
 };

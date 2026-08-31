@@ -147,13 +147,12 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
-      { id: 'mgmPgl',      label: 'MGM / PGL' },
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' }
     ],
 
     mgmPglTab: {
-      enabled: true
+      enabled: false
     },
     trendsTab: { enabled: false },
     enableAccountLinks: true,
@@ -235,6 +234,29 @@ var APP_CONFIG = {
   },
 
   momentum: {
-    enabled: false
+    enabled: true,
+    productFilter: {
+      Product_Area__c: 'Contract Management and Document Intelligence',
+      Deployment_Name: ['%Evisort%', '%CLM%']
+    },
+    dataSource: 'Deployment_Product_Function__c',
+    dateStrategy: 'actualThenTarget',
+    includeStandaloneDeployments: true,
+    periodView: 'previousFyAndCurrentHalves',
+    industryGrowthStrategy: 'currentVsPreviousFyDelta',
+    kpiLabels: {
+      label1: 'Total {FY} Go-Lives',
+      label2: 'Distinct Accounts {FY}',
+      label3: 'Evisort Avg Annual Growth (%)',
+      label4: 'Fastest Growing Industry'
+    },
+    chartLegend: ['Evisort'],
+    timeRange: 'LAST_N_YEARS:5',
+    chart: {
+      colors: {
+        Evisort: '#0F4C81'
+      },
+      inProgressOpacity: 0.55
+    }
   }
 };

@@ -1728,8 +1728,11 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   /** @const {number} V2.1: max visible rows per Partner/Approach breakdown column. */
   var V2_BREAKDOWN_TOP_N_ = 10;
 
-  /** @const {Object} V2 monthly report analytics opts (report product scope). */
-  var V2_REPORT_SCOPE_OPTS_ = { applyReportProductScope: true };
+  /** @const {Object} V2 monthly report analytics opts (product scope + exclusions). */
+  var V2_REPORT_SCOPE_OPTS_ = {
+    applyReportProductScope: true,
+    applyReportExclusions:   true
+  };
 
   /**
    * V2 monthly report product scope filter (delegates to CoreData).
@@ -1893,7 +1896,8 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   function renderRedYellowSectionV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var rows = CoreReportHelpers.getEffectiveRedYellowForExport_(cfg);
-    rows = _filterRowsByReportProductScopeV2_(rows, cfg);
+    rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    rows = CoreData.filterRowsExcludedFromReport_(rows);
     if (!rows || !rows.length) {
       return wrapSectionV2_('Red / Yellow Deployments',
         '<p style="font-size:11px; font-family:Arial,sans-serif; color:#666666;">' +
@@ -2077,8 +2081,8 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var cfg = CoreConfig.withDefaults(config);
     var recentDays = cfg.report.recentWindowDays != null ? cfg.report.recentWindowDays : 30;
     var rows = CoreData.getRecentGoLives(cfg, null, recentDays) || [];
-    rows = _filterRowsByReportProductScopeV2_(rows, cfg);
-    rows = rows.filter(function (r) { return !r.excludeFromReport; });
+    rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    rows = CoreData.filterRowsExcludedFromReport_(rows);
 
     var effectiveByDeploymentId = {};
     _filterRowsByReportProductScopeV2_(
@@ -2116,8 +2120,8 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     var upcomingDays = cfg.report.upcomingWindowDays != null ? cfg.report.upcomingWindowDays : 60;
     var rows = CoreData.getUpcomingGoLives(cfg, null) || [];
     rows = _filterUpcomingGoLivesForReportV2_(rows, upcomingDays);
-    rows = _filterRowsByReportProductScopeV2_(rows, cfg);
-    rows = rows.filter(function (r) { return !r.excludeFromReport; });
+    rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    rows = CoreData.filterRowsExcludedFromReport_(rows);
 
     var effectiveByDeploymentId = {};
     _filterRowsByReportProductScopeV2_(

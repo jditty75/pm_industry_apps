@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Evisort Deployment Health Manager — Product Overview V2 Mock</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --color-primary: #0F4C81;
+      --color-primary-tint: #E8EFF6;
+      --color-surface: #FFFFFF;
+      --color-surface-alt: #F8FAFC;
+      --color-border: #E5E7EB;
+      --color-border-subtle: #F1F5F9;
+      --color-text: #0F172A;
+      --color-text-muted: #475569;
+      --color-text-subtle: #94A3B8;
+      --color-status-green: #10B981;
+      --color-status-yellow: #F59E0B;
+      --color-status-red: #EF4444;
+      --color-status-green-fg: #047857;
+      --color-status-yellow-fg: #b45309;
+      --color-status-red-fg: #b91c1c;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-7: 48px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+      --shadow-card: 0 2px 8px rgba(15, 23, 42, 0.06);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--color-surface-alt);
+      color: var(--color-text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Header */
+    .header {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-card);
+      margin: var(--space-5) auto var(--space-5);
+      max-width: 1400px;
+      display: flex;
+      align-items: stretch;
+      position: sticky;
+      top: var(--space-3);
+      z-index: 1000;
+    }
+    .header-strip {
+      background: var(--color-primary);
+      width: 48px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: var(--space-4) 0;
+      border-top-left-radius: calc(var(--radius-xl) - 1px);
+      border-bottom-left-radius: calc(var(--radius-xl) - 1px);
+    }
+    .header-strip svg { width: 24px; height: 24px; display: block; }
+    .header-body {
+      padding: var(--space-4) var(--space-5);
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .header-body h1 {
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1.3;
+      color: var(--color-text);
+      margin-bottom: 2px;
+    }
+    .header-body p {
+      font-size: 12px;
+      color: var(--color-text-muted);
+    }
+    .freshness-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin: auto var(--space-3) auto 0;
+      white-space: nowrap;
+      background: #D1FAE5;
+      color: #065F46;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 var(--space-5) var(--space-7);
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: var(--space-5);
+      border-bottom: 1px solid var(--color-border);
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: var(--space-3) var(--space-4);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--color-text-muted);
+      margin-bottom: -1px;
+      font-family: inherit;
+    }
+    .tab.active {
+      color: var(--color-primary);
+      border-bottom-color: var(--color-primary);
+      font-weight: 600;
+    }
+
+    /* Section bands */
+    .overview-section {
+      margin-bottom: var(--space-4);
+    }
+    .overview-section-label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-3);
+    }
+
+    /* KPI strip */
+    .overview-kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: var(--space-3);
+      margin-bottom: var(--space-4);
+    }
+    .overview-kpi-tile {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-left-width: 4px;
+      border-radius: var(--radius-lg);
+      padding: var(--space-3) var(--space-4);
+    }
+    .overview-kpi-tile.total           { border-left-color: #94a3b8; }
+    .overview-kpi-tile.red             { border-left-color: #EF4444; }
+    .overview-kpi-tile.yellow          { border-left-color: #F59E0B; }
+    .overview-kpi-tile.green           { border-left-color: #10B981; }
+    .overview-kpi-tile.executive-watch { border-left-color: #a855f7; }
+    .overview-kpi-value {
+      font-size: 1.875rem;
+      font-weight: 700;
+      color: var(--color-text);
+      line-height: 1.1;
+    }
+    .overview-kpi-tile.red    .overview-kpi-value { color: var(--color-status-red-fg); }
+    .overview-kpi-tile.yellow .overview-kpi-value { color: var(--color-status-yellow-fg); }
+    .overview-kpi-tile.green  .overview-kpi-value { color: var(--color-status-green-fg); }
+    .overview-kpi-tile.executive-watch .overview-kpi-value { color: #7e22ce; }
+    .overview-kpi-label {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    /* Two-column bands */
+    .overview-band-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+
+    /* Cards */
+    .overview-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .overview-card-header {
+      padding: var(--space-3) var(--space-4);
+      background: var(--color-primary-tint);
+      border-bottom: 1px solid var(--color-border);
+    }
+    .overview-card-title {
+      margin: 0;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--color-text);
+    }
+    .overview-card-subtitle {
+      font-size: 0.75rem;
+      font-weight: 400;
+      color: var(--color-text-muted);
+      margin-left: var(--space-2);
+    }
+    .overview-card-count-pill {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--color-text-muted);
+      margin-left: var(--space-2);
+    }
+    .overview-card-body { flex: 1; padding: var(--space-2) 0; }
+    .overview-card-body.padded { padding: var(--space-4); }
+    .overview-card-footer {
+      border-top: 1px solid var(--color-border);
+      padding: var(--space-2) var(--space-4);
+      text-align: right;
+    }
+    .overview-card-link {
+      font-size: 0.8125rem;
+      color: #3730a3;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    /* List rows */
+    .overview-list-row {
+      display: grid;
+      grid-template-columns: 12px 1fr auto auto;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-2) var(--space-4);
+      border-bottom: 1px solid var(--color-border-subtle);
+      cursor: pointer;
+      transition: background 0.12s ease;
+    }
+    .overview-list-row:hover { background: var(--color-surface-alt); }
+    .overview-list-row:last-child { border-bottom: none; }
+    .overview-health-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .overview-health-dot.red    { background: #EF4444; }
+    .overview-health-dot.yellow { background: #F59E0B; }
+    .overview-health-dot.green  { background: #10B981; }
+    .overview-list-account {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--color-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .overview-list-deployment {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .overview-list-partner {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+      white-space: nowrap;
+    }
+    .overview-list-date {
+      font-size: 0.8125rem;
+      color: var(--color-text);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .exec-watch-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      background: #fff3e0;
+      color: #F46821;
+      border: 1px solid #F46821;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* Trends table */
+    .trends-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    .trends-table th {
+      text-align: left;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-text-muted);
+      border-bottom: 1px solid var(--color-border);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .trends-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--color-border-subtle);
+      vertical-align: middle;
+    }
+    .trends-table tr:last-child td { border-bottom: none; }
+    .trends-table td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .trends-inline-bar {
+      display: flex;
+      height: 12px;
+      border-radius: 3px;
+      overflow: hidden;
+      min-width: 120px;
+    }
+    .trends-bar-seg { height: 100%; }
+    .seg-green  { background: #10B981; }
+    .seg-yellow { background: #F59E0B; }
+    .seg-red    { background: #EF4444; }
+    .trends-stacked-legend {
+      display: flex;
+      gap: 12px;
+      margin-top: 12px;
+      font-size: 11px;
+      color: var(--color-text-muted);
+    }
+    .trends-swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 3px;
+      vertical-align: middle;
+    }
+
+    /* Composition charts */
+    .ph-stacked {
+      display: flex;
+      width: 100%;
+      height: 28px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--color-surface-alt);
+    }
+    .ph-stacked > div {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .ph-stacked-legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      flex-wrap: wrap;
+    }
+    .ph-legend-swatch {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .ph-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .ph-bar-row:last-child { margin-bottom: 0; }
+    .ph-bar-name {
+      width: 140px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      flex-shrink: 0;
+    }
+    .ph-bar-track {
+      flex: 1;
+      height: 14px;
+      background: var(--color-surface-alt);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .ph-bar-fill { height: 100%; border-radius: 4px; }
+    .ph-bar-value {
+      width: 48px;
+      text-align: right;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--color-text);
+      flex-shrink: 0;
+    }
+
+    /* Lifecycle */
+    .lifecycle-bar {
+      display: flex;
+      gap: 2px;
+      height: 56px;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      margin-bottom: var(--space-3);
+    }
+    .lifecycle-segment {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+      min-width: 60px;
+      padding: 0 var(--space-2);
+    }
+    .lifecycle-segment-count { font-size: 1.25rem; font-weight: 700; line-height: 1; }
+    .lifecycle-segment-label {
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-top: 2px;
+      opacity: 0.92;
+    }
+    .lifecycle-starting { background: #93c5fd; color: #1e3a8a; }
+    .lifecycle-building { background: #3b82f6; }
+    .lifecycle-landing  { background: #1e40af; }
+    .lifecycle-other    { background: #94a3b8; }
+    .lifecycle-stage-lists { display: flex; gap: 2px; }
+    .lifecycle-stage-list {
+      flex: 1;
+      font-size: 0.6875rem;
+      color: var(--color-text-muted);
+      padding: 0 var(--space-2);
+      text-align: center;
+      line-height: 1.4;
+    }
+
+    /* Watchouts */
+    .watchout-row {
+      display: flex;
+      gap: var(--space-3);
+      padding: var(--space-2) 0;
+      border-bottom: 1px solid var(--color-border-subtle);
+      align-items: flex-start;
+    }
+    .watchout-row:last-child { border-bottom: none; }
+    .watchout-icon {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+    .watchout-icon.warn { background: #FEF3C7; color: #92400E; }
+    .watchout-icon.alert { background: #FEE2E2; color: #991B1B; }
+    .watchout-icon.info { background: var(--color-primary-tint); color: var(--color-primary); }
+    .watchout-text { font-size: 0.8125rem; color: var(--color-text); line-height: 1.45; }
+    .watchout-text strong { font-weight: 600; }
+    .watchout-meta { font-size: 0.75rem; color: var(--color-text-muted); margin-top: 2px; }
+
+    .mock-banner {
+      max-width: 1400px;
+      margin: 0 auto var(--space-3);
+      padding: 0 var(--space-5);
+    }
+    .mock-banner-inner {
+      background: var(--color-primary-tint);
+      border: 1px dashed var(--color-primary);
+      border-radius: var(--radius-md);
+      padding: var(--space-2) var(--space-4);
+      font-size: 12px;
+      color: var(--color-primary);
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .overview-kpi-strip { grid-template-columns: repeat(2, 1fr); }
+      .overview-band-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="mock-banner">
+    <div class="mock-banner-inner">Visual mock only — Product Overview V2 layout preview (not connected to live data)</div>
+  </div>
+
+  <div class="header">
+    <div class="header-strip">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" aria-label="Workday">
+        <path fill="#FFFFFF" d="M1221.5,1999.8h-179.3c-26.9,0-49-12.3-56.3-41.9l-216-760.4-216,760.6c-7.3,29.6-29.4,41.9-56.3,41.9h-179.3c-29.4,0-46.7-12.3-56.3-41.9C146.5,1637.3,68.1,1318.5,1.8,997.7c-7.3-32.3,7.3-54.4,41.5-54.4h159.7c29.4,0,49,14.8,54.2,41.9,41.5,227.3,90.9,461.5,157.2,691.5l191.4-691.5c7.3-27.1,26.9-41.9,56.3-41.9h216c29.4,0,49,14.8,56.3,41.9l191.4,691.5c66.3-229.4,115.7-464.2,157.2-691.5,4.8-27.1,24.6-41.9,54.2-41.9h159.7c34.2,0,49,22.3,41.5,54.4-66.3,320.9-144.7,639.6-260.1,960.4-10,29.6-27.1,41.7-56.5,41.7Z"/>
+        <path fill="#FFFFFF" d="M375.1,408.1c105.5-105.7,245.7-163.7,395-163.9,149.1,0,289.2,58,394.4,163.3,54.8,54.8,96.6,118.9,124.3,188.7,6.3,16.1,22.1,26.7,39.4,26.7h168.7c28.2,0,49-27.1,40.9-54-37.7-124.9-105.7-239.2-200.4-334.1C1185.9,83.6,984.5,0,770.3,0S354.2,83.6,202.6,235.4C107.7,330.3,39.8,444.6,2.4,569.1c-8.1,26.9,12.7,54,40.9,54h168.7c17.3,0,33-10.6,39.4-26.7,27.5-69.7,69.2-133.7,123.7-188.3Z"/>
+      </svg>
+    </div>
+    <div class="header-body">
+      <h1>Evisort Deployment Health Manager</h1>
+      <p>Review and manage Evisort deployment data</p>
+    </div>
+    <span class="freshness-badge">Data as of Aug 31, 2026 · 2h ago</span>
+  </div>
+
+  <div class="container">
+
+    <div class="tabs">
+      <button class="tab active">Overview</button>
+      <button class="tab">Deployments</button>
+      <button class="tab">Go Lives</button>
+      <button class="tab">Reporting</button>
+      <button class="tab">Portfolio Health</button>
+      <button class="tab">Notable Deployments</button>
+      <button class="tab">Manage Overrides</button>
+    </div>
+
+    <div id="overview-content">
+
+      <!-- BAND 1: KPI strip -->
+      <div class="overview-kpi-strip">
+        <div class="overview-kpi-tile total">
+          <div class="overview-kpi-value">42</div>
+          <div class="overview-kpi-label">Total Active</div>
+        </div>
+        <div class="overview-kpi-tile red">
+          <div class="overview-kpi-value">5</div>
+          <div class="overview-kpi-label">Red</div>
+        </div>
+        <div class="overview-kpi-tile yellow">
+          <div class="overview-kpi-value">8</div>
+          <div class="overview-kpi-label">Yellow</div>
+        </div>
+        <div class="overview-kpi-tile green">
+          <div class="overview-kpi-value">29</div>
+          <div class="overview-kpi-label">Green</div>
+        </div>
+        <div class="overview-kpi-tile executive-watch">
+          <div class="overview-kpi-value">3</div>
+          <div class="overview-kpi-label">Executive Watch</div>
+        </div>
+      </div>
+
+      <!-- BAND 2: Go-Live Movement -->
+      <div class="overview-section">
+        <div class="overview-section-label">Go-Live Movement</div>
+        <div class="overview-band-2">
+          <div class="overview-card">
+            <div class="overview-card-header">
+              <h3 class="overview-card-title">
+                Recently Live
+                <span class="overview-card-subtitle">(Last 30 Days)</span>
+                <span class="overview-card-count-pill">· 4</span>
+              </h3>
+            </div>
+            <div class="overview-card-body">
+              <div class="overview-list-row">
+                <span class="overview-health-dot green"></span>
+                <div>
+                  <div class="overview-list-account">Jabil</div>
+                  <div class="overview-list-deployment">Evisort CLM Phase 1</div>
+                </div>
+                <div class="overview-list-partner">Deloitte</div>
+                <div class="overview-list-date">Aug 22</div>
+              </div>
+              <div class="overview-list-row">
+                <span class="overview-health-dot green"></span>
+                <div>
+                  <div class="overview-list-account">Regal Rexnord</div>
+                  <div class="overview-list-deployment">Contract Intelligence</div>
+                </div>
+                <div class="overview-list-partner">Workday PS</div>
+                <div class="overview-list-date">Aug 18</div>
+              </div>
+              <div class="overview-list-row">
+                <span class="overview-health-dot green"></span>
+                <div>
+                  <div class="overview-list-account">NetApp</div>
+                  <div class="overview-list-deployment">AI Contract Review</div>
+                </div>
+                <div class="overview-list-partner">Accenture</div>
+                <div class="overview-list-date">Aug 10</div>
+              </div>
+              <div class="overview-list-row">
+                <span class="overview-health-dot green"></span>
+                <div>
+                  <div class="overview-list-account">Siemens Healthineers</div>
+                  <div class="overview-list-deployment">Evisort Core</div>
+                </div>
+                <div class="overview-list-partner">Cognizant</div>
+                <div class="overview-list-date">Jul 28</div>
+              </div>
+            </div>
+            <div class="overview-card-footer">
+              <a href="#" class="overview-card-link">View all →</a>
+            </div>
+          </div>
+
+          <div class="overview-card">
+            <div class="overview-card-header">
+              <h3 class="overview-card-title">
+                Upcoming Go-Lives
+                <span class="overview-card-subtitle">(Next 30 Days)</span>
+                <span class="overview-card-count-pill">· 5</span>
+              </h3>
+            </div>
+            <div class="overview-card-body">
+              <div class="overview-list-row">
+                <span class="overview-health-dot green"></span>
+                <div>
+                  <div class="overview-list-account">Moody's</div>
+                  <div class="overview-list-deployment">CLM Implementation</div>
+                </div>
+                <div class="overview-list-partner">Workday PS</div>
+                <div class="overview-list-date">Sep 12</div>
+              </div>
+              <div class="overview-list-row">
+                <span class="overview-health-dot yellow"></span>
+                <div>
+                  <div class="overview-list-account">UnitedHealth Group</div>
+                  <div class="overview-list-deployment">Document Intelligence</div>
+                </div>
+                <div class="overview-list-partner">Deloitte</div>
+                <div class="overview-list-date">Sep 18</div>
+              </div>
+              <div class="overview-list-row">
+                <span class="overview-health-dot green"></span>
+                <div>
+                  <div class="overview-list-account">Koch Industries</div>
+                  <div class="overview-list-deployment">Evisort Suite</div>
+                </div>
+                <div class="overview-list-partner">IBM</div>
+                <div class="overview-list-date">Sep 24</div>
+              </div>
+              <div class="overview-list-row">
+                <span class="overview-health-dot green"></span>
+                <div>
+                  <div class="overview-list-account">Hess Corporation</div>
+                  <div class="overview-list-deployment">Contract Analytics</div>
+                </div>
+                <div class="overview-list-partner">Accenture</div>
+                <div class="overview-list-date">Sep 28</div>
+              </div>
+              <div class="overview-list-row">
+                <span class="overview-health-dot yellow"></span>
+                <div>
+                  <div class="overview-list-account">Sanofi</div>
+                  <div class="overview-list-deployment">Global CLM Rollout</div>
+                </div>
+                <div class="overview-list-partner">Cognizant</div>
+                <div class="overview-list-date">Sep 30</div>
+              </div>
+            </div>
+            <div class="overview-card-footer">
+              <a href="#" class="overview-card-link">View all →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BAND 3: High-Risk Attention Queue -->
+      <div class="overview-section">
+        <div class="overview-card">
+          <div class="overview-card-header">
+            <h3 class="overview-card-title">
+              High-Risk Attention Queue
+              <span class="overview-card-subtitle">Red &amp; Yellow deployments requiring near-term action</span>
+            </h3>
+          </div>
+          <div class="overview-card-body">
+            <div class="overview-list-row">
+              <span class="overview-health-dot red"></span>
+              <div>
+                <div class="overview-list-account">IBM <span class="exec-watch-pill">⚠ Exec</span></div>
+                <div class="overview-list-deployment">Evisort Enterprise</div>
+              </div>
+              <div class="overview-list-partner">Deloitte</div>
+              <div class="overview-list-date">Sep 8</div>
+            </div>
+            <div class="overview-list-row">
+              <span class="overview-health-dot red"></span>
+              <div>
+                <div class="overview-list-account">Pfizer</div>
+                <div class="overview-list-deployment">CLM North America</div>
+              </div>
+              <div class="overview-list-partner">Accenture</div>
+              <div class="overview-list-date">Sep 14</div>
+            </div>
+            <div class="overview-list-row">
+              <span class="overview-health-dot yellow"></span>
+              <div>
+                <div class="overview-list-account">Marriott International</div>
+                <div class="overview-list-deployment">Contract AI Pilot</div>
+              </div>
+              <div class="overview-list-partner">Workday PS</div>
+              <div class="overview-list-date">Sep 19</div>
+            </div>
+            <div class="overview-list-row">
+              <span class="overview-health-dot yellow"></span>
+              <div>
+                <div class="overview-list-account">AstraZeneca</div>
+                <div class="overview-list-deployment">Document Intelligence</div>
+              </div>
+              <div class="overview-list-partner">Cognizant</div>
+              <div class="overview-list-date">Oct 2</div>
+            </div>
+            <div class="overview-list-row">
+              <span class="overview-health-dot yellow"></span>
+              <div>
+                <div class="overview-list-account">Ford Motor Company</div>
+                <div class="overview-list-deployment">Evisort Phase 2</div>
+              </div>
+              <div class="overview-list-partner">IBM</div>
+              <div class="overview-list-date">Oct 5</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BAND 4: Deployment Trends -->
+      <div class="overview-section">
+        <div class="overview-card">
+          <div class="overview-card-header">
+            <h3 class="overview-card-title">
+              Deployment Trends
+              <span class="overview-card-subtitle">Active portfolio health — last 6 months</span>
+            </h3>
+          </div>
+          <div class="overview-card-body padded">
+            <table class="trends-table">
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th style="text-align:right">Total</th>
+                  <th style="text-align:right">Green</th>
+                  <th style="text-align:right">Yellow</th>
+                  <th style="text-align:right">Red</th>
+                  <th>Distribution</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Mar 2026</td>
+                  <td class="num">38</td>
+                  <td class="num" style="color:#047857">26</td>
+                  <td class="num" style="color:#b45309">7</td>
+                  <td class="num" style="color:#b91c1c">5</td>
+                  <td>
+                    <div class="trends-inline-bar">
+                      <div class="trends-bar-seg seg-green" style="width:68%"></div>
+                      <div class="trends-bar-seg seg-yellow" style="width:18%"></div>
+                      <div class="trends-bar-seg seg-red" style="width:14%"></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Apr 2026</td>
+                  <td class="num">39</td>
+                  <td class="num" style="color:#047857">27</td>
+                  <td class="num" style="color:#b45309">7</td>
+                  <td class="num" style="color:#b91c1c">5</td>
+                  <td>
+                    <div class="trends-inline-bar">
+                      <div class="trends-bar-seg seg-green" style="width:69%"></div>
+                      <div class="trends-bar-seg seg-yellow" style="width:18%"></div>
+                      <div class="trends-bar-seg seg-red" style="width:13%"></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>May 2026</td>
+                  <td class="num">40</td>
+                  <td class="num" style="color:#047857">28</td>
+                  <td class="num" style="color:#b45309">7</td>
+                  <td class="num" style="color:#b91c1c">5</td>
+                  <td>
+                    <div class="trends-inline-bar">
+                      <div class="trends-bar-seg seg-green" style="width:70%"></div>
+                      <div class="trends-bar-seg seg-yellow" style="width:18%"></div>
+                      <div class="trends-bar-seg seg-red" style="width:12%"></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Jun 2026</td>
+                  <td class="num">41</td>
+                  <td class="num" style="color:#047857">28</td>
+                  <td class="num" style="color:#b45309">8</td>
+                  <td class="num" style="color:#b91c1c">5</td>
+                  <td>
+                    <div class="trends-inline-bar">
+                      <div class="trends-bar-seg seg-green" style="width:68%"></div>
+                      <div class="trends-bar-seg seg-yellow" style="width:20%"></div>
+                      <div class="trends-bar-seg seg-red" style="width:12%"></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Jul 2026</td>
+                  <td class="num">41</td>
+                  <td class="num" style="color:#047857">28</td>
+                  <td class="num" style="color:#b45309">8</td>
+                  <td class="num" style="color:#b91c1c">5</td>
+                  <td>
+                    <div class="trends-inline-bar">
+                      <div class="trends-bar-seg seg-green" style="width:68%"></div>
+                      <div class="trends-bar-seg seg-yellow" style="width:20%"></div>
+                      <div class="trends-bar-seg seg-red" style="width:12%"></div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Aug 2026</td>
+                  <td class="num"><strong>42</strong></td>
+                  <td class="num" style="color:#047857"><strong>29</strong></td>
+                  <td class="num" style="color:#b45309"><strong>8</strong></td>
+                  <td class="num" style="color:#b91c1c"><strong>5</strong></td>
+                  <td>
+                    <div class="trends-inline-bar">
+                      <div class="trends-bar-seg seg-green" style="width:69%"></div>
+                      <div class="trends-bar-seg seg-yellow" style="width:19%"></div>
+                      <div class="trends-bar-seg seg-red" style="width:12%"></div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="trends-stacked-legend">
+              <span><span class="trends-swatch seg-green"></span>Green</span>
+              <span><span class="trends-swatch seg-yellow"></span>Yellow</span>
+              <span><span class="trends-swatch seg-red"></span>Red</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BAND 5: Portfolio Composition -->
+      <div class="overview-section">
+        <div class="overview-section-label">Portfolio Composition</div>
+        <div class="overview-band-2">
+          <div class="overview-card">
+            <div class="overview-card-header">
+              <h3 class="overview-card-title">Deployment Health Status</h3>
+            </div>
+            <div class="overview-card-body padded">
+              <div class="ph-stacked">
+                <div style="flex:29;background:#10B981">29</div>
+                <div style="flex:8;background:#F59E0B">8</div>
+                <div style="flex:5;background:#EF4444">5</div>
+              </div>
+              <div class="ph-stacked-legend">
+                <span><span class="ph-legend-swatch" style="background:#10B981"></span>Green — 29 (69%)</span>
+                <span><span class="ph-legend-swatch" style="background:#F59E0B"></span>Yellow — 8 (19%)</span>
+                <span><span class="ph-legend-swatch" style="background:#EF4444"></span>Red — 5 (12%)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="overview-card">
+            <div class="overview-card-header">
+              <h3 class="overview-card-title">Delivery Model</h3>
+            </div>
+            <div class="overview-card-body padded">
+              <div class="ph-bar-row">
+                <div class="ph-bar-name">Workday PS</div>
+                <div class="ph-bar-track">
+                  <div class="ph-bar-fill" style="width:43%;background:#0F4C81"></div>
+                </div>
+                <div class="ph-bar-value">18</div>
+              </div>
+              <div class="ph-bar-row">
+                <div class="ph-bar-name">Partner-led</div>
+                <div class="ph-bar-track">
+                  <div class="ph-bar-fill" style="width:38%;background:#3b82f6"></div>
+                </div>
+                <div class="ph-bar-value">16</div>
+              </div>
+              <div class="ph-bar-row">
+                <div class="ph-bar-name">Hybrid</div>
+                <div class="ph-bar-track">
+                  <div class="ph-bar-fill" style="width:19%;background:#94a3b8"></div>
+                </div>
+                <div class="ph-bar-value">8</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BAND 6: Operational Context -->
+      <div class="overview-section">
+        <div class="overview-section-label">Operational Context</div>
+        <div class="overview-band-2">
+          <div class="overview-card">
+            <div class="overview-card-header">
+              <h3 class="overview-card-title">Deployment Lifecycle</h3>
+            </div>
+            <div class="overview-card-body padded">
+              <p style="font-size:0.75rem;color:var(--color-text-muted);margin-bottom:12px">Where 42 active deployments sit across the lifecycle</p>
+              <div class="lifecycle-bar">
+                <div class="lifecycle-segment lifecycle-starting" style="flex:11">
+                  <div class="lifecycle-segment-count">11</div>
+                  <div class="lifecycle-segment-label">Starting</div>
+                </div>
+                <div class="lifecycle-segment lifecycle-building" style="flex:18">
+                  <div class="lifecycle-segment-count">18</div>
+                  <div class="lifecycle-segment-label">Building</div>
+                </div>
+                <div class="lifecycle-segment lifecycle-landing" style="flex:10">
+                  <div class="lifecycle-segment-count">10</div>
+                  <div class="lifecycle-segment-label">Landing</div>
+                </div>
+                <div class="lifecycle-segment lifecycle-other" style="flex:3">
+                  <div class="lifecycle-segment-count">3</div>
+                  <div class="lifecycle-segment-label">Other</div>
+                </div>
+              </div>
+              <div class="lifecycle-stage-lists">
+                <div class="lifecycle-stage-list">Initiate, Plan</div>
+                <div class="lifecycle-stage-list">Configure, Integrate, Test</div>
+                <div class="lifecycle-stage-list">Deploy, Hypercare</div>
+                <div class="lifecycle-stage-list">On Hold, Complete</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="overview-card">
+            <div class="overview-card-header">
+              <h3 class="overview-card-title">Product Watchouts</h3>
+            </div>
+            <div class="overview-card-body padded">
+              <div class="watchout-row">
+                <div class="watchout-icon alert">!</div>
+                <div>
+                  <div class="watchout-text"><strong>IBM</strong> — Integration milestone at risk; MTP may slip beyond Sep 8.</div>
+                  <div class="watchout-meta">Executive Watch · Red health</div>
+                </div>
+              </div>
+              <div class="watchout-row">
+                <div class="watchout-icon alert">!</div>
+                <div>
+                  <div class="watchout-text"><strong>Pfizer</strong> — Data migration blockers unresolved; partner escalation needed.</div>
+                  <div class="watchout-meta">Red health · Accenture-led</div>
+                </div>
+              </div>
+              <div class="watchout-row">
+                <div class="watchout-icon warn">⚠</div>
+                <div>
+                  <div class="watchout-text"><strong>3 deployments</strong> missing Delivery Director assignment.</div>
+                  <div class="watchout-meta">Operational gap · affects reporting accuracy</div>
+                </div>
+              </div>
+              <div class="watchout-row">
+                <div class="watchout-icon info">i</div>
+                <div>
+                  <div class="watchout-text"><strong>UnitedHealth Group</strong> — UAT sign-off pending; go-live date may shift.</div>
+                  <div class="watchout-meta">Yellow health · Sep 18 MTP</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

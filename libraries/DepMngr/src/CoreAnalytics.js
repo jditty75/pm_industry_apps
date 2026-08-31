@@ -373,7 +373,7 @@ var CoreAnalytics = (function () {
    *   }
    *
    * @param {AppConfig} config
-   * @param {Object=} opts  { applyReportProductScope?: boolean }
+   * @param {Object=} opts  { applyReportProductScope?: boolean, applyReportExclusions?: boolean }
    * @return {Object}
    */
   function getHealthBreakdown(config, opts) {
@@ -389,6 +389,9 @@ var CoreAnalytics = (function () {
     allEffective = CoreData.filterDeploymentsByStudent_(allEffective, 'exclude', cfg);
     if (opts && opts.applyReportProductScope === true) {
       allEffective = CoreData.filterRowsByReportProductScope_(allEffective, cfg);
+    }
+    if (opts && opts.applyReportExclusions === true) {
+      allEffective = CoreData.filterRowsExcludedFromReport_(allEffective);
     }
     var expectedTotal = allEffective.length;
     var counts = { Green: 0, Red: 0, Yellow: 0 };
@@ -481,7 +484,7 @@ var CoreAnalytics = (function () {
    * (Deployment_Partner_Name__c) from effective deployments.
    *
    * @param {AppConfig} config
-   * @param {Object=} opts  { applyReportProductScope?: boolean }
+   * @param {Object=} opts  { applyReportProductScope?: boolean, applyReportExclusions?: boolean }
    * @return {Object}
    */
   function getPartnerBreakdown(config, opts) {
@@ -491,6 +494,9 @@ var CoreAnalytics = (function () {
     rows = CoreData.filterDeploymentsByStudent_(rows, 'exclude', cfg);
     if (opts && opts.applyReportProductScope === true) {
       rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
+    }
+    if (opts && opts.applyReportExclusions === true) {
+      rows = CoreData.filterRowsExcludedFromReport_(rows);
     }
     var totalDeployments = rows.length;
 
@@ -537,7 +543,7 @@ var CoreAnalytics = (function () {
    * from effective deployments.
    *
    * @param {AppConfig} config
-   * @param {Object=} opts  { applyReportProductScope?: boolean }
+   * @param {Object=} opts  { applyReportProductScope?: boolean, applyReportExclusions?: boolean }
    * @return {Object}
    */
   function getApproachBreakdown(config, opts) {
@@ -547,6 +553,9 @@ var CoreAnalytics = (function () {
     effectiveRows = CoreData.filterDeploymentsByStudent_(effectiveRows, 'exclude', cfg);
     if (opts && opts.applyReportProductScope === true) {
       effectiveRows = CoreData.filterRowsByReportProductScope_(effectiveRows, cfg);
+    }
+    if (opts && opts.applyReportExclusions === true) {
+      effectiveRows = CoreData.filterRowsExcludedFromReport_(effectiveRows);
     }
     // C13: filter to Active only; SFDC path already returns Active-only, but
     // the legacy path may include non-Active rows — be explicit.

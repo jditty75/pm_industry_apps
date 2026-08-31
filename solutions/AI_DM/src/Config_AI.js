@@ -125,6 +125,9 @@ var APP_CONFIG = {
       workdayLabel: 'Workday',
       otherLabel: 'Partners/Other',
       recentGoLivesWindowDays: 60,
+      industryMode: 'all',
+      industryDisplayMode: 'topNWithOther',
+      industryTopN: 10,
       industryBuckets: []
     },
 

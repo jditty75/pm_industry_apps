@@ -90,7 +90,28 @@ var CorePortfolioHealth = (function () {
     var partnerSplit = buildPartnerSplit_(allEffective, workdayPartner);
 
     // ---- Industry split per health row --------------------------------------
-    var industrySplit = buildIndustrySplit_(allEffective, ph.industryBuckets || []);
+    var industryMode = String(ph.industryMode || 'bucketed').trim().toLowerCase();
+    var industryDisplayMode = String(ph.industryDisplayMode || 'bucketed').trim();
+    var industryTopN = Number(ph.industryTopN || 10);
+    var industrySplit;
+
+    if (industryMode === 'all' && industryDisplayMode === 'topNWithOther') {
+      industrySplit = buildTopIndustriesSplit_(allEffective, industryTopN);
+    } else if (industryMode === 'all') {
+      industrySplit = buildAllIndustriesSplit_(allEffective);
+    } else {
+      industrySplit = buildIndustrySplit_(allEffective, ph.industryBuckets || []);
+    }
+
+    Logger.log(
+      'CorePortfolioHealth.getSnapshot: appId=' + (cfg.appId || '') +
+      ', industryMode=' + industryMode +
+      ', industryDisplayMode=' + industryDisplayMode +
+      ', allEffective=' + allEffective.length +
+      ', industryRows=' + (
+        industrySplit && industrySplit.rows ? industrySplit.rows.length : 0
+      )
+    );
 
     // ---- History (trailing months + trend) ----------------------------------
     var historyWindow = (ph.historyWindowMonths && ph.historyWindowMonths > 0)
@@ -145,8 +166,10 @@ var CorePortfolioHealth = (function () {
         windowDays: cfg.report.goLivesWindowDays || ph.recentGoLivesWindowDays || 60,
         accounts:   recentGoLivesAccounts
       },
-      partnerSplit:    partnerSplit,
-      industrySplit:   industrySplit,
+      partnerSplit:         partnerSplit,
+      industryMode:         industryMode,
+      industryDisplayMode:  industryDisplayMode,
+      industrySplit:        industrySplit,
       history:         history,
       phasedDeployments: phasedDeployments
     };
@@ -284,6 +307,179 @@ var CorePortfolioHealth = (function () {
     var grand = bucketTotals.reduce(function (s, b) { return s + b.count; }, 0);
 
     return {
+      bucketLabels: bucketLabels,
+      rows: rowsOut,
+      totals: {
+        buckets: bucketTotals.map(function (b) {
+          return {
+            label: b.label,
+            count: b.count,
+            pct:   grand > 0 ? b.count / grand : 0
+          };
+        }),
+        total: grand
+      }
+    };
+  }
+
+  /**
+   * Build a compact ranked industry split for product apps (Top N + Other).
+   *
+   * @param {Array<Object>} rows
+   * @param {number} topN
+   * @return {Object}
+   * @private
+   */
+  function buildTopIndustriesSplit_(rows, topN) {
+    topN = Math.max(1, Number(topN || 10));
+
+    var byIndustry = {};
+    var totalPortfolio = 0;
+
+    rows.forEach(function (r) {
+      var health = String(r.health || '').trim();
+      if (health !== 'Green' && health !== 'Yellow' && health !== 'Red') return;
+
+      var industry = String(r.industry || '').trim();
+      if (!industry) industry = 'Unknown';
+
+      if (!byIndustry[industry]) {
+        byIndustry[industry] = {
+          label: industry,
+          green: 0,
+          yellow: 0,
+          red: 0,
+          total: 0
+        };
+      }
+
+      if (health === 'Green') byIndustry[industry].green++;
+      else if (health === 'Yellow') byIndustry[industry].yellow++;
+      else if (health === 'Red') byIndustry[industry].red++;
+
+      byIndustry[industry].total++;
+      totalPortfolio++;
+    });
+
+    var ranked = Object.keys(byIndustry)
+      .map(function (k) { return byIndustry[k]; })
+      .filter(function (x) { return x.label !== 'Unknown'; })
+      .sort(function (a, b) {
+        if (b.total !== a.total) return b.total - a.total;
+        return String(a.label).toLowerCase().localeCompare(String(b.label).toLowerCase());
+      });
+
+    var top = ranked.slice(0, topN);
+    var rest = ranked.slice(topN);
+
+    var unknown = byIndustry.Unknown || null;
+
+    var other = {
+      label: 'Other',
+      green: 0,
+      yellow: 0,
+      red: 0,
+      total: 0
+    };
+
+    rest.forEach(function (x) {
+      other.green += x.green;
+      other.yellow += x.yellow;
+      other.red += x.red;
+      other.total += x.total;
+    });
+
+    if (unknown) {
+      other.green += unknown.green;
+      other.yellow += unknown.yellow;
+      other.red += unknown.red;
+      other.total += unknown.total;
+    }
+
+    var outRows = top.slice();
+    if (other.total > 0) outRows.push(other);
+
+    outRows.forEach(function (x) {
+      x.greenPct = x.total > 0 ? x.green / x.total : 0;
+      x.yellowPct = x.total > 0 ? x.yellow / x.total : 0;
+      x.redPct = x.total > 0 ? x.red / x.total : 0;
+      x.portfolioPct = totalPortfolio > 0 ? x.total / totalPortfolio : 0;
+    });
+
+    return {
+      mode: 'topNWithOther',
+      topN: topN,
+      rows: outRows,
+      total: totalPortfolio,
+      hiddenIndustryCount: rest.length + (unknown ? 1 : 0),
+      legend: [
+        { label: 'Green', key: 'green' },
+        { label: 'Yellow', key: 'yellow' },
+        { label: 'Red', key: 'red' }
+      ]
+    };
+  }
+
+  /**
+   * Build the industry split per health bucket using actual industry values
+   * from deployment rows (product apps with industryMode: 'all').
+   *
+   * @param {Array<Object>} rows
+   * @return {Object}
+   * @private
+   */
+  function buildAllIndustriesSplit_(rows) {
+    var healths = ['Green', 'Yellow', 'Red'];
+
+    var industrySet = {};
+    rows.forEach(function (r) {
+      var industry = String(r.industry || '').trim();
+      if (!industry) return;
+      industrySet[industry] = true;
+    });
+
+    var bucketLabels = Object.keys(industrySet).sort(function (a, b) {
+      return a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+
+    var rowsOut = healths.map(function (h) {
+      var counts = bucketLabels.map(function () { return 0; });
+
+      rows.forEach(function (r) {
+        if (String(r.health || '').trim() !== h) return;
+        var industry = String(r.industry || '').trim();
+        if (!industry) return;
+        var idx = bucketLabels.indexOf(industry);
+        if (idx >= 0) counts[idx]++;
+      });
+
+      var sub = counts.reduce(function (s, c) { return s + c; }, 0);
+
+      return {
+        health: h,
+        buckets: bucketLabels.map(function (label, i) {
+          return {
+            label: label,
+            count: counts[i],
+            pct:   sub > 0 ? counts[i] / sub : 0
+          };
+        })
+      };
+    });
+
+    var bucketTotals = bucketLabels.map(function (label, i) {
+      var c = rowsOut.reduce(function (s, r) {
+        return s + r.buckets[i].count;
+      }, 0);
+      return { label: label, count: c };
+    });
+
+    var grand = bucketTotals.reduce(function (s, b) {
+      return s + b.count;
+    }, 0);
+
+    return {
+      mode: 'all',
       bucketLabels: bucketLabels,
       rows: rowsOut,
       totals: {

@@ -377,6 +377,16 @@ var CoreConfig = (function () {
       cfg.report.portfolioHealth.workdayLabel = 'Workday';
     if (!cfg.report.portfolioHealth.otherLabel)
       cfg.report.portfolioHealth.otherLabel = 'Partners/Other';
+    if (!cfg.report.portfolioHealth.industryMode)
+      cfg.report.portfolioHealth.industryMode = 'bucketed';
+    if (!cfg.report.portfolioHealth.industryDisplayMode)
+      cfg.report.portfolioHealth.industryDisplayMode = 'bucketed';
+    if (
+      cfg.report.portfolioHealth.industryTopN === undefined ||
+      cfg.report.portfolioHealth.industryTopN === null
+    ) {
+      cfg.report.portfolioHealth.industryTopN = 10;
+    }
     if (!Array.isArray(cfg.report.portfolioHealth.industryBuckets))
       cfg.report.portfolioHealth.industryBuckets = [];
     if (cfg.report.portfolioHealth.recentGoLivesWindowDays === undefined)

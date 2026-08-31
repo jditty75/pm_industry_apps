@@ -215,3 +215,24 @@ function testDataFreshnessRollupPreview() {
 function testSendDailyDataFreshnessRollup() {
   return sendDailyDataFreshnessRollup();
 }
+
+function setupDataFreshnessSpreadsheetIds() {
+  configureDataFreshnessSpreadsheetIds({
+    SLG: '1v0wzRYd6CC00usYIGfgIgMI2QiN5FGbcReCPkOUbmhI',
+    HENP: '17gzhQiSFJf1mQe8wl8YEySTTMZxbFoq4U4MptzW7SY8',
+    HC: '12GFRUfdPnqgKR8EilVUHpE1pIvDbb9zlYFtSQjHvDBM',
+    EVI: '1Gy_GxWTrCPRh2dQ_0Shps5uIPM6i3rfOlI34ua8TLyQ',
+    AI: '1Bi4a-JeQi-4VLrM6ZTm9jrDhVp7ve8NuN5KDz7qc1yw'
+  });
+}
+function debugDataFreshnessSpreadsheetIds() {
+  var props = PropertiesService.getScriptProperties().getProperties();
+
+  Logger.log('FRESHNESS_SPREADSHEET_SLG=' + (props.FRESHNESS_SPREADSHEET_SLG || '(not set)'));
+  Logger.log('FRESHNESS_SPREADSHEET_HENP=' + (props.FRESHNESS_SPREADSHEET_HENP || '(not set)'));
+  Logger.log('FRESHNESS_SPREADSHEET_HC=' + (props.FRESHNESS_SPREADSHEET_HC || '(not set)'));
+  Logger.log('FRESHNESS_SPREADSHEET_EVI=' + (props.FRESHNESS_SPREADSHEET_EVI || '(not set)'));
+  Logger.log('FRESHNESS_SPREADSHEET_AI=' + (props.FRESHNESS_SPREADSHEET_AI || '(not set)'));
+
+  Logger.log(JSON.stringify(props, null, 2));
+}

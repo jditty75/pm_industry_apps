@@ -114,13 +114,13 @@ var APP_CONFIG = {
     // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
     // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
-      enabled: false,
-      fromAlias: '',
-      to: [],
+      enabled: true,
+      fromAlias: 'b.benson@workday.com',
+      to: ['henpdeploymentreport@workday.com'],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
       allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'HENP Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'Higher Education & Non-Profit - Monthly Deployment Health Report - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },
@@ -197,6 +197,17 @@ var APP_CONFIG = {
       useTestMode:         true,
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
+    }
+  },
+
+  notify: {
+    allowedFromAliases: [
+      'b.benson@workday.com',
+      'jeffrey.ditty@workday.com'
+    ],
+    fromAliasNames: {
+      'b.benson@workday.com': 'Bonnie Benson',
+      'jeffrey.ditty@workday.com': 'Jeff Ditty'
     }
   },
 

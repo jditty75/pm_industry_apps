@@ -125,13 +125,13 @@ var APP_CONFIG = {
     // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
     // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
-      enabled: false,
-      fromAlias: '',
-      to: [],
+      enabled: true,
+      fromAlias: 'krishna.kuchibhotla@workday.com',
+      to: ['hcdeploymentreport@workday.com'],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
       allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'Healthcare Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'Healthcare - Monthly Deployment Health Report - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },
@@ -219,6 +219,17 @@ var APP_CONFIG = {
       useTestMode:         true,
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
+    }
+  },
+
+  notify: {
+    allowedFromAliases: [
+      'krishna.kuchibhotla@workday.com',
+      'jeffrey.ditty@workday.com'
+    ],
+    fromAliasNames: {
+      'krishna.kuchibhotla@workday.com': 'Krishna Kuchibhotla',
+      'jeffrey.ditty@workday.com': 'Jeff Ditty'
     }
   },
 

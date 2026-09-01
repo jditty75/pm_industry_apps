@@ -463,10 +463,11 @@ var CoreConfig = (function () {
     if (!cfg.notify.configSheet) cfg.notify.configSheet = 'NotificationConfig';
     if (!cfg.notify.testDefaultRecipient)
       cfg.notify.testDefaultRecipient = 'jeffrey.ditty@workday.com';
-    if (!Array.isArray(cfg.notify.allowedFromAliases) || !cfg.notify.allowedFromAliases.length) {
-      cfg.notify.allowedFromAliases = [
-        'jeffrey.ditty@workday.com'
-      ];
+    if (!Array.isArray(cfg.notify.allowedFromAliases)) {
+      cfg.notify.allowedFromAliases = ['jeffrey.ditty@workday.com'];
+    }
+    if (typeof cfg.notify.fromAliasNames !== 'object' || cfg.notify.fromAliasNames === null) {
+      cfg.notify.fromAliasNames = {};
     }
 
     // -------------------------------------------------------------------------

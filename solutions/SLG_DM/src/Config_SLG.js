@@ -136,13 +136,13 @@ var APP_CONFIG = {
     // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
     // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
-      enabled: false,
-      fromAlias: 'jeffrey.ditty@workday.com',
-      to: [],
+      enabled: true,
+      fromAlias: 'windsel.mccray@workday.com',
+      to: ['slgdeploymentreport@workday.com'],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
       allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'State & Local Government \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'State & Local Government - Monthly Deployment Health Report - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },
@@ -256,6 +256,16 @@ var APP_CONFIG = {
     }
   },
 
+  notify: {
+    allowedFromAliases: [
+      'windsel.mccray@workday.com',
+      'jeffrey.ditty@workday.com'
+    ],
+    fromAliasNames: {
+      'windsel.mccray@workday.com': 'Windsel McCray',
+      'jeffrey.ditty@workday.com': 'Jeff Ditty'
+    }
+  },
   // ---------------------------------------------------------------------------
   // N4: Salesforce Connector data freshness monitoring.
   // ---------------------------------------------------------------------------

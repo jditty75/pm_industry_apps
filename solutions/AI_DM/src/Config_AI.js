@@ -135,12 +135,12 @@ var APP_CONFIG = {
 
     distribution: {
       enabled: false,
-      fromAlias: '',
+      fromAlias: 'jeffrey.ditty@workday.com',
       to: [],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
       allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'AI Products \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'AI Products - Monthly Deployment Health Report - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },
@@ -248,7 +248,10 @@ var APP_CONFIG = {
 
   notify: {
     enabled: false,
-    allowedFromAliases: ['jeffrey.ditty@workday.com']
+    allowedFromAliases: ['jeffrey.ditty@workday.com'],
+    fromAliasNames: {
+      'jeffrey.ditty@workday.com': 'Jeff Ditty'
+    }
   },
 
   // ---------------------------------------------------------------------------

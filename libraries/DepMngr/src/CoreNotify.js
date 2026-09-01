@@ -580,16 +580,42 @@ var CoreNotify = (function () {
   }
 
   /**
+   * @param {AppConfig=} cfg
+   * @param {string} fromAlias
+   * @return {string}
+   * @private
+   */
+  function _resolveFromDisplayName_(cfg, fromAlias) {
+    var names = (cfg && cfg.notify && cfg.notify.fromAliasNames) || {};
+    return names[String(fromAlias || '').trim()] || '';
+  }
+
+  /**
+   * @param {string} fromAlias
+   * @param {string} fromName
+   * @return {string}
+   * @private
+   */
+  function _formatFromHeader_(fromAlias, fromName) {
+    var email = String(fromAlias || '').trim();
+    var name = String(fromName || '').trim();
+    if (!name) return email;
+    var safeName = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return '"' + safeName + '" <' + email + '>';
+  }
+
+  /**
    * @param {string} to
    * @param {string} subject
    * @param {string} htmlBody
    * @param {string} fromAlias
    * @param {string} cc
    * @param {Array<string>} allowedAliases
+   * @param {AppConfig=} cfg
    * @return {boolean}
    * @private
    */
-  function _gmailSend_(to, subject, htmlBody, fromAlias, cc, allowedAliases) {
+  function _gmailSend_(to, subject, htmlBody, fromAlias, cc, allowedAliases, cfg) {
     var toStr = String(to || '').trim();
     if (!toStr) {
       Logger.log('CoreNotify._gmailSend_: empty to; skipped.');
@@ -602,7 +628,9 @@ var CoreNotify = (function () {
       return false;
     }
 
+    var fromName = _resolveFromDisplayName_(cfg, from);
     var opts = { htmlBody: htmlBody, from: from };
+    if (fromName) opts.name = fromName;
     var ccStr = String(cc || '').trim();
     if (ccStr) opts.cc = ccStr;
 
@@ -708,11 +736,12 @@ var CoreNotify = (function () {
    * @param {string} cc
    * @param {Array<string>} allowedAliases
    * @param {string=} bcc
+   * @param {AppConfig=} cfg
    * @return {{ok: boolean, messageId: string, threadId: string,
    *           captureMethod: 'advanced'|'heuristic'|'none'}}
    * @private
    */
-  function _gmailSendWithIds_(to, subject, htmlBody, fromAlias, cc, allowedAliases, bcc) {
+  function _gmailSendWithIds_(to, subject, htmlBody, fromAlias, cc, allowedAliases, bcc, cfg) {
     var fail = { ok: false, messageId: '', threadId: '', captureMethod: 'none' };
     var toStr = String(to || '').trim();
     if (!toStr) {
@@ -737,7 +766,9 @@ var CoreNotify = (function () {
         throw new ReferenceError('Gmail advanced service is not enabled');
       }
 
-      var rawMime = _buildRfc2822Mime_(from, toStr, ccStr, bccStr, subject, bodyWithToken);
+      var fromName = _resolveFromDisplayName_(cfg, from);
+      var fromHeader = _formatFromHeader_(from, fromName);
+      var rawMime = _buildRfc2822Mime_(fromHeader, toStr, ccStr, bccStr, subject, bodyWithToken);
       var encoded = _base64UrlEncodeMime_(rawMime);
       var response = Gmail.Users.Messages.send({ raw: encoded }, 'me');
       var messageId = response && response.id ? String(response.id) : '';
@@ -760,7 +791,9 @@ var CoreNotify = (function () {
                  advancedErr + '); falling back to GmailApp.');
     }
 
+    var fallbackFromName = _resolveFromDisplayName_(cfg, from);
     var opts = { htmlBody: bodyWithToken, from: from };
+    if (fallbackFromName) opts.name = fallbackFromName;
     if (ccStr) opts.cc = ccStr;
     if (bccStr) opts.bcc = bccStr;
     var plain = String(bodyWithToken).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -863,7 +896,7 @@ var CoreNotify = (function () {
         _escapeHtml_(recipients.join(', ') || '(none)') + '</p>' + body;
     }
 
-    var sent = _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases);
+    var sent = _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases, cfg);
     _logSurveyNotification_(cfg, {
       notificationKey: String(row.notificationKey || '').trim(),
       fromAlias: row.fromAlias,
@@ -933,7 +966,7 @@ var CoreNotify = (function () {
         _escapeHtml_(recipients.join(', ') || '(none)') + '</p>' + body;
     }
 
-    var sent = _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases);
+    var sent = _gmailSend_(to, subject, body, row.fromAlias, cc, cfg.notify.allowedFromAliases, cfg);
     _logSurveyNotification_(cfg, {
       notificationKey: String(row.notificationKey || '').trim(),
       fromAlias: row.fromAlias,

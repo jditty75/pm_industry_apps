@@ -232,7 +232,7 @@ var CoreDistribute = (function () {
     }
 
     var sendResult = CoreNotify._gmailSendWithIds_(toStr, subject, htmlBody, fromAlias, ccStr,
-      cfg.notify.allowedFromAliases, bccStr);
+      cfg.notify.allowedFromAliases, bccStr, cfg);
     if (!sendResult.ok) {
       var sendErr = 'Gmail send failed or was blocked (see Logs)';
       logRow('failed', sendErr, null, 'prod');
@@ -302,7 +302,7 @@ var CoreDistribute = (function () {
     });
 
     var sent = CoreNotify._gmailSend_(to, subject, htmlBody, fromAlias, '',
-      cfg.notify.allowedFromAliases);
+      cfg.notify.allowedFromAliases, cfg);
     if (!sent) {
       return { status: 'failed', error: 'GmailApp send failed (see Logs)' };
     }

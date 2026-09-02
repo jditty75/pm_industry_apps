@@ -921,6 +921,22 @@ function _debugOverviewNextHighRisk() {
   return CoreLib.CoreData._debugOverviewNextHighRisk(APP_CONFIG, { product: 'all' });
 }
 
+/**
+ * Deployment Health Plan diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugDeploymentHealthPlan() {
+  return CoreLib.CoreData._debugDeploymentHealthPlan(APP_CONFIG);
+}
+
+/**
+ * Wellness / Executive Watch diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugWellnessData() {
+  return CoreLib.CoreData._debugWellnessData(APP_CONFIG);
+}
+
 // ===========================================================================
 // TRENDS TAB ENDPOINTS (T1)
 // ===========================================================================

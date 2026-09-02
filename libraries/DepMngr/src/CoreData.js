@@ -64,6 +64,10 @@ var CoreData = (function () {
     mdsPglBatchView: {},       // { '<windowMonths>': payload } — tier 1 for getMdsPglBatchView
     overviewSnapshot: null,     // tier 1 for getOverviewSnapshot
     pfReaderMeta: null,         // last readSfdcProductFunctionsRaw_ header diagnostics
+    dhpRows: null,              // result of readDeploymentHealthPlansRaw_
+    dhpMap: null,               // result of buildDeploymentHealthPlanMap_
+    wellnessRows: null,         // result of readWellnessPlansRaw_
+    wellnessMap: null,          // result of buildWellnessMap_
     reportBuildCtx: null        // active monthly-report build context (per execution)
   };
 
@@ -88,6 +92,10 @@ var CoreData = (function () {
     _cache.mdsPglBatchView = {};
     _cache.overviewSnapshot = null;
     _cache.pfReaderMeta = null;
+    _cache.dhpRows = null;
+    _cache.dhpMap = null;
+    _cache.wellnessRows = null;
+    _cache.wellnessMap = null;
     _cache.reportBuildCtx = null;
     // Tier 2: sheet-tab cache. Layer 2. Clears all rows including mdsPglBatchView:* and overviewData:* keys.
     _perfCacheClearAll_();
@@ -1217,10 +1225,9 @@ var CoreData = (function () {
       deliveryDirector: meta.deliveryDirector || '',
       ddNotes: meta.ddNotes || '',
       metaUsername: meta.username || '',
-      metaTimestamp: meta.timestamp || '',
-      isExecutiveWatch: !!wellness,
-      wellnessData: wellness
+      metaTimestamp: meta.timestamp || ''
     };
+    _attachWellnessFieldsToRow_(base, wellness);
 
     var derived = buildEffectiveDeploymentRow_(base, overridesMap || {});
     derived.deploymentId = _deriveProductFunctionDeploymentId_(parentId, pf);
@@ -2624,7 +2631,374 @@ var CoreData = (function () {
   // ===========================================================================
 
   /**
-   * Builds a map of accountId (15-char) → { cxLeaderName, executiveSummary }
+   * Parses a collapsed Salesforce relationship/object cell value for a Name field.
+   * @param {any} raw
+   * @return {string}
+   * @private
+   */
+  function _parseRelationshipNameField_(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '';
+    if (s.indexOf('Name=') < 0 && s.indexOf('name=') < 0) return s;
+    var match = s.match(/(?:^|[,{]\s*)Name=([^,}]+)/);
+    if (match && match[1]) return String(match[1]).trim();
+    return s;
+  }
+
+  /**
+   * Parses a collapsed Salesforce relationship/object cell value for an Id field.
+   * @param {any} raw
+   * @return {string}
+   * @private
+   */
+  function _parseRelationshipIdField_(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '';
+    if (/^[a-zA-Z0-9]{15,18}$/.test(s)) return s;
+    var match = s.match(/(?:^|[,{]\s*)Id=([a-zA-Z0-9]{15,18})/);
+    if (match && match[1]) return match[1];
+    return s;
+  }
+
+  /**
+   * Parses CX_Leader_Assignment__r from plain text or connector object strings.
+   * @param {any} raw
+   * @return {string}
+   * @private
+   */
+  function _parseCxLeaderFromRelationship_(raw) {
+    return _parseRelationshipNameField_(raw);
+  }
+
+  /**
+   * Normalizes High_Risk_Flag__c to boolean.
+   * @param {any} raw
+   * @return {boolean}
+   * @private
+   */
+  function _normalizeWellnessHighRiskFlag_(raw) {
+    if (raw === true) return true;
+    if (raw === false) return false;
+    var s = String(raw || '').trim().toLowerCase();
+    if (!s) return false;
+    if (s === 'true' || s === 'yes' || s === 'y' || s === '1') return true;
+    if (s === 'false' || s === 'no' || s === 'n' || s === '0') return false;
+    return false;
+  }
+
+  /**
+   * Splits Issue_Category__c into normalized categories.
+   * @param {string} raw
+   * @param {string=} delimiter
+   * @return {Array<string>}
+   * @private
+   */
+  function _splitWellnessIssueCategories_(raw, delimiter) {
+    var delim = delimiter || ';';
+    return String(raw || '').split(delim).map(function(part) {
+      return String(part || '').trim();
+    }).filter(function(part) {
+      return !!part;
+    });
+  }
+
+  /**
+   * Derives primary issue category label from split categories.
+   * @param {Array<string>} categories
+   * @return {string}
+   * @private
+   */
+  function _normalizeWellnessIssueCategoryLabel_(categories) {
+    categories = categories || [];
+    if (!categories.length) return '';
+    if (categories.length === 1) return categories[0];
+    return 'Multiple';
+  }
+
+  /**
+   * Parses a wellness date for comparison.
+   * @param {any} raw
+   * @return {Date|null}
+   * @private
+   */
+  function _parseWellnessDate_(raw) {
+    if (!raw) return null;
+    if (raw instanceof Date && !isNaN(raw.getTime())) return raw;
+    var d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
+   * Formats a wellness date for display/storage.
+   * @param {any} raw
+   * @return {string}
+   * @private
+   */
+  function _formatWellnessDate_(raw) {
+    var d = _parseWellnessDate_(raw);
+    if (!d) return String(raw || '').trim();
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  /**
+   * Reads raw Wellness rows from SFDC_Wellness.
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function readWellnessPlansRaw_(cfg) {
+    if (_cache.wellnessRows !== null) return _cache.wellnessRows;
+
+    var sheetName = (cfg && cfg.sheets && cfg.sheets.wellness) || 'SFDC_Wellness';
+    var rows = [];
+
+    try {
+      var ss = getSpreadsheet_();
+      var sheet = ss.getSheetByName(sheetName);
+      if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() === 0) {
+        _cache.wellnessRows = [];
+        return _cache.wellnessRows;
+      }
+
+      var lastRow = sheet.getLastRow();
+      var lastCol = sheet.getLastColumn();
+      var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+      var headers = allValues[0].map(function(h) { return String(h || '').trim(); });
+      var lowerH = headers.map(function(h) { return h.toLowerCase(); });
+
+      function findExact_(headerName) {
+        var target = String(headerName || '').trim().toLowerCase();
+        for (var i = 0; i < lowerH.length; i++) {
+          if (lowerH[i] === target) return i;
+        }
+        return -1;
+      }
+
+      function detect_(keywords) {
+        for (var ki = 0; ki < keywords.length; ki++) {
+          var kw = keywords[ki].toLowerCase();
+          for (var hi = 0; hi < lowerH.length; hi++) {
+            if (lowerH[hi].indexOf(kw) !== -1) return hi;
+          }
+        }
+        return -1;
+      }
+
+      function cellStr_(row, col) {
+        return col >= 0 ? String(row[col] || '').trim() : '';
+      }
+
+      var colId = findExact_('Id');
+      var colOverallHealth = findExact_('Overall_Health_Status__c');
+      if (colOverallHealth < 0) colOverallHealth = detect_(['overall_health_status', 'overall_health']);
+      var colAccount = findExact_('Account__c');
+      var colAccountRelId = findExact_('Account__r.Id');
+      var colAccountRel = findExact_('Account__r');
+      if (colAccount < 0) colAccount = detect_(['account__c']);
+      var colHighRisk = findExact_('High_Risk_Flag__c');
+      if (colHighRisk < 0) colHighRisk = detect_(['high_risk_flag', 'high_risk']);
+      var colWellnessUpdate = findExact_('Wellness_Update__c');
+      if (colWellnessUpdate < 0) colWellnessUpdate = detect_(['wellness_update']);
+      var colCxLeaderName = findExact_('CX_Leader_Assignment__r.Name');
+      var colCxLeaderRel = findExact_('CX_Leader_Assignment__r');
+      if (colCxLeaderRel < 0) colCxLeaderRel = detect_(['cx_leader_assignment__r']);
+      var colExecSummary = findExact_('Executive_Summary__c');
+      if (colExecSummary < 0) colExecSummary = detect_(['executive_summary']);
+      var colSummaryIssues = findExact_('Summary_of_Issues__c');
+      if (colSummaryIssues < 0) colSummaryIssues = detect_(['summary_of_issues']);
+      var colIssueCategory = findExact_('Issue_Category__c');
+      if (colIssueCategory < 0) colIssueCategory = detect_(['issue_category']);
+      var colLastModified = findExact_('LastModifiedDate');
+      if (colLastModified < 0) colLastModified = detect_(['lastmodifieddate', 'last_modified']);
+
+      for (var r = 1; r < allValues.length; r++) {
+        var row = allValues[r];
+        var accountId = cellStr_(row, colAccount);
+        if (!accountId) accountId = cellStr_(row, colAccountRelId);
+        if (!accountId && colAccountRel >= 0) {
+          accountId = _parseRelationshipIdField_(row[colAccountRel]);
+        }
+        if (!accountId && colAccount < 0 && colAccountRelId < 0 && colAccountRel < 0) {
+          accountId = String(row[1] || '').trim();
+        }
+        accountId = accountId ? accountId.slice(0, 15) : '';
+
+        var cxLeader = '';
+        if (colCxLeaderName >= 0) cxLeader = cellStr_(row, colCxLeaderName);
+        if (!cxLeader && colCxLeaderRel >= 0) {
+          cxLeader = _parseCxLeaderFromRelationship_(row[colCxLeaderRel]);
+        }
+
+        var issueCategoryRaw = cellStr_(row, colIssueCategory);
+        var issueCategories = _splitWellnessIssueCategories_(issueCategoryRaw, ';');
+        var lastModifiedRaw = colLastModified >= 0 ? row[colLastModified] : '';
+
+        rows.push({
+          wellnessPlanId: cellStr_(row, colId),
+          accountId: accountId,
+          overallHealthStatus: cellStr_(row, colOverallHealth),
+          highRiskFlag: _normalizeWellnessHighRiskFlag_(colHighRisk >= 0 ? row[colHighRisk] : ''),
+          wellnessUpdate: cellStr_(row, colWellnessUpdate),
+          cxLeader: cxLeader,
+          executiveSummary: cellStr_(row, colExecSummary),
+          summaryOfIssues: cellStr_(row, colSummaryIssues),
+          issueCategoryRaw: issueCategoryRaw,
+          issueCategories: issueCategories,
+          issueCategory: _normalizeWellnessIssueCategoryLabel_(issueCategories),
+          lastModifiedDate: _formatWellnessDate_(lastModifiedRaw),
+          lastModifiedSort: _parseWellnessDate_(lastModifiedRaw)
+        });
+      }
+    } catch (e) {
+      Logger.log('CoreData.readWellnessPlansRaw_: ' + e);
+      rows = [];
+    }
+
+    _cache.wellnessRows = rows;
+    return _cache.wellnessRows;
+  }
+
+  /**
+   * Picks the latest nonblank field value by LastModifiedDate.
+   * @param {Array<Object>} plans
+   * @param {string} fieldName
+   * @return {string}
+   * @private
+   */
+  function _pickLatestWellnessField_(plans, fieldName) {
+    var latest = '';
+    var latestDate = null;
+    (plans || []).forEach(function(plan) {
+      var val = String(plan[fieldName] || '').trim();
+      if (!val) return;
+      var d = plan.lastModifiedSort;
+      if (d && (!latestDate || d.getTime() > latestDate.getTime())) {
+        latestDate = d;
+        latest = val;
+      }
+    });
+    if (latest) return latest;
+    for (var i = 0; i < (plans || []).length; i++) {
+      var fallback = String(plans[i][fieldName] || '').trim();
+      if (fallback) return fallback;
+    }
+    return '';
+  }
+
+  /**
+   * Aggregates normalized wellness rows for one account.
+   * @param {Array<Object>} plans
+   * @return {Object|null}
+   * @private
+   */
+  function _aggregateWellnessPlansForAccount_(plans) {
+    plans = plans || [];
+    if (!plans.length) return null;
+
+    var wellnessPlanIds = [];
+    var issueCategoryRawValues = [];
+    var issueCategories = [];
+    var highRiskFlag = false;
+
+    plans.forEach(function(plan) {
+      if (plan.wellnessPlanId) wellnessPlanIds.push(plan.wellnessPlanId);
+      if (plan.highRiskFlag === true) highRiskFlag = true;
+      if (plan.issueCategoryRaw && issueCategoryRawValues.indexOf(plan.issueCategoryRaw) < 0) {
+        issueCategoryRawValues.push(plan.issueCategoryRaw);
+      }
+      (plan.issueCategories || []).forEach(function(cat) {
+        if (cat && issueCategories.indexOf(cat) < 0) issueCategories.push(cat);
+      });
+    });
+
+    var cxLeader = _pickLatestWellnessField_(plans, 'cxLeader');
+    var wellnessUpdate = _pickLatestWellnessField_(plans, 'wellnessUpdate');
+    var executiveSummary = _pickLatestWellnessField_(plans, 'executiveSummary');
+    var summaryOfIssues = _pickLatestWellnessField_(plans, 'summaryOfIssues');
+    var overallHealthStatus = _pickLatestWellnessField_(plans, 'overallHealthStatus');
+    var lastModifiedDate = '';
+    var latestModified = null;
+    plans.forEach(function(plan) {
+      if (!plan.lastModifiedSort) return;
+      if (!latestModified || plan.lastModifiedSort.getTime() > latestModified.getTime()) {
+        latestModified = plan.lastModifiedSort;
+        lastModifiedDate = plan.lastModifiedDate || '';
+      }
+    });
+    if (!lastModifiedDate) {
+      lastModifiedDate = _pickLatestWellnessField_(plans, 'lastModifiedDate');
+    }
+
+    var agg = {
+      hasCustomerWellness: true,
+      wellnessPlanCount: plans.length,
+      wellnessPlanIds: wellnessPlanIds,
+      accountId: plans[0].accountId,
+      highRiskFlag: highRiskFlag,
+      overallHealthStatus: overallHealthStatus,
+      issueCategory: _normalizeWellnessIssueCategoryLabel_(issueCategories),
+      issueCategories: issueCategories,
+      issueCategoryRawValues: issueCategoryRawValues,
+      cxLeader: cxLeader,
+      cxLeaderName: cxLeader,
+      wellnessUpdate: wellnessUpdate,
+      executiveSummary: executiveSummary,
+      summaryOfIssues: summaryOfIssues,
+      lastModifiedDate: lastModifiedDate,
+      overallHealth: overallHealthStatus,
+      highRisk: highRiskFlag,
+      issueCategoryRaw: issueCategoryRawValues.length ? issueCategoryRawValues[0] : '',
+      plans: plans.map(function(plan) {
+        return {
+          wellnessPlanId: plan.wellnessPlanId,
+          accountId: plan.accountId,
+          overallHealthStatus: plan.overallHealthStatus,
+          highRiskFlag: plan.highRiskFlag,
+          wellnessUpdate: plan.wellnessUpdate,
+          cxLeader: plan.cxLeader,
+          executiveSummary: plan.executiveSummary,
+          summaryOfIssues: plan.summaryOfIssues,
+          issueCategoryRaw: plan.issueCategoryRaw,
+          issueCategories: (plan.issueCategories || []).slice(),
+          issueCategory: plan.issueCategory,
+          lastModifiedDate: plan.lastModifiedDate
+        };
+      })
+    };
+    return agg;
+  }
+
+  /**
+   * Attaches normalized wellness fields to a deployment row.
+   * @param {Object} row
+   * @param {Object|null} wellness
+   * @return {Object}
+   * @private
+   */
+  function _attachWellnessFieldsToRow_(row, wellness) {
+    if (!row) return row;
+    if (!wellness) {
+      row.isExecutiveWatch = false;
+      row.wellnessData = null;
+      row.customerWellness = null;
+      return row;
+    }
+    row.isExecutiveWatch = true;
+    row.wellnessData = wellness;
+    row.customerWellness = wellness;
+    row.overallHealthStatus = wellness.overallHealthStatus || wellness.overallHealth || '';
+    row.highRiskFlag = wellness.highRiskFlag === true;
+    row.cxLeader = wellness.cxLeader || wellness.cxLeaderName || '';
+    row.wellnessUpdate = wellness.wellnessUpdate || '';
+    row.executiveSummary = wellness.executiveSummary || '';
+    row.summaryOfIssues = wellness.summaryOfIssues || '';
+    row.issueCategories = (wellness.issueCategories || []).slice();
+    row.lastModifiedDate = wellness.lastModifiedDate || '';
+    return row;
+  }
+
+  /**
+   * Builds a map of accountId (15-char) → aggregated wellness object
    * from the SFDC_Wellness sheet. Returns {} if the sheet is absent or empty.
    *
    * @param {AppConfig} cfg  Already-defaulted config.
@@ -2632,27 +3006,633 @@ var CoreData = (function () {
    * @private
    */
   function buildWellnessMap_(cfg) {
+    if (_cache.wellnessMap !== null) return _cache.wellnessMap;
+
+    var rawRows = [];
     try {
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName(cfg.sheets.wellness || 'SFDC_Wellness');
-      if (!sheet || sheet.getLastRow() < 2) return {};
-      if (sheet.getLastColumn() === 0) return {};
-      var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1,
-                                sheet.getLastColumn()).getValues();
-      var map = {};
-      rows.forEach(function(r) {
-        var accountId = (r[1] || '').toString().slice(0, 15); // Account__c col 2
-        if (!accountId) return;
-        map[accountId] = {
-          cxLeaderName:     (r[3] || '').toString(), // CX_Leader_Assignment__r.Name col 4
-          executiveSummary: (r[4] || '').toString()  // Executive_Summary__c col 5
-        };
-      });
-      return map;
-    } catch(e) {
-      Logger.log('buildWellnessMap_ error: ' + e);
-      return {};
+      rawRows = readWellnessPlansRaw_(cfg) || [];
+    } catch (e) {
+      Logger.log('CoreData.buildWellnessMap_: readWellnessPlansRaw_ failed: ' + e);
+      _cache.wellnessMap = {};
+      return _cache.wellnessMap;
     }
+
+    var byAccount = {};
+    rawRows.forEach(function(plan) {
+      if (!plan || !plan.accountId) return;
+      if (!byAccount[plan.accountId]) byAccount[plan.accountId] = [];
+      byAccount[plan.accountId].push(plan);
+    });
+
+    var map = {};
+    Object.keys(byAccount).forEach(function(accountId) {
+      var agg = _aggregateWellnessPlansForAccount_(byAccount[accountId]);
+      if (!agg) return;
+      map[accountId] = agg;
+      if (accountId.length >= 15) map[accountId.slice(0, 15)] = agg;
+    });
+
+    _cache.wellnessMap = map;
+    return _cache.wellnessMap;
+  }
+
+  /**
+   * Diagnostic for SFDC_Wellness ingestion and deployment enrichment.
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function _debugWellnessData(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var sheetName = (cfg.sheets && cfg.sheets.wellness) || 'SFDC_Wellness';
+    var sheetExists = false;
+    try {
+      sheetExists = !!getSpreadsheet_().getSheetByName(sheetName);
+    } catch (e) { /* no-op */ }
+
+    _cache.wellnessRows = null;
+    _cache.wellnessMap = null;
+    var rawRows = readWellnessPlansRaw_(cfg) || [];
+    var map = buildWellnessMap_(cfg) || {};
+
+    var withAccountId = 0;
+    var missingAccountId = 0;
+    var highRiskTrueCount = 0;
+    var overallHealthCounts = {};
+    var issueCategoryCounts = {};
+    var withCxLeader = 0;
+    var withWellnessUpdate = 0;
+    var withExecutiveSummary = 0;
+    var withSummaryOfIssues = 0;
+    var withLastModified = 0;
+    var perAccountCounts = {};
+
+    rawRows.forEach(function(row) {
+      if (row.accountId) {
+        withAccountId++;
+        perAccountCounts[row.accountId] = (perAccountCounts[row.accountId] || 0) + 1;
+      } else {
+        missingAccountId++;
+      }
+      if (row.highRiskFlag === true) highRiskTrueCount++;
+      var oh = row.overallHealthStatus || '(blank)';
+      overallHealthCounts[oh] = (overallHealthCounts[oh] || 0) + 1;
+      (row.issueCategories || []).forEach(function(cat) {
+        issueCategoryCounts[cat] = (issueCategoryCounts[cat] || 0) + 1;
+      });
+      if (row.cxLeader) withCxLeader++;
+      if (row.wellnessUpdate) withWellnessUpdate++;
+      if (row.executiveSummary) withExecutiveSummary++;
+      if (row.summaryOfIssues) withSummaryOfIssues++;
+      if (row.lastModifiedDate) withLastModified++;
+    });
+
+    var multiplePerAccount = 0;
+    Object.keys(perAccountCounts).forEach(function(accountId) {
+      if (perAccountCounts[accountId] > 1) multiplePerAccount++;
+    });
+
+    var deploymentRows = [];
+    try {
+      deploymentRows = getAllDeployments(cfg, null, { product: 'all' }) || [];
+    } catch (e) {
+      Logger.log('CoreData._debugWellnessData: getAllDeployments failed: ' + e);
+    }
+
+    var enrichedCount = 0;
+    var sampleEnriched = [];
+    deploymentRows.forEach(function(row) {
+      if (!row.isExecutiveWatch) return;
+      enrichedCount++;
+      if (sampleEnriched.length < 5) {
+        sampleEnriched.push({
+          accountName: row.accountName || '',
+          accountId: row.accountId || '',
+          isExecutiveWatch: true,
+          cxLeader: row.cxLeader || (row.wellnessData && row.wellnessData.cxLeader) || '',
+          overallHealthStatus: row.overallHealthStatus ||
+            (row.wellnessData && row.wellnessData.overallHealthStatus) || '',
+          issueCategories: row.issueCategories ||
+            (row.wellnessData && row.wellnessData.issueCategories) || []
+        });
+      }
+    });
+
+    var result = {
+      appName: cfg.appId || '',
+      sheetName: sheetName,
+      sheetExists: sheetExists,
+      wellnessRowCount: rawRows.length,
+      rowsWithAccountId: withAccountId,
+      rowsMissingAccountId: missingAccountId,
+      highRiskTrueCount: highRiskTrueCount,
+      overallHealthStatusCounts: overallHealthCounts,
+      issueCategoryCounts: issueCategoryCounts,
+      rowsWithCxLeader: withCxLeader,
+      rowsWithWellnessUpdate: withWellnessUpdate,
+      rowsWithExecutiveSummary: withExecutiveSummary,
+      rowsWithSummaryOfIssues: withSummaryOfIssues,
+      rowsWithLastModifiedDate: withLastModified,
+      accountsWithMultipleWellnessRows: multiplePerAccount,
+      distinctAccountsInMap: Object.keys(map).length,
+      sampleNormalizedRows: rawRows.slice(0, 5).map(function(r) {
+        return {
+          wellnessPlanId: r.wellnessPlanId,
+          accountId: r.accountId,
+          overallHealthStatus: r.overallHealthStatus,
+          highRiskFlag: r.highRiskFlag,
+          cxLeader: r.cxLeader,
+          issueCategories: r.issueCategories || [],
+          lastModifiedDate: r.lastModifiedDate
+        };
+      }),
+      deploymentRowsChecked: deploymentRows.length,
+      deploymentRowsWithExecutiveWatch: enrichedCount,
+      sampleEnrichedRows: sampleEnriched
+    };
+
+    Logger.log('=== _debugWellnessData(' + (cfg.appId || '?') + ') ===');
+    Logger.log(JSON.stringify(result, null, 2));
+    Logger.log('=== end _debugWellnessData ===');
+    return result;
+  }
+
+  // ===========================================================================
+  // DEPLOYMENT HEALTH PLAN (DHP)
+  // ===========================================================================
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function _isDeploymentHealthPlanEnabled_(cfg) {
+    return !!(cfg && cfg.deploymentHealthPlan && cfg.deploymentHealthPlan.enabled === true);
+  }
+
+  /**
+   * True when a deployment row id is a synthetic ProductMode display/group id.
+   * @param {any} id
+   * @return {boolean}
+   * @private
+   */
+  function _isSyntheticDeploymentDisplayId_(id) {
+    var s = String(id || '');
+    return s.indexOf('__pf__') >= 0 || s.indexOf('__product__') >= 0;
+  }
+
+  /**
+   * Parses a DHP date field to a Date for comparison.
+   * @param {any} raw
+   * @return {Date|null}
+   * @private
+   */
+  function _parseDhpDate_(raw) {
+    if (!raw) return null;
+    if (raw instanceof Date && !isNaN(raw.getTime())) return raw;
+    var d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
+   * Formats a DHP date value for display/storage.
+   * @param {any} raw
+   * @return {string}
+   * @private
+   */
+  function _formatDhpDate_(raw) {
+    var d = _parseDhpDate_(raw);
+    if (!d) return String(raw || '').trim();
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+
+  /**
+   * Splits and normalizes Issue_Category__c values.
+   * @param {string} raw
+   * @param {string} delimiter
+   * @return {Array<string>}
+   * @private
+   */
+  function _splitDhpIssueCategories_(raw, delimiter) {
+    var delim = delimiter || ';';
+    return String(raw || '').split(delim).map(function (part) {
+      return String(part || '').trim();
+    }).filter(function (part) {
+      return !!part;
+    });
+  }
+
+  /**
+   * Reads raw Deployment Health Plan rows from SFDC_DHP.
+   * Returns [] when disabled, sheet missing, or empty. Avoids noisy logs when absent.
+   *
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @return {Array<Object>}
+   * @private
+   */
+  function readDeploymentHealthPlansRaw_(cfg) {
+    if (!_isDeploymentHealthPlanEnabled_(cfg)) return [];
+    if (_cache.dhpRows !== null) return _cache.dhpRows;
+
+    var dhpCfg = cfg.deploymentHealthPlan || {};
+    var sheetName = dhpCfg.sheetName || 'SFDC_DHP';
+    var delimiter = dhpCfg.issueCategoryDelimiter || ';';
+    var rows = [];
+
+    try {
+      var ss = getSpreadsheet_();
+      var sheet = ss.getSheetByName(sheetName);
+      if (!sheet || sheet.getLastRow() < 2 || sheet.getLastColumn() === 0) {
+        _cache.dhpRows = [];
+        return _cache.dhpRows;
+      }
+
+      var lastRow = sheet.getLastRow();
+      var lastCol = sheet.getLastColumn();
+      var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+      var headers = allValues[0].map(function (h) { return String(h || '').trim(); });
+      var lowerH = headers.map(function (h) { return h.toLowerCase(); });
+
+      function findExact_(headerName) {
+        var target = String(headerName || '').trim().toLowerCase();
+        for (var i = 0; i < lowerH.length; i++) {
+          if (lowerH[i] === target) return i;
+        }
+        return -1;
+      }
+
+      function detect_(keywords, fallback) {
+        for (var ki = 0; ki < keywords.length; ki++) {
+          var kw = keywords[ki].toLowerCase();
+          for (var hi = 0; hi < lowerH.length; hi++) {
+            if (lowerH[hi].indexOf(kw) !== -1) return hi;
+          }
+        }
+        if (fallback >= 0 && fallback < headers.length) return fallback;
+        return -1;
+      }
+
+      var colId = findExact_('Id');
+      if (colId < 0) colId = detect_(['id'], 0);
+      var colDeploymentId = findExact_('Deployment__r.Id');
+      if (colDeploymentId < 0) colDeploymentId = detect_(['deployment__r.id'], 1);
+      var colPlanOwner = findExact_('Plan_Owner__r.Name');
+      if (colPlanOwner < 0) colPlanOwner = detect_(['plan_owner__r.name', 'plan_owner'], 2);
+      var colLastUpdated = findExact_('DHP_Last_Updated__c');
+      if (colLastUpdated < 0) colLastUpdated = detect_(['dhp_last_updated'], 3);
+      var colPlanUpdate = findExact_('Deployment_Health_Plan_Update__c');
+      if (colPlanUpdate < 0) colPlanUpdate = detect_(['deployment_health_plan_update'], 4);
+      var colActionPlan = findExact_('Deployment_Health_Action_Plan__c');
+      if (colActionPlan < 0) colActionPlan = detect_(['deployment_health_action_plan'], 5);
+      var colIssueCategory = findExact_('Issue_Category__c');
+      if (colIssueCategory < 0) colIssueCategory = detect_(['issue_category'], 6);
+
+      for (var r = 1; r < allValues.length; r++) {
+        var row = allValues[r];
+        function cellStr_(col) { return col >= 0 ? String(row[col] || '').trim() : ''; }
+
+        var issueCategoryRaw = cellStr_(colIssueCategory);
+        rows.push({
+          dhpId: cellStr_(colId),
+          deploymentId: _canonicalId_(cellStr_(colDeploymentId)),
+          planOwner: cellStr_(colPlanOwner),
+          dhpLastUpdated: _formatDhpDate_(colLastUpdated >= 0 ? row[colLastUpdated] : ''),
+          healthPlanUpdate: cellStr_(colPlanUpdate),
+          healthPlanActionPlan: cellStr_(colActionPlan),
+          issueCategoryRaw: issueCategoryRaw,
+          issueCategories: _splitDhpIssueCategories_(issueCategoryRaw, delimiter)
+        });
+      }
+    } catch (e) {
+      Logger.log('CoreData.readDeploymentHealthPlansRaw_: ' + e);
+      rows = [];
+    }
+
+    _cache.dhpRows = rows;
+    return _cache.dhpRows;
+  }
+
+  /**
+   * Aggregates normalized DHP rows for one deployment.
+   * @param {Array<Object>} plans
+   * @return {Object}
+   * @private
+   */
+  function _aggregateDeploymentHealthPlansForDeployment_(plans) {
+    plans = plans || [];
+    if (!plans.length) {
+      return { hasHealthPlan: false };
+    }
+
+    var latest = null;
+    var latestDate = null;
+    var fallback = null;
+    var planOwners = [];
+    var issueCategoryRawValues = [];
+    var issueCategories = [];
+    var dhpIds = [];
+
+    plans.forEach(function (plan) {
+      if (plan.dhpId) dhpIds.push(plan.dhpId);
+      if (plan.planOwner && planOwners.indexOf(plan.planOwner) < 0) {
+        planOwners.push(plan.planOwner);
+      }
+      if (plan.issueCategoryRaw && issueCategoryRawValues.indexOf(plan.issueCategoryRaw) < 0) {
+        issueCategoryRawValues.push(plan.issueCategoryRaw);
+      }
+      (plan.issueCategories || []).forEach(function (cat) {
+        if (cat && issueCategories.indexOf(cat) < 0) issueCategories.push(cat);
+      });
+
+      if (!fallback && (plan.dhpLastUpdated || plan.healthPlanUpdate || plan.healthPlanActionPlan)) {
+        fallback = plan;
+      }
+
+      var parsed = _parseDhpDate_(plan.dhpLastUpdated);
+      if (parsed && (!latestDate || parsed.getTime() > latestDate.getTime())) {
+        latestDate = parsed;
+        latest = plan;
+      }
+    });
+
+    if (!latest) latest = fallback || plans[0];
+
+    var primaryIssueCategory = '';
+    if (issueCategories.length === 1) primaryIssueCategory = issueCategories[0];
+    else if (issueCategories.length > 1) primaryIssueCategory = 'Multiple';
+
+    return {
+      hasHealthPlan: true,
+      deploymentId: plans[0].deploymentId,
+      dhpCount: plans.length,
+      dhpIds: dhpIds,
+      planOwners: planOwners,
+      latestPlanOwner: latest ? (latest.planOwner || '') : '',
+      latestUpdated: latest ? (latest.dhpLastUpdated || '') : '',
+      latestHealthPlanUpdate: latest ? (latest.healthPlanUpdate || '') : '',
+      latestHealthPlanActionPlan: latest ? (latest.healthPlanActionPlan || '') : '',
+      issueCategoryRawValues: issueCategoryRawValues,
+      issueCategories: issueCategories,
+      primaryIssueCategory: primaryIssueCategory,
+      plans: plans.map(function (p) {
+        return {
+          dhpId: p.dhpId,
+          deploymentId: p.deploymentId,
+          planOwner: p.planOwner,
+          dhpLastUpdated: p.dhpLastUpdated,
+          healthPlanUpdate: p.healthPlanUpdate,
+          healthPlanActionPlan: p.healthPlanActionPlan,
+          issueCategoryRaw: p.issueCategoryRaw,
+          issueCategories: (p.issueCategories || []).slice()
+        };
+      })
+    };
+  }
+
+  /**
+   * Builds a deployment-id-keyed map of aggregated DHP data.
+   * Keys include both 18-char and 15-char canonical ids when available.
+   *
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @return {Object}
+   * @private
+   */
+  function buildDeploymentHealthPlanMap_(cfg) {
+    if (!_isDeploymentHealthPlanEnabled_(cfg)) return {};
+    if (_cache.dhpMap !== null) return _cache.dhpMap;
+
+    var rawRows = readDeploymentHealthPlansRaw_(cfg) || [];
+    var byDeployment = {};
+    rawRows.forEach(function (plan) {
+      var depId = _canonicalId_(plan.deploymentId);
+      if (!depId) return;
+      if (!byDeployment[depId]) byDeployment[depId] = [];
+      byDeployment[depId].push(plan);
+    });
+
+    var map = {};
+    Object.keys(byDeployment).forEach(function (depId) {
+      var agg = _aggregateDeploymentHealthPlansForDeployment_(byDeployment[depId]);
+      map[depId] = agg;
+      if (depId.length >= 15) map[depId.slice(0, 15)] = agg;
+    });
+
+    _cache.dhpMap = map;
+    return _cache.dhpMap;
+  }
+
+  /**
+   * Resolves the deployment id used to join DHP rows onto a deployment row.
+   * @param {Object} row
+   * @return {string}
+   * @private
+   */
+  function _resolveDhpJoinKeyForRow_(row) {
+    if (!row) return '';
+
+    var parentKey = _canonicalId_(row.parentDeploymentId || row.deploymentFk);
+    if (parentKey) return parentKey;
+
+    var depId = _canonicalId_(row.deploymentId);
+    if (depId && !_isSyntheticDeploymentDisplayId_(depId)) return depId;
+
+    if (row.productFunctions && row.productFunctions.length) {
+      for (var i = 0; i < row.productFunctions.length; i++) {
+        var pf = row.productFunctions[i];
+        var pfKey = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+        if (pfKey) return pfKey;
+      }
+    }
+    return '';
+  }
+
+  /**
+   * Looks up aggregated DHP data for a deployment join key.
+   * @param {Object} map
+   * @param {string} joinKey
+   * @return {Object|null}
+   * @private
+   */
+  function _lookupDeploymentHealthPlan_(map, joinKey) {
+    if (!map || !joinKey) return null;
+    var canon = _canonicalId_(joinKey);
+    if (!canon) return null;
+    return map[canon] || (canon.length >= 15 ? map[canon.slice(0, 15)] : null) || null;
+  }
+
+  /**
+   * Applies DHP enrichment fields to deployment rows (cloned per row).
+   * Does not alter health, overallStatus, or Executive Watch fields.
+   *
+   * @param {Array<Object>} rows
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function applyDeploymentHealthPlansToRows_(rows, cfg) {
+    rows = rows || [];
+    if (!_isDeploymentHealthPlanEnabled_(cfg)) {
+      return rows.map(function (row) {
+        return Object.assign({}, row, { hasHealthPlan: false });
+      });
+    }
+
+    var map = buildDeploymentHealthPlanMap_(cfg);
+    return rows.map(function (row) {
+      var enriched = Object.assign({}, row);
+      var joinKey = _resolveDhpJoinKeyForRow_(row);
+      var agg = _lookupDeploymentHealthPlan_(map, joinKey);
+      if (agg && agg.hasHealthPlan) {
+        enriched.hasHealthPlan = true;
+        enriched.deploymentHealthPlan = JSON.parse(JSON.stringify(agg));
+        enriched.healthPlanIssueCategory = agg.primaryIssueCategory || '';
+        enriched.healthPlanIssueCategories = (agg.issueCategories || []).slice();
+        enriched.healthPlanOwner = agg.latestPlanOwner || '';
+        enriched.healthPlanLastUpdated = agg.latestUpdated || '';
+      } else {
+        enriched.hasHealthPlan = false;
+      }
+      return enriched;
+    });
+  }
+
+  /**
+   * Diagnostic for Deployment Health Plan ingestion and row enrichment.
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function _debugDeploymentHealthPlan(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var dhpCfg = cfg.deploymentHealthPlan || {};
+    var sheetName = dhpCfg.sheetName || 'SFDC_DHP';
+    var enabled = _isDeploymentHealthPlanEnabled_(cfg);
+    var productMode = isProductModeActiveDeploymentsUnionEnabled_(cfg);
+    var displayGrain = _getProductModeDisplayGrain_(cfg);
+    var countGrain = _getProductModeCountGrain_(cfg);
+
+    var sheetExists = false;
+    try {
+      sheetExists = !!getSpreadsheet_().getSheetByName(sheetName);
+    } catch (e) { /* no-op */ }
+
+    var rawRows = [];
+    if (enabled) {
+      _cache.dhpRows = null;
+      _cache.dhpMap = null;
+      rawRows = readDeploymentHealthPlansRaw_(cfg) || [];
+    }
+
+    var withDeploymentId = 0;
+    var missingDeploymentId = 0;
+    var uniqueDeploymentIds = {};
+    var issueCategoryCounts = {};
+    var multiPerDeployment = 0;
+    var perDeploymentCounts = {};
+
+    rawRows.forEach(function (row) {
+      if (row.deploymentId) {
+        withDeploymentId++;
+        uniqueDeploymentIds[_canonicalId_(row.deploymentId)] = true;
+        perDeploymentCounts[row.deploymentId] = (perDeploymentCounts[row.deploymentId] || 0) + 1;
+      } else {
+        missingDeploymentId++;
+      }
+      (row.issueCategories || []).forEach(function (cat) {
+        issueCategoryCounts[cat] = (issueCategoryCounts[cat] || 0) + 1;
+      });
+    });
+
+    Object.keys(perDeploymentCounts).forEach(function (depId) {
+      if (perDeploymentCounts[depId] > 1) multiPerDeployment++;
+    });
+
+    var deploymentRows = [];
+    try {
+      deploymentRows = getAllDeployments(cfg, null, { product: 'all' }) || [];
+    } catch (e) {
+      Logger.log('CoreData._debugDeploymentHealthPlan: getAllDeployments failed: ' + e);
+    }
+
+    var enrichedCount = 0;
+    var withoutDhp = 0;
+    var bothEwAndDhp = 0;
+    var dhpOnly = 0;
+    var ewOnly = 0;
+    var matchedByParentKey = 0;
+    var sampleEnriched = [];
+
+    deploymentRows.forEach(function (row) {
+      if (row.hasHealthPlan) {
+        enrichedCount++;
+        if (sampleEnriched.length < 5) {
+          sampleEnriched.push({
+            accountName: row.accountName || '',
+            deploymentName: row.deploymentName || '',
+            deploymentId: row.deploymentId || '',
+            parentDeploymentId: row.parentDeploymentId || '',
+            deploymentFk: row.deploymentFk || '',
+            hasHealthPlan: true,
+            healthPlanIssueCategories: row.healthPlanIssueCategories || [],
+            healthPlanOwner: row.healthPlanOwner || '',
+            healthPlanLastUpdated: row.healthPlanLastUpdated || ''
+          });
+        }
+        var joinKey = _resolveDhpJoinKeyForRow_(row);
+        if (joinKey && (row.parentDeploymentId || row.deploymentFk)) matchedByParentKey++;
+      } else {
+        withoutDhp++;
+      }
+
+      if (row.isExecutiveWatch && row.hasHealthPlan) bothEwAndDhp++;
+      else if (row.hasHealthPlan) dhpOnly++;
+      else if (row.isExecutiveWatch) ewOnly++;
+    });
+
+    var groupedDisplayRows = productMode
+      ? deploymentRows.filter(function (r) {
+          return r.deploymentRowSource === 'productFunctionGrouped';
+        }).length
+      : 0;
+
+    var result = {
+      appName: cfg.appId || cfg.ui && cfg.ui.appTitle || '',
+      enabled: enabled,
+      sheetName: sheetName,
+      sheetExists: sheetExists,
+      dhpRowCount: rawRows.length,
+      dhpRowsWithDeploymentId: withDeploymentId,
+      dhpRowsMissingDeploymentId: missingDeploymentId,
+      distinctDeploymentIdsInDhp: Object.keys(uniqueDeploymentIds).length,
+      issueCategoryCounts: issueCategoryCounts,
+      deploymentsWithMultipleDhpRows: multiPerDeployment,
+      sampleNormalizedDhpRows: rawRows.slice(0, 5).map(function (r) {
+        return {
+          dhpId: r.dhpId,
+          deploymentId: r.deploymentId,
+          planOwner: r.planOwner,
+          dhpLastUpdated: r.dhpLastUpdated,
+          issueCategories: r.issueCategories || []
+        };
+      }),
+      joinMode: productMode ? 'ProductMode' : 'IndustryMode',
+      displayGrain: displayGrain,
+      countGrain: countGrain,
+      groupedDisplayRowCount: groupedDisplayRows,
+      deploymentRowsChecked: deploymentRows.length,
+      deploymentRowsEnrichedWithDhp: enrichedCount,
+      deploymentRowsWithoutDhp: withoutDhp,
+      dhpDeploymentsMatchedByParentKey: matchedByParentKey,
+      sampleEnrichedRows: sampleEnriched,
+      rowsWithExecutiveWatchAndHealthPlan: bothEwAndDhp,
+      rowsWithHealthPlanOnly: dhpOnly,
+      rowsWithExecutiveWatchOnly: ewOnly
+    };
+
+    Logger.log('=== _debugDeploymentHealthPlan(' + (cfg.appId || '?') + ') ===');
+    Logger.log(JSON.stringify(result, null, 2));
+    Logger.log('=== end _debugDeploymentHealthPlan ===');
+    return result;
   }
   
 /**
@@ -2850,8 +3830,7 @@ function _sfdcDataVersion_(cfg) {
       };
       var _wKey = (rowObj.accountId || '').slice(0, 15);
       var _wellness = _wellnessMap[_wKey] || null;
-      rowObj.isExecutiveWatch = !!_wellness;
-      rowObj.wellnessData     = _wellness;
+      _attachWellnessFieldsToRow_(rowObj, _wellness);
       rows.push(rowObj);
     }
 
@@ -3023,6 +4002,7 @@ function _sfdcDataVersion_(cfg) {
     // Base effective view — includes SFDC-vs-legacy fallback, Active-only filter,
     // meta application, overrides application, and D1 ddContacts/ddFromContacts.
     var allEffective = getAllEffectiveDeployments(cfg, productOpts);
+    allEffective = applyDeploymentHealthPlansToRows_(allEffective, cfg);
 
     // Phase 3a: enrich with isPhased, upcomingDates, nextGoLiveDate.
     // Degrade gracefully when the enrichment sheet is absent.
@@ -8467,6 +9447,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     // D1 diagnostic
     _debugDdFromContacts_:       _debugDdFromContacts_,
+    _debugDeploymentHealthPlan:  _debugDeploymentHealthPlan,
+    _debugWellnessData:          _debugWellnessData,
 
     // S1: Student data layer
     filterDeploymentsByStudent_: filterDeploymentsByStudent_,

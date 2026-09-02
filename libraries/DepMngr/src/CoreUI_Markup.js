@@ -138,6 +138,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 
   // Executive Watch modal — informational, available to all roles.
   parts.push(_CoreUI_Markup_buildExecWatchModal_());
+  parts.push(_CoreUI_Markup_buildDeploymentHealthPlanModal_());
 
   // Modals — only included for power users (read-only never opens them).
   if (!isReadOnly) {
@@ -1153,23 +1154,39 @@ function _CoreUI_Markup_buildOverridesTab_(ui) {
 
 function _CoreUI_Markup_buildExecWatchModal_() {
   return [
-    '<div id="exec-watch-modal" class="modal-overlay">',
-    '  <div class="modal-card" style="max-width:480px;">',
-    '    <div class="modal-header">',
-    '      <span class="modal-title">&#x26A0; Executive Watch</span>',
-    '      <button class="modal-close" onclick="closeExecWatchModal()">&#x2715;</button>',
+    '<div id="exec-watch-modal" class="modal-overlay ew-modal risk-modal risk-modal--executive-watch"',
+    '     role="presentation" onclick="onExecWatchModalBackdropClick_(event)">',
+    '  <div id="exec-watch-modal-panel" class="modal-card ew-modal-panel risk-modal-panel"',
+    '       role="dialog" aria-modal="true" aria-labelledby="exec-watch-modal-title"',
+    '       onclick="event.stopPropagation()">',
+    '    <div class="modal-header ew-modal-header risk-modal-header">',
+    '      <span id="exec-watch-modal-title" class="modal-title">&#x26A0; Executive Watch</span>',
+    '      <button type="button" class="modal-close" aria-label="Close Executive Watch modal"',
+    '              onclick="closeExecWatchModal()">&#x2715;</button>',
     '    </div>',
-    '    <div class="modal-body">',
-    '      <div class="modal-field-group">',
-    '        <label class="modal-label">CX Leader</label>',
-    '        <div id="exec-watch-cx-leader" class="modal-value"></div>',
-    '      </div>',
-    '      <div class="modal-field-group" style="margin-top:var(--space-3);">',
-    '        <label class="modal-label">Executive Summary</label>',
-    '        <div id="exec-watch-summary" class="modal-value"',
-    '             style="white-space:pre-wrap;"></div>',
-    '      </div>',
+    '    <div id="exec-watch-modal-body" class="modal-body ew-modal-body risk-modal-body"></div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// MODAL: DEPLOYMENT HEALTH PLAN (DHP Phase 1)
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildDeploymentHealthPlanModal_() {
+  return [
+    '<div id="dhp-modal" class="modal-overlay dhp-modal risk-modal risk-modal--dhp"',
+    '     role="presentation" onclick="onDhpModalBackdropClick_(event)">',
+    '  <div id="dhp-modal-panel" class="modal-card dhp-modal-panel risk-modal-panel"',
+    '       role="dialog" aria-modal="true" aria-labelledby="dhp-modal-title"',
+    '       onclick="event.stopPropagation()">',
+    '    <div class="modal-header dhp-modal-header risk-modal-header">',
+    '      <span id="dhp-modal-title" class="modal-title">Deployment Health Plan</span>',
+    '      <button type="button" class="modal-close" aria-label="Close Deployment Health Plan modal"',
+    '              onclick="closeDeploymentHealthPlanModal()">&#x2715;</button>',
     '    </div>',
+    '    <div id="dhp-modal-body" class="modal-body dhp-modal-body risk-modal-body"></div>',
     '  </div>',
     '</div>'
   ].join('\n');

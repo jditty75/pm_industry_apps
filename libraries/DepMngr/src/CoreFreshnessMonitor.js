@@ -25,6 +25,53 @@ var CoreFreshnessMonitor = (function () {
   // ---------------------------------------------------------------------------
 
   /**
+   * Resolves the primary freshness sheet for UI badge display.
+   * ProductMode apps default to SFDC_DeploymentProductFunctions.
+   *
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function _resolvePrimarySheet_(cfg) {
+    if (cfg.freshness && cfg.freshness.primarySheet) {
+      return cfg.freshness.primarySheet;
+    }
+    if (cfg.freshness && cfg.freshness.watchSheet) {
+      return cfg.freshness.watchSheet;
+    }
+    if (cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled) {
+      return (cfg.sheets && cfg.sheets.sfdcDeploymentProductFunctions) ||
+        'SFDC_DeploymentProductFunctions';
+    }
+    return 'SFDC_Deployments';
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function _isProductModeApp_(cfg) {
+    return !!(cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled);
+  }
+
+  /**
+   * Finds a sheet freshness entry by name.
+   *
+   * @param {Array<Object>} sheets
+   * @param {string} sheetName
+   * @return {Object|null}
+   * @private
+   */
+  function _findSheetFreshness_(sheets, sheetName) {
+    if (!sheets || !sheetName) return null;
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].sheetName === sheetName) return sheets[i];
+    }
+    return null;
+  }
+
+  /**
    * UI badge entry point — returns a simple freshness object for the header.
    *
    * @param {AppConfig} config
@@ -616,20 +663,31 @@ var CoreFreshnessMonitor = (function () {
    */
   function mapSnapshotToUiBadge_(snapshot, config) {
     var cfg = CoreConfig.withDefaults(config);
-    var watchSheet = cfg.freshness.watchSheet || 'SFDC_Deployments';
+    var primarySheet = _resolvePrimarySheet_(cfg);
+    var watchSheet = (cfg.freshness && cfg.freshness.watchSheet) || 'SFDC_Deployments';
     var target = null;
+    var sourceSheet = '';
 
     if (snapshot.sheets && snapshot.sheets.length) {
-      for (var i = 0; i < snapshot.sheets.length; i++) {
-        if (snapshot.sheets[i].sheetName === watchSheet) {
-          target = snapshot.sheets[i];
+      var lookupOrder = [primarySheet];
+      if (watchSheet && watchSheet !== primarySheet) lookupOrder.push(watchSheet);
+
+      for (var li = 0; li < lookupOrder.length; li++) {
+        var candidate = _findSheetFreshness_(snapshot.sheets, lookupOrder[li]);
+        if (candidate && candidate.lastRefresh) {
+          target = candidate;
+          sourceSheet = candidate.sheetName;
           break;
         }
       }
-      if (!target) {
+
+      // IndustryMode only: legacy fallback to the stalest expected sheet.
+      if (!target && !_isProductModeApp_(cfg)) {
         snapshot.sheets.forEach(function (s) {
-          if (!target || (s.ageHours !== null && (target.ageHours === null || s.ageHours > target.ageHours))) {
+          if (!target || (s.ageHours !== null &&
+              (target.ageHours === null || s.ageHours > target.ageHours))) {
             target = s;
+            sourceSheet = s.sheetName;
           }
         });
       }
@@ -649,6 +707,7 @@ var CoreFreshnessMonitor = (function () {
       status: uiStatus,
       ageHours: target ? target.ageHours : snapshot.maxAgeHours,
       lastRefresh: target ? (target.lastRefresh || '') : (snapshot.latestRefresh || ''),
+      sourceSheet: sourceSheet,
       details: snapshot.sheets || []
     };
   }
@@ -774,12 +833,54 @@ var CoreFreshnessMonitor = (function () {
       .replace(/"/g, '&quot;');
   }
 
+  /**
+   * Diagnostic: freshness badge inputs and Auto Refresh Execution Log state.
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function _debugDataFreshness(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var snapshot = getFreshnessSnapshot(config);
+    var uiBadge = mapSnapshotToUiBadge_(snapshot, config);
+    var primarySheet = _resolvePrimarySheet_(cfg);
+    var watchSheet = (cfg.freshness && cfg.freshness.watchSheet) || 'SFDC_Deployments';
+    var logLatestBySheet = {};
+
+    (snapshot.sheets || []).forEach(function (sheet) {
+      logLatestBySheet[sheet.sheetName] = {
+        lastRefresh: sheet.lastRefresh || '',
+        ageHours: sheet.ageHours,
+        status: sheet.status,
+        message: sheet.message || ''
+      };
+    });
+
+    return {
+      appId: cfg.appId || 'UNKNOWN',
+      productModeUnionEnabled: _isProductModeApp_(cfg),
+      displayedFreshnessTimestamp: uiBadge.lastRefresh || '',
+      displayedFreshnessSheet: uiBadge.sourceSheet || '',
+      displayedStatus: uiBadge.status,
+      displayedAgeHours: uiBadge.ageHours,
+      autoRefreshLogLatestBySheet: logLatestBySheet,
+      expectedSheets: snapshot.expectedSheets || [],
+      primarySheet: primarySheet,
+      watchSheet: watchSheet,
+      fromCache: false,
+      cacheKey: null,
+      snapshotStatus: snapshot.status || 'Unknown',
+      logSheet: snapshot.logSheet || (cfg.freshness && cfg.freshness.logSheet) || DEFAULT_LOG_SHEET
+    };
+  }
+
   return {
     getFreshnessForUI: getFreshnessForUI,
     getFreshnessSnapshot: getFreshnessSnapshot,
     getFreshnessSnapshotForSpreadsheet: getFreshnessSnapshotForSpreadsheet,
     getRollupSnapshot: getRollupSnapshot,
     sendDailyRollup: sendDailyRollup,
-    installDailyTrigger: installDailyTrigger
+    installDailyTrigger: installDailyTrigger,
+    _debugDataFreshness: _debugDataFreshness
   };
 })();

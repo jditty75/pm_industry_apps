@@ -793,6 +793,14 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     if (result.dataIntegrity.showDisclaimer) {
       html += _renderDisclaimerParagraph_(cfg.report.disclaimers.healthBreakdown);
     }
+    var ad = cfg.activeDeployments || {};
+    if (ad.productModeUnionEnabled && ad.productModeCountGrain &&
+        ad.productModeDisplayGrain &&
+        ad.productModeCountGrain !== ad.productModeDisplayGrain) {
+      html += _renderDisclaimerParagraph_(
+        'Health totals count unique product functions. The Deployments tab may group ' +
+        'related functions into fewer display rows.');
+    }
     return html;
   }
 
@@ -1155,10 +1163,9 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     }
 
     // Build effectiveByDeploymentId for parentMtp lookup.
-    var effectiveByDeploymentId = {};
-    CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
-      if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
-    });
+    var effectiveByDeploymentId = _buildReportEffectiveLookup_(
+      CoreData.getAllEffectiveDeployments(cfg)
+    );
 
     // Re-sort ascending by earliest in-window date; ties broken by account name.
     function _earliestRecentDate_(r) {
@@ -1231,7 +1238,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       }
 
       var recentDates = row.recentDates || [];
-      var effective   = effectiveByDeploymentId[row.deploymentId];
+      var effective   = _lookupEffectiveForGoLiveRow_(effectiveByDeploymentId, row);
       var parentMtp   = (effective && effective.mtpDate) || '';
 
       // Date cell per C13 §3.5.
@@ -1260,7 +1267,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       return '<tr>' +
         tdRaw_(dateCellHtml) +
         td_(row.accountName) +
-        td_(row.deploymentName) +
+        td_(_resolveGoLiveDeploymentColumn_(row)) +
         td_(row.partner) +
         '</tr>';
     }).join('');
@@ -1292,10 +1299,9 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   // Build effectiveByDeploymentId for parentMtp lookup.
-  var effectiveByDeploymentId = {};
-  CoreData.getAllEffectiveDeployments(cfg).forEach(function (r) {
-    if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
-  });
+  var effectiveByDeploymentId = _buildReportEffectiveLookup_(
+    CoreData.getAllEffectiveDeployments(cfg)
+  );
 
   // Sort ascending by earliest in-window date.
   rows = rows.slice().sort(function (a, b) {
@@ -1360,7 +1366,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     }
 
     var upcomingDates = row.upcomingDates || [];
-    var effective     = effectiveByDeploymentId[row.deploymentId];
+    var effective     = _lookupEffectiveForGoLiveRow_(effectiveByDeploymentId, row);
     var parentMtp     = (effective && effective.mtpDate) || '';
 
     var dateCellHtml;
@@ -1385,7 +1391,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     return '<tr>' +
       tdRaw_(dateCellHtml) +
       td_(row.accountName) +
-      td_(row.deploymentName) +
+      td_(_resolveGoLiveDeploymentColumn_(row)) +
       td_(row.partner) +
       '</tr>';
   }).join('');
@@ -1735,6 +1741,85 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   };
 
   /**
+   * Builds a deployment lookup for report go-live sections.
+   * Indexes PF synthetic ids and parent deployment ids.
+   * @param {Array<Object>} rows
+   * @return {Object}
+   * @private
+   */
+  function _buildReportEffectiveLookup_(rows) {
+    var lookup = {};
+    (rows || []).forEach(function (r) {
+      if (!r) return;
+      if (r.deploymentId) lookup[r.deploymentId] = r;
+      var parentId = CoreData._parentDeploymentLookupId_(r);
+      if (parentId) {
+        if (!lookup[parentId]) lookup[parentId] = r;
+        if (parentId.length >= 15) {
+          var p15 = parentId.slice(0, 15);
+          if (!lookup[p15]) lookup[p15] = r;
+        }
+      }
+    });
+    return lookup;
+  }
+
+  /**
+   * Resolves an effective deployment row for a go-live row (PF or parent id).
+   * @param {Object} lookup
+   * @param {Object} row
+   * @return {Object|undefined}
+   * @private
+   */
+  function _lookupEffectiveForGoLiveRow_(lookup, row) {
+    if (!lookup || !row) return undefined;
+    if (row.deploymentId && lookup[row.deploymentId]) return lookup[row.deploymentId];
+    var parentId = CoreData._parentDeploymentLookupId_(row);
+    if (parentId && lookup[parentId]) return lookup[parentId];
+    if (parentId && parentId.length >= 15 && lookup[parentId.slice(0, 15)]) {
+      return lookup[parentId.slice(0, 15)];
+    }
+    return undefined;
+  }
+
+  /**
+   * Deployment column for go-live tables (includes ProductMode PF product/function context).
+   * @param {Object} row
+   * @return {string}
+   * @private
+   */
+  function _resolveGoLiveDeploymentColumn_(row) {
+    if (!row) return '';
+    var primary = '';
+    if (row.displayDeploymentName) primary = row.displayDeploymentName;
+    else if (row.displayLabel) primary = row.displayLabel;
+    else if (typeof CoreData.resolveGoLiveDisplayDeploymentName_ === 'function') {
+      primary = CoreData.resolveGoLiveDisplayDeploymentName_(row);
+    } else {
+      var pa = String(row.productArea || '').trim();
+      var fa = String(row.funcArea || '').trim();
+      if (pa && fa) {
+        var base = String(row.deploymentName || '').trim();
+        var suffix = pa + ' / ' + fa;
+        if (!base || base.indexOf(suffix) === -1) primary = (base ? base + ' \u2014 ' : '') + suffix;
+        else primary = base;
+      } else {
+        primary = row.deploymentName || pa || fa || '';
+      }
+    }
+    var summary = '';
+    if (typeof CoreData.resolveGoLiveProductFunctionSummary_ === 'function') {
+      summary = CoreData.resolveGoLiveProductFunctionSummary_(row);
+    } else if (row.displayProductFunction) {
+      summary = row.displayProductFunction;
+    }
+    if (summary && primary.indexOf(summary) < 0 && (row.productFunctionCount || 0) > 1) {
+      return primary + ' \u2014 ' + summary;
+    }
+    return primary;
+  }
+
+  /**
    * V2 monthly report product scope filter (delegates to CoreData).
    * @param {Array<Object>} rows
    * @param {AppConfig} config
@@ -1939,6 +2024,9 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     if (dates.length === 1) {
       return CoreUtils.escapeHtml(_fmtReportDateV2_(dates[0].date));
     }
+    if (row.goLiveDate) {
+      return CoreUtils.escapeHtml(_fmtReportDateV2_(row.goLiveDate));
+    }
     if (dateField === 'recentDates') {
       if (row.lastGoLiveDate) return CoreUtils.escapeHtml(_fmtReportDateV2_(row.lastGoLiveDate));
     } else {
@@ -2049,7 +2137,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
         '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
         CoreUtils.escapeHtml(row.accountName || '') + '</td>' +
         '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
-        CoreUtils.escapeHtml(row.deploymentName || '') + '</td>' +
+        CoreUtils.escapeHtml(_resolveGoLiveDeploymentColumn_(row)) + '</td>' +
         '<td style="' + TD_WRAP + ' background-color:' + bg + ';">' +
         CoreUtils.escapeHtml(row.partner || '') + '</td>' +
         '</tr>'
@@ -2084,12 +2172,10 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
     rows = CoreData.filterRowsExcludedFromReport_(rows);
 
-    var effectiveByDeploymentId = {};
-    _filterRowsByReportProductScopeV2_(
+    var effectiveRows = _filterRowsByReportProductScopeV2_(
       CoreData.getAllEffectiveDeployments(cfg), cfg
-    ).forEach(function (r) {
-      if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
-    });
+    );
+    var effectiveByDeploymentId = _buildReportEffectiveLookup_(effectiveRows);
 
     function earliestDate_(r) {
       if (!r.recentDates || !r.recentDates.length) return r.lastGoLiveDate || '';
@@ -2123,12 +2209,10 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
     rows = CoreData.filterRowsExcludedFromReport_(rows);
 
-    var effectiveByDeploymentId = {};
-    _filterRowsByReportProductScopeV2_(
+    var effectiveRows = _filterRowsByReportProductScopeV2_(
       CoreData.getAllEffectiveDeployments(cfg), cfg
-    ).forEach(function (r) {
-      if (r.deploymentId) effectiveByDeploymentId[r.deploymentId] = r;
-    });
+    );
+    var effectiveByDeploymentId = _buildReportEffectiveLookup_(effectiveRows);
 
     rows = rows.slice().sort(function (a, b) {
       var ad = a.nextGoLiveDate || a.mtpDate || '';
@@ -2335,6 +2419,15 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
 
     if (result.dataIntegrity.showDisclaimer) {
       innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.healthBreakdown);
+    }
+
+    var ad = cfg.activeDeployments || {};
+    if (ad.productModeUnionEnabled && ad.productModeCountGrain &&
+        ad.productModeDisplayGrain &&
+        ad.productModeCountGrain !== ad.productModeDisplayGrain) {
+      innerHtml += _renderDisclaimerParagraph_(
+        'Health totals count unique product functions. The Deployments tab may group ' +
+        'related functions into fewer display rows.');
     }
 
     return wrapSectionV2_('Deployment Health Breakdown', innerHtml);
@@ -2586,8 +2679,87 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
    * @return {string}
    */
   function buildReportV2WithAnalytics(config) {
-    CoreAnalytics.update(config);
-    return buildReportV2(config);
+    var cfg = CoreConfig.withDefaults(config);
+    var totalStart = Date.now();
+    var phaseStart = totalStart;
+    CoreData.beginReportBuildContext_(cfg);
+    try {
+      CoreAnalytics.update(config);
+      CoreData._markReportBuildPhase_('analytics.update', phaseStart, totalStart);
+      phaseStart = Date.now();
+
+      var html = buildReportV2(config);
+      CoreData._markReportBuildPhase_('report.sections', phaseStart, totalStart);
+      CoreData._markReportBuildPhase_('total', totalStart, totalStart);
+      return html;
+    } finally {
+      CoreData.endReportBuildContext_();
+    }
+  }
+
+  /**
+   * Diagnostic: runs the Gmail report preview build with phase timings.
+   * @param {AppConfig} config
+   * @return {{ totalMs: number, phases: Array<Object> }}
+   */
+  function debugGmailReportPreviewPerformance(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var totalStart = Date.now();
+    var phases = [];
+    CoreData.beginReportBuildContext_(cfg);
+    try {
+      var phaseStart = totalStart;
+      CoreAnalytics.update(cfg);
+      phases.push({ phase: 'analytics.update', ms: Date.now() - phaseStart,
+        totalMs: Date.now() - totalStart });
+      phaseStart = Date.now();
+
+      buildReportV2(cfg);
+      phases.push({ phase: 'report.sections', ms: Date.now() - phaseStart,
+        totalMs: Date.now() - totalStart });
+    } finally {
+      CoreData.endReportBuildContext_();
+    }
+    var totalMs = Date.now() - totalStart;
+    var goLiveSummary = null;
+    var usesPfGoLive = !!(cfg.activeDeployments &&
+      cfg.activeDeployments.productModeUnionEnabled &&
+      cfg.activeDeployments.productModeGoLiveSource === 'productFunction');
+    if (usesPfGoLive) {
+      try {
+        var recent = CoreData.getRecentGoLives(cfg, null) || [];
+        var upcoming = CoreData.getUpcomingGoLives(cfg, null) || [];
+        var goLiveAnalysis = null;
+        try {
+          var dbg = CoreData._debugProductModeGoLiveEvents(cfg, null);
+          goLiveAnalysis = dbg && dbg.analysis ? dbg.analysis : null;
+        } catch (analysisErr) {
+          Logger.log('CoreReport.debugGmailReportPreviewPerformance: go-live analysis failed: ' +
+                     analysisErr);
+        }
+        goLiveSummary = {
+          productModeGoLiveHelperUsed: true,
+          recentGoLiveEventCount: recent.length,
+          upcomingGoLiveEventCount: upcoming.length,
+          rawRecentPfRowCount: goLiveAnalysis ? goLiveAnalysis.recentGoLiveRawPfRowCount : null,
+          groupedRecentEventCount: goLiveAnalysis ? goLiveAnalysis.recentGoLiveGroupedEventCount : null,
+          rawUpcomingPfRowCount: goLiveAnalysis ? goLiveAnalysis.upcomingGoLiveRawPfRowCount : null,
+          groupedUpcomingEventCount: goLiveAnalysis ? goLiveAnalysis.upcomingGoLiveGroupedEventCount : null
+        };
+      } catch (e) {
+        Logger.log('CoreReport.debugGmailReportPreviewPerformance: go-live counts failed: ' + e);
+      }
+    }
+    phases.push({ phase: 'total', ms: totalMs, totalMs: totalMs });
+    Logger.log('CoreReport.debugGmailReportPreviewPerformance(' + (cfg.appId || '?') +
+               '): total=' + totalMs + 'ms');
+    if (goLiveSummary) {
+      Logger.log('  goLiveSummary=' + JSON.stringify(goLiveSummary));
+    }
+    phases.forEach(function (p) {
+      Logger.log('  ' + p.phase + ': +' + p.ms + 'ms (total ' + p.totalMs + 'ms)');
+    });
+    return { totalMs: totalMs, phases: phases, goLiveSummary: goLiveSummary };
   }
 
   // --- EXPORTS ---------------------------------------------------------------
@@ -2599,6 +2771,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     exportInlineAndOutlookToDrive: exportInlineAndOutlookToDrive,
     exportReportV2ToDrive: exportReportV2ToDrive,
     buildReportV2: buildReportV2,
-    buildReportV2WithAnalytics: buildReportV2WithAnalytics
+    buildReportV2WithAnalytics: buildReportV2WithAnalytics,
+    debugGmailReportPreviewPerformance: debugGmailReportPreviewPerformance
   };
 })();

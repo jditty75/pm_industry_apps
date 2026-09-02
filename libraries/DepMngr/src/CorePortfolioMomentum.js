@@ -442,10 +442,15 @@ var CorePortfolioMomentum = (function () {
 
   /**
    * Reads SFDC_Deployments into lookup map and ordered row list.
+   * ProductMode apps (EVI/AI) build lookup from PF relationship fields instead.
    * @param {AppConfig} cfg
    * @return {{ lookup: Object, deploymentRows: Array<Object> }}
    */
   function _buildDeploymentLookup_(cfg) {
+    if (_usesPfMomentumLookup_(cfg)) {
+      return _buildDeploymentLookupFromPf_(cfg);
+    }
+
     var sheetName = (cfg.sheets && cfg.sheets.deployments) || 'SFDC_Deployments';
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName(sheetName);
@@ -532,6 +537,64 @@ var CorePortfolioMomentum = (function () {
       ', colStatus=' + colStatus
     );
 
+    return { lookup: lookup, byId: lookup, deploymentRows: deploymentRows };
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   */
+  function _usesPfMomentumLookup_(cfg) {
+    return !!(cfg && cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled &&
+      cfg.momentum && cfg.momentum.dataSource === 'Deployment_Product_Function__c');
+  }
+
+  /**
+   * Builds deployment lookup from normalized PF rows (one entry per parent deployment).
+   * @param {AppConfig} cfg
+   * @return {{ lookup: Object, deploymentRows: Array<Object> }}
+   */
+  function _buildDeploymentLookupFromPf_(cfg) {
+    var lookup = {};
+    var deploymentRows = [];
+    var pfRows = [];
+    try {
+      pfRows = CoreData.readProductModePfRowsRaw_(cfg) || [];
+    } catch (e) {
+      Logger.log('CorePortfolioMomentum._buildDeploymentLookupFromPf_: read failed: ' + e);
+      return { lookup: lookup, byId: lookup, deploymentRows: deploymentRows };
+    }
+
+    var byParent = {};
+    pfRows.forEach(function (pf) {
+      if (!pf || !pf.deploymentFk) return;
+      var id = String(pf.parentDeploymentId || pf.deploymentFk).trim();
+      if (!id) return;
+      if (!byParent[id]) {
+        byParent[id] = {
+          deploymentId: id,
+          deploymentName: pf.deploymentName || '',
+          accountName: pf.accountName || '',
+          industry: pf.industry || '',
+          status: pf.overallStatus || '',
+          deploymentStartDate: pf.deploymentStartDate || '',
+          currentMtpDate: pf.mtpDate || '',
+          firstMtpDateActual: pf.firstMtpDateActual || pf.actualGoLive || '',
+          completionDate: pf.completionDate || ''
+        };
+      }
+    });
+
+    Object.keys(byParent).forEach(function (id) {
+      var entry = byParent[id];
+      deploymentRows.push(entry);
+      _storeDeploymentLookupEntry_(lookup, id, entry);
+    });
+
+    Logger.log(
+      'CorePortfolioMomentum._buildDeploymentLookupFromPf_: rows=' + deploymentRows.length +
+      ', byIdKeys=' + Object.keys(lookup).length
+    );
     return { lookup: lookup, byId: lookup, deploymentRows: deploymentRows };
   }
 

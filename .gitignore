@@ -26,6 +26,10 @@ Thumbs.db
 # Clasp credentials (NEVER commit)
 .clasprc.json
 ~/.clasprc.json
+
+# Local Apps Script clasp project bindings
+.clasp.json
+**/.clasp.json
 Save the file.
 
 Step 4: Create .gitattributes

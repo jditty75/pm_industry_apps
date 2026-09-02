@@ -295,6 +295,41 @@ var CoreConfig = (function () {
       cfg.sheets.csatInFlight = 'CSAT_InFlight';
 
     // -------------------------------------------------------------------------
+    // Active deployments (ProductMode union — EVI/AI opt-in)
+    // -------------------------------------------------------------------------
+    cfg.activeDeployments = cfg.activeDeployments || {};
+    if (cfg.activeDeployments.productModeUnionEnabled === undefined) {
+      cfg.activeDeployments.productModeUnionEnabled = false;
+    }
+    if (!cfg.activeDeployments.productModeSourceMode) {
+      cfg.activeDeployments.productModeSourceMode = 'parent';
+    }
+    if (!Array.isArray(cfg.activeDeployments.productModeUnionStatuses)) {
+      cfg.activeDeployments.productModeUnionStatuses = ['Active'];
+    }
+    if (cfg.activeDeployments.allowPfRowsWithoutParentStatus === undefined) {
+      cfg.activeDeployments.allowPfRowsWithoutParentStatus = false;
+    }
+    if (!Array.isArray(cfg.activeDeployments.productModeExcludePhases)) {
+      cfg.activeDeployments.productModeExcludePhases = [];
+    }
+    if (cfg.activeDeployments.productModeExcludeCustomer360 === undefined) {
+      cfg.activeDeployments.productModeExcludeCustomer360 = false;
+    }
+    if (!cfg.activeDeployments.productModeDataSource) {
+      cfg.activeDeployments.productModeDataSource =
+        cfg.activeDeployments.productModeUnionEnabled ? 'productFunction' : 'parent';
+    }
+    if (!cfg.activeDeployments.productModeHistoricalSource) {
+      cfg.activeDeployments.productModeHistoricalSource =
+        cfg.activeDeployments.productModeUnionEnabled ? 'productFunction' : 'parent';
+    }
+    if (!cfg.activeDeployments.productModeGoLiveSource) {
+      cfg.activeDeployments.productModeGoLiveSource =
+        cfg.activeDeployments.productModeUnionEnabled ? 'productFunction' : 'parent';
+    }
+
+    // -------------------------------------------------------------------------
     // Salesforce (Phase 3a, extended Phase 3i)
     // -------------------------------------------------------------------------
     cfg.salesforce = cfg.salesforce || {};

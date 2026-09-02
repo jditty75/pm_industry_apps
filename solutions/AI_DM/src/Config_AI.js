@@ -24,6 +24,18 @@
 var APP_CONFIG = {
   appId: 'AI',
 
+  activeDeployments: {
+    productModeUnionEnabled: true,
+    productModeSourceMode: 'pfOnly',
+    productModeDataSource: 'productFunction',
+    productModeHistoricalSource: 'productFunction',
+    productModeGoLiveSource: 'productFunction',
+    productModeUnionStatuses: ['Active'],
+    allowPfRowsWithoutParentStatus: false,
+    productModeExcludePhases: [],
+    productModeExcludeCustomer360: false
+  },
+
   sheets: {
     activeDeployments:     'ActiveDeployments',
     goLives:               'Go Lives',
@@ -261,9 +273,10 @@ var APP_CONFIG = {
     warningHours: 12,
     criticalHours: 24,
     logSheet: 'Auto Refresh Execution Log',
+    watchSheet: 'SFDC_DeploymentProductFunctions',
     expectedSheets: [
-      'SFDC_Deployments',
       'SFDC_DeploymentProductFunctions',
+      'SFDC_Deployments',
       'SFDC_DeploymentContacts',
       'SFDC_DeploymentHistory'
     ],

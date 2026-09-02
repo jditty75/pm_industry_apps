@@ -219,6 +219,14 @@ function getGmailReportPreview() {
 }
 
 /**
+ * Diagnostic: report preview build with phase timings (no email).
+ * @return {{ totalMs: number, phases: Array<Object> }}
+ */
+function _debugGmailReportPreviewPerformance() {
+  return CoreLib.CoreReport.debugGmailReportPreviewPerformance(APP_CONFIG);
+}
+
+/**
  * N8: production native Gmail send for the V2 monthly report.
  * @return {{status: string, error?: string}}
  */
@@ -819,7 +827,12 @@ function _debugDdFromContacts_SLG() {
 
 function _debugSfdcColumns() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetNames = ['SFDC_Deployments', 'SFDC_Wellness'];
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  var sheetNames = [
+    cfg.sheets.deployments || 'SFDC_Deployments',
+    cfg.sheets.sfdcDeploymentProductFunctions || 'SFDC_DeploymentProductFunctions',
+    'SFDC_Wellness'
+  ];
 
   sheetNames.forEach(function(sheetName) {
     var sheet = ss.getSheetByName(sheetName);
@@ -833,6 +846,39 @@ function _debugSfdcColumns() {
       Logger.log('Col ' + (i + 1) + ' (index ' + i + '): ' + h);
     });
   });
+}
+
+/**
+ * ProductMode active deployment union diagnostic. Run from the Apps Script editor.
+ * Compares workbook parent/PF counts to getAllDeployments output.
+ */
+function _debugProductModeActiveDeploymentsUnion() {
+  var summary = CoreLib.CoreData._debugProductModeActiveDeploymentsUnion(APP_CONFIG);
+  Logger.log('\n=== getAllDeployments cross-check ===');
+  var deployments = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
+  var bySource = { parent: 0, productFunction: 0, other: 0 };
+  deployments.forEach(function (r) {
+    var src = r.deploymentRowSource || 'other';
+    if (bySource[src] !== undefined) bySource[src]++;
+    else bySource.other++;
+  });
+  Logger.log('getAllDeployments count=' + deployments.length);
+  Logger.log('getAllDeployments by deploymentRowSource=' + JSON.stringify(bySource));
+  if (summary.countByParentMatchStatus) {
+    Logger.log('getAllEffectiveDeployments by parentMatchStatus=' +
+      JSON.stringify(summary.countByParentMatchStatus));
+  }
+  summary.getAllDeploymentsCount = deployments.length;
+  summary.getAllDeploymentsBySource = bySource;
+  return summary;
+}
+
+/**
+ * Comprehensive ProductMode source diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugProductModeSources() {
+  return CoreLib.CoreData._debugProductModeSources(APP_CONFIG, 10);
 }
 
 // ===========================================================================

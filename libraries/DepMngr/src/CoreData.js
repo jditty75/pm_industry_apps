@@ -54,11 +54,16 @@ var CoreData = (function () {
   // ===========================================================================
   var _cache = {
     sfdcRows: null,           // result of readSfdcDeploymentsRaw_
+    pfRows: null,             // result of readSfdcProductFunctionsRaw_
+    effectiveByProduct: {},   // getAllEffectiveDeployments cache keyed by product chip
+    historicalPfByProduct: {}, // getProductModeHistoricalPfRows_ cache
     metaMap: null,            // result of getDeploymentsMetaMap_
     overridesMap: null,       // result of getDeploymentOverridesMap_
     goLivesOverridesMap: null, // result of getGoLivesOverridesMap_
     mdsPglBatchView: {},       // { '<windowMonths>': payload } — tier 1 for getMdsPglBatchView
-    overviewSnapshot: null     // tier 1 for getOverviewSnapshot
+    overviewSnapshot: null,     // tier 1 for getOverviewSnapshot
+    pfReaderMeta: null,         // last readSfdcProductFunctionsRaw_ header diagnostics
+    reportBuildCtx: null        // active monthly-report build context (per execution)
   };
 
   /**
@@ -72,11 +77,16 @@ var CoreData = (function () {
   function _clearCache(cfg) {
     // Tier 1: in-memory.
     _cache.sfdcRows = null;
+    _cache.pfRows = null;
+    _cache.effectiveByProduct = {};
+    _cache.historicalPfByProduct = {};
     _cache.metaMap = null;
     _cache.overridesMap = null;
     _cache.goLivesOverridesMap = null;
     _cache.mdsPglBatchView = {};
     _cache.overviewSnapshot = null;
+    _cache.pfReaderMeta = null;
+    _cache.reportBuildCtx = null;
     // Tier 2: sheet-tab cache. Layer 2. Clears all rows including mdsPglBatchView:* and overviewData:* keys.
     _perfCacheClearAll_();
     // Cross-module cache clears.
@@ -97,7 +107,11 @@ var CoreData = (function () {
     // write fresh data to both tier 1 and tier 2.
     _cache.sfdcRows = null;
     try {
-      readSfdcDeploymentsRaw_(cfg);
+      if (usesProductModePfDataSource_(cfg)) {
+        readProductModePfRowsRaw_(cfg);
+      } else {
+        readSfdcDeploymentsRaw_(cfg);
+      }
     } catch (err) {
       Logger.log('CoreData._warmSfdcRows: ' + err);
     }
@@ -639,6 +653,416 @@ var CoreData = (function () {
   }
 
   /**
+   * Config-gated ProductMode switch for two-source active deployment union.
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @return {boolean}
+   * @private
+   */
+  function isProductModeActiveDeploymentsUnionEnabled_(cfg) {
+    return !!(cfg && cfg.activeDeployments &&
+              cfg.activeDeployments.productModeUnionEnabled === true);
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function _getProductModeSourceMode_(cfg) {
+    if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return 'parent';
+    return (cfg.activeDeployments && cfg.activeDeployments.productModeSourceMode) || 'parentPlusPf';
+  }
+
+  /**
+   * True when ProductMode apps should use PF sheet as primary data source.
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function usesProductModePfDataSource_(cfg) {
+    if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return false;
+    var src = (cfg.activeDeployments && cfg.activeDeployments.productModeDataSource) || 'parent';
+    return src === 'productFunction' || _getProductModeSourceMode_(cfg) === 'pfOnly';
+  }
+
+  /**
+   * True when go-live surfaces should read PF rows (active + complete).
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function usesProductModePfGoLiveSource_(cfg) {
+    if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return false;
+    return (cfg.activeDeployments && cfg.activeDeployments.productModeGoLiveSource) === 'productFunction';
+  }
+
+  /**
+   * True when historical/report surfaces should read PF rows (active + complete).
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function usesProductModePfHistoricalSource_(cfg) {
+    if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return false;
+    return (cfg.activeDeployments && cfg.activeDeployments.productModeHistoricalSource) === 'productFunction';
+  }
+
+  /**
+   * Canonical ProductMode PF raw reader (normalized relationship fields).
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function readProductModePfRowsRaw_(cfg) {
+    return readSfdcProductFunctionsRaw_(cfg);
+  }
+
+  /**
+   * Filters PF rows by global product chip when enabled.
+   * @param {Array<Object>} pfRows
+   * @param {string} productArea
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function filterProductModePfRowsByProduct_(pfRows, productArea, cfg) {
+    if (!cfg || !cfg.ui || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true) {
+      return pfRows;
+    }
+    if (!productArea || productArea === 'all') return pfRows;
+    if (!Array.isArray(pfRows) || !pfRows.length) return pfRows;
+
+    var nameTokens = (cfg.ui.productFilter.nameTokens &&
+                      cfg.ui.productFilter.nameTokens[productArea]) || [];
+    return pfRows.filter(function (pf) {
+      if (String(pf.productArea || '').trim() === productArea) return true;
+      if (!nameTokens.length) return false;
+      var depName = String(pf.deploymentName || '').toLowerCase();
+      if (!depName) return false;
+      for (var ti = 0; ti < nameTokens.length; ti++) {
+        var token = String(nameTokens[ti] || '').toLowerCase();
+        if (token && depName.indexOf(token) >= 0) return true;
+      }
+      return false;
+    });
+  }
+
+  /**
+   * Returns all PF rows for historical/go-live analysis (Active + Complete).
+   * @param {AppConfig} cfg
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   * @private
+   */
+  function getProductModeHistoricalPfRows_(cfg, productOpts) {
+    var pa = (productOpts && productOpts.product) || 'all';
+    var cacheKey = 'hist:' + pa;
+    if (_cache.historicalPfByProduct && _cache.historicalPfByProduct[cacheKey]) {
+      return _cache.historicalPfByProduct[cacheKey];
+    }
+    var pfRows = [];
+    try {
+      pfRows = readProductModePfRowsRaw_(cfg) || [];
+    } catch (e) {
+      Logger.log('CoreData.getProductModeHistoricalPfRows_: read failed: ' + e);
+      return [];
+    }
+    pfRows = filterProductModePfRowsByProduct_(pfRows, pa, cfg);
+    pfRows = filterRowsByReportProductScope_(pfRows, cfg);
+    pfRows = filterDeploymentsByStudent_(pfRows, 'exclude', cfg);
+    if (!_cache.historicalPfByProduct) _cache.historicalPfByProduct = {};
+    _cache.historicalPfByProduct[cacheKey] = pfRows;
+    return pfRows;
+  }
+
+  /**
+   * Parent deployment id for parent-keyed joins (meta, overrides, DD, wellness).
+   * @param {Object} row
+   * @return {string}
+   * @private
+   */
+  function _parentDeploymentLookupId_(row) {
+    if (!row) return '';
+    return _canonicalId_(row.parentDeploymentId || row.deploymentFk || row.deploymentId);
+  }
+
+  /**
+   * Begins a request-scoped report build context and pre-warms shared reads.
+   * @param {AppConfig} cfg
+   * @return {Object}
+   */
+  function beginReportBuildContext_(cfg) {
+    if (_cache.reportBuildCtx) return _cache.reportBuildCtx;
+    var ctx = {
+      cfg: cfg,
+      startedAt: Date.now(),
+      phases: []
+    };
+    _cache.reportBuildCtx = ctx;
+    if (usesProductModePfDataSource_(cfg)) {
+      readSfdcProductFunctionsRaw_(cfg);
+    }
+    try {
+      CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    } catch (e) {
+      Logger.log('CoreData.beginReportBuildContext_: enrichment warm failed: ' + e);
+    }
+    return ctx;
+  }
+
+  /**
+   * Ends the active report build context marker.
+   */
+  function endReportBuildContext_() {
+    _cache.reportBuildCtx = null;
+  }
+
+  /**
+   * Records a report-build phase timing entry on the active context.
+   * @param {string} phase
+   * @param {number} startedMs
+   * @param {number=} totalStartMs
+   * @private
+   */
+  function _markReportBuildPhase_(phase, startedMs, totalStartMs) {
+    var ctx = _cache.reportBuildCtx;
+    if (!ctx) return;
+    var now = Date.now();
+    ctx.phases.push({
+      phase: phase,
+      ms: now - startedMs,
+      totalMs: totalStartMs ? now - totalStartMs : now - ctx.startedAt
+    });
+    Logger.log('CoreData.reportBuild: ' + phase + ' +' + (now - startedMs) + 'ms total=' +
+               (totalStartMs ? now - totalStartMs : now - ctx.startedAt) + 'ms');
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {Array<string>}
+   * @private
+   */
+  function _getProductModeUnionStatuses_(cfg) {
+    var statuses = cfg && cfg.activeDeployments && cfg.activeDeployments.productModeUnionStatuses;
+    return Array.isArray(statuses) && statuses.length ? statuses.slice() : ['Active'];
+  }
+
+  /**
+   * @param {string} phase
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function _isExcludedPfPhase_(phase, cfg) {
+    var excluded = cfg && cfg.activeDeployments && cfg.activeDeployments.productModeExcludePhases;
+    if (!Array.isArray(excluded) || !excluded.length) return false;
+    if (!phase) return false;
+    var norm = String(phase).trim().toLowerCase();
+    for (var i = 0; i < excluded.length; i++) {
+      if (String(excluded[i] || '').trim().toLowerCase() === norm) return true;
+    }
+    return false;
+  }
+
+  /**
+   * @param {Object} pf
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function _isExcludedCustomer360PfRow_(pf, cfg) {
+    if (!(cfg && cfg.activeDeployments &&
+          cfg.activeDeployments.productModeExcludeCustomer360 === true)) {
+      return false;
+    }
+    var hay = [
+      pf.productArea, pf.funcArea, pf.deploymentName, pf.accountName
+    ].join(' ').toLowerCase();
+    return hay.indexOf('customer 360') >= 0;
+  }
+
+  /**
+   * @param {Object} pf
+   * @param {Object=} parentRow
+   * @return {string}
+   * @private
+   */
+  function _getPfRowStatus_(pf, parentRow) {
+    if (pf && pf.overallStatus) return String(pf.overallStatus).trim();
+    if (parentRow && parentRow.overallStatus) return String(parentRow.overallStatus).trim();
+    return '';
+  }
+
+  /**
+   * @param {Object} pf
+   * @param {Object=} parentRow
+   * @param {AppConfig} cfg
+   * @return {{ eligible: boolean, reason: string }}
+   * @private
+   */
+  function _evaluatePfRowStatus_(pf, parentRow, cfg) {
+    var eligibleStatuses = _getProductModeUnionStatuses_(cfg);
+    var allowNoStatus = !!(cfg.activeDeployments &&
+                           cfg.activeDeployments.allowPfRowsWithoutParentStatus === true);
+    var completeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
+                          cfg.salesforce.statusValues.complete) || 'Complete';
+    var status = _getPfRowStatus_(pf, parentRow);
+
+    if (!status) {
+      return allowNoStatus
+        ? { eligible: true, reason: '' }
+        : { eligible: false, reason: 'statusMissing' };
+    }
+    if (status === completeStatus) {
+      return { eligible: false, reason: 'statusComplete' };
+    }
+    if (eligibleStatuses.indexOf(status) < 0) {
+      return { eligible: false, reason: 'statusNotEligible' };
+    }
+    return { eligible: true, reason: '' };
+  }
+
+  /**
+   * @param {Object} pf
+   * @param {AppConfig} cfg
+   * @return {{ eligible: boolean, reason: string }}
+   * @private
+   */
+  function _evaluatePfOnlyRowEligibility_(pf, cfg) {
+    if (!pf) return { eligible: false, reason: 'missingRow' };
+    if (!(_canonicalId_(pf.parentDeploymentId || pf.deploymentFk))) {
+      return { eligible: false, reason: 'missingDeploymentId' };
+    }
+    if (!String(pf.deploymentName || '').trim() && !String(pf.accountName || '').trim()) {
+      return { eligible: false, reason: 'missingMinimumFields' };
+    }
+    if (!String(pf.productArea || '').trim() && !String(pf.funcArea || '').trim()) {
+      return { eligible: false, reason: 'missingMinimumFields' };
+    }
+    var statusEval = _evaluatePfRowStatus_(pf, null, cfg);
+    if (!statusEval.eligible) return { eligible: false, reason: statusEval.reason };
+    if (_isExcludedPfPhase_(pf.phase, cfg)) return { eligible: false, reason: 'excludedPhase' };
+    if (_isExcludedCustomer360PfRow_(pf, cfg)) return { eligible: false, reason: 'excludedCustomer360' };
+    return { eligible: true, reason: '' };
+  }
+
+  /**
+   * Dedupe key for pfOnly mode: pfRowId when present, else deterministic fallback.
+   * @param {Object} pf
+   * @return {string}
+   * @private
+   */
+  function _pfOnlyDedupeKey_(pf) {
+    if (pf.pfRowId) return 'id:' + _canonicalId_(pf.pfRowId);
+    return _productFunctionDedupeKey_(pf);
+  }
+
+  /**
+   * Builds one PF-only deployment-shaped row (one row per PF record).
+   * @param {Object} pf
+   * @param {AppConfig} cfg
+   * @param {Object} metaMap
+   * @param {Object} overridesMap
+   * @param {number} index
+   * @return {Object}
+   * @private
+   */
+  function _buildPfOnlyDeploymentRow_(pf, cfg, metaMap, overridesMap, index, wellnessMap) {
+    var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+    var meta = (metaMap && metaMap[parentId]) || {};
+    var accountId = pf.accountId || '';
+    var wKey = accountId ? accountId.slice(0, 15) : '';
+    var wellness = (wellnessMap && wKey && wellnessMap[wKey]) || null;
+    var base = {
+      deploymentId: parentId,
+      parentDeploymentId: parentId,
+      deploymentFk: parentId,
+      deploymentName: pf.deploymentName || '',
+      accountId: accountId,
+      accountName: pf.accountName || '',
+      industry: pf.industry || '',
+      region: pf.region || '',
+      subRegion: pf.subRegion || '',
+      subRegionAlt: pf.subRegionAlt || '',
+      deploymentStartDate: pf.deploymentStartDate || '',
+      mtpDate: pf.mtpDate || '',
+      firstMtpDateActual: pf.firstMtpDateActual || '',
+      overallStatus: pf.overallStatus || '',
+      phase: pf.phase || '',
+      stage: pf.stage || '',
+      health: pf.health || '',
+      completionDate: pf.completionDate || '',
+      wdEngManager: pf.wdEngManager || '',
+      damFullName: pf.damFullName || '',
+      primingPartner: pf.primingPartner || '',
+      implPartner: pf.implPartner || '',
+      partner: pf.partner || '',
+      currentUpdate: pf.currentUpdate || '',
+      rowIndex: index + 2,
+      deliveryDirector: meta.deliveryDirector || '',
+      ddNotes: meta.ddNotes || '',
+      metaUsername: meta.username || '',
+      metaTimestamp: meta.timestamp || '',
+      isExecutiveWatch: !!wellness,
+      wellnessData: wellness
+    };
+
+    var derived = buildEffectiveDeploymentRow_(base, overridesMap || {});
+    derived.deploymentId = _deriveProductFunctionDeploymentId_(parentId, pf);
+    derived.parentDeploymentId = parentId;
+    derived.deploymentFk = parentId;
+    derived.deploymentRowSource = 'productFunction';
+    derived.parentMatchStatus = 'pfOnly';
+    return _overlayPfFieldsOnDeploymentRow_(derived, pf);
+  }
+
+  /**
+   * ProductMode pfOnly: active deployments built exclusively from PF sheet rows.
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildProductModePfOnlyEffectiveDeployments_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var pfRows = [];
+    try {
+      pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
+    } catch (e) {
+      Logger.log('CoreData.buildProductModePfOnlyEffectiveDeployments_: read failed: ' + e);
+      return [];
+    }
+
+    var metaMap = getDeploymentsMetaMap_(cfg);
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+    var wellnessMap = {};
+    try { wellnessMap = buildWellnessMap_(cfg) || {}; } catch (e) {
+      Logger.log('CoreData.buildProductModePfOnlyEffectiveDeployments_: buildWellnessMap_ failed: ' + e);
+    }
+    var seenPf = {};
+    var effective = [];
+
+    pfRows.forEach(function (pf, index) {
+      if (!pf || (!pf.deploymentFk && !pf.parentDeploymentId)) return;
+
+      var eligibility = _evaluatePfOnlyRowEligibility_(pf, cfg);
+      if (!eligibility.eligible) return;
+
+      var dedupeKey = _pfOnlyDedupeKey_(pf);
+      if (seenPf[dedupeKey]) return;
+      seenPf[dedupeKey] = true;
+
+      var row = _buildPfOnlyDeploymentRow_(pf, cfg, metaMap, overridesMap, index, wellnessMap);
+      if (!row || !row.deploymentId) return;
+      if (!(row.accountName || row.deploymentName)) return;
+      effective.push(row);
+    });
+
+    Logger.log('CoreData.buildProductModePfOnlyEffectiveDeployments_: ' + effective.length +
+               ' PF-only active rows from ' + pfRows.length + ' PF records.');
+    return effective;
+  }
+
+  /**
    * Resolves a deployment id to its canonical 18-char form from SFDC rows when available.
    * @param {AppConfig} cfg
    * @param {any} deploymentId
@@ -738,6 +1162,225 @@ var CoreData = (function () {
   }
 
   /**
+   * Builds a stable dedupe key for a product-function row.
+   * @param {Object} pf
+   * @return {string}
+   * @private
+   */
+  function _productFunctionDedupeKey_(pf) {
+    if (pf.pfRowId) return 'id:' + _canonicalId_(pf.pfRowId);
+    return [
+      _canonicalId_(pf.parentDeploymentId || pf.deploymentFk),
+      String(pf.productArea || '').trim().toLowerCase(),
+      String(pf.funcArea || '').trim().toLowerCase(),
+      String(pf.targetGoLive || '').trim(),
+      String(pf.actualGoLive || '').trim()
+    ].join('|');
+  }
+
+  /**
+   * Derives a unique deploymentId for a PF-derived UI row.
+   * @param {string} baseDeploymentId  Parent deployment id or PF deployment FK.
+   * @param {Object} pf
+   * @return {string}
+   * @private
+   */
+  function _deriveProductFunctionDeploymentId_(baseDeploymentId, pf) {
+    var parentId = _canonicalId_(baseDeploymentId);
+    if (pf.pfRowId) {
+      return parentId + '__pf__' + _canonicalId_(pf.pfRowId);
+    }
+    Logger.log('CoreData._deriveProductFunctionDeploymentId_: no stable pfRowId for parent ' +
+               parentId + ' — using product/function/date fallback key.');
+    var fallback = [
+      String(pf.productArea || '').trim(),
+      String(pf.funcArea || '').trim(),
+      String(pf.targetGoLive || '').trim(),
+      String(pf.actualGoLive || '').trim()
+    ].join('_');
+    return parentId + '__pf__' + Utilities.base64EncodeWebSafe(fallback).slice(0, 16);
+  }
+
+  /**
+   * Applies PF product/function overlay and display naming to a deployment row.
+   * @param {Object} derived
+   * @param {Object} pf
+   * @return {Object}
+   * @private
+   */
+  function _overlayPfFieldsOnDeploymentRow_(derived, pf) {
+    derived.productArea = pf.productArea || derived.productArea || '';
+    derived.funcArea = pf.funcArea || derived.funcArea || '';
+    derived.targetGoLive = pf.targetGoLive || derived.targetGoLive || '';
+    derived.actualGoLive = pf.actualGoLive || derived.actualGoLive || '';
+    if (pf.pfRowId) derived.pfRowId = pf.pfRowId;
+    if (pf.overallStatus) derived.overallStatus = pf.overallStatus;
+
+    if (derived.productArea && derived.funcArea) {
+      var baseName = String(derived.deploymentName || '').trim();
+      var suffix = derived.productArea + ' / ' + derived.funcArea;
+      if (!baseName || baseName.indexOf(suffix) === -1) {
+        derived.deploymentName = (baseName ? baseName + ' \u2014 ' : '') + suffix;
+      }
+    }
+    return derived;
+  }
+
+  /**
+   * Normalizes one PF sheet row into a deployment-shaped row by cloning an active parent.
+   * @param {Object} parentRow  Effective parent deployment row.
+   * @param {Object} pf         Normalized PF row from readSfdcProductFunctionsRaw_.
+   * @return {Object}
+   * @private
+   */
+  function _normalizeProductFunctionDeploymentRow_(parentRow, pf) {
+    var derived = Object.assign({}, parentRow);
+    var parentId = _canonicalId_(parentRow.deploymentId);
+    derived.deploymentId = _deriveProductFunctionDeploymentId_(parentId, pf);
+    derived.parentDeploymentId = parentId;
+    derived.deploymentFk = parentId;
+    derived.deploymentRowSource = 'productFunction';
+    derived.parentMatchStatus = 'matchedParent';
+    return _overlayPfFieldsOnDeploymentRow_(derived, pf);
+  }
+
+  /**
+   * Synthesizes a deployment-shaped row from PF relationship fields when no parent match exists.
+   * @param {Object} pf
+   * @param {AppConfig} cfg
+   * @return {Object}
+   * @private
+   */
+  function _synthesizeProductFunctionDeploymentRow_(pf, cfg) {
+    var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+    var base = {
+      deploymentId: parentId,
+      parentDeploymentId: parentId,
+      deploymentFk: parentId,
+      deploymentName: pf.deploymentName || '',
+      accountId: pf.accountId || '',
+      accountName: pf.accountName || '',
+      industry: pf.industry || '',
+      region: pf.region || '',
+      subRegion: pf.subRegion || '',
+      subRegionAlt: pf.subRegionAlt || '',
+      deploymentStartDate: pf.deploymentStartDate || '',
+      mtpDate: pf.mtpDate || '',
+      firstMtpDateActual: pf.firstMtpDateActual || '',
+      overallStatus: pf.overallStatus || '',
+      phase: pf.phase || '',
+      stage: pf.stage || '',
+      health: pf.health || '',
+      completionDate: pf.completionDate || '',
+      wdEngManager: pf.wdEngManager || '',
+      damFullName: pf.damFullName || '',
+      primingPartner: pf.primingPartner || '',
+      implPartner: pf.implPartner || '',
+      partner: pf.partner || '',
+      currentUpdate: pf.currentUpdate || '',
+      isExecutiveWatch: false,
+      wellnessData: null
+    };
+
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+    var derived = buildEffectiveDeploymentRow_(base, overridesMap);
+    derived.deploymentId = _deriveProductFunctionDeploymentId_(parentId, pf);
+    derived.parentDeploymentId = parentId;
+    derived.deploymentFk = parentId;
+    derived.deploymentRowSource = 'productFunction';
+    derived.parentMatchStatus = 'synthesizedFromPfRelationship';
+    return _overlayPfFieldsOnDeploymentRow_(derived, pf);
+  }
+
+  /**
+   * Appends PF-derived deployment rows for ProductMode apps.
+   * Includes PF rows that match an active parent, or rows synthesized from
+   * Deployment__r.* relationship fields when no parent match exists.
+   *
+   * @param {Array<Object>} parentRows  Active parent effective rows.
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function appendProductFunctionDeploymentRows_(parentRows, cfg) {
+    parentRows = parentRows || [];
+
+    var parentById = {};
+    parentRows.forEach(function (row) {
+      if (!row || !row.deploymentId) return;
+      var canon = _canonicalId_(row.deploymentId);
+      parentById[canon] = row;
+      if (canon.length >= 15) parentById[canon.slice(0, 15)] = row;
+    });
+
+    var pfRows = [];
+    try {
+      pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
+    } catch (e) {
+      Logger.log('CoreData.appendProductFunctionDeploymentRows_: readSfdcProductFunctionsRaw_ failed: ' + e);
+      return parentRows;
+    }
+
+    var seenPf = {};
+    var pfDerived = [];
+    pfRows.forEach(function (pf) {
+      if (!pf || !pf.deploymentFk) return;
+
+      var dedupeKey = _productFunctionDedupeKey_(pf);
+      if (seenPf[dedupeKey]) return;
+
+      var fk = _canonicalId_(pf.deploymentFk);
+      var parent = parentById[fk] || parentById[fk.slice(0, 15)] || null;
+      var statusEval = _evaluatePfRowStatus_(pf, parent, cfg);
+      if (!statusEval.eligible) return;
+
+      var derived;
+      if (parent) {
+        derived = _normalizeProductFunctionDeploymentRow_(parent, pf);
+      } else {
+        if (!_pfSynthesisMeetsMinimum_(pf, cfg)) return;
+        if (_isExcludedPfPhase_(pf.phase, cfg)) return;
+        if (_isExcludedCustomer360PfRow_(pf, cfg)) return;
+        derived = _synthesizeProductFunctionDeploymentRow_(pf, cfg);
+      }
+
+      if (!derived || !derived.deploymentId) return;
+      if (!(derived.accountName || derived.deploymentName)) return;
+
+      seenPf[dedupeKey] = true;
+      pfDerived.push(derived);
+    });
+
+    Logger.log('CoreData.appendProductFunctionDeploymentRows_: ' + parentRows.length +
+               ' parent rows + ' + pfDerived.length + ' PF-derived rows.');
+    return parentRows.concat(pfDerived);
+  }
+
+  /**
+   * @param {Object} pf
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function _pfSynthesisMeetsMinimum_(pf, cfg) {
+    return _evaluatePfOnlyRowEligibility_(pf, cfg).eligible;
+  }
+
+  /**
+   * ProductMode active deployment union: parent rows plus PF-derived rows.
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildProductModeEffectiveDeployments_(config) {
+    var parentRows = buildEffectiveDeploymentsFromSfdc_(config) || [];
+    var markedParents = parentRows.map(function (row) {
+      return Object.assign({}, row, { deploymentRowSource: 'parent' });
+    });
+    return appendProductFunctionDeploymentRows_(markedParents, CoreConfig.withDefaults(config));
+  }
+
+  /**
    * Phase 3j: Canonical effective deployments view.
    *
    * Reads SFDC_Deployments (with meta + overrides). Returns empty on error or
@@ -749,17 +1392,35 @@ var CoreData = (function () {
    */
   function getAllEffectiveDeployments(config, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
+    var cacheKey = String(pa);
+    if (_cache.effectiveByProduct && _cache.effectiveByProduct[cacheKey]) {
+      return _cache.effectiveByProduct[cacheKey];
+    }
+
     var effective = [];
     try {
-      effective = buildEffectiveDeploymentsFromSfdc_(cfg);
+      if (isProductModeActiveDeploymentsUnionEnabled_(cfg)) {
+        var sourceMode = _getProductModeSourceMode_(cfg);
+        if (sourceMode === 'pfOnly') {
+          effective = buildProductModePfOnlyEffectiveDeployments_(cfg);
+        } else if (sourceMode === 'parentPlusPf') {
+          effective = buildProductModeEffectiveDeployments_(cfg);
+        } else {
+          effective = buildEffectiveDeploymentsFromSfdc_(cfg);
+        }
+      } else {
+        effective = buildEffectiveDeploymentsFromSfdc_(cfg);
+      }
     } catch (err) {
       Logger.log('CoreData.getAllEffectiveDeployments: SFDC path threw. Error: ' + err);
       effective = [];
     }
 
     effective = _attachDdContactsToRows_(effective, cfg);
-    var pa = (productOpts && productOpts.product) || 'all';
     effective = filterDeploymentsByProduct_(effective, pa, cfg);
+    if (!_cache.effectiveByProduct) _cache.effectiveByProduct = {};
+    _cache.effectiveByProduct[cacheKey] = effective;
     return effective;
   }
 
@@ -781,7 +1442,8 @@ var CoreData = (function () {
     }
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-      var contacts = ddMap[row.deploymentId] || [];
+      var lookupId = row.parentDeploymentId || row.deploymentId;
+      var contacts = ddMap[lookupId] || [];
       row.ddContacts = contacts;
       row.ddFromContacts = contacts.length === 0 ? null
         : contacts.length === 1 ? (contacts[0].name || contacts[0].email)
@@ -883,6 +1545,430 @@ var CoreData = (function () {
     };
   }
 
+  /**
+   * ProductMode union validation/diagnostic. Compares parent-only vs union counts.
+   *
+   * @param {AppConfig} config
+   * @param {number=} sampleLimit
+   * @return {Object}
+   */
+  function _validateProductModeActiveDeploymentsUnion(config, sampleLimit) {
+    var cfg = CoreConfig.withDefaults(config);
+    var limit = sampleLimit || 5;
+    var adCfg = cfg.activeDeployments || {};
+    var unionEnabled = isProductModeActiveDeploymentsUnionEnabled_(cfg);
+    var sourceMode = _getProductModeSourceMode_(cfg);
+    var unionStatuses = _getProductModeUnionStatuses_(cfg);
+    var allowNoStatus = adCfg.allowPfRowsWithoutParentStatus === true;
+    var excludePhases = adCfg.productModeExcludePhases || [];
+    var excludeCustomer360 = adCfg.productModeExcludeCustomer360 === true;
+    var completeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
+                          cfg.salesforce.statusValues.complete) || 'Complete';
+    var activeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
+                        cfg.salesforce.statusValues.active) || 'Active';
+    var parentSheet = cfg.sheets.deployments || 'SFDC_Deployments';
+    var pfSheet = cfg.sheets.sfdcDeploymentProductFunctions || 'SFDC_DeploymentProductFunctions';
+
+    var rawParents = [];
+    try { rawParents = readSfdcDeploymentsRaw_(cfg) || []; } catch (e) {
+      Logger.log('_validateProductModeActiveDeploymentsUnion: readSfdcDeploymentsRaw_ failed: ' + e);
+    }
+
+    var parentStatusCounts = {};
+    var parentActiveIds = {};
+    rawParents.forEach(function (r) {
+      var st = String(r.overallStatus || r.status || '(blank)').trim();
+      parentStatusCounts[st] = (parentStatusCounts[st] || 0) + 1;
+      if (st === activeStatus && r.deploymentId) {
+        var pid = _canonicalId_(r.deploymentId);
+        parentActiveIds[pid] = true;
+        if (pid.length >= 15) parentActiveIds[pid.slice(0, 15)] = true;
+      }
+    });
+
+    var parentEffective = [];
+    try { parentEffective = buildEffectiveDeploymentsFromSfdc_(cfg) || []; } catch (e) {
+      Logger.log('_validateProductModeActiveDeploymentsUnion: buildEffectiveDeploymentsFromSfdc_ failed: ' + e);
+    }
+
+    var pfRows = [];
+    try { pfRows = readSfdcProductFunctionsRaw_(cfg) || []; } catch (e) {
+      Logger.log('_validateProductModeActiveDeploymentsUnion: readSfdcProductFunctionsRaw_ failed: ' + e);
+    }
+    var pfMeta = _cache.pfReaderMeta || {
+      headers: [],
+      foundColumns: {},
+      missingRecommended: _PF_RECOMMENDED_HEADERS_.slice()
+    };
+
+    var pfStatusCounts = {};
+    var pfPhaseCounts = {};
+    var pfFuncCounts = {};
+    var pfHealthCounts = {};
+    var pfActiveCount = 0;
+    var pfCompleteCount = 0;
+    var pfWithAccountId = 0;
+    var pfMissingAccountId = 0;
+    var pfWithAccountName = 0;
+    var pfMissingAccountName = 0;
+    var stats = {
+      pfRowsIncludedInActiveUi: 0,
+      pfRowsSkippedBecauseStatusComplete: 0,
+      pfRowsSkippedBecauseStatusMissing: 0,
+      pfRowsSkippedBecauseStatusNotEligible: 0,
+      pfRowsSkippedBecauseMissingMinimumFields: 0,
+      pfRowsSkippedBecauseDuplicatePfRowId: 0,
+      pfRowsSkippedBecauseExcludedPhase: 0,
+      pfRowsSkippedBecauseCustomer360: 0
+    };
+    var seenPf = {};
+    var pfActiveDeploymentIds = {};
+    var samplePfFks = [];
+    var sampleIncludedPf = [];
+
+    pfRows.forEach(function (pf) {
+      if (!pf || !pf.deploymentFk) return;
+      var fk = _canonicalId_(pf.deploymentFk);
+      if (samplePfFks.length < limit) samplePfFks.push(fk);
+
+      if (String(pf.accountId || '').trim()) pfWithAccountId++;
+      else pfMissingAccountId++;
+      if (String(pf.accountName || '').trim()) pfWithAccountName++;
+      else pfMissingAccountName++;
+
+      var pfStatus = _getPfRowStatus_(pf, null);
+      var statusKey = pfStatus || '(blank)';
+      pfStatusCounts[statusKey] = (pfStatusCounts[statusKey] || 0) + 1;
+      if (pfStatus === activeStatus) pfActiveCount++;
+      if (pfStatus === completeStatus) pfCompleteCount++;
+
+      var phaseKey = String(pf.phase || '(blank)').trim();
+      pfPhaseCounts[phaseKey] = (pfPhaseCounts[phaseKey] || 0) + 1;
+      var funcKey = String(pf.funcArea || '(blank)').trim();
+      pfFuncCounts[funcKey] = (pfFuncCounts[funcKey] || 0) + 1;
+      var healthKey = String(pf.health || '(blank)').trim();
+      pfHealthCounts[healthKey] = (pfHealthCounts[healthKey] || 0) + 1;
+
+      var dedupeKey = _pfOnlyDedupeKey_(pf);
+      if (seenPf[dedupeKey]) {
+        stats.pfRowsSkippedBecauseDuplicatePfRowId++;
+        return;
+      }
+
+      var eligibility = _evaluatePfOnlyRowEligibility_(pf, cfg);
+      if (!eligibility.eligible) {
+        if (eligibility.reason === 'statusComplete') stats.pfRowsSkippedBecauseStatusComplete++;
+        else if (eligibility.reason === 'statusMissing') stats.pfRowsSkippedBecauseStatusMissing++;
+        else if (eligibility.reason === 'statusNotEligible') stats.pfRowsSkippedBecauseStatusNotEligible++;
+        else if (eligibility.reason === 'excludedPhase') stats.pfRowsSkippedBecauseExcludedPhase++;
+        else if (eligibility.reason === 'excludedCustomer360') stats.pfRowsSkippedBecauseCustomer360++;
+        else stats.pfRowsSkippedBecauseMissingMinimumFields++;
+        return;
+      }
+
+      seenPf[dedupeKey] = true;
+      stats.pfRowsIncludedInActiveUi++;
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      pfActiveDeploymentIds[parentId] = true;
+      if (parentId.length >= 15) pfActiveDeploymentIds[parentId.slice(0, 15)] = true;
+
+      if (sampleIncludedPf.length < limit) {
+        sampleIncludedPf.push({
+          deploymentId: _deriveProductFunctionDeploymentId_(parentId, pf),
+          pfRowId: pf.pfRowId || '',
+          parentDeploymentId: parentId,
+          deploymentFk: _canonicalId_(pf.deploymentFk),
+          accountId: pf.accountId || '',
+          deploymentName: pf.deploymentName || '',
+          accountName: pf.accountName || '',
+          industry: pf.industry || '',
+          region: pf.region || '',
+          subRegion: pf.subRegion || '',
+          subRegionAlt: pf.subRegionAlt || '',
+          overallStatus: pf.overallStatus || '',
+          phase: pf.phase || '',
+          stage: pf.stage || '',
+          health: pf.health || '',
+          productArea: pf.productArea || '',
+          funcArea: pf.funcArea || '',
+          deploymentRowSource: 'productFunction',
+          parentMatchStatus: 'pfOnly'
+        });
+      }
+    });
+
+    var parentActiveInPf = 0;
+    var parentActiveNotInPf = 0;
+    var pfActiveNotInParent = 0;
+    Object.keys(parentActiveIds).forEach(function (id) {
+      if (id.length < 15) return;
+      if (pfActiveDeploymentIds[id] || pfActiveDeploymentIds[id.slice(0, 15)]) parentActiveInPf++;
+      else parentActiveNotInPf++;
+    });
+    Object.keys(pfActiveDeploymentIds).forEach(function (id) {
+      if (id.length < 15) return;
+      if (!parentActiveIds[id] && !parentActiveIds[id.slice(0, 15)]) pfActiveNotInParent++;
+    });
+
+    var unionRows = [];
+    try { unionRows = getAllEffectiveDeployments(cfg) || []; } catch (e) {
+      Logger.log('_validateProductModeActiveDeploymentsUnion: getAllEffectiveDeployments failed: ' + e);
+    }
+
+    var bySource = { parent: 0, productFunction: 0, other: 0 };
+    var byMatchStatus = { pfOnly: 0, matchedParent: 0, synthesizedFromPfRelationship: 0, other: 0 };
+    unionRows.forEach(function (r) {
+      var src = r.deploymentRowSource || 'other';
+      if (bySource[src] !== undefined) bySource[src]++;
+      else bySource.other++;
+      var match = r.parentMatchStatus || 'other';
+      if (byMatchStatus[match] !== undefined) byMatchStatus[match]++;
+      else byMatchStatus.other++;
+    });
+
+    Logger.log('=== _validateProductModeActiveDeploymentsUnion(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  productModeUnionEnabled=' + unionEnabled);
+    Logger.log('  productModeSourceMode=' + sourceMode);
+    Logger.log('  productModeUnionStatuses=' + JSON.stringify(unionStatuses));
+    Logger.log('  allowPfRowsWithoutParentStatus=' + allowNoStatus);
+    Logger.log('  productModeExcludePhases=' + JSON.stringify(excludePhases));
+    Logger.log('  productModeExcludeCustomer360=' + excludeCustomer360);
+    Logger.log('  parentSheet=' + parentSheet + ', pfSheet=' + pfSheet);
+    Logger.log('  pfAvailableHeaders=' + JSON.stringify(pfMeta.headers || []));
+    Logger.log('  pfMissingRecommendedHeaders=' + JSON.stringify(pfMeta.missingRecommended || []));
+    Logger.log('  parentRowCount=' + rawParents.length);
+    Logger.log('  parentStatusCounts=' + JSON.stringify(parentStatusCounts));
+    Logger.log('  activeParentEffectiveCount=' + parentEffective.length);
+    Logger.log('  pfRowCount=' + pfRows.length);
+    Logger.log('  pfActiveCount=' + pfActiveCount);
+    Logger.log('  pfCompleteCount=' + pfCompleteCount);
+    Logger.log('  pfStatusCounts=' + JSON.stringify(pfStatusCounts));
+    Logger.log('  pfPhaseCounts=' + JSON.stringify(pfPhaseCounts));
+    Logger.log('  pfFuncCounts=' + JSON.stringify(pfFuncCounts));
+    Logger.log('  pfHealthCounts=' + JSON.stringify(pfHealthCounts));
+    Logger.log('  pfRowsWithAccountId=' + pfWithAccountId);
+    Logger.log('  pfRowsMissingAccountId=' + pfMissingAccountId);
+    Logger.log('  pfRowsWithAccountName=' + pfWithAccountName);
+    Logger.log('  pfRowsMissingAccountName=' + pfMissingAccountName);
+    Logger.log('  pfRowsIncludedInActiveUi=' + stats.pfRowsIncludedInActiveUi);
+    Logger.log('  pfRowsSkippedBecauseStatusComplete=' + stats.pfRowsSkippedBecauseStatusComplete);
+    Logger.log('  pfRowsSkippedBecauseStatusMissing=' + stats.pfRowsSkippedBecauseStatusMissing);
+    Logger.log('  pfRowsSkippedBecauseStatusNotEligible=' + stats.pfRowsSkippedBecauseStatusNotEligible);
+    Logger.log('  pfRowsSkippedBecauseMissingMinimumFields=' + stats.pfRowsSkippedBecauseMissingMinimumFields);
+    Logger.log('  pfRowsSkippedBecauseDuplicatePfRowId=' + stats.pfRowsSkippedBecauseDuplicatePfRowId);
+    Logger.log('  pfRowsSkippedBecauseExcludedPhase=' + stats.pfRowsSkippedBecauseExcludedPhase);
+    Logger.log('  pfRowsSkippedBecauseCustomer360=' + stats.pfRowsSkippedBecauseCustomer360);
+    Logger.log('  parentActiveDeploymentIdsRepresentedInPf=' + parentActiveInPf);
+    Logger.log('  parentActiveDeploymentIdsNotRepresentedInPf=' + parentActiveNotInPf);
+    Logger.log('  activePfDeploymentIdsNotRepresentedInParent=' + pfActiveNotInParent);
+    Logger.log('  parentPfOverlapCount=' + parentActiveInPf);
+    Logger.log('  finalGetAllEffectiveDeploymentsCount=' + unionRows.length);
+    Logger.log('  countByDeploymentRowSource=' + JSON.stringify(bySource));
+    Logger.log('  countByParentMatchStatus=' + JSON.stringify(byMatchStatus));
+    Logger.log('  samplePfDeploymentFkValues=' + JSON.stringify(samplePfFks));
+    Logger.log('  sampleIncludedPfRows=' + JSON.stringify(sampleIncludedPf));
+
+    if (sourceMode === 'pfOnly' && pfRows.length > 0 && stats.pfRowsIncludedInActiveUi === 0) {
+      Logger.log('  WARNING: PF rows exist but none included in pfOnly active UI.');
+      if (stats.pfRowsSkippedBecauseStatusMissing > 0) {
+        Logger.log('  Likely cause: missing Deployment__r.Overall_Status__c on PF rows.');
+      } else if (stats.pfRowsSkippedBecauseStatusComplete === pfRows.length) {
+        Logger.log('  Likely cause: PF rows are Complete-only.');
+      } else if (stats.pfRowsSkippedBecauseMissingMinimumFields > 0) {
+        Logger.log('  Likely cause: missing relationship fields (account/name/product/function).');
+      }
+    }
+    if (stats.pfRowsSkippedBecauseStatusComplete > 0) {
+      Logger.log('  NOTE: Complete PF rows are intentionally skipped from active UI because ' +
+                 'productModeUnionStatuses=' + JSON.stringify(unionStatuses) + '.');
+    }
+
+    unionRows.slice(0, limit).forEach(function (r, i) {
+      Logger.log('  union[' + i + ']: source=' + (r.deploymentRowSource || '?') +
+                 ' match=' + (r.parentMatchStatus || '?') +
+                 ' id=' + r.deploymentId + ' pfRowId=' + (r.pfRowId || '') +
+                 ' status=' + (r.overallStatus || '') + ' phase=' + (r.phase || '') +
+                 ' product=' + (r.productArea || '') + ' func=' + (r.funcArea || ''));
+    });
+
+    return {
+      productModeUnionEnabled: unionEnabled,
+      productModeSourceMode: sourceMode,
+      productModeUnionStatuses: unionStatuses,
+      allowPfRowsWithoutParentStatus: allowNoStatus,
+      productModeExcludePhases: excludePhases,
+      productModeExcludeCustomer360: excludeCustomer360,
+      parentSheet: parentSheet,
+      pfSheet: pfSheet,
+      pfAvailableHeaders: pfMeta.headers || [],
+      pfMissingRecommendedHeaders: pfMeta.missingRecommended || [],
+      parentRowCount: rawParents.length,
+      parentStatusCounts: parentStatusCounts,
+      activeParentEffectiveCount: parentEffective.length,
+      pfRowCount: pfRows.length,
+      pfActiveCount: pfActiveCount,
+      pfCompleteCount: pfCompleteCount,
+      pfStatusCounts: pfStatusCounts,
+      pfPhaseCounts: pfPhaseCounts,
+      pfFuncCounts: pfFuncCounts,
+      pfHealthCounts: pfHealthCounts,
+      pfRowsWithAccountId: pfWithAccountId,
+      pfRowsMissingAccountId: pfMissingAccountId,
+      pfRowsWithAccountName: pfWithAccountName,
+      pfRowsMissingAccountName: pfMissingAccountName,
+      pfRowsIncludedInActiveUi: stats.pfRowsIncludedInActiveUi,
+      pfRowsSkippedBecauseStatusComplete: stats.pfRowsSkippedBecauseStatusComplete,
+      pfRowsSkippedBecauseStatusMissing: stats.pfRowsSkippedBecauseStatusMissing,
+      pfRowsSkippedBecauseStatusNotEligible: stats.pfRowsSkippedBecauseStatusNotEligible,
+      pfRowsSkippedBecauseMissingMinimumFields: stats.pfRowsSkippedBecauseMissingMinimumFields,
+      pfRowsSkippedBecauseDuplicatePfRowId: stats.pfRowsSkippedBecauseDuplicatePfRowId,
+      pfRowsSkippedBecauseExcludedPhase: stats.pfRowsSkippedBecauseExcludedPhase,
+      pfRowsSkippedBecauseCustomer360: stats.pfRowsSkippedBecauseCustomer360,
+      parentActiveDeploymentIdsRepresentedInPf: parentActiveInPf,
+      parentActiveDeploymentIdsNotRepresentedInPf: parentActiveNotInPf,
+      activePfDeploymentIdsNotRepresentedInParent: pfActiveNotInParent,
+      parentPfOverlapCount: parentActiveInPf,
+      finalCount: unionRows.length,
+      countByDeploymentRowSource: bySource,
+      countByParentMatchStatus: byMatchStatus,
+      samplePfDeploymentFkValues: samplePfFks,
+      sampleIncludedPfRows: sampleIncludedPf
+    };
+  }
+
+  /**
+   * Thin diagnostic wrapper for ProductMode active deployment union.
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function _debugProductModeActiveDeploymentsUnion(config) {
+    return _validateProductModeActiveDeploymentsUnion(config, 10);
+  }
+
+  /**
+   * Comprehensive ProductMode source diagnostic for EVI/AI validation.
+   * @param {AppConfig} config
+   * @param {number=} limit
+   * @return {Object}
+   */
+  function _debugProductModeSources(config, limit) {
+    var cfg = CoreConfig.withDefaults(config);
+    var lim = (typeof limit === 'number' && limit > 0) ? limit : 10;
+    var unionSummary = _validateProductModeActiveDeploymentsUnion(cfg, lim);
+
+    var pfRows = [];
+    try { pfRows = readProductModePfRowsRaw_(cfg) || []; } catch (e) {
+      Logger.log('_debugProductModeSources: PF read failed: ' + e);
+    }
+    var completeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
+                          cfg.salesforce.statusValues.complete) || 'Complete';
+    var activeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
+                        cfg.salesforce.statusValues.active) || 'Active';
+
+    var pfMissing = {
+      accountId: 0, accountName: 0, deploymentName: 0, status: 0,
+      targetGoLive: 0, actualGoLive: 0, duplicatePfRowId: 0
+    };
+    var seenPfIds = {};
+    var sampleCompleteGoLives = [];
+    pfRows.forEach(function (pf) {
+      if (!pf) return;
+      if (!String(pf.accountId || '').trim()) pfMissing.accountId++;
+      if (!String(pf.accountName || '').trim()) pfMissing.accountName++;
+      if (!String(pf.deploymentName || '').trim()) pfMissing.deploymentName++;
+      if (!String(pf.overallStatus || '').trim()) pfMissing.status++;
+      if (!String(pf.targetGoLive || '').trim()) pfMissing.targetGoLive++;
+      if (!String(pf.actualGoLive || '').trim()) pfMissing.actualGoLive++;
+      var pfId = String(pf.pfRowId || '').trim();
+      if (pfId) {
+        if (seenPfIds[pfId]) pfMissing.duplicatePfRowId++;
+        seenPfIds[pfId] = true;
+      }
+      if (sampleCompleteGoLives.length < lim &&
+          String(pf.overallStatus || '').trim() === completeStatus &&
+          String(pf.actualGoLive || '').trim()) {
+        sampleCompleteGoLives.push({
+          pfRowId: pf.pfRowId || '',
+          parentDeploymentId: _canonicalId_(pf.parentDeploymentId || pf.deploymentFk),
+          accountName: pf.accountName || '',
+          actualGoLive: pf.actualGoLive || '',
+          productArea: pf.productArea || '',
+          funcArea: pf.funcArea || ''
+        });
+      }
+    });
+
+    var overviewActive = null;
+    try {
+      var snap = _computeOverviewSnapshot_(cfg, { viewMode: 'all' }, { product: 'all' });
+      overviewActive = snap && snap.totals ? snap.totals.totalActive : null;
+    } catch (e) {
+      Logger.log('_debugProductModeSources: overview compute failed: ' + e);
+    }
+
+    var recentPf = [];
+    var upcomingPf = [];
+    try { recentPf = getRecentGoLives(cfg, { viewMode: 'all' }, undefined, { product: 'all' }) || []; }
+    catch (e) { Logger.log('_debugProductModeSources: recent go-lives failed: ' + e); }
+    try { upcomingPf = getUpcomingGoLives(cfg, { viewMode: 'all' }, { product: 'all' }) || []; }
+    catch (e) { Logger.log('_debugProductModeSources: upcoming go-lives failed: ' + e); }
+
+    var parentRows = [];
+    try { parentRows = readSfdcDeploymentsRaw_(cfg) || []; } catch (e) {}
+    var parentActive = parentRows.filter(function (r) {
+      return String(r.overallStatus || r.status || '').trim() === activeStatus;
+    }).length;
+
+    var remainingParentDeps = [
+      { feature: 'Trends tab', runtime: false, reason: 'disabled for EVI/AI; uses parent when enabled' },
+      { feature: 'CoreHistory.getCurrentMTPDate', runtime: false, reason: 'utility; low exposure' },
+      { feature: '_resolveCanonicalDeploymentId_', runtime: false, reason: 'ID normalization fallback' },
+      { feature: 'Diagnostics comparison', runtime: false, reason: 'parent counts for audit only' },
+      { feature: 'SFDC_Deployments connector refresh', runtime: true,
+        reason: 'optional until all surfaces migrated; not required for active UI after this pass' }
+    ];
+
+    var report = {
+      config: {
+        productModeUnionEnabled: !!(cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled),
+        productModeSourceMode: _getProductModeSourceMode_(cfg),
+        productModeDataSource: (cfg.activeDeployments && cfg.activeDeployments.productModeDataSource) || 'parent',
+        productModeHistoricalSource: (cfg.activeDeployments && cfg.activeDeployments.productModeHistoricalSource) || 'parent',
+        productModeGoLiveSource: (cfg.activeDeployments && cfg.activeDeployments.productModeGoLiveSource) || 'parent',
+        productModeUnionStatuses: _getProductModeUnionStatuses_(cfg),
+        productModeExcludePhases: (cfg.activeDeployments && cfg.activeDeployments.productModeExcludePhases) || [],
+        productModeExcludeCustomer360: !!(cfg.activeDeployments &&
+                                          cfg.activeDeployments.productModeExcludeCustomer360),
+        freshnessWatchSheet: (cfg.freshness && cfg.freshness.watchSheet) || 'SFDC_Deployments',
+        trendsEnabled: !!(cfg.ui && cfg.ui.trendsTab && cfg.ui.trendsTab.enabled)
+      },
+      pfRowCount: pfRows.length,
+      parentRowCount: parentRows.length,
+      parentActiveCount: parentActive,
+      overviewActiveTotal: overviewActive,
+      pfActiveEffectiveCount: unionSummary.pfRowsIncludedInActiveUi,
+      recentGoLiveCountPf: recentPf.length,
+      upcomingGoLiveCountPf: upcomingPf.length,
+      pfDataQuality: pfMissing,
+      remainingParentDependencies: remainingParentDeps,
+      unionSummary: unionSummary,
+      sampleCompleteGoLiveRows: sampleCompleteGoLives,
+      sampleRecentGoLives: recentPf.slice(0, lim),
+      sampleUpcomingGoLives: upcomingPf.slice(0, lim)
+    };
+
+    Logger.log('=== _debugProductModeSources(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  config=' + JSON.stringify(report.config));
+    Logger.log('  pfRowCount=' + report.pfRowCount);
+    Logger.log('  parentRowCount=' + report.parentRowCount + ' parentActiveCount=' + parentActive);
+    Logger.log('  overviewActiveTotal=' + overviewActive +
+               ' pfActiveEffectiveCount=' + unionSummary.pfRowsIncludedInActiveUi);
+    Logger.log('  recentGoLiveCountPf=' + recentPf.length +
+               ' upcomingGoLiveCountPf=' + upcomingPf.length);
+    Logger.log('  pfDataQuality=' + JSON.stringify(pfMissing));
+    return report;
+  }
+
   // ===========================================================================
   // WELLNESS MAP
   // ===========================================================================
@@ -938,7 +2024,17 @@ function _sfdcDataVersion_(cfg) {
     var vals = sh.getRange(2, 1, lastRow - 1, 2).getValues();
     var deploymentsSheet = cfg && cfg.sheets && cfg.sheets.deployments
       ? cfg.sheets.deployments : 'SFDC_Deployments';
-    var latestForDep = '';
+    var pfSheet = cfg && cfg.sheets && cfg.sheets.sfdcDeploymentProductFunctions
+      ? cfg.sheets.sfdcDeploymentProductFunctions : 'SFDC_DeploymentProductFunctions';
+    var watchSheet = cfg && cfg.freshness && cfg.freshness.watchSheet
+      ? cfg.freshness.watchSheet : deploymentsSheet;
+    var watchTargets = {};
+    watchTargets[watchSheet] = true;
+    if (usesProductModePfDataSource_(cfg)) {
+      watchTargets[pfSheet] = true;
+    }
+    watchTargets[deploymentsSheet] = true;
+    var latestForWatch = '';
     var latestOverall = '';
     for (var i = 0; i < vals.length; i++) {
       var ts = vals[i][0];
@@ -946,9 +2042,9 @@ function _sfdcDataVersion_(cfg) {
       if (!ts) continue;
       var key = (ts instanceof Date) ? String(ts.getTime()) : String(ts);
       if (key > latestOverall) latestOverall = key;
-      if (sheetName === deploymentsSheet && key > latestForDep) latestForDep = key;
+      if (watchTargets[sheetName] && key > latestForWatch) latestForWatch = key;
     }
-    var chosen = latestForDep || latestOverall;
+    var chosen = latestForWatch || latestOverall;
     return chosen ? chosen.replace(/[^0-9A-Za-z]/g, '').slice(0, 24) : '';
   } catch (e) {
     Logger.log('CoreData._sfdcDataVersion_: ' + e);
@@ -1289,7 +2385,8 @@ function _sfdcDataVersion_(cfg) {
     }
 
     var enriched = allEffective.map(function (row) {
-      var enrichment = enrichmentMap[row.deploymentId];
+      var lookupId = row.parentDeploymentId || row.deploymentId;
+      var enrichment = enrichmentMap[row.deploymentId] || enrichmentMap[lookupId];
       return Object.assign({}, row, {
         isPhased:       enrichment ? !!enrichment.isPhased : false,
         upcomingDates:  enrichment ? (enrichment.upcomingDates || []) : [],
@@ -1519,6 +2616,10 @@ function _sfdcDataVersion_(cfg) {
    */
   function getRecentGoLives(config, viewModeOpts, windowDaysOverride, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    if (usesProductModePfGoLiveSource_(cfg)) {
+      return getRecentGoLivesFromProductFunctions_(cfg, viewModeOpts, windowDaysOverride, productOpts);
+    }
+
     var pa = (productOpts && productOpts.product) || 'all';
 
     // Recent window: positive windowDaysOverride wins; otherwise fall back to config / 60-day default.
@@ -1608,6 +2709,129 @@ function _sfdcDataVersion_(cfg) {
                ' deployments with in-window go-live dates (last ' +
                recentWindowDays + ' days, Active + Complete).');
 
+    return applyViewModeFilter_(cfg, results, viewModeOpts);
+  }
+
+  /**
+   * ProductMode recent go-lives from PF rows (Active + Complete).
+   * One row per PF record with an in-window Production_Move_Date_Actual__c.
+   *
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {number=} windowDaysOverride
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   * @private
+   */
+  function getRecentGoLivesFromProductFunctions_(cfg, viewModeOpts, windowDaysOverride, productOpts) {
+    var recentWindowDays =
+      (typeof windowDaysOverride === 'number' && windowDaysOverride > 0)
+        ? windowDaysOverride
+        : (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
+          (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) || 60;
+
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var tz = Session.getScriptTimeZone();
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var windowStart = new Date(now.getTime() - recentWindowDays * 24 * 60 * 60 * 1000);
+    var windowStartKey = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
+
+    var pfRows = getProductModeHistoricalPfRows_(cfg, productOpts);
+    var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var enrichmentMap = {};
+    try {
+      enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    } catch (err) {
+      Logger.log('CoreData.getRecentGoLivesFromProductFunctions_: enrichment failed: ' + err);
+    }
+
+    var results = [];
+    var seen = {};
+    pfRows.forEach(function (pf) {
+      if (!pf || !pf.deploymentFk) return;
+
+      var ov = goLivesOverrides[pf.accountName] || {};
+      if (ov.exclude) return;
+
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      var depId = _deriveProductFunctionDeploymentId_(parentId, pf);
+      if (seen[depId]) return;
+
+      var dep = {
+        deploymentId: depId,
+        parentDeploymentId: parentId,
+        accountId: pf.accountId || '',
+        accountName: pf.accountName || '',
+        deploymentName: pf.deploymentName || '',
+        partner: pf.partner || '',
+        industry: pf.industry || '',
+        status: pf.overallStatus || '',
+        productArea: pf.productArea || '',
+        funcArea: pf.funcArea || '',
+        firstMtpDateActual: pf.actualGoLive || pf.firstMtpDateActual || '',
+        completionDate: pf.completionDate || ''
+      };
+
+      var products = [];
+      if (pf.productArea) products.push(pf.productArea);
+      if (pf.funcArea && products.indexOf(pf.funcArea) < 0) products.push(pf.funcArea);
+
+      var allRecentDates = [];
+      var actualKey = _toDateKey_(pf.actualGoLive);
+      if (actualKey) {
+        allRecentDates = [{ date: actualKey, products: products }];
+      } else {
+        var enrichment = enrichmentMap[parentId];
+        allRecentDates = enrichment ? (enrichment.recentDates || []) : [];
+        if (products.length && allRecentDates.length) {
+          allRecentDates = allRecentDates.filter(function (rd) {
+            if (!rd.products || !rd.products.length) return true;
+            for (var pi = 0; pi < products.length; pi++) {
+              if (rd.products.indexOf(products[pi]) >= 0) return true;
+            }
+            return false;
+          });
+        }
+      }
+
+      var recentMatch = _latestRecentDateInRange_(dep, allRecentDates, windowStartKey, todayKey);
+      if (!recentMatch) return;
+
+      seen[depId] = true;
+      results.push({
+        deploymentId: depId,
+        parentDeploymentId: parentId,
+        pfRowId: pf.pfRowId || '',
+        accountId: dep.accountId,
+        accountName: dep.accountName,
+        deploymentName: dep.deploymentName,
+        partner: ov.overridePartner || dep.partner,
+        industry: dep.industry,
+        status: dep.status,
+        productArea: dep.productArea,
+        funcArea: dep.funcArea,
+        recentDates: recentMatch.filteredRecentDates,
+        lastGoLiveDate: recentMatch.lastGoLiveDate,
+        deploymentRowSource: 'productFunction',
+        parentMatchStatus: 'pfOnly'
+      });
+    });
+
+    results.sort(function (a, b) {
+      if (a.lastGoLiveDate < b.lastGoLiveDate) return -1;
+      if (a.lastGoLiveDate > b.lastGoLiveDate) return 1;
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
+
+    results = _enrichGoLiveRowsWithOverrides_(
+      results,
+      getDeploymentOverridesMap_(cfg),
+      goLivesOverrides
+    );
+
+    Logger.log('CoreData.getRecentGoLivesFromProductFunctions_: ' + results.length +
+               ' PF rows with in-window go-live dates (last ' + recentWindowDays + ' days).');
     return applyViewModeFilter_(cfg, results, viewModeOpts);
   }
 
@@ -2396,14 +3620,115 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   // ===========================================================================
 
   /**
-   * Reads SFDC_DeploymentProductFunctions and returns flat rows with per-product
-   * target and actual go-live dates. Used exclusively by getUpcomingSurveys.
+   * Strips outer braces from a Salesforce object-like connector export string.
+   * @param {any} raw
+   * @return {string}
+   * @private
+   */
+  function _stripSfdcObjectWrapper_(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '';
+    if (s.charAt(0) === '{' && s.charAt(s.length - 1) === '}') {
+      s = s.slice(1, -1).trim();
+    }
+    return s;
+  }
+
+  /**
+   * Parses a single field from a Salesforce object-like connector export string.
+   * Handles blank values, nested attributes={...}, and keys in any order.
+   * @param {any} raw
+   * @param {string} fieldName
+   * @return {string}
+   * @private
+   */
+  function _parseSfdcObjectField_(raw, fieldName) {
+    var s = _stripSfdcObjectWrapper_(raw);
+    if (!s) return '';
+    if (s.indexOf('=') < 0) return s;
+
+    var target = String(fieldName || '').trim();
+    if (!target) return '';
+
+    // Remove nested attributes blocks so commas inside do not break field parsing.
+    var scan = s.replace(/attributes=\{[^}]*\}/gi, '')
+      .replace(/,\s*,+/g, ',')
+      .replace(/,\s*$/g, '');
+
+    var escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var re = new RegExp(
+      '(?:^|,\\s*)' + escaped + '=(.*?)(?=,\\s*[A-Za-z_][\\w.]*=|$)', 'i'
+    );
+    var m = scan.match(re);
+    if (!m) {
+      m = scan.match(new RegExp('(?:^|,\\s*)' + escaped + '=([^,}]+)', 'i'));
+    }
+    if (!m) return '';
+    return String(m[1] || '').trim();
+  }
+
+  /**
+   * Extracts Account Id from a Customer__r object export via attributes.url fallback.
+   * @param {any} raw
+   * @return {string}
+   * @private
+   */
+  function _parseSfdcAccountIdFromCustomerObject_(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '';
+    var fromId = _parseSfdcObjectField_(s, 'Id');
+    if (fromId) return fromId;
+    var m = s.match(/\/sobjects\/Account\/([a-zA-Z0-9]{15,18})/i);
+    return m ? m[1] : '';
+  }
+
+  /**
+   * Recommended PF sheet headers for ProductMode union diagnostics.
+   * @type {Array<string>}
+   * @private
+   */
+  var _PF_RECOMMENDED_HEADERS_ = [
+    'Id',
+    'Deployment__c',
+    'Deployment__r.Id',
+    'Deployment__r.Name',
+    'Deployment__r.Customer__c',
+    'Deployment__r.Customer__r.Name',
+    'Deployment__r.Customer__r.Industry',
+    'Deployment__r.Customer__r.PS_Region_New__c',
+    'Deployment__r.Customer__r.PS_Sub_Region__c',
+    'Deployment__r.Customer__r.SubRegion__c',
+    'Deployment__r.Deployment_Start_Date__c',
+    'Deployment__r.Current_MTP_Date__c',
+    'Deployment__r.First_Move_to_Production_Date_Actual__c',
+    'Deployment__r.Overall_Status__c',
+    'Deployment__r.Deployment_Phase__c',
+    'Deployment__r.Deployment_Stage__c',
+    'Deployment__r.Overall_Health__c',
+    'Deployment__r.Deployment_Completion_Date__c',
+    'Deployment__r.Workday_Engagement_Manager__r.Full_Name__c',
+    'Deployment__r.Delivery_Assurance_Manager__r.Full_Name__c',
+    'Deployment__r.Priming_Partner__c',
+    'Deployment__r.Implementation_Partner__c',
+    'Deployment__r.Deployment_Partner_Name__c',
+    'Deployment__r.Deployment_Summary__c',
+    'Product_Area__c',
+    'Function__c',
+    'Production_Move_Date_Target__c',
+    'Production_Move_Date_Actual__c'
+  ];
+
+  /**
+   * Reads SFDC_DeploymentProductFunctions and returns flat rows with PF fields and
+   * optional Deployment__r.* relationship fields for ProductMode union synthesis.
    *
    * @param {AppConfig} cfg  Already-defaulted config.
-   * @return {Array<Object>}  { deploymentFk, productArea, targetGoLive, actualGoLive }
+   * @return {Array<Object>}
    * @private
    */
   function readSfdcProductFunctionsRaw_(cfg) {
+    if (_cache.pfRows !== null) return _cache.pfRows;
+
     var sheetName = cfg.sheets.sfdcDeploymentProductFunctions ||
                     'SFDC_DeploymentProductFunctions';
     var ss = getSpreadsheet_();
@@ -2411,10 +3736,26 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     if (!sheet) {
       Logger.log('CoreData.readSfdcProductFunctionsRaw_: sheet "' + sheetName + '" not found.');
-      return [];
+      _cache.pfReaderMeta = {
+        sheetName: sheetName,
+        headers: [],
+        foundColumns: {},
+        missingRecommended: _PF_RECOMMENDED_HEADERS_.slice()
+      };
+      _cache.pfRows = [];
+      return _cache.pfRows;
     }
     var lastRow = sheet.getLastRow();
-    if (lastRow < 2) return [];
+    if (lastRow < 2) {
+      _cache.pfReaderMeta = {
+        sheetName: sheetName,
+        headers: [],
+        foundColumns: {},
+        missingRecommended: _PF_RECOMMENDED_HEADERS_.slice()
+      };
+      _cache.pfRows = [];
+      return _cache.pfRows;
+    }
 
     var lastCol   = sheet.getLastColumn();
     var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
@@ -2432,32 +3773,103 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       return -1;
     }
 
-    // FK column: contains 'deployment' but no dot notation (not a traversal).
-    var colFk = -1;
-    for (var i = 0; i < lowerH.length; i++) {
-      if (lowerH[i].indexOf('deployment') !== -1 && lowerH[i].indexOf('.') === -1) {
-        colFk = i;
-        break;
+    function findExact_(headerName) {
+      var target = String(headerName || '').trim().toLowerCase();
+      for (var i = 0; i < lowerH.length; i++) {
+        if (lowerH[i] === target) return i;
+      }
+      return -1;
+    }
+
+    function resolveCol_(exactHeader, keywordFallbacks, positionalFallback) {
+      var exact = findExact_(exactHeader);
+      if (exact >= 0) return exact;
+      return detect_(keywordFallbacks || [], positionalFallback);
+    }
+
+    // FK column: Deployment__c preferred; fallback to deployment keyword without dot.
+    var colFk = findExact_('Deployment__c');
+    if (colFk < 0) {
+      for (var fi = 0; fi < lowerH.length; fi++) {
+        if (lowerH[fi].indexOf('deployment') !== -1 && lowerH[fi].indexOf('.') === -1) {
+          colFk = fi;
+          break;
+        }
       }
     }
     if (colFk < 0) colFk = detect_(['deployment__c'], 5);
 
-    var colProductArea  = detect_(['product_area'],                                                1);
-    var colFunctionArea = detect_(['function__c', 'function'],                                     2);
-    var colTargetGoLive = detect_(['production_move_date_target', 'move_date_target'],             3);
-    var colActualGoLive = detect_(['production_move_date_actual', 'move_date_actual'],             4);
+    var colPfId = findExact_('Id');
+    if (colPfId >= 0 && colPfId === colFk) colPfId = -1;
+
+    var cols = {
+      pfRowId: colPfId,
+      deploymentFk: colFk,
+      parentDeploymentId: resolveCol_('Deployment__r.Id', ['deployment__r.id'], -1),
+      deploymentName: resolveCol_('Deployment__r.Name', ['deployment__r.name'], -1),
+      accountId: resolveCol_('Deployment__r.Customer__c', ['deployment__r.customer__c'], -1),
+      customerRId: resolveCol_('Deployment__r.Customer__r.Id', ['deployment__r.customer__r.id'], -1),
+      accountName: resolveCol_('Deployment__r.Customer__r.Name', ['customer__r.name'], -1),
+      industry: resolveCol_('Deployment__r.Customer__r.Industry', ['customer__r.industry'], -1),
+      region: resolveCol_('Deployment__r.Customer__r.PS_Region_New__c', ['ps_region_new'], -1),
+      subRegion: resolveCol_('Deployment__r.Customer__r.PS_Sub_Region__c', ['ps_sub_region'], -1),
+      subRegionAlt: resolveCol_('Deployment__r.Customer__r.SubRegion__c', ['subregion__c', 'subregion'], -1),
+      deploymentStartDate: resolveCol_('Deployment__r.Deployment_Start_Date__c', ['deployment_start_date'], -1),
+      mtpDate: resolveCol_('Deployment__r.Current_MTP_Date__c', ['current_mtp_date'], -1),
+      firstMtpDateActual: resolveCol_('Deployment__r.First_Move_to_Production_Date_Actual__c',
+        ['first_move_to_production_date_actual', 'move_to_production_date_actual'], -1),
+      overallStatus: resolveCol_('Deployment__r.Overall_Status__c', ['overall_status'], -1),
+      phase: resolveCol_('Deployment__r.Deployment_Phase__c', ['deployment_phase'], -1),
+      stage: resolveCol_('Deployment__r.Deployment_Stage__c', ['deployment_stage'], -1),
+      health: resolveCol_('Deployment__r.Overall_Health__c', ['overall_health'], -1),
+      completionDate: resolveCol_('Deployment__r.Deployment_Completion_Date__c', ['deployment_completion_date'], -1),
+      wdEngManager: resolveCol_('Deployment__r.Workday_Engagement_Manager__r.Full_Name__c',
+        ['workday_engagement_manager__r.full_name', 'engagement_manager'], -1),
+      damFullName: resolveCol_('Deployment__r.Delivery_Assurance_Manager__r.Full_Name__c',
+        ['delivery_assurance_manager__r.full_name', 'delivery_assurance'], -1),
+      primingPartner: resolveCol_('Deployment__r.Priming_Partner__c', ['priming_partner'], -1),
+      implPartner: resolveCol_('Deployment__r.Implementation_Partner__c', ['implementation_partner'], -1),
+      partner: resolveCol_('Deployment__r.Deployment_Partner_Name__c', ['deployment_partner_name', 'partner'], -1),
+      currentUpdate: resolveCol_('Deployment__r.Deployment_Summary__c', ['deployment_summary'], -1),
+      productArea: resolveCol_('Product_Area__c', ['product_area'], 1),
+      funcArea: resolveCol_('Function__c', ['function__c', 'function'], 2),
+      targetGoLive: resolveCol_('Production_Move_Date_Target__c',
+        ['production_move_date_target', 'move_date_target'], 3),
+      actualGoLive: resolveCol_('Production_Move_Date_Actual__c',
+        ['production_move_date_actual', 'move_date_actual'], 4),
+      customerObject: findExact_('Deployment__r.Customer__r'),
+      wdEmObject: findExact_('Deployment__r.Workday_Engagement_Manager__r'),
+      damObject: findExact_('Deployment__r.Delivery_Assurance_Manager__r')
+    };
+
+    var foundColumns = {};
+    Object.keys(cols).forEach(function (key) {
+      if (cols[key] >= 0) foundColumns[key] = headers[cols[key]];
+    });
+    var missingRecommended = _PF_RECOMMENDED_HEADERS_.filter(function (headerName) {
+      if (findExact_(headerName) >= 0) return false;
+      if (headerName === 'Deployment__r.Customer__c' && cols.accountId >= 0) return false;
+      if (headerName.indexOf('Customer__r.') >= 0 && cols.customerObject >= 0) return false;
+      if (headerName.indexOf('Workday_Engagement_Manager__r.') >= 0 && cols.wdEmObject >= 0) return false;
+      if (headerName.indexOf('Delivery_Assurance_Manager__r.') >= 0 && cols.damObject >= 0) return false;
+      return true;
+    });
+    _cache.pfReaderMeta = {
+      sheetName: sheetName,
+      headers: headers,
+      foundColumns: foundColumns,
+      missingRecommended: missingRecommended
+    };
 
     var tz   = Session.getScriptTimeZone();
     var rows = [];
 
     for (var r = 1; r < allValues.length; r++) {
       var row = allValues[r];
-      var fk  = colFk >= 0 ? String(row[colFk] || '').trim() : '';
-      if (!fk) continue;
 
-      var productArea = colProductArea  >= 0 ? String(row[colProductArea]  || '').trim() : '';
-      var funcArea    = colFunctionArea >= 0 ? String(row[colFunctionArea] || '').trim() : '';
-
+      function cellStr_(col) {
+        return col >= 0 ? String(row[col] || '').trim() : '';
+      }
       function cellDate_(col) {
         if (col < 0) return '';
         var raw = row[col];
@@ -2466,19 +3878,65 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         if (isNaN(d.getTime())) return '';
         return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
       }
+      function resolveField_(flatCol, objectCol, objectField) {
+        var flat = cellStr_(flatCol);
+        if (flat) return flat;
+        if (objectCol >= 0 && objectField) {
+          return _parseSfdcObjectField_(row[objectCol], objectField);
+        }
+        return '';
+      }
+      function resolveAccountId_() {
+        var direct = cellStr_(cols.accountId);
+        if (direct) return direct;
+        var fromCustomerRId = cellStr_(cols.customerRId);
+        if (fromCustomerRId) return fromCustomerRId;
+        if (cols.customerObject >= 0) {
+          return _parseSfdcAccountIdFromCustomerObject_(row[cols.customerObject]);
+        }
+        return '';
+      }
 
+      var fk = cellStr_(cols.deploymentFk);
+      if (!fk) continue;
+
+      var parentId = cellStr_(cols.parentDeploymentId) || fk;
       rows.push({
+        pfRowId: cellStr_(cols.pfRowId),
         deploymentFk: fk,
-        productArea:  productArea,
-        funcArea:     funcArea,
-        targetGoLive: cellDate_(colTargetGoLive),
-        actualGoLive: cellDate_(colActualGoLive)
+        parentDeploymentId: parentId,
+        deploymentName: cellStr_(cols.deploymentName),
+        accountId: resolveAccountId_(),
+        accountName: resolveField_(cols.accountName, cols.customerObject, 'Name'),
+        industry: resolveField_(cols.industry, cols.customerObject, 'Industry'),
+        region: resolveField_(cols.region, cols.customerObject, 'PS_Region_New__c'),
+        subRegion: resolveField_(cols.subRegion, cols.customerObject, 'PS_Sub_Region__c'),
+        subRegionAlt: resolveField_(cols.subRegionAlt, cols.customerObject, 'SubRegion__c'),
+        deploymentStartDate: cellDate_(cols.deploymentStartDate),
+        mtpDate: cellDate_(cols.mtpDate),
+        firstMtpDateActual: cellDate_(cols.firstMtpDateActual),
+        overallStatus: cellStr_(cols.overallStatus),
+        phase: cellStr_(cols.phase),
+        stage: cellStr_(cols.stage),
+        health: cellStr_(cols.health),
+        completionDate: cellDate_(cols.completionDate),
+        wdEngManager: resolveField_(cols.wdEngManager, cols.wdEmObject, 'Full_Name__c'),
+        damFullName: resolveField_(cols.damFullName, cols.damObject, 'Full_Name__c'),
+        primingPartner: cellStr_(cols.primingPartner),
+        implPartner: cellStr_(cols.implPartner),
+        partner: cellStr_(cols.partner),
+        currentUpdate: cellStr_(cols.currentUpdate),
+        productArea: cellStr_(cols.productArea),
+        funcArea: cellStr_(cols.funcArea),
+        targetGoLive: cellDate_(cols.targetGoLive),
+        actualGoLive: cellDate_(cols.actualGoLive)
       });
     }
 
     Logger.log('CoreData.readSfdcProductFunctionsRaw_: ' + rows.length +
                ' product-function rows from "' + sheetName + '".');
-    return rows;
+    _cache.pfRows = rows;
+    return _cache.pfRows;
   }
 
   // ===========================================================================
@@ -2984,14 +4442,31 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Active deployments (raw, Active-only).
     var activeRows = [];
     try {
-      var rawRows = readSfdcDeploymentsRaw_(cfg);
-      activeRows = rawRows.filter(function (r) {
-        return r.overallStatus === 'Active';
-      });
-      // S1: exclude Student deployments from MDS/PGL batch view (HENP only).
-      activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+      if (usesProductModePfDataSource_(cfg)) {
+        var effectivePf = getAllEffectiveDeployments(cfg) || [];
+        var byParent = {};
+        effectivePf.forEach(function (r) {
+          var pid = _canonicalId_(r.parentDeploymentId || r.deploymentFk || r.deploymentId);
+          if (!pid) return;
+          if (!byParent[pid]) {
+            byParent[pid] = Object.assign({}, r, {
+              deploymentId: pid,
+              parentDeploymentId: pid,
+              deploymentFk: pid
+            });
+          }
+        });
+        activeRows = Object.keys(byParent).map(function (k) { return byParent[k]; });
+        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+      } else {
+        var rawRows = readSfdcDeploymentsRaw_(cfg);
+        activeRows = rawRows.filter(function (r) {
+          return r.overallStatus === 'Active';
+        });
+        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+      }
     } catch (e) {
-      Logger.log('CoreData.getMdsPglBatchView: readSfdcDeploymentsRaw_ failed: ' + e);
+      Logger.log('CoreData.getMdsPglBatchView: active deployment read failed: ' + e);
     }
 
     // Product-function rows grouped by deploymentFk.
@@ -4426,11 +5901,16 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
     var pa = (productOpts && productOpts.product) || 'all';
 
-    var allRows = readSfdcDeploymentsRaw_(cfg);
-    // S1: exclude Student deployments from Overview tab (HENP only).
-    allRows = filterDeploymentsByStudent_(allRows, 'exclude', cfg);
-    allRows = filterDeploymentsByProduct_(allRows, pa, cfg);
-    var activeRows = allRows.filter(function(r) { return r.overallStatus === 'Active'; });
+    var activeRows;
+    if (usesProductModePfDataSource_(cfg)) {
+      activeRows = getAllEffectiveDeployments(cfg, productOpts) || [];
+      activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+    } else {
+      var allRows = readSfdcDeploymentsRaw_(cfg);
+      allRows = filterDeploymentsByStudent_(allRows, 'exclude', cfg);
+      allRows = filterDeploymentsByProduct_(allRows, pa, cfg);
+      activeRows = allRows.filter(function (r) { return r.overallStatus === 'Active'; });
+    }
 
     // TOTALS
     var totalActive    = activeRows.length;
@@ -4541,7 +6021,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa       = (productOpts && productOpts.product) || 'all';
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
-    var cacheKey = _perfKey_(cfg, 'overviewData:v3');
+    var cacheKey = _perfKey_(cfg, 'overviewData:v4');
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
 
@@ -4722,7 +6202,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     }
 
     return rows.filter(function (r) {
-      return allowed[_canonicalId_(r.deploymentId)] || matchesNameToken_(r);
+      if (String(r.productArea || '').trim() === productArea) return true;
+      var lookupId = r.parentDeploymentId || r.deploymentId;
+      return allowed[_canonicalId_(lookupId)] || matchesNameToken_(r);
     });
   }
 
@@ -5280,6 +6762,14 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
     _validateEffectiveDeployments:       _validateEffectiveDeployments,
+    _validateProductModeActiveDeploymentsUnion: _validateProductModeActiveDeploymentsUnion,
+    _debugProductModeActiveDeploymentsUnion: _debugProductModeActiveDeploymentsUnion,
+    _debugProductModeSources: _debugProductModeSources,
+    readProductModePfRowsRaw_: readProductModePfRowsRaw_,
+    beginReportBuildContext_: beginReportBuildContext_,
+    endReportBuildContext_: endReportBuildContext_,
+    _markReportBuildPhase_: _markReportBuildPhase_,
+    _parentDeploymentLookupId_: _parentDeploymentLookupId_,
     getUpcomingGoLives:                  getUpcomingGoLives,
     updateDeploymentMeta:                updateDeploymentMeta,
     updateDeploymentOverride:            updateDeploymentOverride,

@@ -39,6 +39,15 @@ var APP_CONFIG = {
     productModeExcludeCustomer360: false
   },
 
+  deploymentHealthPlan: {
+    enabled: true,
+    sheetName: 'SFDC_DHP',
+    chipEnabled: true,
+    expandedDetailsEnabled: true,
+    metricsEnabled: false,
+    issueCategoryDelimiter: ';'
+  },
+
   sheets: {
     activeDeployments:     'ActiveDeployments',
     goLives:               'Go Lives',

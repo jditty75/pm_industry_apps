@@ -295,6 +295,23 @@ var CoreConfig = (function () {
       cfg.sheets.csatInFlight = 'CSAT_InFlight';
 
     // -------------------------------------------------------------------------
+    // Deployment Health Plan (DHP) — opt-in per app; safe defaults for all apps
+    // -------------------------------------------------------------------------
+    cfg.deploymentHealthPlan = cfg.deploymentHealthPlan || {};
+    if (cfg.deploymentHealthPlan.enabled === undefined)
+      cfg.deploymentHealthPlan.enabled = false;
+    if (!cfg.deploymentHealthPlan.sheetName)
+      cfg.deploymentHealthPlan.sheetName = 'SFDC_DHP';
+    if (cfg.deploymentHealthPlan.chipEnabled === undefined)
+      cfg.deploymentHealthPlan.chipEnabled = true;
+    if (cfg.deploymentHealthPlan.expandedDetailsEnabled === undefined)
+      cfg.deploymentHealthPlan.expandedDetailsEnabled = true;
+    if (cfg.deploymentHealthPlan.metricsEnabled === undefined)
+      cfg.deploymentHealthPlan.metricsEnabled = false;
+    if (!cfg.deploymentHealthPlan.issueCategoryDelimiter)
+      cfg.deploymentHealthPlan.issueCategoryDelimiter = ';';
+
+    // -------------------------------------------------------------------------
     // Active deployments (ProductMode union — EVI/AI opt-in)
     // -------------------------------------------------------------------------
     cfg.activeDeployments = cfg.activeDeployments || {};
@@ -728,6 +745,13 @@ var CoreConfig = (function () {
       cfg.ui.productFilter.nameTokens = {};
     if (cfg.ui.productFilter.hidden === undefined)
       cfg.ui.productFilter.hidden = false;
+
+    // Mirror deploymentHealthPlan to ui for client-side APP_UI_CONFIG access.
+    cfg.ui.deploymentHealthPlan = Object.assign(
+      {},
+      cfg.deploymentHealthPlan,
+      cfg.ui.deploymentHealthPlan || {}
+    );
 
     // -------------------------------------------------------------------------
     // Trends (T1)

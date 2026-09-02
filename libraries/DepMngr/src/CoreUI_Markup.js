@@ -278,6 +278,7 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
     '  </div>',
     // Dynamic KPI cards — populated by JS based on current filter state.
     '  <div class="stats-grid" id="deployments-stats-grid"></div>',
+    '  <div class="deployments-metrics-note" id="deployments-metrics-note" style="display:none;"></div>',
     // Filter shell — primary row, active chips, and advanced panel
     '  <div class="control-bar deployments-filter-shell">',
     '    <div class="deployments-filter-primary control-row">',

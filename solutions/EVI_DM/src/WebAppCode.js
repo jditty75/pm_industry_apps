@@ -81,7 +81,7 @@ function getActiveDeploymentsData() {
  * @param {Object=} viewModeOpts  { viewMode: 'my'|'all', ddDisplayName: string }
  */
 function getAllDeploymentsForUI(viewModeOpts, productOpts) {
-  return CoreLib.CoreData.getAllDeployments(APP_CONFIG, viewModeOpts, productOpts);
+  return CoreLib.CoreData.getAllDeploymentsForUI(APP_CONFIG, viewModeOpts, productOpts);
 }
 
 /**
@@ -856,7 +856,7 @@ function _debugProductModeActiveDeploymentsUnion() {
   var summary = CoreLib.CoreData._debugProductModeActiveDeploymentsUnion(APP_CONFIG);
   Logger.log('\n=== getAllDeployments cross-check ===');
   var deployments = CoreLib.CoreData.getAllDeployments(APP_CONFIG, { viewMode: 'all', ddDisplayName: '' });
-  var bySource = { parent: 0, productFunction: 0, other: 0 };
+  var bySource = { parent: 0, productFunction: 0, productFunctionGrouped: 0, other: 0 };
   deployments.forEach(function (r) {
     var src = r.deploymentRowSource || 'other';
     if (bySource[src] !== undefined) bySource[src]++;
@@ -874,11 +874,51 @@ function _debugProductModeActiveDeploymentsUnion() {
 }
 
 /**
+ * ProductMode deployment display-grain diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugProductModeDeploymentDisplayGrain() {
+  return CoreLib.CoreData._debugProductModeDeploymentDisplayGrain(APP_CONFIG);
+}
+
+/**
+ * ProductMode count-grain vs display-grain diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugProductModeCounts() {
+  return CoreLib.CoreData._debugProductModeCounts(APP_CONFIG);
+}
+
+/**
+ * Data freshness diagnostic for the header badge. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugDataFreshness() {
+  return CoreLib.CoreFreshnessMonitor._debugDataFreshness(APP_CONFIG);
+}
+
+/**
  * Comprehensive ProductMode source diagnostic. Run from the Apps Script editor.
  * @return {Object}
  */
 function _debugProductModeSources() {
   return CoreLib.CoreData._debugProductModeSources(APP_CONFIG, 10);
+}
+
+/**
+ * ProductMode PF go-live event diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugProductModeGoLiveEvents() {
+  return CoreLib.CoreData._debugProductModeGoLiveEvents(APP_CONFIG, { product: 'all' });
+}
+
+/**
+ * Overview Next High Risk widget diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugOverviewNextHighRisk() {
+  return CoreLib.CoreData._debugOverviewNextHighRisk(APP_CONFIG, { product: 'all' });
 }
 
 // ===========================================================================

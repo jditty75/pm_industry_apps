@@ -13,6 +13,9 @@ var APP_CONFIG = {
   activeDeployments: {
     productModeUnionEnabled: true,
     productModeSourceMode: 'pfOnly',
+    productModeDisplayGrain: 'deploymentProduct',
+    productModeCountGrain: 'pfRow',
+    productModeGoLiveGrain: 'accountDate',
     productModeDataSource: 'productFunction',
     productModeHistoricalSource: 'productFunction',
     productModeGoLiveSource: 'productFunction',
@@ -248,11 +251,13 @@ var APP_CONFIG = {
     warningHours: 12,
     criticalHours: 24,
     logSheet: 'Auto Refresh Execution Log',
+    primarySheet: 'SFDC_DeploymentProductFunctions',
     watchSheet: 'SFDC_DeploymentProductFunctions',
     expectedSheets: [
       'SFDC_DeploymentProductFunctions',
-      'SFDC_Deployments',
-      'SFDC_DeploymentContacts',
+      'Contacts1',
+      'Contacts2',
+      'SFDC_Wellness',
       'SFDC_DeploymentHistory'
     ],
     alertRecipient: 'jeffrey.ditty@workday.com'

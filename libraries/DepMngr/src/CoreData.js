@@ -56,6 +56,7 @@ var CoreData = (function () {
     sfdcRows: null,           // result of readSfdcDeploymentsRaw_
     pfRows: null,             // result of readSfdcProductFunctionsRaw_
     effectiveByProduct: {},   // getAllEffectiveDeployments cache keyed by product chip
+    countByProduct: {},       // getActiveCountDeployments cache keyed by product chip
     historicalPfByProduct: {}, // getProductModeHistoricalPfRows_ cache
     metaMap: null,            // result of getDeploymentsMetaMap_
     overridesMap: null,       // result of getDeploymentOverridesMap_
@@ -79,6 +80,7 @@ var CoreData = (function () {
     _cache.sfdcRows = null;
     _cache.pfRows = null;
     _cache.effectiveByProduct = {};
+    _cache.countByProduct = {};
     _cache.historicalPfByProduct = {};
     _cache.metaMap = null;
     _cache.overridesMap = null;
@@ -674,6 +676,219 @@ var CoreData = (function () {
   }
 
   /**
+   * ProductMode display grain for active deployment surfaces.
+   * @param {AppConfig} cfg
+   * @return {'pfRow'|'parentDeployment'|'deploymentProduct'}
+   * @private
+   */
+  function _getProductModeDisplayGrain_(cfg) {
+    if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return 'pfRow';
+    var grain = cfg.activeDeployments && cfg.activeDeployments.productModeDisplayGrain;
+    if (grain === 'parentDeployment' || grain === 'deploymentProduct') return grain;
+    return 'pfRow';
+  }
+
+  /**
+   * ProductMode count grain for Overview / analytics / portfolio KPI totals.
+   * Independent of display grain. Unset or invalid values follow display grain
+   * so existing apps keep prior count behavior.
+   * @param {AppConfig} cfg
+   * @return {'pfRow'|'parentDeployment'|'deploymentProduct'}
+   * @private
+   */
+  function _getProductModeCountGrain_(cfg) {
+    if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return 'pfRow';
+    var grain = cfg.activeDeployments && cfg.activeDeployments.productModeCountGrain;
+    if (grain === 'parentDeployment' || grain === 'deploymentProduct' || grain === 'pfRow') {
+      return grain;
+    }
+    return _getProductModeDisplayGrain_(cfg);
+  }
+
+  /**
+   * ProductMode go-live event grain.
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function _getProductModeGoLiveGrain_(cfg) {
+    return (cfg.activeDeployments && cfg.activeDeployments.productModeGoLiveGrain) ||
+      'accountDate';
+  }
+
+  /**
+   * Normalizes a product area string for stable group keys.
+   * @param {string} productArea
+   * @return {string}
+   * @private
+   */
+  function _normalizeProductAreaKey_(productArea) {
+    return String(productArea || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
+
+  /**
+   * Stable deploymentId for deploymentProduct grain groups.
+   * @param {string} parentId
+   * @param {string} productArea
+   * @return {string}
+   * @private
+   */
+  function _deriveGroupedDeploymentProductId_(parentId, productArea) {
+    return _canonicalId_(parentId) + '__product__' + _normalizeProductAreaKey_(productArea);
+  }
+
+  /**
+   * Detail object for one PF row attached to a grouped deployment row.
+   * @param {Object} pf
+   * @return {Object}
+   * @private
+   */
+  function _buildPfDetailObject_(pf) {
+    return {
+      pfRowId: pf.pfRowId || '',
+      productArea: pf.productArea || '',
+      funcArea: pf.funcArea || '',
+      targetGoLive: pf.targetGoLive || '',
+      actualGoLive: pf.actualGoLive || '',
+      overallStatus: pf.overallStatus || '',
+      phase: pf.phase || '',
+      stage: pf.stage || '',
+      health: pf.health || ''
+    };
+  }
+
+  /**
+   * Collects eligible PF rows for pfOnly active deployment builds.
+   * @param {Array<Object>} pfRows
+   * @param {AppConfig} cfg
+   * @return {Array<{pf: Object, index: number}>}
+   * @private
+   */
+  function _collectEligiblePfOnlyRows_(pfRows, cfg) {
+    var seenPf = {};
+    var eligible = [];
+    (pfRows || []).forEach(function (pf, index) {
+      if (!pf || (!pf.deploymentFk && !pf.parentDeploymentId)) return;
+      var eligibility = _evaluatePfOnlyRowEligibility_(pf, cfg);
+      if (!eligibility.eligible) return;
+      var dedupeKey = _pfOnlyDedupeKey_(pf);
+      if (seenPf[dedupeKey]) return;
+      seenPf[dedupeKey] = true;
+      eligible.push({ pf: pf, index: index });
+    });
+    return eligible;
+  }
+
+  /**
+   * Analyzes PF row counts at each display grain (diagnostics).
+   * @param {Array<Object>} pfRows
+   * @param {AppConfig} cfg
+   * @return {Object}
+   * @private
+   */
+  function _analyzePfDisplayGrain_(pfRows, cfg) {
+    var eligible = _collectEligiblePfOnlyRows_(pfRows, cfg);
+    var parentCounts = {};
+    var parentProductCounts = {};
+    var parentNames = {};
+
+    eligible.forEach(function (item) {
+      var pf = item.pf;
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      parentCounts[parentId] = (parentCounts[parentId] || 0) + 1;
+      if (!parentNames[parentId]) {
+        parentNames[parentId] = pf.accountName || pf.deploymentName || parentId;
+      }
+      var ppKey = parentId + '|' + String(pf.productArea || '').trim().toLowerCase();
+      parentProductCounts[ppKey] = (parentProductCounts[ppKey] || 0) + 1;
+    });
+
+    var dupParentExamples = [];
+    var dupParentProductExamples = [];
+    Object.keys(parentCounts).forEach(function (pid) {
+      if (parentCounts[pid] > 1 && dupParentExamples.length < 5) {
+        dupParentExamples.push({
+          parentDeploymentId: pid,
+          accountName: parentNames[pid] || '',
+          rowCount: parentCounts[pid]
+        });
+      }
+    });
+    Object.keys(parentProductCounts).forEach(function (key) {
+      if (parentProductCounts[key] > 1 && dupParentProductExamples.length < 5) {
+        var sep = key.indexOf('|');
+        dupParentProductExamples.push({
+          parentDeploymentId: key.slice(0, sep),
+          productArea: key.slice(sep + 1),
+          rowCount: parentProductCounts[key]
+        });
+      }
+    });
+
+    return {
+      pfActiveRowCount: eligible.length,
+      groupedParentDeploymentCount: Object.keys(parentCounts).length,
+      groupedDeploymentProductCount: Object.keys(parentProductCounts).length,
+      duplicateParentExamples: dupParentExamples,
+      duplicateParentProductExamples: dupParentProductExamples
+    };
+  }
+
+  /**
+   * Builds one grouped ProductMode deployment row from multiple PF records.
+   * @param {Array<{pf: Object, index: number}>} groupItems
+   * @param {AppConfig} cfg
+   * @param {'parentDeployment'|'deploymentProduct'} grain
+   * @param {Object} metaMap
+   * @param {Object} overridesMap
+   * @param {Object} wellnessMap
+   * @param {number} groupIndex
+   * @return {Object|null}
+   * @private
+   */
+  function _buildGroupedPfDeploymentRow_(groupItems, cfg, grain, metaMap, overridesMap, wellnessMap, groupIndex) {
+    if (!groupItems || !groupItems.length) return null;
+
+    var primary = groupItems[0];
+    var pf = primary.pf;
+    var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+    var row = _buildPfOnlyDeploymentRow_(pf, cfg, metaMap, overridesMap, primary.index, wellnessMap);
+    row.deploymentName = String(pf.deploymentName || row.deploymentName || '').trim();
+
+    var productFunctions = groupItems.map(function (item) {
+      return _buildPfDetailObject_(item.pf);
+    });
+    var functions = [];
+    var productAreas = [];
+    groupItems.forEach(function (item) {
+      var fa = String(item.pf.funcArea || '').trim();
+      if (fa && functions.indexOf(fa) < 0) functions.push(fa);
+      var pa = String(item.pf.productArea || '').trim();
+      if (pa && productAreas.indexOf(pa) < 0) productAreas.push(pa);
+    });
+
+    var groupId = grain === 'parentDeployment'
+      ? parentId
+      : _deriveGroupedDeploymentProductId_(parentId, pf.productArea);
+
+    row.deploymentId = groupId;
+    row.parentDeploymentId = parentId;
+    row.deploymentFk = parentId;
+    row.deploymentRowSource = 'productFunctionGrouped';
+    row.parentMatchStatus = 'pfGrouped';
+    row.productFunctions = productFunctions;
+    row.productFunctionCount = productFunctions.length;
+    row.productAreas = productAreas;
+    row.functions = functions;
+    row.productArea = grain === 'deploymentProduct'
+      ? (pf.productArea || '')
+      : productAreas.join(', ');
+    row.funcArea = functions.join(', ');
+    row.rowIndex = primary.index + 2;
+    return row;
+  }
+
+  /**
    * True when ProductMode apps should use PF sheet as primary data source.
    * @param {AppConfig} cfg
    * @return {boolean}
@@ -1017,18 +1232,18 @@ var CoreData = (function () {
   }
 
   /**
-   * ProductMode pfOnly: active deployments built exclusively from PF sheet rows.
-   * @param {AppConfig} config
+   * Builds ProductMode pfOnly rows at a requested grain.
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @param {'pfRow'|'parentDeployment'|'deploymentProduct'} grain
    * @return {Array<Object>}
    * @private
    */
-  function buildProductModePfOnlyEffectiveDeployments_(config) {
-    var cfg = CoreConfig.withDefaults(config);
+  function _buildProductModePfOnlyRowsAtGrain_(cfg, grain) {
     var pfRows = [];
     try {
       pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
     } catch (e) {
-      Logger.log('CoreData.buildProductModePfOnlyEffectiveDeployments_: read failed: ' + e);
+      Logger.log('CoreData._buildProductModePfOnlyRowsAtGrain_: read failed: ' + e);
       return [];
     }
 
@@ -1036,30 +1251,103 @@ var CoreData = (function () {
     var overridesMap = getDeploymentOverridesMap_(cfg);
     var wellnessMap = {};
     try { wellnessMap = buildWellnessMap_(cfg) || {}; } catch (e) {
-      Logger.log('CoreData.buildProductModePfOnlyEffectiveDeployments_: buildWellnessMap_ failed: ' + e);
+      Logger.log('CoreData._buildProductModePfOnlyRowsAtGrain_: buildWellnessMap_ failed: ' + e);
     }
-    var seenPf = {};
+
+    var eligible = _collectEligiblePfOnlyRows_(pfRows, cfg);
     var effective = [];
 
-    pfRows.forEach(function (pf, index) {
-      if (!pf || (!pf.deploymentFk && !pf.parentDeploymentId)) return;
+    if (grain === 'pfRow') {
+      eligible.forEach(function (item) {
+        var row = _buildPfOnlyDeploymentRow_(item.pf, cfg, metaMap, overridesMap, item.index, wellnessMap);
+        if (!row || !row.deploymentId) return;
+        if (!(row.accountName || row.deploymentName)) return;
+        effective.push(row);
+      });
+    } else {
+      var groups = {};
+      eligible.forEach(function (item) {
+        var pf = item.pf;
+        var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+        var groupKey = grain === 'parentDeployment'
+          ? parentId
+          : parentId + '__product__' + _normalizeProductAreaKey_(pf.productArea);
+        if (!groups[groupKey]) groups[groupKey] = [];
+        groups[groupKey].push(item);
+      });
 
-      var eligibility = _evaluatePfOnlyRowEligibility_(pf, cfg);
-      if (!eligibility.eligible) return;
+      var groupIndex = 0;
+      Object.keys(groups).forEach(function (groupKey) {
+        var row = _buildGroupedPfDeploymentRow_(
+          groups[groupKey], cfg, grain, metaMap, overridesMap, wellnessMap, groupIndex++);
+        if (!row || !row.deploymentId) return;
+        if (!(row.accountName || row.deploymentName)) return;
+        effective.push(row);
+      });
+    }
 
-      var dedupeKey = _pfOnlyDedupeKey_(pf);
-      if (seenPf[dedupeKey]) return;
-      seenPf[dedupeKey] = true;
-
-      var row = _buildPfOnlyDeploymentRow_(pf, cfg, metaMap, overridesMap, index, wellnessMap);
-      if (!row || !row.deploymentId) return;
-      if (!(row.accountName || row.deploymentName)) return;
-      effective.push(row);
-    });
-
-    Logger.log('CoreData.buildProductModePfOnlyEffectiveDeployments_: ' + effective.length +
-               ' PF-only active rows from ' + pfRows.length + ' PF records.');
+    Logger.log('CoreData._buildProductModePfOnlyRowsAtGrain_: ' + effective.length +
+               ' active rows (grain=' + grain + ') from ' + pfRows.length + ' PF records.');
     return effective;
+  }
+
+  /**
+   * ProductMode pfOnly: active deployments built exclusively from PF sheet rows.
+   * Uses productModeDisplayGrain for Deployments-tab / display surfaces.
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildProductModePfOnlyEffectiveDeployments_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    return _buildProductModePfOnlyRowsAtGrain_(cfg, _getProductModeDisplayGrain_(cfg));
+  }
+
+  /**
+   * ProductMode active rows for KPI counts, independent of display grain.
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   * @private
+   */
+  function getProductModeActiveCountRows_(cfg, productOpts) {
+    var pa = (productOpts && productOpts.product) || 'all';
+    var cacheKey = String(pa);
+    if (_cache.countByProduct && _cache.countByProduct[cacheKey]) {
+      return _cache.countByProduct[cacheKey];
+    }
+
+    var countGrain = _getProductModeCountGrain_(cfg);
+    var displayGrain = _getProductModeDisplayGrain_(cfg);
+    var rows;
+
+    if (countGrain === displayGrain) {
+      rows = getAllEffectiveDeployments(cfg, productOpts) || [];
+    } else {
+      rows = _buildProductModePfOnlyRowsAtGrain_(cfg, countGrain);
+      rows = _attachDdContactsToRows_(rows, cfg);
+      rows = filterDeploymentsByProduct_(rows, pa, cfg);
+    }
+
+    if (!_cache.countByProduct) _cache.countByProduct = {};
+    _cache.countByProduct[cacheKey] = rows;
+    return rows;
+  }
+
+  /**
+   * Active rows for app-level KPI counts (Overview, analytics, portfolio totals).
+   * ProductMode uses productModeCountGrain; IndustryMode uses parent deployments.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   */
+  function getActiveCountDeployments(config, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (usesProductModePfDataSource_(cfg)) {
+      return getProductModeActiveCountRows_(cfg, productOpts);
+    }
+    return getAllEffectiveDeployments(cfg, productOpts);
   }
 
   /**
@@ -1558,6 +1846,9 @@ var CoreData = (function () {
     var adCfg = cfg.activeDeployments || {};
     var unionEnabled = isProductModeActiveDeploymentsUnionEnabled_(cfg);
     var sourceMode = _getProductModeSourceMode_(cfg);
+    var displayGrain = _getProductModeDisplayGrain_(cfg);
+    var countGrain = _getProductModeCountGrain_(cfg);
+    var goLiveGrain = _getProductModeGoLiveGrain_(cfg);
     var unionStatuses = _getProductModeUnionStatuses_(cfg);
     var allowNoStatus = adCfg.allowPfRowsWithoutParentStatus === true;
     var excludePhases = adCfg.productModeExcludePhases || [];
@@ -1715,8 +2006,8 @@ var CoreData = (function () {
       Logger.log('_validateProductModeActiveDeploymentsUnion: getAllEffectiveDeployments failed: ' + e);
     }
 
-    var bySource = { parent: 0, productFunction: 0, other: 0 };
-    var byMatchStatus = { pfOnly: 0, matchedParent: 0, synthesizedFromPfRelationship: 0, other: 0 };
+    var bySource = { parent: 0, productFunction: 0, productFunctionGrouped: 0, other: 0 };
+    var byMatchStatus = { pfOnly: 0, pfGrouped: 0, matchedParent: 0, synthesizedFromPfRelationship: 0, other: 0 };
     unionRows.forEach(function (r) {
       var src = r.deploymentRowSource || 'other';
       if (bySource[src] !== undefined) bySource[src]++;
@@ -1726,9 +2017,29 @@ var CoreData = (function () {
       else byMatchStatus.other++;
     });
 
+    var grainAnalysis = _analyzePfDisplayGrain_(pfRows, cfg);
+    var sampleGroupedRows = unionRows
+      .filter(function (r) { return r.deploymentRowSource === 'productFunctionGrouped'; })
+      .slice(0, limit)
+      .map(function (r) {
+        return {
+          deploymentId: r.deploymentId,
+          parentDeploymentId: r.parentDeploymentId,
+          accountName: r.accountName,
+          deploymentName: r.deploymentName,
+          productArea: r.productArea,
+          funcArea: r.funcArea,
+          productFunctionCount: r.productFunctionCount,
+          productFunctions: (r.productFunctions || []).slice(0, 3)
+        };
+      });
+
     Logger.log('=== _validateProductModeActiveDeploymentsUnion(' + (cfg.appId || '?') + ') ===');
     Logger.log('  productModeUnionEnabled=' + unionEnabled);
     Logger.log('  productModeSourceMode=' + sourceMode);
+    Logger.log('  productModeDisplayGrain=' + displayGrain);
+    Logger.log('  productModeCountGrain=' + countGrain);
+    Logger.log('  productModeGoLiveGrain=' + goLiveGrain);
     Logger.log('  productModeUnionStatuses=' + JSON.stringify(unionStatuses));
     Logger.log('  allowPfRowsWithoutParentStatus=' + allowNoStatus);
     Logger.log('  productModeExcludePhases=' + JSON.stringify(excludePhases));
@@ -1751,6 +2062,8 @@ var CoreData = (function () {
     Logger.log('  pfRowsWithAccountName=' + pfWithAccountName);
     Logger.log('  pfRowsMissingAccountName=' + pfMissingAccountName);
     Logger.log('  pfRowsIncludedInActiveUi=' + stats.pfRowsIncludedInActiveUi);
+    Logger.log('  grainAnalysis=' + JSON.stringify(grainAnalysis));
+    Logger.log('  effectiveDeploymentCount=' + unionRows.length);
     Logger.log('  pfRowsSkippedBecauseStatusComplete=' + stats.pfRowsSkippedBecauseStatusComplete);
     Logger.log('  pfRowsSkippedBecauseStatusMissing=' + stats.pfRowsSkippedBecauseStatusMissing);
     Logger.log('  pfRowsSkippedBecauseStatusNotEligible=' + stats.pfRowsSkippedBecauseStatusNotEligible);
@@ -1783,6 +2096,8 @@ var CoreData = (function () {
                  'productModeUnionStatuses=' + JSON.stringify(unionStatuses) + '.');
     }
 
+    Logger.log('  sampleGroupedRows=' + JSON.stringify(sampleGroupedRows));
+
     unionRows.slice(0, limit).forEach(function (r, i) {
       Logger.log('  union[' + i + ']: source=' + (r.deploymentRowSource || '?') +
                  ' match=' + (r.parentMatchStatus || '?') +
@@ -1794,6 +2109,9 @@ var CoreData = (function () {
     return {
       productModeUnionEnabled: unionEnabled,
       productModeSourceMode: sourceMode,
+      productModeDisplayGrain: displayGrain,
+      productModeCountGrain: countGrain,
+      productModeGoLiveGrain: goLiveGrain,
       productModeUnionStatuses: unionStatuses,
       allowPfRowsWithoutParentStatus: allowNoStatus,
       productModeExcludePhases: excludePhases,
@@ -1817,6 +2135,9 @@ var CoreData = (function () {
       pfRowsWithAccountName: pfWithAccountName,
       pfRowsMissingAccountName: pfMissingAccountName,
       pfRowsIncludedInActiveUi: stats.pfRowsIncludedInActiveUi,
+      grainAnalysis: grainAnalysis,
+      effectiveDeploymentCount: unionRows.length,
+      sampleGroupedRows: sampleGroupedRows,
       pfRowsSkippedBecauseStatusComplete: stats.pfRowsSkippedBecauseStatusComplete,
       pfRowsSkippedBecauseStatusMissing: stats.pfRowsSkippedBecauseStatusMissing,
       pfRowsSkippedBecauseStatusNotEligible: stats.pfRowsSkippedBecauseStatusNotEligible,
@@ -1834,6 +2155,319 @@ var CoreData = (function () {
       samplePfDeploymentFkValues: samplePfFks,
       sampleIncludedPfRows: sampleIncludedPf
     };
+  }
+
+  /**
+   * ProductMode deployment display-grain diagnostic for EVI/AI validation.
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function _debugProductModeDeploymentDisplayGrain(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var displayGrain = _getProductModeDisplayGrain_(cfg);
+    var countGrain = _getProductModeCountGrain_(cfg);
+    var goLiveGrain = _getProductModeGoLiveGrain_(cfg);
+
+    var effective = [];
+    try { effective = getAllEffectiveDeployments(cfg) || []; } catch (e) {
+      Logger.log('_debugProductModeDeploymentDisplayGrain: getAllEffectiveDeployments failed: ' + e);
+    }
+
+    var deployments = [];
+    try {
+      deployments = getAllDeployments(cfg, { viewMode: 'all', ddDisplayName: '' }) || [];
+    } catch (e) {
+      Logger.log('_debugProductModeDeploymentDisplayGrain: getAllDeployments failed: ' + e);
+    }
+
+    var bySource = {};
+    deployments.forEach(function (r) {
+      var src = r.deploymentRowSource || 'other';
+      bySource[src] = (bySource[src] || 0) + 1;
+    });
+
+    var accountCounts = {};
+    deployments.forEach(function (r) {
+      var key = String(r.accountName || '').trim();
+      if (!key) return;
+      accountCounts[key] = (accountCounts[key] || 0) + 1;
+    });
+    var duplicateAccountExamples = [];
+    Object.keys(accountCounts).forEach(function (accountName) {
+      if (accountCounts[accountName] > 1 && duplicateAccountExamples.length < 5) {
+        duplicateAccountExamples.push({
+          accountName: accountName,
+          rowCount: accountCounts[accountName]
+        });
+      }
+    });
+
+    var pfRows = [];
+    try { pfRows = readSfdcProductFunctionsRaw_(cfg) || []; } catch (e) {
+      Logger.log('_debugProductModeDeploymentDisplayGrain: PF read failed: ' + e);
+    }
+    var grainAnalysis = _analyzePfDisplayGrain_(pfRows, cfg);
+
+    var first10DeploymentRows = deployments.slice(0, 10).map(function (r) {
+      return {
+        accountName: r.accountName || '',
+        deploymentName: r.deploymentName || '',
+        deploymentId: r.deploymentId || '',
+        parentDeploymentId: r.parentDeploymentId || '',
+        productArea: r.productArea || '',
+        funcArea: r.funcArea || '',
+        productFunctionCount: r.productFunctionCount || 0,
+        deploymentRowSource: r.deploymentRowSource || ''
+      };
+    });
+
+    return {
+      appId: cfg.appId || 'UNKNOWN',
+      productModeSourceMode: _getProductModeSourceMode_(cfg),
+      productModeDisplayGrain: displayGrain,
+      productModeCountGrain: countGrain,
+      productModeGoLiveGrain: goLiveGrain,
+      getAllEffectiveDeploymentsCount: effective.length,
+      getAllDeploymentsCount: deployments.length,
+      countByDeploymentRowSource: bySource,
+      duplicateAccountExamples: duplicateAccountExamples,
+      grainAnalysis: grainAnalysis,
+      first10DeploymentRows: first10DeploymentRows
+    };
+  }
+
+  /**
+   * ProductMode count-grain vs display-grain diagnostic.
+   * Use this to validate Overview Total Active vs Deployments tab row counts.
+   *
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function _debugProductModeCounts(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var sourceMode = _getProductModeSourceMode_(cfg);
+    var displayGrain = _getProductModeDisplayGrain_(cfg);
+    var countGrain = _getProductModeCountGrain_(cfg);
+    var goLiveGrain = _getProductModeGoLiveGrain_(cfg);
+    var overviewUses = (countGrain === displayGrain) ? 'displayGrain' : 'countGrain';
+
+    var pfRows = [];
+    try { pfRows = readSfdcProductFunctionsRaw_(cfg) || []; } catch (e) {
+      Logger.log('_debugProductModeCounts: PF read failed: ' + e);
+    }
+
+    var unionStatuses = _getProductModeUnionStatuses_(cfg);
+    var activeStatusSet = {};
+    unionStatuses.forEach(function (s) { activeStatusSet[String(s || '').trim()] = true; });
+
+    var activePfRowCount = 0;
+    var uniqueActivePfIds = {};
+    var uniqueActivePfIdCount = 0;
+    pfRows.forEach(function (pf) {
+      if (!pf) return;
+      var status = String(pf.overallStatus || '').trim();
+      if (!activeStatusSet[status]) return;
+      activePfRowCount++;
+      var pfId = pf.pfRowId ? _canonicalId_(pf.pfRowId) : '';
+      if (pfId) uniqueActivePfIds[pfId] = true;
+    });
+    uniqueActivePfIdCount = Object.keys(uniqueActivePfIds).length;
+
+    var grainAnalysis = _analyzePfDisplayGrain_(pfRows, cfg);
+    var eligible = _collectEligiblePfOnlyRows_(pfRows, cfg);
+
+    var countRows = [];
+    try { countRows = getActiveCountDeployments(cfg, { product: 'all' }) || []; } catch (e) {
+      Logger.log('_debugProductModeCounts: getActiveCountDeployments failed: ' + e);
+    }
+    countRows = filterDeploymentsByStudent_(countRows, 'exclude', cfg);
+
+    var displayRows = [];
+    try { displayRows = getAllEffectiveDeployments(cfg) || []; } catch (e) {
+      Logger.log('_debugProductModeCounts: getAllEffectiveDeployments failed: ' + e);
+    }
+    displayRows = filterDeploymentsByStudent_(displayRows, 'exclude', cfg);
+
+    var deploymentsTabRows = [];
+    try {
+      deploymentsTabRows = getAllDeployments(cfg, { viewMode: 'all', ddDisplayName: '' }) || [];
+    } catch (e) {
+      Logger.log('_debugProductModeCounts: getAllDeployments failed: ' + e);
+    }
+
+    var bySource = { parent: 0, productFunction: 0, productFunctionGrouped: 0, other: 0 };
+    displayRows.forEach(function (r) {
+      var src = r.deploymentRowSource || 'other';
+      if (bySource[src] !== undefined) bySource[src]++;
+      else bySource.other++;
+    });
+
+    var overviewTotals = { totalActive: null, red: null, yellow: null, green: null, executiveWatch: null };
+    try {
+      var snap = _computeOverviewSnapshot_(cfg, { viewMode: 'all' }, { product: 'all' });
+      if (snap && snap.totals) overviewTotals = snap.totals;
+    } catch (e) {
+      Logger.log('_debugProductModeCounts: overview compute failed: ' + e);
+    }
+
+    var countHealth = { Red: 0, Yellow: 0, Green: 0, Other: 0 };
+    countRows.forEach(function (r) {
+      var h = String(r.health || '').trim();
+      if (countHealth[h] !== undefined) countHealth[h]++;
+      else countHealth.Other++;
+    });
+
+    var overviewTotal = overviewTotals.totalActive;
+    var displayCount = displayRows.length;
+    var deploymentsTabCount = deploymentsTabRows.length;
+    var usesSeparateCountGrain = _productModeUsesSeparateCountGrain_(cfg);
+    var deploymentsTabKpiUses = usesSeparateCountGrain ? 'countGrain' : 'displayGrain';
+
+    var displayHealth = { Red: 0, Yellow: 0, Green: 0, Other: 0 };
+    deploymentsTabRows.forEach(function (r) {
+      var dh = String(r.health || '').trim();
+      if (displayHealth[dh] !== undefined) displayHealth[dh]++;
+      else displayHealth.Other++;
+    });
+
+    var defaultHealthFilter = ['Red', 'Yellow'];
+    function filterRowsByHealth_(rows, healthList) {
+      if (!healthList || !healthList.length) return rows;
+      return rows.filter(function (r) { return healthList.indexOf(r.health) >= 0; });
+    }
+    var countRowsDefaultHealth = filterRowsByHealth_(countRows, defaultHealthFilter);
+    var displayRowsDefaultHealth = filterRowsByHealth_(deploymentsTabRows, defaultHealthFilter);
+
+    var countRowsForReport = countRows.filter(function (r) { return !r.excludeFromReport; });
+    var reportHealthTotal = 0;
+    countRowsForReport.forEach(function (r) {
+      var rh = String(r.health || '').trim();
+      if (rh === 'Green' || rh === 'Red' || rh === 'Yellow') reportHealthTotal++;
+    });
+
+    var portfolioHealthTotal = 0;
+    countRowsForReport.forEach(function (r) {
+      var ph = String(r.health || '').trim();
+      if (ph === 'Green' || ph === 'Red' || ph === 'Yellow') portfolioHealthTotal++;
+    });
+
+    var sampleFunction = '';
+    countRows.some(function (r) {
+      var fn = String(r.funcArea || '').trim();
+      if (fn) { sampleFunction = fn; return true; }
+      return false;
+    });
+    var sampleIndustry = '';
+    countRows.some(function (r) {
+      var ind = String(r.industry || '').trim();
+      if (ind) { sampleIndustry = ind; return true; }
+      return false;
+    });
+    var sampleFilters = {
+      noFiltersAllHealth: {
+        displayRowCount: deploymentsTabCount,
+        countGrainTotal: countRows.length,
+        countGrainHealth: countHealth
+      },
+      defaultRedYellowHealth: {
+        displayRowCount: displayRowsDefaultHealth.length,
+        countGrainTotal: countRowsDefaultHealth.length,
+        countGrainHealth: (function () {
+          var h = { Red: 0, Yellow: 0, Green: 0, Other: 0 };
+          countRowsDefaultHealth.forEach(function (r) {
+            var key = String(r.health || '').trim();
+            if (h[key] !== undefined) h[key]++;
+            else h.Other++;
+          });
+          return h;
+        })()
+      }
+    };
+    if (sampleFunction) {
+      var fnRows = countRows.filter(function (r) {
+        return String(r.funcArea || '').trim() === sampleFunction;
+      });
+      sampleFilters.functionExample = {
+        function: sampleFunction,
+        displayRowCount: deploymentsTabRows.filter(function (r) {
+          return String(r.funcArea || '').trim() === sampleFunction ||
+            (r.productFunctions && r.productFunctions.some(function (pf) {
+              return String(pf.funcArea || '').trim() === sampleFunction;
+            }));
+        }).length,
+        countGrainTotal: fnRows.length
+      };
+    }
+    if (sampleIndustry) {
+      var indRows = countRows.filter(function (r) {
+        return String(r.industry || '').trim() === sampleIndustry;
+      });
+      sampleFilters.industryExample = {
+        industry: sampleIndustry,
+        displayRowCount: deploymentsTabRows.filter(function (r) {
+          return String(r.industry || '').trim() === sampleIndustry;
+        }).length,
+        countGrainTotal: indRows.length
+      };
+    }
+
+    var mismatch = null;
+    if (overviewTotal !== displayCount) {
+      mismatch = 'Overview Total Active (' + overviewTotal + ') uses productModeCountGrain=' +
+        countGrain + '; Deployments tab display rows (' + displayCount +
+        ') use productModeDisplayGrain=' + displayGrain +
+        '. Deployments tab KPI cards use count grain when grains differ.';
+    }
+
+    var report = {
+      appName: cfg.appId || 'UNKNOWN',
+      productModeSourceMode: sourceMode,
+      productModeDisplayGrain: displayGrain,
+      productModeCountGrain: countGrain,
+      productModeGoLiveGrain: goLiveGrain,
+      rawPfRowCount: pfRows.length,
+      activePfRowCount: activePfRowCount,
+      uniqueActivePfIdCount: uniqueActivePfIdCount,
+      eligibleActivePfRowCount: eligible.length,
+      activeDeploymentProductGroupedCount: grainAnalysis.groupedDeploymentProductCount,
+      activeParentDeploymentGroupedCount: grainAnalysis.groupedParentDeploymentCount,
+      overviewTotalActive: overviewTotal,
+      overviewRed: overviewTotals.red,
+      overviewYellow: overviewTotals.yellow,
+      overviewGreen: overviewTotals.green,
+      overviewExecutiveWatch: overviewTotals.executiveWatch,
+      overviewRedYellowGreenSum: (overviewTotals.red || 0) + (overviewTotals.yellow || 0) +
+        (overviewTotals.green || 0),
+      countGrainRowCount: countRows.length,
+      countGrainHealth: countHealth,
+      deploymentsTabEffectiveRowCount: deploymentsTabCount,
+      deploymentsTabDisplayRowCount: deploymentsTabCount,
+      deploymentsTabCountGrainTotal: countRows.length,
+      deploymentsTabKpiUses: deploymentsTabKpiUses,
+      deploymentsTabDisplayHealth: displayHealth,
+      deploymentsTabCountGrainRed: countHealth.Red,
+      deploymentsTabCountGrainYellow: countHealth.Yellow,
+      deploymentsTabCountGrainGreen: countHealth.Green,
+      deploymentsTabCountGrainRedYellowGreenSum: countHealth.Red + countHealth.Yellow +
+        countHealth.Green,
+      monthlyReportHealthTotal: reportHealthTotal,
+      portfolioHealthTotal: portfolioHealthTotal,
+      countGrainVsDisplayGrainNote: usesSeparateCountGrain
+        ? ('Metrics count at productModeCountGrain=' + countGrain +
+           '; table rows use productModeDisplayGrain=' + displayGrain + '.')
+        : null,
+      sampleFilters: sampleFilters,
+      displayGrainRowCount: displayCount,
+      countByDeploymentRowSource: bySource,
+      overviewCountsUse: overviewUses,
+      overviewVsDisplayMismatch: mismatch,
+      grainAnalysis: grainAnalysis
+    };
+
+    Logger.log('=== _debugProductModeCounts(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  report=' + JSON.stringify(report));
+    if (mismatch) Logger.log('  NOTE: ' + mismatch);
+    return report;
   }
 
   /**
@@ -1908,10 +2542,15 @@ var CoreData = (function () {
 
     var recentPf = [];
     var upcomingPf = [];
+    var goLiveEventAnalysis = null;
     try { recentPf = getRecentGoLives(cfg, { viewMode: 'all' }, undefined, { product: 'all' }) || []; }
     catch (e) { Logger.log('_debugProductModeSources: recent go-lives failed: ' + e); }
     try { upcomingPf = getUpcomingGoLives(cfg, { viewMode: 'all' }, { product: 'all' }) || []; }
     catch (e) { Logger.log('_debugProductModeSources: upcoming go-lives failed: ' + e); }
+    if (usesProductModePfGoLiveSource_(cfg)) {
+      try { goLiveEventAnalysis = _analyzeProductModeGoLiveEvents_(cfg, { product: 'all' }); }
+      catch (e) { Logger.log('_debugProductModeSources: go-live event analysis failed: ' + e); }
+    }
 
     var parentRows = [];
     try { parentRows = readSfdcDeploymentsRaw_(cfg) || []; } catch (e) {}
@@ -1939,6 +2578,9 @@ var CoreData = (function () {
         productModeExcludePhases: (cfg.activeDeployments && cfg.activeDeployments.productModeExcludePhases) || [],
         productModeExcludeCustomer360: !!(cfg.activeDeployments &&
                                           cfg.activeDeployments.productModeExcludeCustomer360),
+        productModeDisplayGrain: _getProductModeDisplayGrain_(cfg),
+        productModeCountGrain: _getProductModeCountGrain_(cfg),
+        productModeGoLiveGrain: _getProductModeGoLiveGrain_(cfg),
         freshnessWatchSheet: (cfg.freshness && cfg.freshness.watchSheet) || 'SFDC_Deployments',
         trendsEnabled: !!(cfg.ui && cfg.ui.trendsTab && cfg.ui.trendsTab.enabled)
       },
@@ -1947,8 +2589,11 @@ var CoreData = (function () {
       parentActiveCount: parentActive,
       overviewActiveTotal: overviewActive,
       pfActiveEffectiveCount: unionSummary.pfRowsIncludedInActiveUi,
+      effectiveDeploymentCount: unionSummary.effectiveDeploymentCount,
+      grainAnalysis: unionSummary.grainAnalysis,
       recentGoLiveCountPf: recentPf.length,
       upcomingGoLiveCountPf: upcomingPf.length,
+      goLiveEventAnalysis: goLiveEventAnalysis,
       pfDataQuality: pfMissing,
       remainingParentDependencies: remainingParentDeps,
       unionSummary: unionSummary,
@@ -1962,9 +2607,14 @@ var CoreData = (function () {
     Logger.log('  pfRowCount=' + report.pfRowCount);
     Logger.log('  parentRowCount=' + report.parentRowCount + ' parentActiveCount=' + parentActive);
     Logger.log('  overviewActiveTotal=' + overviewActive +
-               ' pfActiveEffectiveCount=' + unionSummary.pfRowsIncludedInActiveUi);
+               ' pfActiveEffectiveCount=' + unionSummary.pfRowsIncludedInActiveUi +
+               ' effectiveDeploymentCount=' + unionSummary.effectiveDeploymentCount);
+    Logger.log('  grainAnalysis=' + JSON.stringify(unionSummary.grainAnalysis));
     Logger.log('  recentGoLiveCountPf=' + recentPf.length +
                ' upcomingGoLiveCountPf=' + upcomingPf.length);
+    if (goLiveEventAnalysis) {
+      Logger.log('  goLiveEventAnalysis=' + JSON.stringify(goLiveEventAnalysis));
+    }
     Logger.log('  pfDataQuality=' + JSON.stringify(pfMissing));
     return report;
   }
@@ -2409,6 +3059,47 @@ function _sfdcDataVersion_(cfg) {
     return applyViewModeFilter_(cfg, sorted, viewModeOpts);
   }
 
+  /**
+   * True when ProductMode KPI totals should use count grain, not display grain.
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @return {boolean}
+   * @private
+   */
+  function _productModeUsesSeparateCountGrain_(cfg) {
+    if (!usesProductModePfDataSource_(cfg)) return false;
+    return _getProductModeCountGrain_(cfg) !== _getProductModeDisplayGrain_(cfg);
+  }
+
+  /**
+   * Deployments tab payload for the WebApp.
+   * IndustryMode (and ProductMode when count grain equals display grain) returns
+   * the display row array for backward compatibility.
+   * ProductMode when grains differ returns { rows, countRows, useCountGrainForKpis }.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Array<Object>|{rows: Array<Object>, countRows: Array<Object>, useCountGrainForKpis: boolean}}
+   */
+  function getAllDeploymentsForUI(config, viewModeOpts, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var displayRows = getAllDeployments(cfg, viewModeOpts, productOpts);
+
+    if (!_productModeUsesSeparateCountGrain_(cfg)) {
+      return displayRows;
+    }
+
+    var countRows = getActiveCountDeployments(cfg, productOpts) || [];
+    countRows = filterDeploymentsByStudent_(countRows, 'exclude', cfg);
+    countRows = applyViewModeFilter_(cfg, countRows, viewModeOpts);
+
+    return {
+      rows: displayRows,
+      countRows: countRows,
+      useCountGrainForKpis: true
+    };
+  }
+
   // ===========================================================================
   // PUBLIC: GO LIVES
   // ===========================================================================
@@ -2432,6 +3123,9 @@ function _sfdcDataVersion_(cfg) {
    */
   function getUpcomingGoLives(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
+    if (usesProductModePfGoLiveSource_(cfg)) {
+      return getUpcomingGoLivesFromProductFunctions_(cfg, viewModeOpts, productOpts);
+    }
 
     // Get the effective view of all deployments (post-meta + post-overrides).
     var allEffective = getAllEffectiveDeployments(cfg, productOpts);
@@ -2713,8 +3407,893 @@ function _sfdcDataVersion_(cfg) {
   }
 
   /**
+   * Normalizes ProductMode go-live type to canonical values.
+   * @param {string} typeOrGoLiveType
+   * @return {'actual'|'target'|null}
+   * @private
+   */
+  function _normalizeProductModeGoLiveType_(typeOrGoLiveType) {
+    var t = String(typeOrGoLiveType || '').trim().toLowerCase();
+    if (t === 'actual' || t === 'recent' || t === 'recentactual') return 'actual';
+    if (t === 'target' || t === 'upcoming' || t === 'upcomingtarget') return 'target';
+    return null;
+  }
+
+  /**
+   * Stable event ID for ProductMode PF go-live rows (account + date + type).
+   * @param {string} accountId
+   * @param {string} accountName
+   * @param {string} goLiveType
+   * @param {string} dateKey
+   * @return {string}
+   * @private
+   */
+  function _deriveProductModeGoLiveEventId_(accountId, accountName, goLiveType, dateKey) {
+    return _normalizeGoLiveAccountKey_(accountId, accountName) + '__' +
+      goLiveType + '__' +
+      String(_toDateKey_(dateKey) || '').replace(/-/g, '');
+  }
+
+  /**
+   * Normalized account identity for go-live event grouping.
+   * @param {string} accountId
+   * @param {string} accountName
+   * @return {string}
+   * @private
+   */
+  function _normalizeGoLiveAccountKey_(accountId, accountName, aliasMap) {
+    var name = String(accountName || '').trim().toLowerCase();
+    var id = String(accountId || '').trim();
+    var byName = aliasMap && aliasMap.byName ? aliasMap.byName : null;
+
+    if (name && byName && byName[name]) {
+      return 'id:' + byName[name];
+    }
+    if (id) {
+      return 'id:' + (id.length >= 15 ? id.slice(0, 15) : id);
+    }
+    if (name) return 'name:' + name;
+    return 'name:';
+  }
+
+  /**
+   * Maps account names to canonical 15-char IDs from PF rows that have both fields.
+   * Prevents split groups when some rows lack accountId but share accountName.
+   * @param {Array<Object>} details
+   * @return {{ byName: Object<string, string> }}
+   * @private
+   */
+  function _buildGoLiveAccountAliasMap_(details) {
+    var byName = {};
+    (details || []).forEach(function (d) {
+      var name = String(d.accountName || '').trim().toLowerCase();
+      var id = String(d.accountId || '').trim();
+      if (!name || !id) return;
+      var cid = id.length >= 15 ? id.slice(0, 15) : id;
+      if (!byName[name]) byName[name] = cid;
+    });
+    return { byName: byName };
+  }
+
+  /**
+   * Rolls up health across grouped PF rows: Red > Yellow > Green.
+   * @param {Array<string>} healths
+   * @return {string}
+   * @private
+   */
+  function _rollupGoLiveHealth_(healths) {
+    var rank = { 'Red': 3, 'Yellow': 2, 'Green': 1 };
+    var best = '';
+    var bestRank = 0;
+    (healths || []).forEach(function (h) {
+      var val = String(h || '').trim();
+      if (!val) return;
+      var r = rank[val] || 0;
+      if (r > bestRank) {
+        bestRank = r;
+        best = val;
+      }
+    });
+    return best;
+  }
+
+  /**
+   * Builds display labels for grouped account/date go-live events.
+   * @param {Array<string>} deploymentNames
+   * @param {Array<string>} productAreas
+   * @param {Array<string>} functions
+   * @return {{displayDeploymentName: string, displayProductFunction: string, displayLabel: string}}
+   * @private
+   */
+  function _formatGroupedGoLiveDisplayLabels_(deploymentNames, productAreas, functions) {
+    var depName = (deploymentNames && deploymentNames.length) ? deploymentNames[0] : '';
+    var depCount = deploymentNames ? deploymentNames.length : 0;
+    var prodCount = productAreas ? productAreas.length : 0;
+    var funcCount = functions ? functions.length : 0;
+    var productSummary = '';
+
+    if (prodCount === 1 && funcCount === 1) {
+      productSummary = productAreas[0] + ' / ' + functions[0];
+    } else if (prodCount === 1 && funcCount > 1) {
+      productSummary = productAreas[0] + ' / ' + funcCount + ' functions';
+    } else if (prodCount > 1) {
+      productSummary = prodCount + ' products / ' + funcCount + ' functions';
+    } else if (funcCount === 1) {
+      productSummary = functions[0];
+    } else if (funcCount > 1) {
+      productSummary = funcCount + ' functions';
+    }
+
+    var displayDeploymentName = depName;
+    if (productSummary) {
+      displayDeploymentName = depName ? (depName + ' \u2014 ' + productSummary) : productSummary;
+    }
+    if (depCount > 1) {
+      var meta = depCount + ' deployments';
+      if (prodCount > 0) meta += ' \u00B7 ' + prodCount + ' products';
+      if (funcCount > 0) meta += ' \u00B7 ' + funcCount + ' functions';
+      displayDeploymentName = (depName ? depName + ' \u2014 ' : '') + meta;
+    }
+
+    var displayProductFunction = productSummary;
+    if (funcCount > 1 && functions && functions.length) {
+      displayProductFunction = functions.join(', ');
+    }
+
+    return {
+      displayDeploymentName: displayDeploymentName,
+      displayProductFunction: displayProductFunction,
+      displayLabel: displayDeploymentName
+    };
+  }
+
+  /**
+   * PF detail object attached to grouped account/date go-live events.
+   * @param {Object} pf
+   * @param {string} goLiveType
+   * @param {string} dateKey
+   * @param {Object=} ov
+   * @return {Object}
+   * @private
+   */
+  function _buildPfGoLiveDetailObject_(pf, goLiveType, dateKey, ov) {
+    ov = ov || {};
+    goLiveType = _normalizeProductModeGoLiveType_(goLiveType) || goLiveType;
+    var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+    var normalizedDate = _toDateKey_(dateKey);
+    return {
+      pfRowId: pf.pfRowId || '',
+      parentDeploymentId: parentId,
+      deploymentFk: parentId,
+      deploymentName: pf.deploymentName || '',
+      productArea: String(pf.productArea || '').trim(),
+      funcArea: String(pf.funcArea || '').trim(),
+      targetGoLive: pf.targetGoLive || '',
+      actualGoLive: pf.actualGoLive || '',
+      goLiveDate: normalizedDate,
+      goLiveType: goLiveType,
+      overallStatus: pf.overallStatus || '',
+      phase: pf.phase || '',
+      stage: pf.stage || '',
+      health: pf.health || '',
+      partner: ov.overridePartner || pf.partner || '',
+      accountId: pf.accountId || '',
+      accountName: pf.accountName || '',
+      industry: pf.industry || '',
+      region: pf.region || '',
+      subRegion: pf.subRegion || '',
+      subRegionAlt: pf.subRegionAlt || ''
+    };
+  }
+
+  /**
+   * Dedupe key for PF detail rows within an account/date group.
+   * @param {Object} detail
+   * @return {string}
+   * @private
+   */
+  function _pfGoLiveDetailDedupeKey_(detail) {
+    if (detail.pfRowId) return 'id:' + _canonicalId_(detail.pfRowId);
+    return [
+      _canonicalId_(detail.parentDeploymentId || detail.deploymentFk),
+      String(detail.productArea || '').trim().toLowerCase(),
+      String(detail.funcArea || '').trim().toLowerCase()
+    ].join('|');
+  }
+
+  /**
+   * Builds one grouped account/date go-live event from PF detail rows.
+   * @param {Array<Object>} items
+   * @return {Object|null}
+   * @private
+   */
+  function _buildGroupedGoLiveEventRow_(items) {
+    if (!items || !items.length) return null;
+    var first = items[0];
+    var goLiveType = _normalizeProductModeGoLiveType_(first.goLiveType) || first.goLiveType;
+    var goLiveDate = first.goLiveDate;
+    var accountId = first.accountId || '';
+    var accountName = first.accountName || '';
+    var eventKey = _productModeGoLiveEventKey_(
+      accountId, accountName, goLiveDate, goLiveType, _buildGoLiveAccountAliasMap_(items));
+
+    var productAreas = [];
+    var functions = [];
+    var deploymentNames = [];
+    var parentDeploymentIds = [];
+    var partners = [];
+    var healths = [];
+
+    items.forEach(function (d) {
+      if (d.productArea && productAreas.indexOf(d.productArea) < 0) productAreas.push(d.productArea);
+      if (d.funcArea && functions.indexOf(d.funcArea) < 0) functions.push(d.funcArea);
+      if (d.deploymentName && deploymentNames.indexOf(d.deploymentName) < 0) deploymentNames.push(d.deploymentName);
+      if (d.parentDeploymentId && parentDeploymentIds.indexOf(d.parentDeploymentId) < 0) {
+        parentDeploymentIds.push(d.parentDeploymentId);
+      }
+      if (d.partner && partners.indexOf(d.partner) < 0) partners.push(d.partner);
+      if (d.health) healths.push(d.health);
+    });
+
+    var labels = _formatGroupedGoLiveDisplayLabels_(deploymentNames, productAreas, functions);
+    var health = _rollupGoLiveHealth_(healths);
+    var partner = partners.length === 1 ? partners[0] : (partners[0] || '');
+    var products = productAreas.slice();
+    functions.forEach(function (f) {
+      if (f && products.indexOf(f) < 0) products.push(f);
+    });
+
+    var row = {
+      deploymentId: _deriveProductModeGoLiveEventId_(accountId, accountName, goLiveType, goLiveDate),
+      eventKey: eventKey,
+      goLiveDate: goLiveDate,
+      goLiveType: goLiveType,
+      accountId: accountId,
+      accountName: accountName,
+      industry: first.industry || '',
+      region: first.region || '',
+      subRegion: first.subRegion || '',
+      subRegionAlt: first.subRegionAlt || '',
+      deploymentName: deploymentNames[0] || '',
+      displayDeploymentName: labels.displayDeploymentName,
+      displayProductFunction: labels.displayProductFunction,
+      displayLabel: labels.displayLabel,
+      productArea: productAreas.length === 1 ? productAreas[0] : productAreas.join(', '),
+      funcArea: functions.length === 1 ? functions[0] : functions.join(', '),
+      productFunctions: items,
+      productFunctionCount: items.length,
+      productAreas: productAreas,
+      functions: functions,
+      deploymentNames: deploymentNames,
+      parentDeploymentIds: parentDeploymentIds,
+      parentDeploymentId: parentDeploymentIds[0] || '',
+      deploymentFk: parentDeploymentIds[0] || '',
+      partner: partner,
+      health: health,
+      stage: first.stage || '',
+      phase: first.phase || '',
+      status: first.overallStatus || '',
+      isPhased: false,
+      deploymentRowSource: 'productFunctionGoLiveEventGrouped',
+      parentMatchStatus: 'pfGrouped'
+    };
+
+    if (goLiveType === 'actual') {
+      row.recentDates = [{ date: goLiveDate, products: products }];
+      row.lastGoLiveDate = goLiveDate;
+    } else {
+      row.upcomingDates = [{ date: goLiveDate, products: products }];
+      row.nextGoLiveDate = goLiveDate;
+      row.mtpDate = goLiveDate;
+    }
+    return row;
+  }
+
+  /**
+   * Groups PF detail rows into account/date/type go-live events.
+   * @param {Array<Object>} pfDetails
+   * @return {{ events: Array<Object>, rawPfDetailCount: number, groupedEventCount: number, rawRowsCollapsed: number, rawRowsGroupedIntoEvents: number, maxProductFunctionsPerEvent: number }}
+   * @private
+   */
+  function _groupProductModeGoLivePfDetails_(pfDetails) {
+    var aliasMap = _buildGoLiveAccountAliasMap_(pfDetails);
+    var groups = {};
+    var seenDetail = {};
+    var collapsed = 0;
+    var rawCount = (pfDetails || []).length;
+
+    (pfDetails || []).forEach(function (detail) {
+      var groupKey = _productModeGoLiveEventKey_(
+        detail.accountId, detail.accountName, detail.goLiveDate, detail.goLiveType, aliasMap);
+      var detailKey = groupKey + '::' + _pfGoLiveDetailDedupeKey_(detail);
+      if (seenDetail[detailKey]) {
+        collapsed++;
+        return;
+      }
+      seenDetail[detailKey] = true;
+      if (!groups[groupKey]) groups[groupKey] = [];
+      groups[groupKey].push(detail);
+    });
+
+    var events = [];
+    var maxPf = 0;
+    Object.keys(groups).forEach(function (groupKey) {
+      var row = _buildGroupedGoLiveEventRow_(groups[groupKey]);
+      if (!row) return;
+      if (row.productFunctionCount > maxPf) maxPf = row.productFunctionCount;
+      events.push(row);
+    });
+
+    return {
+      events: events,
+      rawPfDetailCount: rawCount,
+      groupedEventCount: events.length,
+      rawRowsCollapsed: collapsed,
+      rawRowsGroupedIntoEvents: rawCount > events.length ? (rawCount - events.length) : 0,
+      maxProductFunctionsPerEvent: maxPf
+    };
+  }
+
+  /**
+   * Product/function fragment for display.
+   * @param {string} productArea
+   * @param {string} funcArea
+   * @return {string}
+   * @private
+   */
+  function _formatProductModeGoLiveProductFunction_(productArea, funcArea) {
+    var pa = String(productArea || '').trim();
+    var fa = String(funcArea || '').trim();
+    if (pa && fa) return pa + ' / ' + fa;
+    return pa || fa || '';
+  }
+
+  /**
+   * Resolves the deployment column / widget label for any go-live row.
+   * @param {Object} row
+   * @return {string}
+   */
+  function resolveGoLiveDisplayDeploymentName_(row) {
+    if (!row) return '';
+    if (row.displayDeploymentName) return row.displayDeploymentName;
+    if (row.displayLabel) return row.displayLabel;
+    if (row.productFunctionCount > 1 && row.displayProductFunction) {
+      var base = String(row.deploymentName || row.accountName || '').trim();
+      return base ? (base + ' \u2014 ' + row.displayProductFunction) : row.displayProductFunction;
+    }
+    return _formatProductModeGoLiveDeploymentLabel_(
+      row.deploymentName || '', row.productArea || '', row.funcArea || '');
+  }
+
+  /**
+   * Secondary product/function summary for grouped go-live rows.
+   * @param {Object} row
+   * @return {string}
+   */
+  function resolveGoLiveProductFunctionSummary_(row) {
+    if (!row) return '';
+    if (row.displayProductFunction) return row.displayProductFunction;
+    if (row.productFunctions && row.productFunctions.length) {
+      return row.productFunctions.map(function (pf) {
+        return _formatProductModeGoLiveProductFunction_(pf.productArea, pf.funcArea);
+      }).filter(Boolean).join(', ');
+    }
+    return _formatProductModeGoLiveProductFunction_(row.productArea, row.funcArea);
+  }
+
+  /**
+   * Stable dedupe key for ProductMode PF go-live events (account + date + type).
+   * @param {string} accountId
+   * @param {string} accountName
+   * @param {string} goLiveDate
+   * @param {string} goLiveType 'actual' | 'target'
+   * @return {string}
+   * @private
+   */
+  function _productModeGoLiveEventKey_(accountId, accountName, goLiveDate, goLiveType, aliasMap) {
+    return [
+      _normalizeGoLiveAccountKey_(accountId, accountName, aliasMap),
+      _toDateKey_(goLiveDate),
+      goLiveType
+    ].join('|');
+  }
+
+  /**
+   * Stable dedupe key for Overview go-live widget rows (account + date + type).
+   * @param {Object} item
+   * @return {string}
+   * @private
+   */
+  function _overviewGoLiveItemEventKey_(item) {
+    if (!item) return '';
+    if (item.eventKey) return item.eventKey;
+    return [
+      _normalizeGoLiveAccountKey_(item.accountId, item.accountName),
+      _toDateKey_(item.goLiveDate || item.currentMtp || item.targetGoLive || ''),
+      item.goLiveType || 'target'
+    ].join('|');
+  }
+
+  /**
+   * Maps a grouped ProductMode go-live event to an Overview widget row shape.
+   * @param {Object} r
+   * @return {Object}
+   * @private
+   */
+  function _mapProductModeGoLiveEventToOverviewItem_(r) {
+    var goLiveDate = r.goLiveDate || r.nextGoLiveDate || r.lastGoLiveDate || '';
+    return {
+      deploymentId: r.deploymentId || '',
+      accountId: r.accountId || '',
+      accountName: r.accountName || '',
+      goLiveDate: goLiveDate,
+      targetGoLive: goLiveDate,
+      currentMtp: goLiveDate,
+      goLiveType: r.goLiveType || 'target',
+      health: r.health || '',
+      partner: r.partner || '',
+      deploymentName: r.deploymentName || '',
+      displayDeploymentName: r.displayDeploymentName || r.displayLabel || r.deploymentName || '',
+      displayLabel: r.displayLabel || r.displayDeploymentName || '',
+      displayProductFunction: r.displayProductFunction || '',
+      productFunctionCount: r.productFunctionCount || 0,
+      productAreas: r.productAreas || [],
+      functions: r.functions || [],
+      productFunctions: r.productFunctions || [],
+      eventKey: r.eventKey || '',
+      productArea: r.productArea || '',
+      funcArea: r.funcArea || ''
+    };
+  }
+
+  /**
+   * Merges two Overview go-live widget rows for the same account/date/type.
+   * @param {Object} a
+   * @param {Object} b
+   * @return {Object}
+   * @private
+   */
+  function _mergeOverviewGoLiveItems_(a, b) {
+    var pfMap = {};
+    var allPf = (a.productFunctions || []).concat(b.productFunctions || []);
+    allPf.forEach(function (pf) {
+      var dk = pf.pfRowId ? ('id:' + pf.pfRowId) : [
+        pf.parentDeploymentId, pf.productArea, pf.funcArea
+      ].join('|');
+      pfMap[dk] = pf;
+    });
+    var mergedPf = Object.keys(pfMap).map(function (k) { return pfMap[k]; });
+
+    var productAreas = [];
+    var functions = [];
+    var deploymentNames = [];
+    mergedPf.forEach(function (d) {
+      if (d.productArea && productAreas.indexOf(d.productArea) < 0) productAreas.push(d.productArea);
+      if (d.funcArea && functions.indexOf(d.funcArea) < 0) functions.push(d.funcArea);
+      if (d.deploymentName && deploymentNames.indexOf(d.deploymentName) < 0) {
+        deploymentNames.push(d.deploymentName);
+      }
+    });
+    var labels = _formatGroupedGoLiveDisplayLabels_(deploymentNames, productAreas, functions);
+    var health = _rollupGoLiveHealth_([a.health, b.health].concat(
+      mergedPf.map(function (pf) { return pf.health; })));
+
+    return {
+      deploymentId: a.deploymentId || b.deploymentId || '',
+      accountId: a.accountId || b.accountId || '',
+      accountName: a.accountName || b.accountName || '',
+      goLiveDate: a.goLiveDate || b.goLiveDate || a.currentMtp || b.currentMtp || '',
+      targetGoLive: a.targetGoLive || b.targetGoLive || a.goLiveDate || b.goLiveDate || '',
+      currentMtp: a.currentMtp || b.currentMtp || a.goLiveDate || b.goLiveDate || '',
+      goLiveType: a.goLiveType || b.goLiveType || 'target',
+      health: health,
+      partner: a.partner || b.partner || '',
+      deploymentName: deploymentNames[0] || a.deploymentName || b.deploymentName || '',
+      displayDeploymentName: labels.displayDeploymentName,
+      displayLabel: labels.displayLabel,
+      displayProductFunction: labels.displayProductFunction,
+      productFunctionCount: mergedPf.length,
+      productAreas: productAreas,
+      functions: functions,
+      productFunctions: mergedPf,
+      eventKey: a.eventKey || b.eventKey || _overviewGoLiveItemEventKey_(a),
+      productArea: productAreas.length === 1 ? productAreas[0] : productAreas.join(', '),
+      funcArea: functions.length === 1 ? functions[0] : functions.join(', ')
+    };
+  }
+
+  /**
+   * ProductMode-only defensive dedupe for Overview go-live widget rows.
+   * @param {Array<Object>} items
+   * @return {{ items: Array<Object>, duplicateAccountDateKeysMerged: number }}
+   * @private
+   */
+  function _dedupeProductModeOverviewGoLiveItems_(items) {
+    var map = {};
+    var order = [];
+    var merged = 0;
+    (items || []).forEach(function (item) {
+      var key = _overviewGoLiveItemEventKey_(item);
+      if (!map[key]) {
+        map[key] = item;
+        order.push(key);
+        return;
+      }
+      merged++;
+      map[key] = _mergeOverviewGoLiveItems_(map[key], item);
+    });
+    return {
+      items: order.map(function (k) { return map[k]; }),
+      duplicateAccountDateKeysMerged: merged
+    };
+  }
+
+  /**
+   * Sort comparator for Overview Next High Risk rows: date, Red before Yellow, account.
+   * @param {Object} a
+   * @param {Object} b
+   * @return {number}
+   * @private
+   */
+  function _compareOverviewHighRiskEvents_(a, b) {
+    var ad = a.goLiveDate || a.currentMtp || '';
+    var bd = b.goLiveDate || b.currentMtp || '';
+    if (ad < bd) return -1;
+    if (ad > bd) return 1;
+    var hr = { 'Red': 0, 'Yellow': 1, 'Green': 2 };
+    var ah = hr[a.health] !== undefined ? hr[a.health] : 9;
+    var bh = hr[b.health] !== undefined ? hr[b.health] : 9;
+    if (ah !== bh) return ah - bh;
+    return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+  }
+
+  /**
+   * ProductMode Overview Next High Risk: upcoming PF go-live events, Red/Yellow, account/date grouped.
+   * @param {AppConfig} cfg
+   * @param {string} todayKey
+   * @param {Object=} productOpts
+   * @param {number=} limit
+   * @return {Array<Object>}
+   * @private
+   */
+  function _buildProductModeOverviewNextHighRisk_(cfg, todayKey, productOpts, limit) {
+    limit = (typeof limit === 'number' && limit > 0) ? limit : 5;
+    var highRiskEndKey = _addDaysToKey_(todayKey,
+      (cfg.salesforce && cfg.salesforce.upcomingWindowDays) || 90);
+    var highRiskEvents = getProductModeGoLiveEvents_(cfg, {
+      type: 'upcoming',
+      startDate: todayKey,
+      endDate: highRiskEndKey,
+      healthFilter: ['Red', 'Yellow'],
+      productOpts: productOpts
+    });
+    highRiskEvents.sort(_compareOverviewHighRiskEvents_);
+    var mapped = highRiskEvents.map(_mapProductModeGoLiveEventToOverviewItem_);
+    var deduped = _dedupeProductModeOverviewGoLiveItems_(mapped);
+    return deduped.items.slice(0, limit);
+  }
+
+  /**
+   * Deployment column label for ProductMode PF go-live rows.
+   * @param {string} deploymentName
+   * @param {string} productArea
+   * @param {string} funcArea
+   * @return {string}
+   * @private
+   */
+  function _formatProductModeGoLiveDeploymentLabel_(deploymentName, productArea, funcArea) {
+    var base = String(deploymentName || '').trim();
+    var pa = String(productArea || '').trim();
+    var fa = String(funcArea || '').trim();
+    if (pa && fa) {
+      var suffix = pa + ' / ' + fa;
+      if (!base || base.indexOf(suffix) === -1) {
+        return (base ? base + ' \u2014 ' : '') + suffix;
+      }
+      return base;
+    }
+    if (pa || fa) {
+      var partial = _formatProductModeGoLiveProductFunction_(pa, fa);
+      if (!base || base.indexOf(partial) === -1) {
+        return base ? (base + ' \u2014 ' + partial) : partial;
+      }
+      return base;
+    }
+    return base || pa || fa;
+  }
+
+  /**
+   * Readable widget label for ProductMode PF go-live events.
+   * @param {string} accountName
+   * @param {string} productArea
+   * @param {string} funcArea
+   * @param {string} dateKey
+   * @return {string}
+   * @private
+   */
+  function _formatProductModeGoLiveDisplayLabel_(accountName, productArea, funcArea, dateKey) {
+    var acct = String(accountName || '').trim();
+    var pa = String(productArea || '').trim();
+    var fa = String(funcArea || '').trim();
+    var productFunc = (pa && fa) ? (pa + ' - ' + fa) : (fa || pa);
+    var dateLabel = _fmtGoLiveDisplayDate_(dateKey);
+    return [acct, productFunc, dateLabel].filter(Boolean).join(' | ');
+  }
+
+  /**
+   * @param {string} dateKey
+   * @return {string}
+   * @private
+   */
+  function _fmtGoLiveDisplayDate_(dateKey) {
+    if (!dateKey) return '';
+    var d = new Date(dateKey);
+    if (isNaN(d.getTime())) return String(dateKey);
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MMM d, yyyy');
+  }
+
+  /**
+   * Collects PF detail rows for ProductMode go-live grouping (account/date/type).
+   * @param {Array<Object>} pfRows
+   * @param {AppConfig} cfg
+   * @param {string} goLiveType 'actual' | 'target'
+   * @param {string} windowStartKey
+   * @param {string} windowEndKey
+   * @param {Object} goLivesOverrides
+   * @return {Array<Object>}
+   * @private
+   */
+  function _collectProductModeGoLivePfDetails_(pfRows, cfg, goLiveType, windowStartKey, windowEndKey, goLivesOverrides) {
+    var activeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
+                        cfg.salesforce.statusValues.active) || 'Active';
+    var normalizedType = _normalizeProductModeGoLiveType_(goLiveType) || goLiveType;
+    var details = [];
+    (pfRows || []).forEach(function (pf) {
+      if (!pf || (!pf.deploymentFk && !pf.parentDeploymentId)) return;
+      var ov = (goLivesOverrides && goLivesOverrides[pf.accountName]) || {};
+      if (ov.exclude) return;
+
+      var dateKey = null;
+      if (normalizedType === 'actual') {
+        dateKey = _toDateKey_(pf.actualGoLive);
+      } else if (normalizedType === 'target') {
+        var status = String(pf.overallStatus || '').trim();
+        if (status && status !== activeStatus) return;
+        dateKey = _toDateKey_(ov.overrideDate || pf.targetGoLive);
+      }
+      if (!dateKey || !_dateKeyInRange_(dateKey, windowStartKey, windowEndKey)) return;
+
+      details.push(_buildPfGoLiveDetailObject_(pf, normalizedType, dateKey, ov));
+    });
+    return details;
+  }
+
+  /**
+   * Diagnostics for ProductMode PF go-live event grain (account + date + type).
+   * @param {AppConfig} cfg
+   * @param {Object=} productOpts
+   * @return {Object}
+   * @private
+   */
+  function _analyzeProductModeGoLiveEvents_(cfg, productOpts) {
+    var recentWindowDays = (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
+      (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) || 60;
+    var upcomingWindowDays = (cfg.salesforce && cfg.salesforce.upcomingWindowDays) || 90;
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var recentStartKey = Utilities.formatDate(
+      new Date(now.getTime() - recentWindowDays * 24 * 60 * 60 * 1000), tz, 'yyyy-MM-dd');
+    var upcomingEndKey = Utilities.formatDate(
+      new Date(now.getTime() + upcomingWindowDays * 24 * 60 * 60 * 1000), tz, 'yyyy-MM-dd');
+
+    var pfRows = getProductModeHistoricalPfRows_(cfg, productOpts);
+    var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var recentRaw = _collectProductModeGoLivePfDetails_(
+      pfRows, cfg, 'actual', recentStartKey, todayKey, goLivesOverrides);
+    var upcomingRaw = _collectProductModeGoLivePfDetails_(
+      pfRows, cfg, 'target', todayKey, upcomingEndKey, goLivesOverrides);
+    var recentGrouped = _groupProductModeGoLivePfDetails_(recentRaw);
+    var upcomingGrouped = _groupProductModeGoLivePfDetails_(upcomingRaw);
+
+    var accountDateGroups = {};
+    recentGrouped.events.concat(upcomingGrouped.events).forEach(function (row) {
+      var key = row.eventKey || _productModeGoLiveEventKey_(
+        row.accountId, row.accountName, row.goLiveDate, row.goLiveType);
+      if (!accountDateGroups[key]) accountDateGroups[key] = row;
+    });
+
+    var sampleSameAccountDateMultipleFunctions = [];
+    var sampleSameAccountDifferentDates = [];
+    var accountDateByAccount = {};
+
+    recentGrouped.events.concat(upcomingGrouped.events).forEach(function (row) {
+      var acctKey = _normalizeGoLiveAccountKey_(row.accountId, row.accountName);
+      if (!accountDateByAccount[acctKey]) accountDateByAccount[acctKey] = [];
+      accountDateByAccount[acctKey].push(row);
+
+      if (row.productFunctionCount > 1 && sampleSameAccountDateMultipleFunctions.length < 5) {
+        sampleSameAccountDateMultipleFunctions.push({
+          accountId: row.accountId,
+          accountName: row.accountName,
+          goLiveDate: row.goLiveDate,
+          goLiveType: row.goLiveType,
+          displayLabel: row.displayLabel,
+          productFunctionCount: row.productFunctionCount,
+          productAreas: row.productAreas,
+          functions: row.functions,
+          deploymentNames: row.deploymentNames,
+          eventKey: row.eventKey,
+          productFunctions: (row.productFunctions || []).slice(0, 6).map(function (pf) {
+            return {
+              pfRowId: pf.pfRowId,
+              parentDeploymentId: pf.parentDeploymentId,
+              productArea: pf.productArea,
+              funcArea: pf.funcArea
+            };
+          })
+        });
+      }
+    });
+
+    Object.keys(accountDateByAccount).forEach(function (acctKey) {
+      if (sampleSameAccountDifferentDates.length >= 5) return;
+      var rows = accountDateByAccount[acctKey];
+      var dates = {};
+      rows.forEach(function (r) { dates[r.goLiveDate + '|' + r.goLiveType] = true; });
+      if (Object.keys(dates).length > 1) {
+        sampleSameAccountDifferentDates.push({
+          accountId: rows[0].accountId,
+          accountName: rows[0].accountName,
+          eventCount: rows.length,
+          events: rows.slice(0, 5).map(function (r) {
+            return {
+              goLiveDate: r.goLiveDate,
+              goLiveType: r.goLiveType,
+              productFunctionCount: r.productFunctionCount,
+              eventKey: r.eventKey
+            };
+          })
+        });
+      }
+    });
+
+    return {
+      recentGoLiveRawPfRowCount: recentRaw.length,
+      recentGoLiveGroupedEventCount: recentGrouped.groupedEventCount,
+      recentGoLiveRawRowsCollapsed: recentGrouped.rawRowsCollapsed,
+      recentGoLiveRawRowsGroupedIntoEvents: recentGrouped.rawRowsGroupedIntoEvents,
+      recentGoLiveMaxProductFunctionsPerEvent: recentGrouped.maxProductFunctionsPerEvent,
+      upcomingGoLiveRawPfRowCount: upcomingRaw.length,
+      upcomingGoLiveGroupedEventCount: upcomingGrouped.groupedEventCount,
+      upcomingGoLiveRawRowsCollapsed: upcomingGrouped.rawRowsCollapsed,
+      upcomingGoLiveRawRowsGroupedIntoEvents: upcomingGrouped.rawRowsGroupedIntoEvents,
+      upcomingGoLiveMaxProductFunctionsPerEvent: upcomingGrouped.maxProductFunctionsPerEvent,
+      sampleSameAccountDateMultipleFunctions: sampleSameAccountDateMultipleFunctions,
+      sampleSameAccountDifferentDates: sampleSameAccountDifferentDates
+    };
+  }
+
+  /**
+   * Canonical ProductMode PF go-live event builder used by Overview, Go Lives, and report.
+   * @param {AppConfig} cfg
+   * @param {Object=} options
+   * @return {Array<Object>}
+   * @private
+   */
+  function getProductModeGoLiveEvents_(cfg, options) {
+    options = options || {};
+    var goLiveType = _normalizeProductModeGoLiveType_(options.type || 'recent') || 'actual';
+
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var windowStartKey = options.startDate ? _toDateKey_(options.startDate) : '';
+    var windowEndKey = options.endDate ? _toDateKey_(options.endDate) : '';
+
+    if (!windowStartKey || !windowEndKey) {
+      if (goLiveType === 'actual') {
+        var recentDays = (typeof options.windowDaysOverride === 'number' && options.windowDaysOverride > 0)
+          ? options.windowDaysOverride
+          : (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
+            (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) || 60;
+        windowEndKey = todayKey;
+        windowStartKey = Utilities.formatDate(
+          new Date(now.getTime() - recentDays * 24 * 60 * 60 * 1000), tz, 'yyyy-MM-dd');
+      } else {
+        var upcomingDays = (cfg.salesforce && cfg.salesforce.upcomingWindowDays) || 90;
+        windowStartKey = todayKey;
+        windowEndKey = Utilities.formatDate(
+          new Date(now.getTime() + upcomingDays * 24 * 60 * 60 * 1000), tz, 'yyyy-MM-dd');
+      }
+    }
+
+    var pfRows = getProductModeHistoricalPfRows_(cfg, options.productOpts);
+    var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var rawDetails = _collectProductModeGoLivePfDetails_(
+      pfRows, cfg, goLiveType, windowStartKey, windowEndKey, goLivesOverrides);
+    var grouped = _groupProductModeGoLivePfDetails_(rawDetails);
+    var results = grouped.events;
+
+    if (Array.isArray(options.healthFilter) && options.healthFilter.length) {
+      results = results.filter(function (row) {
+        return options.healthFilter.indexOf(row.health) >= 0;
+      });
+    }
+
+    results.sort(function (a, b) {
+      var ad = a.goLiveDate || a.lastGoLiveDate || a.nextGoLiveDate || '';
+      var bd = b.goLiveDate || b.lastGoLiveDate || b.nextGoLiveDate || '';
+      if (ad < bd) return -1;
+      if (ad > bd) return 1;
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
+
+    if (typeof options.limit === 'number' && options.limit > 0) {
+      results = results.slice(0, options.limit);
+    }
+
+    Logger.log('CoreData.getProductModeGoLiveEvents_: ' + results.length +
+               ' grouped events (' + rawDetails.length + ' raw PF rows, ' +
+               grouped.rawRowsGroupedIntoEvents + ' PF rows collapsed into account/date events) type=' +
+               goLiveType);
+    return results;
+  }
+
+  /**
+   * Diagnostics for ProductMode PF go-live event grain.
+   * @param {AppConfig} config
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function _debugProductModeGoLiveEvents(config, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
+    var analysis = _analyzeProductModeGoLiveEvents_(cfg, { product: pa });
+    var recentSample = getProductModeGoLiveEvents_(cfg, {
+      type: 'recent', productOpts: { product: pa }, limit: 10
+    });
+    var upcomingSample = getProductModeGoLiveEvents_(cfg, {
+      type: 'upcoming', productOpts: { product: pa }, limit: 10
+    });
+
+    var mapSample = function (r) {
+      return {
+        accountId: r.accountId,
+        accountName: r.accountName,
+        goLiveDate: r.goLiveDate,
+        goLiveType: r.goLiveType,
+        displayLabel: r.displayLabel,
+        productFunctionCount: r.productFunctionCount,
+        productAreas: r.productAreas,
+        functions: r.functions,
+        deploymentNames: r.deploymentNames,
+        eventKey: r.eventKey
+      };
+    };
+
+    var report = {
+      appId: cfg.appId || '',
+      productModeSourceMode: _getProductModeSourceMode_(cfg),
+      productModeDisplayGrain: _getProductModeDisplayGrain_(cfg),
+      productModeCountGrain: _getProductModeCountGrain_(cfg),
+      productModeGoLiveGrain: _getProductModeGoLiveGrain_(cfg),
+      productModeGoLiveHelperUsed: true,
+      analysis: analysis,
+      sampleRecentEvents: recentSample.map(mapSample),
+      sampleUpcomingEvents: upcomingSample.map(mapSample)
+    };
+
+    Logger.log('=== _debugProductModeGoLiveEvents(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  report=' + JSON.stringify(report));
+    return report;
+  }
+
+  /**
    * ProductMode recent go-lives from PF rows (Active + Complete).
-   * One row per PF record with an in-window Production_Move_Date_Actual__c.
+   * One event row per account + actualGoLive date (product/functions attached as detail).
    *
    * @param {AppConfig} cfg
    * @param {Object=} viewModeOpts
@@ -2724,114 +4303,41 @@ function _sfdcDataVersion_(cfg) {
    * @private
    */
   function getRecentGoLivesFromProductFunctions_(cfg, viewModeOpts, windowDaysOverride, productOpts) {
-    var recentWindowDays =
-      (typeof windowDaysOverride === 'number' && windowDaysOverride > 0)
-        ? windowDaysOverride
-        : (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
-          (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) || 60;
-
-    var now = new Date();
-    now.setHours(0, 0, 0, 0);
-    var tz = Session.getScriptTimeZone();
-    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
-    var windowStart = new Date(now.getTime() - recentWindowDays * 24 * 60 * 60 * 1000);
-    var windowStartKey = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
-
-    var pfRows = getProductModeHistoricalPfRows_(cfg, productOpts);
-    var goLivesOverrides = getGoLivesOverridesMap_(cfg);
-    var enrichmentMap = {};
-    try {
-      enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
-    } catch (err) {
-      Logger.log('CoreData.getRecentGoLivesFromProductFunctions_: enrichment failed: ' + err);
-    }
-
-    var results = [];
-    var seen = {};
-    pfRows.forEach(function (pf) {
-      if (!pf || !pf.deploymentFk) return;
-
-      var ov = goLivesOverrides[pf.accountName] || {};
-      if (ov.exclude) return;
-
-      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
-      var depId = _deriveProductFunctionDeploymentId_(parentId, pf);
-      if (seen[depId]) return;
-
-      var dep = {
-        deploymentId: depId,
-        parentDeploymentId: parentId,
-        accountId: pf.accountId || '',
-        accountName: pf.accountName || '',
-        deploymentName: pf.deploymentName || '',
-        partner: pf.partner || '',
-        industry: pf.industry || '',
-        status: pf.overallStatus || '',
-        productArea: pf.productArea || '',
-        funcArea: pf.funcArea || '',
-        firstMtpDateActual: pf.actualGoLive || pf.firstMtpDateActual || '',
-        completionDate: pf.completionDate || ''
-      };
-
-      var products = [];
-      if (pf.productArea) products.push(pf.productArea);
-      if (pf.funcArea && products.indexOf(pf.funcArea) < 0) products.push(pf.funcArea);
-
-      var allRecentDates = [];
-      var actualKey = _toDateKey_(pf.actualGoLive);
-      if (actualKey) {
-        allRecentDates = [{ date: actualKey, products: products }];
-      } else {
-        var enrichment = enrichmentMap[parentId];
-        allRecentDates = enrichment ? (enrichment.recentDates || []) : [];
-        if (products.length && allRecentDates.length) {
-          allRecentDates = allRecentDates.filter(function (rd) {
-            if (!rd.products || !rd.products.length) return true;
-            for (var pi = 0; pi < products.length; pi++) {
-              if (rd.products.indexOf(products[pi]) >= 0) return true;
-            }
-            return false;
-          });
-        }
-      }
-
-      var recentMatch = _latestRecentDateInRange_(dep, allRecentDates, windowStartKey, todayKey);
-      if (!recentMatch) return;
-
-      seen[depId] = true;
-      results.push({
-        deploymentId: depId,
-        parentDeploymentId: parentId,
-        pfRowId: pf.pfRowId || '',
-        accountId: dep.accountId,
-        accountName: dep.accountName,
-        deploymentName: dep.deploymentName,
-        partner: ov.overridePartner || dep.partner,
-        industry: dep.industry,
-        status: dep.status,
-        productArea: dep.productArea,
-        funcArea: dep.funcArea,
-        recentDates: recentMatch.filteredRecentDates,
-        lastGoLiveDate: recentMatch.lastGoLiveDate,
-        deploymentRowSource: 'productFunction',
-        parentMatchStatus: 'pfOnly'
-      });
+    var results = getProductModeGoLiveEvents_(cfg, {
+      type: 'recent',
+      windowDaysOverride: windowDaysOverride,
+      productOpts: productOpts
     });
-
-    results.sort(function (a, b) {
-      if (a.lastGoLiveDate < b.lastGoLiveDate) return -1;
-      if (a.lastGoLiveDate > b.lastGoLiveDate) return 1;
-      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
-    });
-
+    results = filterDeploymentsByStudent_(results, 'exclude', cfg);
     results = _enrichGoLiveRowsWithOverrides_(
       results,
       getDeploymentOverridesMap_(cfg),
-      goLivesOverrides
+      getGoLivesOverridesMap_(cfg)
     );
+    return applyViewModeFilter_(cfg, results, viewModeOpts);
+  }
 
-    Logger.log('CoreData.getRecentGoLivesFromProductFunctions_: ' + results.length +
-               ' PF rows with in-window go-live dates (last ' + recentWindowDays + ' days).');
+  /**
+   * ProductMode upcoming go-lives from PF rows (Active).
+   * One event row per account + targetGoLive date (product/functions attached as detail).
+   *
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   * @private
+   */
+  function getUpcomingGoLivesFromProductFunctions_(cfg, viewModeOpts, productOpts) {
+    var results = getProductModeGoLiveEvents_(cfg, {
+      type: 'upcoming',
+      productOpts: productOpts
+    });
+    results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+    results = _enrichGoLiveRowsWithOverrides_(
+      results,
+      getDeploymentOverridesMap_(cfg),
+      getGoLivesOverridesMap_(cfg)
+    );
     return applyViewModeFilter_(cfg, results, viewModeOpts);
   }
 
@@ -5903,7 +7409,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     var activeRows;
     if (usesProductModePfDataSource_(cfg)) {
-      activeRows = getAllEffectiveDeployments(cfg, productOpts) || [];
+      activeRows = getActiveCountDeployments(cfg, productOpts) || [];
       activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
     } else {
       var allRows = readSfdcDeploymentsRaw_(cfg);
@@ -5919,27 +7425,32 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var greenCount     = activeRows.filter(function(r) { return r.health === 'Green'; }).length;
     var ewCount        = activeRows.filter(function(r) { return r.isExecutiveWatch; }).length;
 
-    // TOP HIGH RISK — sort MTP ascending only; Red/Yellow mix freely by date (C12 fix)
-    var highRiskCandidates = activeRows.filter(function(r) {
-      return (r.health === 'Red' || r.health === 'Yellow') && r.mtpDate && r.mtpDate >= todayKey;
-    });
-    highRiskCandidates.sort(function(a, b) {
-      if (a.mtpDate < b.mtpDate) return -1;
-      if (a.mtpDate > b.mtpDate) return 1;
-      var an = (a.accountName || '').toLowerCase();
-      var bn = (b.accountName || '').toLowerCase();
-      return an < bn ? -1 : an > bn ? 1 : 0;
-    });
-    var topHighRisk = highRiskCandidates.slice(0, 5).map(function(r) {
-      return {
-        deploymentId:   r.deploymentId,
-        accountName:    r.accountName,
-        deploymentName: r.deploymentName,
-        partner:        r.partner,
-        health:         r.health,
-        currentMtp:     r.mtpDate
-      };
-    });
+    // TOP HIGH RISK — ProductMode uses PF go-live events; IndustryMode uses active deployment MTP.
+    var topHighRisk = [];
+    if (usesProductModePfGoLiveSource_(cfg)) {
+      topHighRisk = _buildProductModeOverviewNextHighRisk_(cfg, todayKey, productOpts, 5);
+    } else {
+      var highRiskCandidates = activeRows.filter(function(r) {
+        return (r.health === 'Red' || r.health === 'Yellow') && r.mtpDate && r.mtpDate >= todayKey;
+      });
+      highRiskCandidates.sort(function(a, b) {
+        if (a.mtpDate < b.mtpDate) return -1;
+        if (a.mtpDate > b.mtpDate) return 1;
+        var an = (a.accountName || '').toLowerCase();
+        var bn = (b.accountName || '').toLowerCase();
+        return an < bn ? -1 : an > bn ? 1 : 0;
+      });
+      topHighRisk = highRiskCandidates.slice(0, 5).map(function(r) {
+        return {
+          deploymentId:   r.deploymentId,
+          accountName:    r.accountName,
+          deploymentName: r.deploymentName,
+          partner:        r.partner,
+          health:         r.health,
+          currentMtp:     r.mtpDate
+        };
+      });
+    }
 
     // UPCOMING GO LIVES — delegate to getUpcomingGoLives for parity with the Go Lives tab (C12 fix).
     // getUpcomingGoLives handles phased deployments (per-product target dates), override exclusions,
@@ -5952,25 +7463,53 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     }
     var thirtyAhead = _addDaysToKey_(todayKey, 30);
     var upcomingIn30 = [];
-    upcomingGoLivesPayload.forEach(function (r) {
-      var inWindowDate = _earliestUpcomingDateInRange_(r, todayKey, thirtyAhead);
-      if (inWindowDate) {
-        upcomingIn30.push({ row: r, inWindowDate: inWindowDate });
-      }
-    });
+    if (usesProductModePfGoLiveSource_(cfg)) {
+      upcomingIn30 = getProductModeGoLiveEvents_(cfg, {
+        type: 'upcoming',
+        startDate: todayKey,
+        endDate: thirtyAhead,
+        productOpts: productOpts
+      }).map(function (r) {
+        return { row: r, inWindowDate: r.goLiveDate || r.nextGoLiveDate || '' };
+      });
+    } else {
+      upcomingGoLivesPayload.forEach(function (r) {
+        var inWindowDate = _earliestUpcomingDateInRange_(r, todayKey, thirtyAhead);
+        if (inWindowDate) {
+          upcomingIn30.push({ row: r, inWindowDate: inWindowDate });
+        }
+      });
+    }
     upcomingIn30.sort(function (a, b) {
       return a.inWindowDate < b.inWindowDate ? -1 : a.inWindowDate > b.inWindowDate ? 1 : 0;
     });
-    var upcomingItems = upcomingIn30.slice(0, 5).map(function (entry) {
-      var r = entry.row;
-      return {
-        deploymentId:   r.deploymentId || '',
-        accountName:    r.accountName  || '',
-        deploymentName: r.deploymentName || '',
-        currentMtp:     entry.inWindowDate || ''
-      };
-    });
-    var upcomingGoLivesBlock = { total: upcomingIn30.length, items: upcomingItems };
+    var upcomingItems;
+    var upcomingTotal;
+    if (usesProductModePfGoLiveSource_(cfg)) {
+      var upcomingMapped = upcomingIn30.map(function (entry) {
+        var item = _mapProductModeGoLiveEventToOverviewItem_(entry.row);
+        item.currentMtp = entry.inWindowDate || item.currentMtp || '';
+        item.goLiveDate = item.currentMtp;
+        item.targetGoLive = item.currentMtp;
+        return item;
+      });
+      var upcomingDeduped = _dedupeProductModeOverviewGoLiveItems_(upcomingMapped);
+      upcomingItems = upcomingDeduped.items.slice(0, 5);
+      upcomingTotal = upcomingDeduped.items.length;
+    } else {
+      upcomingItems = upcomingIn30.slice(0, 5).map(function (entry) {
+        var r = entry.row;
+        return {
+          deploymentId:   r.deploymentId || '',
+          accountName:    r.accountName  || '',
+          deploymentName: r.deploymentName || '',
+          partner:        r.partner || '',
+          currentMtp:     entry.inWindowDate || ''
+        };
+      });
+      upcomingTotal = upcomingIn30.length;
+    }
+    var upcomingGoLivesBlock = { total: upcomingTotal, items: upcomingItems };
 
     // LIFECYCLE BUCKETS
     var buckets = {
@@ -6021,7 +7560,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa       = (productOpts && productOpts.product) || 'all';
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
-    var cacheKey = _perfKey_(cfg, 'overviewData:v4');
+    var cacheKey = _perfKey_(cfg, 'overviewData:v7');
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
 
@@ -6041,6 +7580,111 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     Logger.log('CoreData.getOverviewSnapshot(' + cfg.appId + '): computed fresh snapshot. totalActive=' +
                (payload.totals && payload.totals.totalActive));
     return payload;
+  }
+
+  /**
+   * Diagnostic for Overview Next High Risk widget (ProductMode go-live grouping).
+   * @param {AppConfig} config
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function _debugOverviewNextHighRisk(config, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
+    var tz = Session.getScriptTimeZone();
+    var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var highRiskEndKey = _addDaysToKey_(todayKey,
+      (cfg.salesforce && cfg.salesforce.upcomingWindowDays) || 90);
+    var usesPfGoLive = usesProductModePfGoLiveSource_(cfg);
+
+    var rawPfTargetCount = 0;
+    var redYellowPfCount = 0;
+    var groupedAccountDateEventCount = 0;
+    var sampleDuplicateCandidates = [];
+
+    if (usesPfGoLive) {
+      var pfRows = getProductModeHistoricalPfRows_(cfg, { product: pa });
+      var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+      var rawDetails = _collectProductModeGoLivePfDetails_(
+        pfRows, cfg, 'target', todayKey, highRiskEndKey, goLivesOverrides);
+      rawPfTargetCount = rawDetails.length;
+      redYellowPfCount = rawDetails.filter(function (d) {
+        return d.health === 'Red' || d.health === 'Yellow';
+      }).length;
+      var grouped = _groupProductModeGoLivePfDetails_(rawDetails);
+      groupedAccountDateEventCount = grouped.groupedEventCount;
+
+      var byAcctDate = {};
+      rawDetails.forEach(function (d) {
+        if (d.health !== 'Red' && d.health !== 'Yellow') return;
+        var k = _productModeGoLiveEventKey_(d.accountId, d.accountName, d.goLiveDate, d.goLiveType);
+        if (!byAcctDate[k]) byAcctDate[k] = [];
+        byAcctDate[k].push(d);
+      });
+      Object.keys(byAcctDate).forEach(function (k) {
+        if (byAcctDate[k].length < 2 || sampleDuplicateCandidates.length >= 5) return;
+        sampleDuplicateCandidates.push({
+          eventKey: k,
+          accountName: byAcctDate[k][0].accountName,
+          goLiveDate: byAcctDate[k][0].goLiveDate,
+          pfRowCount: byAcctDate[k].length,
+          productAreas: byAcctDate[k].map(function (d) { return d.productArea; }),
+          functions: byAcctDate[k].map(function (d) { return d.funcArea; })
+        });
+      });
+    }
+
+    var snapshot = _computeOverviewSnapshot_(cfg, { viewMode: 'all' }, { product: pa });
+    var finalItems = snapshot.topHighRisk || [];
+    var keyCounts = {};
+    var duplicateAccountDateKeysInPayload = 0;
+    finalItems.forEach(function (item) {
+      var k = _overviewGoLiveItemEventKey_(item);
+      keyCounts[k] = (keyCounts[k] || 0) + 1;
+    });
+    Object.keys(keyCounts).forEach(function (k) {
+      if (keyCounts[k] > 1) duplicateAccountDateKeysInPayload++;
+    });
+
+    var warning = duplicateAccountDateKeysInPayload > 0
+      ? 'WARNING: Overview Next High Risk payload still contains duplicate account/date events.'
+      : null;
+
+    var report = {
+      appId: cfg.appId || '',
+      productModeSourceMode: _getProductModeSourceMode_(cfg),
+      productModeDisplayGrain: _getProductModeDisplayGrain_(cfg),
+      productModeCountGrain: _getProductModeCountGrain_(cfg),
+      productModeGoLiveGrain: _getProductModeGoLiveGrain_(cfg),
+      productModePfGoLiveSourceActive: usesPfGoLive,
+      overviewPayloadField: 'topHighRisk',
+      rawPfTargetRowsInWindow: rawPfTargetCount,
+      redYellowPfCandidateRows: redYellowPfCount,
+      groupedAccountDateEventCount: groupedAccountDateEventCount,
+      finalOverviewNextHighRiskCount: finalItems.length,
+      duplicateAccountDateKeysInPayload: duplicateAccountDateKeysInPayload,
+      warning: warning,
+      sampleFinalNextHighRiskRows: finalItems.map(function (r) {
+        return {
+          accountId: r.accountId,
+          accountName: r.accountName,
+          goLiveDate: r.goLiveDate || r.currentMtp,
+          health: r.health,
+          displayLabel: r.displayLabel,
+          displayDeploymentName: r.displayDeploymentName,
+          productFunctionCount: r.productFunctionCount,
+          productAreas: r.productAreas,
+          functions: r.functions,
+          eventKey: r.eventKey || _overviewGoLiveItemEventKey_(r)
+        };
+      }),
+      sampleDuplicateCandidatesBeforeGrouping: sampleDuplicateCandidates
+    };
+
+    Logger.log('=== _debugOverviewNextHighRisk(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  report=' + JSON.stringify(report));
+    if (warning) Logger.log('  ' + warning);
+    return report;
   }
 
   /**
@@ -6761,10 +8405,17 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Phase 1 surface — preserved unchanged for backward compatibility
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
+    getActiveCountDeployments:           getActiveCountDeployments,
     _validateEffectiveDeployments:       _validateEffectiveDeployments,
     _validateProductModeActiveDeploymentsUnion: _validateProductModeActiveDeploymentsUnion,
     _debugProductModeActiveDeploymentsUnion: _debugProductModeActiveDeploymentsUnion,
+    _debugProductModeDeploymentDisplayGrain: _debugProductModeDeploymentDisplayGrain,
+    _debugProductModeCounts:             _debugProductModeCounts,
+    _debugProductModeGoLiveEvents: _debugProductModeGoLiveEvents,
+    _debugOverviewNextHighRisk: _debugOverviewNextHighRisk,
     _debugProductModeSources: _debugProductModeSources,
+    resolveGoLiveDisplayDeploymentName_: resolveGoLiveDisplayDeploymentName_,
+    resolveGoLiveProductFunctionSummary_: resolveGoLiveProductFunctionSummary_,
     readProductModePfRowsRaw_: readProductModePfRowsRaw_,
     beginReportBuildContext_: beginReportBuildContext_,
     endReportBuildContext_: endReportBuildContext_,
@@ -6778,6 +8429,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     // Phase 2 additions
     getAllDeployments:           getAllDeployments,
+    getAllDeploymentsForUI:      getAllDeploymentsForUI,
     getAllActiveOverrides:       getAllActiveOverrides,
     getOverrideAuditLog:         getOverrideAuditLog,
     setOverrideClassification:   setOverrideClassification,

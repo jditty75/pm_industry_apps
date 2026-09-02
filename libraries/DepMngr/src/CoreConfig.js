@@ -328,6 +328,17 @@ var CoreConfig = (function () {
       cfg.activeDeployments.productModeGoLiveSource =
         cfg.activeDeployments.productModeUnionEnabled ? 'productFunction' : 'parent';
     }
+    if (!cfg.activeDeployments.productModeDisplayGrain) {
+      cfg.activeDeployments.productModeDisplayGrain = 'pfRow';
+    }
+    // Count grain is independent of display grain. Unset preserves prior
+    // behavior by following display grain (IndustryMode never uses this).
+    if (!cfg.activeDeployments.productModeCountGrain) {
+      cfg.activeDeployments.productModeCountGrain = cfg.activeDeployments.productModeDisplayGrain;
+    }
+    if (!cfg.activeDeployments.productModeGoLiveGrain) {
+      cfg.activeDeployments.productModeGoLiveGrain = 'accountDate';
+    }
 
     // -------------------------------------------------------------------------
     // Salesforce (Phase 3a, extended Phase 3i)
@@ -488,6 +499,17 @@ var CoreConfig = (function () {
     }
     if (!Array.isArray(cfg.freshness.expectedSheets)) {
       cfg.freshness.expectedSheets = [];
+    }
+    // ProductMode apps: PF sheet is the primary freshness source for active deployment data.
+    if (cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled) {
+      var pfFreshnessSheet = cfg.sheets.sfdcDeploymentProductFunctions ||
+        'SFDC_DeploymentProductFunctions';
+      if (!cfg.freshness.primarySheet) {
+        cfg.freshness.primarySheet = pfFreshnessSheet;
+      }
+      if (!cfg.freshness.watchSheet || cfg.freshness.watchSheet === 'SFDC_Deployments') {
+        cfg.freshness.watchSheet = pfFreshnessSheet;
+      }
     }
 
     // -------------------------------------------------------------------------

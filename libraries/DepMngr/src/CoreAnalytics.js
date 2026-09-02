@@ -41,8 +41,8 @@ var CoreAnalytics = (function () {
     var monthIndex = Number(Utilities.formatDate(now, tz, 'M')) - 1; // 0-based
     var reportMonth = new Date(year, monthIndex, 1);
 
-    // Use EFFECTIVE deployments (ActiveDeployments + DeploymentOverrides + Meta)
-    var allEffective = CoreData.getAllEffectiveDeployments(cfg);
+    // Use count-grain deployments (ProductMode unique PF IDs when configured)
+    var allEffective = CoreData.getActiveCountDeployments(cfg);
 
     var green = 0, red = 0, yellow = 0;
     allEffective.forEach(function (row) {
@@ -384,7 +384,7 @@ var CoreAnalytics = (function () {
     var currentYear = Utilities.formatDate(now, tz, 'yyyy');
 
     // Current counts from effective deployments
-    var allEffective = CoreData.getAllEffectiveDeployments(cfg);
+    var allEffective = CoreData.getActiveCountDeployments(cfg);
     // S1: exclude Student deployments from health breakdown display (HENP only).
     allEffective = CoreData.filterDeploymentsByStudent_(allEffective, 'exclude', cfg);
     if (opts && opts.applyReportProductScope === true) {
@@ -489,7 +489,7 @@ var CoreAnalytics = (function () {
    */
   function getPartnerBreakdown(config, opts) {
     var cfg = CoreConfig.withDefaults(config);
-    var rows = CoreData.getAllEffectiveDeployments(cfg);
+    var rows = CoreData.getActiveCountDeployments(cfg);
     // S1: exclude Student deployments from partner breakdown display (HENP only).
     rows = CoreData.filterDeploymentsByStudent_(rows, 'exclude', cfg);
     if (opts && opts.applyReportProductScope === true) {
@@ -548,7 +548,7 @@ var CoreAnalytics = (function () {
    */
   function getApproachBreakdown(config, opts) {
     var cfg = CoreConfig.withDefaults(config);
-    var effectiveRows = CoreData.getAllEffectiveDeployments(cfg);
+    var effectiveRows = CoreData.getActiveCountDeployments(cfg);
     // S1: exclude Student deployments from approach breakdown display (HENP only).
     effectiveRows = CoreData.filterDeploymentsByStudent_(effectiveRows, 'exclude', cfg);
     if (opts && opts.applyReportProductScope === true) {

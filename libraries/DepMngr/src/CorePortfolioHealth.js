@@ -43,15 +43,19 @@ var CorePortfolioHealth = (function () {
     var now = new Date();
 
     // ---- Effective deployments (Green/Yellow/Red, post-overrides) -----------
-    var allEffective = CoreData.getAllEffectiveDeployments(cfg, productOpts)
+    // Display rows: Deployments-tab grain (lists, expandable rows).
+    var displayRows = CoreData.getAllEffectiveDeployments(cfg, productOpts)
       .filter(function (r) { return !r.excludeFromReport; });
+    displayRows = CoreData.filterDeploymentsByStudent_(displayRows, 'exclude', cfg);
 
-    // S1: exclude Student deployments from Portfolio Health (HENP only).
-    allEffective = CoreData.filterDeploymentsByStudent_(allEffective, 'exclude', cfg);
+    // Count rows: ProductMode count grain for KPI totals / splits.
+    var countRows = CoreData.getActiveCountDeployments(cfg, productOpts)
+      .filter(function (r) { return !r.excludeFromReport; });
+    countRows = CoreData.filterDeploymentsByStudent_(countRows, 'exclude', cfg);
 
     // ---- Health totals -------------------------------------------------------
     var green = 0, yellow = 0, red = 0;
-    allEffective.forEach(function (r) {
+    countRows.forEach(function (r) {
       var h = String(r.health || '').trim();
       if (h === 'Green')  green++;
       else if (h === 'Yellow') yellow++;
@@ -70,9 +74,9 @@ var CorePortfolioHealth = (function () {
       redPct:    pct(red)
     };
 
-    // ---- Red / Yellow project lists (alphabetical) ---------------------------
-    var redProjects    = buildAccountList_(allEffective, 'Red');
-    var yellowProjects = buildAccountList_(allEffective, 'Yellow');
+    // ---- Red / Yellow project lists (alphabetical, display grain) -----------
+    var redProjects    = buildAccountList_(displayRows, 'Red');
+    var yellowProjects = buildAccountList_(displayRows, 'Yellow');
 
     // ---- WD Prime Go Lives (last N days, effective view) --------------------
     // Phase 3i: use getRecentGoLives() (SOQL-backed, Complete deployments) instead
@@ -87,7 +91,7 @@ var CorePortfolioHealth = (function () {
     });
 
     // ---- Partner split (Workday vs Partners/Other) per health row -----------
-    var partnerSplit = buildPartnerSplit_(allEffective, workdayPartner);
+    var partnerSplit = buildPartnerSplit_(countRows, workdayPartner);
 
     // ---- Industry split per health row --------------------------------------
     var industryMode = String(ph.industryMode || 'bucketed').trim().toLowerCase();
@@ -96,18 +100,19 @@ var CorePortfolioHealth = (function () {
     var industrySplit;
 
     if (industryMode === 'all' && industryDisplayMode === 'topNWithOther') {
-      industrySplit = buildTopIndustriesSplit_(allEffective, industryTopN);
+      industrySplit = buildTopIndustriesSplit_(countRows, industryTopN);
     } else if (industryMode === 'all') {
-      industrySplit = buildAllIndustriesSplit_(allEffective);
+      industrySplit = buildAllIndustriesSplit_(countRows);
     } else {
-      industrySplit = buildIndustrySplit_(allEffective, ph.industryBuckets || []);
+      industrySplit = buildIndustrySplit_(countRows, ph.industryBuckets || []);
     }
 
     Logger.log(
       'CorePortfolioHealth.getSnapshot: appId=' + (cfg.appId || '') +
       ', industryMode=' + industryMode +
       ', industryDisplayMode=' + industryDisplayMode +
-      ', allEffective=' + allEffective.length +
+      ', countRows=' + countRows.length +
+      ', displayRows=' + displayRows.length +
       ', industryRows=' + (
         industrySplit && industrySplit.rows ? industrySplit.rows.length : 0
       )

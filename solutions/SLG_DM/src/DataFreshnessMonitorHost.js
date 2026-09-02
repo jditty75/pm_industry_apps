@@ -59,9 +59,10 @@ var DATA_FRESHNESS_APPS = [
     spreadsheetId: '',
     logSheet: 'Auto Refresh Execution Log',
     expectedSheets: [
-      'SFDC_Deployments',
       'SFDC_DeploymentProductFunctions',
-      'SFDC_DeploymentContacts',
+      'Contact1',
+      'Contact2',
+      'SFDC_Wellness',
       'SFDC_DeploymentHistory'
     ]
   },
@@ -71,9 +72,10 @@ var DATA_FRESHNESS_APPS = [
     spreadsheetId: '',
     logSheet: 'Auto Refresh Execution Log',
     expectedSheets: [
-      'SFDC_Deployments',
       'SFDC_DeploymentProductFunctions',
-      'SFDC_DeploymentContacts',
+      'Contacts1',
+      'Contacts2',
+      'SFDC_Wellness',
       'SFDC_DeploymentHistory'
     ]
   }

@@ -135,7 +135,11 @@ var APP_CONFIG = {
       otherLabel: 'Partners/Other',
       recentGoLivesWindowDays: 60,
       industryMode: 'all',
-      industryBuckets: []
+      industryBuckets: [],
+      vNextEnabled: true,
+      exportImageEnabled: true,
+      exportSlidesEnabled: true,
+      healthPlanConcentrationDimension: 'partner'
     },
 
     sections: { approach: true },

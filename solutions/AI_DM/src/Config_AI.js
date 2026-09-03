@@ -152,7 +152,11 @@ var APP_CONFIG = {
       industryMode: 'all',
       industryDisplayMode: 'topNWithOther',
       industryTopN: 10,
-      industryBuckets: []
+      industryBuckets: [],
+      vNextEnabled: true,
+      exportImageEnabled: true,
+      exportSlidesEnabled: true,
+      healthPlanConcentrationDimension: 'partner'
     },
 
     sections: { approach: true },

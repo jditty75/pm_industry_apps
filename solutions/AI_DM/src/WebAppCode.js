@@ -338,6 +338,20 @@ function getPortfolioHealthData(viewModeOpts, productOpts) {
 }
 
 /**
+ * Portfolio Health vNext Diagnostic
+ */
+/**
+ * Portfolio Health vNext Diagnostic
+ * Returns a structured summary object with vNext status and metrics.
+ */
+function debugPortfolioHealthVNext() {
+  if (!CoreLib || !CoreLib.CorePortfolioHealth || typeof CoreLib.CorePortfolioHealth.debugPortfolioHealthVNext !== 'function') {
+    throw new Error('CorePortfolioHealth.debugPortfolioHealthVNext is not available. Confirm CoreLib was pushed and app binding is current.');
+  }
+  return CoreLib.CorePortfolioHealth.debugPortfolioHealthVNext(APP_CONFIG);
+}
+
+/**
  * P2: Portfolio Momentum server endpoint.
  * Returns null if momentum is not enabled for this app.
  */

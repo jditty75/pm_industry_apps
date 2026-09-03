@@ -891,7 +891,10 @@ function _CoreUI_Markup_buildPortfolioTab_(ui, cfg) {
   var showIndicator = ui.personalization && ui.personalization.enabled &&
                       ui.personalization.showFullPortfolioIndicator !== false;
   var momentumEnabled = cfg && cfg.momentum && cfg.momentum.enabled === true;
-  var slideExportEnabled = !(cfg && cfg.report && cfg.report.portfolioHealth && cfg.report.portfolioHealth.slideExportEnabled === false);
+  var phCfg = (cfg && cfg.report && cfg.report.portfolioHealth) || {};
+  var vNextProduct = !!(cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled && phCfg.vNextEnabled);
+  var exportImageEnabled = phCfg.exportImageEnabled !== false;
+  var slideExportEnabled = !(phCfg.slideExportEnabled === false) && !vNextProduct && phCfg.exportSlidesEnabled !== false;
 
   var toggleHtml = momentumEnabled ? [
     '  <div class="portfolio-subview-toggle seg-control no-export" id="portfolio-subview-toggle">',
@@ -930,11 +933,11 @@ function _CoreUI_Markup_buildPortfolioTab_(ui, cfg) {
       ? '  <div class="full-portfolio-indicator">\u2139\uFE0F This view always reflects the full team \u2014 used for external communication.</div>'
       : ''),
     '  <div class="info-banner">',
-    '    📤 Snapshot of overall portfolio health. Use <strong>Download PNG</strong> to export a slide-ready image.',
+    '    📤 Executive portfolio snapshot. Use <strong>Export Image</strong> to download a slide-ready PNG.',
     '  </div>',
     '  <div class="ph-toolbar no-export">',
     '    <button class="btn btn-secondary" onclick="loadPortfolioHealth()" style="margin-right: 8px;">🔄 Refresh</button>',
-    (ui._isReadOnly ? '' : '    <button class="btn btn-primary" onclick="downloadPortfolioHealthPng()">⬇ Download PNG <span id="ph-spinner" class="spinner hidden"></span></button>'),
+    (ui._isReadOnly || !exportImageEnabled ? '' : '    <button class="btn btn-primary" onclick="downloadPortfolioHealthImage()">⬇ Export Image <span id="ph-spinner" class="spinner hidden"></span></button>'),
     (ui._isReadOnly || !slideExportEnabled ? '' : '    <button class="btn btn-secondary" onclick="downloadPortfolioHealthSlidePng()">⬇ Download PNG (16:9 Slide) <span id="ph-slide-spinner" class="spinner hidden"></span></button>'),
     '  </div>',
     toggleHtml,

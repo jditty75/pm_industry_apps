@@ -56,31 +56,48 @@
   }
 
   function countdownText(days) {
-    if (days <= 0) return 'today';
+    if (days === 0) return 'today';
+    if (days < 0) {
+      var ago = Math.abs(days);
+      if (ago === 1) return '1 day ago';
+      return ago + ' days ago';
+    }
     if (days === 1) return 'in 1 day';
     return 'in ' + days + ' days';
   }
 
-  function formatIsoDate(d) {
-    var y = d.getFullYear();
-    var m = d.getMonth() + 1;
-    var day = d.getDate();
-    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  function addDaysIso(startIso, days) {
+    var d = parseIso(startIso);
+    d.setDate(d.getDate() + days);
+    return formatIsoDate(d);
   }
 
-  function getRangeEndIso(range) {
-    var start = parseIso(state.today);
-    var end = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-    if (range === 'd30') end.setDate(end.getDate() + 30);
-    else if (range === 'd90') end.setDate(end.getDate() + 90);
-    else end.setMonth(end.getMonth() + 6);
-    return formatIsoDate(end);
+  function addMonthsIso(startIso, months) {
+    var d = parseIso(startIso);
+    d.setMonth(d.getMonth() + months);
+    return formatIsoDate(d);
+  }
+
+  function getRangeBounds(range) {
+    var today = state.today;
+    if (range === 'p90') {
+      return { start: addDaysIso(today, -90), end: today, direction: 'past' };
+    }
+    if (range === 'd30') {
+      return { start: today, end: addDaysIso(today, 30), direction: 'future' };
+    }
+    if (range === 'd90') {
+      return { start: today, end: addDaysIso(today, 90), direction: 'future' };
+    }
+    return { start: today, end: addMonthsIso(today, 6), direction: 'future' };
   }
 
   function filterMilestones() {
-    var endIso = getRangeEndIso(state.range);
+    var bounds = getRangeBounds(state.range);
     return state.milestones.filter(function(m) {
-      if (m.goLiveDate < state.today || m.goLiveDate > endIso) return false;
+      if (m.goLiveDate < bounds.start || m.goLiveDate > bounds.end) return false;
+      if (bounds.direction === 'past' && m.milestoneStatus !== 'completed') return false;
+      if (bounds.direction === 'future' && m.milestoneStatus !== 'upcoming') return false;
       if (state.productFilters.length === 0) return true;
       return state.productFilters.some(function(p) {
         return (m.coreProducts || []).indexOf(p) !== -1;
@@ -140,13 +157,25 @@
     return daysBetween(state.today, m.goLiveDate);
   }
 
+  function formatIsoDate(d) {
+    var y = d.getFullYear();
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+
   function renderRow(m) {
     var days = getCountdownDays(m);
-    var rowClass = 'timeline-row' + (m.isWorkdayDelivered ? ' workday-delivered' : '');
-    var countdownClass = days <= 0 ? 'countdown today' : 'countdown';
+    var isCompleted = m.milestoneStatus === 'completed';
+    var rowClass = 'timeline-row' +
+      (m.isWorkdayDelivered ? ' workday-delivered' : '') +
+      (isCompleted ? ' completed-milestone' : '');
+    var countdownClass = days === 0 ? 'countdown today' : (days < 0 ? 'countdown past' : 'countdown');
     var depName = m.deploymentName || '';
     var badge = m.isWorkdayDelivered
       ? '<span class="wd-badge">Workday Professional Services</span>' : '';
+    var completedBadge = isCompleted
+      ? '<span class="completed-badge">Completed</span>' : '';
 
     return '<div class="' + rowClass + '">' +
       '<div class="col-date">' +
@@ -157,6 +186,7 @@
         '<div class="customer-line">' +
           '<span class="customer-name">' + escapeHtml(m.customerName) + '</span>' +
           badge +
+          completedBadge +
         '</div>' +
         (depName ? '<div class="depl-name" title="' + escapeHtml(depName) + '">' + escapeHtml(depName) + '</div>' : '') +
         (m.industry ? '<div class="industry">' + escapeHtml(m.industry) + '</div>' : '') +
@@ -201,7 +231,8 @@
       hide('timeline');
       show('emptyState');
       var msg = 'No core go-lives in this window';
-      if (state.range === 'd30') msg += ' — try Next 90 days.';
+      if (state.range === 'p90') msg += ' — try Next 30 days.';
+      else if (state.range === 'd30') msg += ' — try Next 90 days or Past 90 days.';
       else if (state.range === 'd90') msg += ' — try Next 6 months.';
       el('emptyMessage').textContent = msg + '.';
       return;

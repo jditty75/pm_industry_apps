@@ -27,7 +27,7 @@ function include(name) {
 function getUpcomingGoLives() {
   Logger.log('getUpcomingGoLives: start');
   const cache = CacheService.getScriptCache();
-  const cacheKey = 'upcomingGoLives_v2';
+  const cacheKey = 'upcomingGoLives_v3';
   const cached = cache.get(cacheKey);
 
   if (cached) {
@@ -102,7 +102,7 @@ function getExportColumns_() {
   });
 
   const orderedKeys = [
-    'goLiveDate', 'countdownDays',
+    'goLiveDate', 'countdownDays', 'milestoneStatus', 'dateBasis',
     'customerName', 'deploymentName', 'industry',
     'coreProducts', 'deploymentType', 'isWorkdayDelivered',
     'csm', 'emdm', 'ae', 'implementationPartner', 'managingPartner',
@@ -121,6 +121,8 @@ function getExportColumns_() {
   const labelMap = {
     goLiveDate: 'Go-Live Date',
     countdownDays: 'Countdown (days)',
+    milestoneStatus: 'Milestone Status',
+    dateBasis: 'Date Basis',
     coreProducts: 'Core Products',
     deploymentType: 'Deployment Type',
     isWorkdayDelivered: 'Workday-Delivered (Y/N)',
@@ -162,6 +164,8 @@ function flattenMilestoneForExport_(milestone, todayIso) {
   return {
     goLiveDate: milestone.goLiveDate,
     countdownDays: daysBetweenIso_(todayIso, milestone.goLiveDate),
+    milestoneStatus: milestone.milestoneStatus || 'upcoming',
+    dateBasis: milestone.dateBasis || 'target',
     customerName: milestone.customerName,
     deploymentName: milestone.deploymentName || '',
     industry: milestone.industry,

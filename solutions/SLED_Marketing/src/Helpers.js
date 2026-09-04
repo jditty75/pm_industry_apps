@@ -6,8 +6,29 @@
  */
 function parsePersonName(raw) {
   if (raw === null || raw === undefined || raw === '') return '';
-  const m = String(raw).match(/Name=([^,}]+)/);
-  return m ? m[1].trim() : '';
+  const text = String(raw).trim();
+  const m = text.match(/Name=([^,}]+)/);
+  if (m) return m[1].trim();
+  if (text.indexOf('{') === -1 && text.indexOf('attributes=') === -1) return text;
+  return '';
+}
+
+/**
+ * Returns the first non-empty deployment field value for a header or alt header list.
+ * @param {Object<string, *>} deployment
+ * @param {string|Array<string>|undefined} headers
+ * @returns {*}
+ */
+function resolveDeploymentFieldRaw_(deployment, headers) {
+  const list = Array.isArray(headers) ? headers : [headers];
+  for (let i = 0; i < list.length; i++) {
+    const header = list[i];
+    if (!header) continue;
+    const raw = deployment[header];
+    if (raw === null || raw === undefined || raw === '') continue;
+    return raw;
+  }
+  return undefined;
 }
 
 /**

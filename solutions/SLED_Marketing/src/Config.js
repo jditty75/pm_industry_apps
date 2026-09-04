@@ -54,8 +54,9 @@ const AREA_PILL = {
 const PILL_ORDER = ['HCM', 'Financials', 'Payroll', 'Student', 'Core'];
 const GENERIC_PILL = 'Core';
 
-// Time window
-const WINDOW_MONTHS = 6;
+// Time window (server payload: lookback + lookahead)
+const LOOKBACK_MONTHS = 3;
+const LOOKAHEAD_MONTHS = 6;
 const DEFAULT_RANGE = 'd30';
 
 const INTERNAL_PARTNER = 'workday professional services';
@@ -67,9 +68,9 @@ const FIELD_REGISTRY = [
   { key:'region', header:'Customer__r.PS_Region_New__c', label:'Region', type:'text', export:true },
   { key:'subRegion', header:'Customer__r.PS_Sub_Region__c', label:'Sub-Region', type:'text', export:true },
 
-  { key:'csm', header:'Customer__r.Customer_Success_Manager__r', label:'CSM', type:'person', inCard:true, export:true, optional:true },
-  { key:'emdm', combine:['Workday_Engagement_Manager__r','Delivery_Assurance_Manager__r'], label:'EM/DM', type:'person', inCard:true, export:true, optional:true },
-  { key:'ae', header:'Customer__r.Owner', label:'AE', type:'person', inCard:true, export:true },
+  { key:'csm', header:'Customer__r.Customer_Success_Manager__r', altHeaders:['Customer__r.Customer_Success_Manager__r.Full_Name__c'], label:'CSM', type:'person', inCard:true, export:true, optional:true },
+  { key:'emdm', combine:['Workday_Engagement_Manager__r','Delivery_Assurance_Manager__r','Workday_Engagement_Manager__r.Full_Name__c','Delivery_Assurance_Manager__r.Full_Name__c'], label:'EM/DM', type:'person', inCard:true, export:true, optional:true },
+  { key:'ae', header:'Customer__r.Owner', altHeaders:['Customer__r.Owner.Full_Name__c'], label:'AE', type:'person', inCard:true, export:true, optional:true },
   { key:'implementationPartner', header:'Deployment_Partner_Name__c', label:'Impl. Partner', type:'text', inCard:true, export:true, optional:true },
-  { key:'managingPartner', header:'Customer__r.Managing_Partner__r', label:'Managing Partner', type:'person', inCard:true, export:true, optional:true },
+  { key:'managingPartner', header:'Customer__r.Managing_Partner__r', altHeaders:['Customer__r.Managing_Partner__r.Full_Name__c'], label:'Managing Partner', type:'person', inCard:true, export:true, optional:true },
 ];

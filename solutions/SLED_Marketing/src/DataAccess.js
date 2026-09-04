@@ -13,9 +13,13 @@ function readSheetRows_(sheetName) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  const values = sheet.getRange(2, 1, lastRow, sheet.getLastColumn()).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
   const rows = [];
   values.forEach(function(row) {
+    const isBlank = row.every(function(cell) {
+      return cell === '' || cell === null || cell === undefined;
+    });
+    if (isBlank) return;
     const obj = {};
     Object.keys(headerIndex).forEach(function(header) {
       obj[header] = row[headerIndex[header]];
@@ -91,22 +95,65 @@ function isStudentDeployment_(deployment, products) {
 }
 
 /**
- * Returns true when a deployment meets inclusion rules (§4, Revision 4).
+ * Returns true when a product row indicates Student.
+ * @param {Object<string, *>} product
+ * @returns {boolean}
+ */
+function isStudentProduct_(product) {
+  const area = String(product['Product_Area__c'] || '').trim();
+  if (STUDENT_AREAS.indexOf(area) !== -1) return true;
+  const fn = String(product['Function__c'] || '').trim();
+  return STUDENT_FUNCTIONS.indexOf(fn) !== -1;
+}
+
+/**
+ * Returns true when a deployment meets upcoming inclusion rules.
  * @param {Object<string, *>} deployment
  * @param {Array<Object<string, *>>} products
  * @returns {boolean}
  */
-function qualifies_(deployment, products) {
+function qualifiesUpcoming_(deployment, products) {
   const status = String(deployment['Overall_Status__c'] || '').trim();
   if (status !== 'Active') return false;
   if (isStudentDeployment_(deployment, products)) return false;
 
   const type = String(deployment['Deployment_Type__c'] || '').trim();
+  if (type === TYPE_SPEC_INITIAL) return false;
   if (type === TYPE_INITIAL) return true;
   if (type === TYPE_SUBSEQUENT) {
     return hasTargetFunction_(products) || nameHasMajorProduct_(deployment);
   }
   return false;
+}
+
+/**
+ * Returns true when a deployment meets historical inclusion rules.
+ * @param {Object<string, *>} deployment
+ * @param {Array<Object<string, *>>} products
+ * @returns {boolean}
+ */
+function qualifiesHistorical_(deployment, products) {
+  const status = String(deployment['Overall_Status__c'] || '').trim();
+  if (status !== 'Active' && status !== 'Complete') return false;
+  if (isStudentDeployment_(deployment, products)) return false;
+
+  const type = String(deployment['Deployment_Type__c'] || '').trim();
+  if (type === TYPE_SPEC_INITIAL) return false;
+  if (type === TYPE_INITIAL) return true;
+  if (type === TYPE_SUBSEQUENT) {
+    return hasTargetFunction_(products) || nameHasMajorProduct_(deployment);
+  }
+  return false;
+}
+
+/**
+ * Backward-compatible alias for upcoming qualification.
+ * @param {Object<string, *>} deployment
+ * @param {Array<Object<string, *>>} products
+ * @returns {boolean}
+ */
+function qualifies_(deployment, products) {
+  return qualifiesUpcoming_(deployment, products);
 }
 
 /**
@@ -205,15 +252,19 @@ function resolveFieldValue_(deployment, fieldDef) {
     const parts = [];
     fieldDef.combine.forEach(function(header) {
       const raw = deployment[header];
-      const val = fieldDef.type === 'person' ? parsePersonName(raw) : String(raw || '').trim();
+      if (raw === null || raw === undefined || raw === '') return;
+      const val = fieldDef.type === 'person' ? parsePersonName(raw) : String(raw).trim();
       if (val) parts.push(val);
     });
     return parts.join(' / ');
   }
 
-  const raw = deployment[fieldDef.header];
+  const headers = fieldDef.altHeaders
+    ? [fieldDef.header].concat(fieldDef.altHeaders)
+    : [fieldDef.header];
+  const raw = resolveDeploymentFieldRaw_(deployment, headers);
+  if (raw === undefined) return '';
   if (fieldDef.type === 'person') return parsePersonName(raw);
-  if (raw === null || raw === undefined) return '';
   return String(raw).trim();
 }
 
@@ -236,9 +287,10 @@ function getFieldByKey_(key) {
  * @param {string[]} coreProducts
  * @param {string} depType
  * @param {Array<{name:string,email:string,role:string}>} deploymentContacts
+ * @param {Object} [meta]
  * @returns {Object}
  */
-function buildMilestoneObject_(deployment, iso, coreProducts, depType, deploymentContacts) {
+function buildMilestoneObject_(deployment, iso, coreProducts, depType, deploymentContacts, meta) {
   const depId = String(deployment['Id'] || '').trim();
   const keyContacts = {
     csm: resolveFieldValue_(deployment, getFieldByKey_('csm')),
@@ -247,9 +299,10 @@ function buildMilestoneObject_(deployment, iso, coreProducts, depType, deploymen
     implementationPartner: resolveFieldValue_(deployment, getFieldByKey_('implementationPartner')),
     managingPartner: resolveFieldValue_(deployment, getFieldByKey_('managingPartner')),
   };
+  const metadata = meta || {};
 
   return {
-    id: depId + '-' + iso,
+    id: depId + '-' + iso + '-' + (metadata.milestoneStatus || 'upcoming'),
     customerName: resolveFieldValue_(deployment, getFieldByKey_('customerName')),
     deploymentName: String(deployment['Name'] || '').trim(),
     industry: resolveFieldValue_(deployment, getFieldByKey_('industry')),
@@ -262,6 +315,8 @@ function buildMilestoneObject_(deployment, iso, coreProducts, depType, deploymen
     subRegion: resolveFieldValue_(deployment, getFieldByKey_('subRegion')),
     keyContacts: keyContacts,
     deploymentContacts: deploymentContacts || [],
+    milestoneStatus: metadata.milestoneStatus || 'upcoming',
+    dateBasis: metadata.dateBasis || 'target',
   };
 }
 
@@ -272,7 +327,7 @@ function buildMilestoneObject_(deployment, iso, coreProducts, depType, deploymen
  * @param {Array<{name:string,email:string,role:string}>} deploymentContacts
  * @returns {Array<Object>}
  */
-function buildMilestonesForDeployment_(deployment, products, deploymentContacts) {
+function buildUpcomingMilestonesForDeployment_(deployment, products, deploymentContacts) {
   const depType = String(deployment['Deployment_Type__c'] || '').trim();
   const parentMtp = deployment['Current_MTP_Date__c'];
   const isParentAlreadyLive = isActualDateSet_(deployment['First_Move_to_Production_Date_Actual__c']);
@@ -294,7 +349,10 @@ function buildMilestonesForDeployment_(deployment, products, deploymentContacts)
         const iso = toIso(parentDate);
         if (iso) {
           const pills = resolvePillsForEvent_(products, deployment);
-          milestones.push(buildMilestoneObject_(deployment, iso, pills, depType, deploymentContacts));
+          milestones.push(buildMilestoneObject_(deployment, iso, pills, depType, deploymentContacts, {
+            milestoneStatus: 'upcoming',
+            dateBasis: 'target',
+          }));
         }
       }
     }
@@ -323,7 +381,10 @@ function buildMilestonesForDeployment_(deployment, products, deploymentContacts)
       const iso = toIso(parentDate);
       if (iso) {
         const pills = resolvePillsForEvent_([], deployment);
-        milestones.push(buildMilestoneObject_(deployment, iso, pills, depType, deploymentContacts));
+        milestones.push(buildMilestoneObject_(deployment, iso, pills, depType, deploymentContacts, {
+          milestoneStatus: 'upcoming',
+          dateBasis: 'target',
+        }));
       }
     }
     return milestones;
@@ -342,8 +403,80 @@ function buildMilestonesForDeployment_(deployment, products, deploymentContacts)
   Object.keys(byDate).forEach(function(iso) {
     const productsOnDate = byDate[iso];
     const pills = resolvePillsForEvent_(productsOnDate, deployment);
-    milestones.push(buildMilestoneObject_(deployment, iso, pills, depType, deploymentContacts));
+    milestones.push(buildMilestoneObject_(deployment, iso, pills, depType, deploymentContacts, {
+      milestoneStatus: 'upcoming',
+      dateBasis: 'target',
+    }));
   });
+
+  return milestones;
+}
+
+/**
+ * Returns true when a product row qualifies for a historical milestone.
+ * @param {Object<string, *>} product
+ * @param {Object<string, *>} deployment
+ * @param {boolean} isSubsequent
+ * @param {boolean} hasTargetFn
+ * @param {boolean} matchedByName
+ * @returns {boolean}
+ */
+function productQualifiesHistorical_(product, deployment, isSubsequent, hasTargetFn, matchedByName) {
+  if (isStudentProduct_(product)) return false;
+  if (!isSubsequent) return true;
+
+  const fn = String(product['Function__c'] || '').trim();
+  if (hasTargetFn) return TARGET_FUNCTIONS.indexOf(fn) !== -1;
+  if (matchedByName) return true;
+  return false;
+}
+
+/**
+ * Builds completed milestone events from actual go-live dates.
+ * @param {Object<string, *>} deployment
+ * @param {Array<Object<string, *>>} products child rows for this deployment
+ * @param {Array<{name:string,email:string,role:string}>} deploymentContacts
+ * @returns {Array<Object>}
+ */
+function buildHistoricalMilestonesForDeployment_(deployment, products, deploymentContacts) {
+  const depType = String(deployment['Deployment_Type__c'] || '').trim();
+  const isSubsequent = depType === TYPE_SUBSEQUENT;
+  const hasTargetFn = hasTargetFunction_(products);
+  const matchedByName = nameHasMajorProduct_(deployment);
+  const milestones = [];
+  const byDate = {};
+
+  (products || []).forEach(function(product) {
+    if (!isActualDateSet_(product['Production_Move_Date_Actual__c'])) return;
+    if (!productQualifiesHistorical_(product, deployment, isSubsequent, hasTargetFn, matchedByName)) return;
+
+    const iso = toIso(product['Production_Move_Date_Actual__c']);
+    if (!iso) return;
+    if (!byDate[iso]) byDate[iso] = [];
+    byDate[iso].push(product);
+  });
+
+  Object.keys(byDate).forEach(function(iso) {
+    const productsOnDate = byDate[iso];
+    const pills = resolvePillsForEvent_(productsOnDate, deployment);
+    milestones.push(buildMilestoneObject_(deployment, iso, pills, depType, deploymentContacts, {
+      milestoneStatus: 'completed',
+      dateBasis: 'productActual',
+    }));
+  });
+
+  if (milestones.length > 0) return milestones;
+
+  if (!isActualDateSet_(deployment['First_Move_to_Production_Date_Actual__c'])) return milestones;
+
+  const parentIso = toIso(deployment['First_Move_to_Production_Date_Actual__c']);
+  if (!parentIso) return milestones;
+
+  const pills = resolvePillsForEvent_(products, deployment);
+  milestones.push(buildMilestoneObject_(deployment, parentIso, pills, depType, deploymentContacts, {
+    milestoneStatus: 'completed',
+    dateBasis: 'parentActual',
+  }));
 
   return milestones;
 }
@@ -403,11 +536,17 @@ function buildMilestones_() {
   deployments.forEach(function(deployment) {
     const depId = String(deployment['Id'] || '').trim();
     const childProducts = productsByDep[depId] || [];
-    if (!qualifies_(deployment, childProducts)) return;
-
     const depContacts = contactsByDep[depId] || [];
-    const events = buildMilestonesForDeployment_(deployment, childProducts, depContacts);
-    events.forEach(function(m) { all.push(m); });
+
+    if (qualifiesUpcoming_(deployment, childProducts)) {
+      const upcoming = buildUpcomingMilestonesForDeployment_(deployment, childProducts, depContacts);
+      upcoming.forEach(function(m) { all.push(m); });
+    }
+
+    if (qualifiesHistorical_(deployment, childProducts)) {
+      const historical = buildHistoricalMilestonesForDeployment_(deployment, childProducts, depContacts);
+      historical.forEach(function(m) { all.push(m); });
+    }
   });
 
   all.sort(function(a, b) {
@@ -429,25 +568,35 @@ function getTodayIso_() {
 }
 
 /**
- * Returns the upper bound (today + WINDOW_MONTHS) as yyyy-MM-dd.
+ * Returns the lower bound (today - LOOKBACK_MONTHS) as yyyy-MM-dd.
+ * @returns {string}
+ */
+function getWindowStartIso_() {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth() - LOOKBACK_MONTHS, today.getDate());
+  return Utilities.formatDate(start, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+/**
+ * Returns the upper bound (today + LOOKAHEAD_MONTHS) as yyyy-MM-dd.
  * @returns {string}
  */
 function getWindowEndIso_() {
   const today = new Date();
-  const end = new Date(today.getFullYear(), today.getMonth() + WINDOW_MONTHS, today.getDate());
+  const end = new Date(today.getFullYear(), today.getMonth() + LOOKAHEAD_MONTHS, today.getDate());
   return Utilities.formatDate(end, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
 /**
- * Filters milestones to the server-side 6-month window (§6).
+ * Filters milestones to the server-side lookback/lookahead window.
  * @param {Array<Object>} milestones
  * @returns {Array<Object>}
  */
 function filterMilestonesToWindow_(milestones) {
-  const todayIso = getTodayIso_();
+  const startIso = getWindowStartIso_();
   const endIso = getWindowEndIso_();
   return milestones.filter(function(m) {
-    return m.goLiveDate >= todayIso && m.goLiveDate <= endIso;
+    return m.goLiveDate >= startIso && m.goLiveDate <= endIso;
   });
 }
 
@@ -484,35 +633,46 @@ function getInclusionDiagnostics_() {
   let qualifying = 0;
   const badSubsequent = [];
 
+  let historicalQualifying = 0;
+  let completedStatus = 0;
+
   deployments.forEach(function(deployment) {
     const depId = String(deployment['Id'] || '').trim();
     const childProducts = productsByDep[depId] || [];
     const type = String(deployment['Deployment_Type__c'] || '').trim();
     const status = String(deployment['Overall_Status__c'] || '').trim();
 
-    if (status !== 'Active') return;
+    if (status === 'Complete') completedStatus++;
 
     if (isStudentDeployment_(deployment, childProducts)) {
-      studentExcluded++;
+      if (status === 'Active' || status === 'Complete') studentExcluded++;
       return;
     }
 
-    if (type === TYPE_SUBSEQUENT) {
+    if (type === TYPE_SUBSEQUENT && (status === 'Active' || status === 'Complete')) {
       const hasFn = hasTargetFunction_(childProducts);
       const hasName = nameHasMajorProduct_(deployment);
       if (!hasFn && !hasName) {
-        excludedSubsequent++;
+        if (status === 'Active') excludedSubsequent++;
         return;
       }
     }
 
-    if (!qualifies_(deployment, childProducts)) return;
+    if (qualifiesUpcoming_(deployment, childProducts)) {
+      qualifying++;
+      if (type === TYPE_INITIAL) initial++;
+      else if (type === TYPE_SPEC_INITIAL) specInitial++;
+      else if (type === TYPE_SUBSEQUENT) subsequent++;
+      else badSubsequent.push({ id: depId, type: type });
+    } else if (status === 'Active') {
+      if (type === TYPE_SUBSEQUENT) {
+        const hasFn = hasTargetFunction_(childProducts);
+        const hasName = nameHasMajorProduct_(deployment);
+        if (!hasFn && !hasName) excludedSubsequent++;
+      }
+    }
 
-    qualifying++;
-    if (type === TYPE_INITIAL) initial++;
-    else if (type === TYPE_SPEC_INITIAL) specInitial++;
-    else if (type === TYPE_SUBSEQUENT) subsequent++;
-    else badSubsequent.push({ id: depId, type: type });
+    if (qualifiesHistorical_(deployment, childProducts)) historicalQualifying++;
   });
 
   return {
@@ -523,6 +683,8 @@ function getInclusionDiagnostics_() {
     excludedSubsequent: excludedSubsequent,
     studentExcluded: studentExcluded,
     badSubsequent: badSubsequent,
+    historicalQualifying: historicalQualifying,
+    completedStatus: completedStatus,
   };
 }
 

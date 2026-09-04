@@ -239,6 +239,31 @@
     background: linear-gradient(90deg, rgba(255, 176, 0, 0.09) 0%, #FAFAFA 28%);
   }
 
+  .timeline-row.completed-milestone {
+    opacity: 0.92;
+  }
+
+  .timeline-row.completed-milestone .date-short {
+    color: var(--muted);
+  }
+
+  .completed-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    color: #374151;
+    background: #F3F4F6;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .countdown.past {
+    color: var(--gray);
+  }
+
   /* Column 1 — Date */
   .col-date {
     width: 92px;

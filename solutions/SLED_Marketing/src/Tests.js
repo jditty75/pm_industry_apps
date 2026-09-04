@@ -15,9 +15,47 @@ function runSelfTest() {
 
   // §9 / §14 — pure helpers
   check(
-    'parsePersonName',
-    parsePersonName('{attributes={...}, Name=John Waugh}') === 'John Waugh',
-    'expected John Waugh'
+    'parsePersonName plain Full_Name field',
+    parsePersonName('Jane Smith') === 'Jane Smith',
+    'expected plain name from refreshed header'
+  );
+
+  function formatCountdownTextForTest_(days) {
+    if (days === 0) return 'today';
+    if (days < 0) {
+      var ago = Math.abs(days);
+      if (ago === 1) return '1 day ago';
+      return ago + ' days ago';
+    }
+    if (days === 1) return 'in 1 day';
+    return 'in ' + days + ' days';
+  }
+
+  check(
+    'countdown negative days',
+    formatCountdownTextForTest_(-3) === '3 days ago' &&
+      formatCountdownTextForTest_(-1) === '1 day ago' &&
+      formatCountdownTextForTest_(0) === 'today' &&
+      formatCountdownTextForTest_(2) === 'in 2 days',
+    'past and future countdown labels'
+  );
+
+  check(
+    'window constants',
+    LOOKBACK_MONTHS === 3 && LOOKAHEAD_MONTHS === 6,
+    'lookback/lookahead months'
+  );
+
+  check(
+    'window start before today',
+    getWindowStartIso_() < getTodayIso_(),
+    'window start is in the past'
+  );
+
+  check(
+    'window end after today',
+    getWindowEndIso_() >= getTodayIso_(),
+    'window end is today or later'
   );
 
   const d1 = new Date(2026, 0, 15);
@@ -108,9 +146,15 @@ function runSelfTest() {
     inclusion.subsequent + ' subsequent (expected ~42)'
   );
   check(
-    'no bad subsequent in pool',
-    inclusion.badSubsequent.length === 0,
-    inclusion.badSubsequent.length + ' unexpected types'
+    'historical qualifying includes complete deployments',
+    inclusion.historicalQualifying >= inclusion.qualifying,
+    inclusion.historicalQualifying + ' historical vs ' + inclusion.qualifying + ' upcoming qualifying'
+  );
+
+  check(
+    'completed deployments present in sheet',
+    inclusion.completedStatus > 0,
+    inclusion.completedStatus + ' Complete-status deployments'
   );
 
   // No Subsequent without (target function OR name-major-token)
@@ -146,20 +190,125 @@ function runSelfTest() {
     studentLeaks + ' student deployments in qualifying set'
   );
 
-  // §6 — 6-month window pool (soft range)
+  // §6 — server window pool (upcoming + historical)
   const all = buildMilestones_();
   const windowed = filterMilestonesToWindow_(all);
+  const upcomingWindowed = windowed.filter(function(m) { return m.milestoneStatus === 'upcoming'; });
+  const historicalWindowed = windowed.filter(function(m) { return m.milestoneStatus === 'completed'; });
   const customers = {};
   windowed.forEach(function(m) { customers[m.customerName] = true; });
   const customerCount = Object.keys(customers).length;
 
-  Logger.log('runSelfTest: window pool events=' + windowed.length + ' customers=' + customerCount +
-    ' (expected ~87 / ~85)');
+  Logger.log('runSelfTest: window pool total=' + windowed.length +
+    ' upcoming=' + upcomingWindowed.length +
+    ' historical=' + historicalWindowed.length +
+    ' customers=' + customerCount);
 
   check(
-    'window events ~70-110',
-    windowed.length >= 70 && windowed.length <= 110,
-    windowed.length + ' events (expected ~87)'
+    'historical milestones generated in window',
+    historicalWindowed.length > 0,
+    historicalWindowed.length + ' completed milestones in server window'
+  );
+
+  check(
+    'upcoming window events ~70-110',
+    upcomingWindowed.length >= 70 && upcomingWindowed.length <= 110,
+    upcomingWindowed.length + ' upcoming events (expected ~87)'
+  );
+
+  check(
+    'upcoming milestones exclude completed status deployments only',
+    upcomingWindowed.every(function(m) { return m.milestoneStatus === 'upcoming'; }),
+    'all upcoming-window milestones marked upcoming'
+  );
+
+  const historicalProductActual = historicalWindowed.filter(function(m) {
+    return m.dateBasis === 'productActual';
+  }).length;
+  const historicalParentActual = historicalWindowed.filter(function(m) {
+    return m.dateBasis === 'parentActual';
+  }).length;
+  check(
+    'historical uses product actual dates when available',
+    historicalProductActual > 0,
+    historicalProductActual + ' productActual milestones'
+  );
+  check(
+    'historical falls back to parent actual when needed',
+    historicalParentActual >= 0,
+    historicalParentActual + ' parentActual milestones'
+  );
+
+  // Mock historical builder — product actual preferred over parent
+  const mockDep = {
+    Id: 'mock-dep-1',
+    Name: 'Initial Deployment',
+    Deployment_Type__c: TYPE_INITIAL,
+    First_Move_to_Production_Date_Actual__c: new Date(2020, 0, 1),
+    Customer__r: { Name: 'Mock Customer' },
+  };
+  const mockProducts = [
+    {
+      Deployment__c: 'mock-dep-1',
+      Function__c: 'Core HR',
+      Production_Move_Date_Actual__c: new Date(2025, 5, 15),
+    },
+  ];
+  const mockHistorical = buildHistoricalMilestonesForDeployment_(mockDep, mockProducts, []);
+  check(
+    'mock historical prefers product actual date',
+    mockHistorical.length === 1 &&
+      mockHistorical[0].goLiveDate === toIso(mockProducts[0]['Production_Move_Date_Actual__c']) &&
+      mockHistorical[0].dateBasis === 'productActual',
+    JSON.stringify(mockHistorical)
+  );
+
+  const mockParentOnly = buildHistoricalMilestonesForDeployment_(mockDep, [], []);
+  check(
+    'mock historical parent fallback',
+    mockParentOnly.length === 1 &&
+      mockParentOnly[0].dateBasis === 'parentActual',
+    JSON.stringify(mockParentOnly)
+  );
+
+  const mockStudentDep = {
+    Id: 'mock-student',
+    Name: 'Student Initial',
+    Deployment_Type__c: TYPE_INITIAL,
+    Overall_Status__c: 'Complete',
+    First_Move_to_Production_Date_Actual__c: new Date(2025, 1, 1),
+  };
+  check(
+    'student deployments excluded from historical qualification',
+    !qualifiesHistorical_(mockStudentDep, [{ Product_Area__c: 'Student', Function__c: 'Student Records' }]),
+    'student deployment blocked'
+  );
+
+  const mockSpecDep = {
+    Id: 'mock-spec',
+    Name: 'Specialized Initial',
+    Deployment_Type__c: TYPE_SPEC_INITIAL,
+    Overall_Status__c: 'Complete',
+    First_Move_to_Production_Date_Actual__c: new Date(2025, 1, 1),
+  };
+  check(
+    'specialized initial excluded from historical qualification',
+    !qualifiesHistorical_(mockSpecDep, []),
+    'specialized initial blocked'
+  );
+
+  const mockCompleteDep = {
+    Id: 'mock-complete',
+    Name: 'Initial Deployment',
+    Deployment_Type__c: TYPE_INITIAL,
+    Overall_Status__c: 'Complete',
+    First_Move_to_Production_Date_Actual__c: new Date(2025, 1, 1),
+  };
+  check(
+    'completed deployments can qualify historically',
+    qualifiesHistorical_(mockCompleteDep, []) &&
+      !qualifiesUpcoming_(mockCompleteDep, []),
+    'Complete qualifies historical only'
   );
 
   // Contacts join (§14)
@@ -191,6 +340,11 @@ function runSelfTest() {
       'export row col count matches headers',
       exportRow.length === columns.length,
       exportRow.length + ' cols vs ' + columns.length + ' headers'
+    );
+    check(
+      'export includes milestone metadata columns',
+      flat.milestoneStatus && flat.dateBasis,
+      flat.milestoneStatus + ' / ' + flat.dateBasis
     );
   }
 

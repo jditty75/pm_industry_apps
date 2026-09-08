@@ -234,7 +234,9 @@ var CoreTrends = {
         points: [],
         baselineMonth: null,
         currentMonth: null,
-        deltaSinceBaseline: { greenPctChange: 0, redPctChange: 0, yellowPctChange: 0 }
+        deltaSinceBaseline: CoreTrends._emptyHealthTrajectoryDelta_(),
+        baselineCounts: null,
+        currentCounts: null
       };
     }
 
@@ -274,32 +276,30 @@ var CoreTrends = {
         points: [],
         baselineMonth: null,
         currentMonth: null,
-        deltaSinceBaseline: { greenPctChange: 0, redPctChange: 0, yellowPctChange: 0 }
+        deltaSinceBaseline: CoreTrends._emptyHealthTrajectoryDelta_(),
+        baselineCounts: null,
+        currentCounts: null
       };
     }
 
     var baselinePt = points[0];
     var currentPt  = points[points.length - 1];
-
-    var delta = {
-      greenPctChange:  currentPt.greenPct  - baselinePt.greenPct,
-      redPctChange:    currentPt.redPct    - baselinePt.redPct,
-      yellowPctChange: currentPt.yellowPct - baselinePt.yellowPct
-    };
+    var deltaPack  = CoreTrends._buildHealthTrajectoryDelta_(baselinePt, currentPt, points.length >= 2);
 
     if (points.length < 2) {
       Logger.log('CoreTrends.getHealthTrajectory: WARNING \u2014 fewer than 2 months of snapshots; ' +
                  'delta will be zero.');
-      delta = { greenPctChange: 0, redPctChange: 0, yellowPctChange: 0 };
     }
 
     Logger.log('CoreTrends.getHealthTrajectory: ' + points.length + ' monthly points');
 
     var _result_ = {
-      points:            points,
-      baselineMonth:     baselinePt.reportMonth,
-      currentMonth:      currentPt.reportMonth,
-      deltaSinceBaseline: delta
+      points:             points,
+      baselineMonth:      baselinePt.reportMonth,
+      currentMonth:       currentPt.reportMonth,
+      deltaSinceBaseline: deltaPack.deltaSinceBaseline,
+      baselineCounts:     deltaPack.baselineCounts,
+      currentCounts:      deltaPack.currentCounts
     };
     if (cache) {
       try {
@@ -394,11 +394,19 @@ var CoreTrends = {
     rows.sort(function (a, b) { return b.total - a.total; });
     if (unassignedRow && unassignedRow.total > 0) rows.push(unassignedRow);
 
-    Logger.log('CoreTrends.getHealthByPartner: ' + rows.length + ' partner rows');
+    var split = CoreTrends._splitHealthConcentrationRows_(rows, 'partner', '(Unassigned)');
+
+    Logger.log('CoreTrends.getHealthByPartner: ' + split.visibleRows.length + ' visible partner rows, ' +
+               split.hiddenAllGreen.count + ' all-Green partners hidden');
 
     var _result_ = {
-      rows:             rows,
+      rows:             split.visibleRows,
       totalDeployments: totalDeployments,
+      hiddenAllGreenPartners: {
+        count:            split.hiddenAllGreen.count,
+        deploymentCount:  split.hiddenAllGreen.deploymentCount,
+        partners:         split.hiddenAllGreen.names
+      },
       dataIntegrity:    { unassignedCount: unassignedCount, showDisclaimer: unassignedCount > 0 }
     };
     if (cache) {
@@ -511,11 +519,19 @@ var CoreTrends = {
     rows.sort(function (a, b) { return b.total - a.total; });
     if (unassignedRow && unassignedRow.total > 0) rows.push(unassignedRow);
 
-    Logger.log('CoreTrends.getHealthByDeliveryDirector: ' + rows.length + ' DD rows');
+    var split = CoreTrends._splitHealthConcentrationRows_(rows, 'deliveryDirector', '(Unassigned)');
+
+    Logger.log('CoreTrends.getHealthByDeliveryDirector: ' + split.visibleRows.length + ' visible DD rows, ' +
+               split.hiddenAllGreen.count + ' all-Green DDs hidden');
 
     var _result_ = {
-      rows:             rows,
+      rows:             split.visibleRows,
       totalDeployments: totalDeployments,
+      hiddenAllGreenDeliveryDirectors: {
+        count:              split.hiddenAllGreen.count,
+        deploymentCount:    split.hiddenAllGreen.deploymentCount,
+        deliveryDirectors:  split.hiddenAllGreen.names
+      },
       dataIntegrity:    { unassignedCount: unassignedCount, showDisclaimer: unassignedCount > 0 }
     };
     if (cache) {
@@ -960,7 +976,7 @@ var CoreTrends = {
       else                        changedFourPlus++;
 
       // byApproach
-      var approach = String(dep.servicesApproach || dep.deploymentPhase || 'Unknown').trim();
+      var approach = CoreTrends._resolveDeploymentApproach_(dep);
       if (!byApproachMap[approach]) {
         byApproachMap[approach] = { approach: approach, sampleSize: 0, onTimeCount: 0,
                                     slippageDays: [], mtpChanges: [] };
@@ -1031,8 +1047,11 @@ var CoreTrends = {
         };
       }).sort(function (a, b) { return b.sampleSize - a.sampleSize; });
 
+    var approachDiagnostics = CoreTrends._buildApproachDiagnostics_(byApproach, sampleSize);
+
     Logger.log('CoreTrends.getGoLiveOutcomePatterns: sampleSize=' + sampleSize +
-               ', onTime=' + onTimeOrEarlyCount + ', slipped=' + slippedCount);
+               ', onTime=' + onTimeOrEarlyCount + ', slipped=' + slippedCount +
+               ', approachUnknownPct=' + approachDiagnostics.unknownApproachPct + '%');
 
     var _result_ = {
       windowMonths: windowMonths,
@@ -1050,9 +1069,10 @@ var CoreTrends = {
         changedTwiceOrThree: changedTwoThree,
         changedFourPlus:    changedFourPlus
       },
-      byApproach:        byApproach,
-      byPartner:         byPartner,
-      recentCompletions: recentCompletions
+      byApproach:           byApproach,
+      byPartner:            byPartner,
+      recentCompletions:    recentCompletions,
+      approachDiagnostics:  approachDiagnostics
     };
     if (cache) {
       try {
@@ -1320,12 +1340,23 @@ var CoreTrends = {
         currentRed: ((payload.timeInRed || {}).currentRedDeployments || []).length,
         healthTrajectoryPoints: ((payload.healthTrend || {}).points || []).length,
         healthByPartnerRows: ((payload.healthByPartner || {}).rows || []).length,
+        hiddenAllGreenPartners: ((payload.healthByPartner || {}).hiddenAllGreenPartners || {}).count || 0,
         healthByDeliveryDirectorRows: ((payload.healthByDeliveryDirector || {}).rows || []).length,
+        hiddenAllGreenDeliveryDirectors:
+          ((payload.healthByDeliveryDirector || {}).hiddenAllGreenDeliveryDirectors || {}).count || 0,
         timeInStageActive: ((payload.timeInStage || {}).currentStateByDeployment || []).length,
         targetDateInFlight: ((payload.targetDateMovement || {}).inFlight || []).length,
         productionDateInFlight: ((payload.productionDateMovement || {}).inFlight || []).length,
-        completionSampleSize: (payload.completionTrend || {}).sampleSize || 0
+        completionSampleSize: (payload.completionTrend || {}).sampleSize || 0,
+        approachDiagnostics: (payload.completionTrend || {}).approachDiagnostics ||
+          ((payload.completionTrend || {}).byApproach ? {} : {})
       };
+      var approachDiag = (payload.completionTrend && payload.completionTrend.approachDiagnostics) || {};
+      if (approachDiag.distinctApproaches) {
+        result.approachDiagnostics = approachDiag;
+        Logger.log('CoreTrends.debugTrendsDashboardData: approachDiagnostics=' +
+          JSON.stringify(approachDiag));
+      }
       Logger.log('CoreTrends.debugTrendsDashboardData: sectionCounts=' +
         JSON.stringify(result.sectionCounts));
     } catch (err) {
@@ -1336,6 +1367,149 @@ var CoreTrends = {
 
     result.totalMs = Date.now() - t0;
     return result;
+  },
+
+  /**
+   * Returns zeroed health trajectory delta fields.
+   * @return {Object}
+   * @private
+   */
+  _emptyHealthTrajectoryDelta_: function () {
+    return {
+      greenPctChange: 0, redPctChange: 0, yellowPctChange: 0,
+      greenCountChange: 0, redCountChange: 0, yellowCountChange: 0
+    };
+  },
+
+  /**
+   * Builds trajectory delta payload from baseline and current snapshot points.
+   *
+   * @param {Object} baselinePt
+   * @param {Object} currentPt
+   * @param {boolean} hasDeltaWindow  True when at least two monthly points exist.
+   * @return {{ deltaSinceBaseline: Object, baselineCounts: Object, currentCounts: Object }}
+   * @private
+   */
+  _buildHealthTrajectoryDelta_: function (baselinePt, currentPt, hasDeltaWindow) {
+    baselinePt = baselinePt || {};
+    currentPt  = currentPt  || {};
+    var delta  = CoreTrends._emptyHealthTrajectoryDelta_();
+    if (hasDeltaWindow) {
+      delta = {
+        greenPctChange:    currentPt.greenPct  - baselinePt.greenPct,
+        redPctChange:      currentPt.redPct    - baselinePt.redPct,
+        yellowPctChange:   currentPt.yellowPct - baselinePt.yellowPct,
+        greenCountChange:  currentPt.green  - baselinePt.green,
+        redCountChange:    currentPt.red    - baselinePt.red,
+        yellowCountChange: currentPt.yellow - baselinePt.yellow
+      };
+    }
+    return {
+      deltaSinceBaseline: delta,
+      baselineCounts: {
+        green: baselinePt.green || 0,
+        yellow: baselinePt.yellow || 0,
+        red: baselinePt.red || 0,
+        total: baselinePt.total || 0,
+        label: baselinePt.label || baselinePt.reportMonth || ''
+      },
+      currentCounts: {
+        green: currentPt.green || 0,
+        yellow: currentPt.yellow || 0,
+        red: currentPt.red || 0,
+        total: currentPt.total || 0,
+        label: currentPt.label || currentPt.reportMonth || ''
+      }
+    };
+  },
+
+  /**
+   * Splits health concentration rows into visible (Red/Yellow exposure) vs all-Green hidden.
+   *
+   * @param {Array<Object>} allRows
+   * @param {string} nameKey  Property holding entity name, e.g. 'partner'.
+   * @param {string} unassignedLabel
+   * @return {{ visibleRows: Array<Object>, hiddenAllGreen: { count: number, deploymentCount: number, names: Array<string> } }}
+   * @private
+   */
+  _splitHealthConcentrationRows_: function (allRows, nameKey, unassignedLabel) {
+    var visible = [];
+    var hiddenRows = [];
+    var unassignedVisible = null;
+    var unassignedHidden = null;
+
+    (allRows || []).forEach(function (row) {
+      var name = String(row[nameKey] || '').trim();
+      var isUnassigned = name === unassignedLabel;
+      if ((row.red || 0) > 0 || (row.yellow || 0) > 0) {
+        if (isUnassigned) unassignedVisible = row;
+        else visible.push(row);
+      } else if ((row.total || 0) > 0) {
+        if (isUnassigned) unassignedHidden = row;
+        else hiddenRows.push(row);
+      }
+    });
+
+    visible.sort(function (a, b) { return b.total - a.total; });
+    if (unassignedVisible) visible.push(unassignedVisible);
+
+    hiddenRows.sort(function (a, b) { return b.total - a.total; });
+    var hiddenNames = hiddenRows.map(function (r) { return r[nameKey]; });
+    if (unassignedHidden) hiddenNames.push(unassignedLabel);
+
+    var deploymentCount = hiddenRows.reduce(function (sum, r) { return sum + (r.total || 0); }, 0) +
+      (unassignedHidden ? unassignedHidden.total : 0);
+
+    return {
+      visibleRows: visible,
+      hiddenAllGreen: {
+        count: hiddenRows.length + (unassignedHidden ? 1 : 0),
+        deploymentCount: deploymentCount,
+        names: hiddenNames
+      }
+    };
+  },
+
+  /**
+   * Resolves deployment approach/phase label from a completion or deployment row.
+   *
+   * @param {Object} dep
+   * @return {string}
+   * @private
+   */
+  _resolveDeploymentApproach_: function (dep) {
+    var approach = String(
+      (dep && (dep.servicesApproach || dep.deploymentPhase || dep.phase)) || ''
+    ).trim();
+    return approach || 'Unknown';
+  },
+
+  /**
+   * Builds approach distribution diagnostics for Go-Live Outcome Patterns.
+   *
+   * @param {Array<Object>} byApproach
+   * @param {number} sampleSize
+   * @return {Object}
+   * @private
+   */
+  _buildApproachDiagnostics_: function (byApproach, sampleSize) {
+    var approachCounts = {};
+    var unknownApproachCount = 0;
+    (byApproach || []).forEach(function (row) {
+      var key = String(row.approach || 'Unknown').trim() || 'Unknown';
+      approachCounts[key] = row.sampleSize || 0;
+      if (key === 'Unknown') unknownApproachCount += row.sampleSize || 0;
+    });
+    var distinctApproaches = Object.keys(approachCounts).sort();
+    var unknownApproachPct = sampleSize > 0
+      ? Math.round((unknownApproachCount / sampleSize) * 1000) / 10
+      : 0;
+    return {
+      approachCounts: approachCounts,
+      unknownApproachCount: unknownApproachCount,
+      unknownApproachPct: unknownApproachPct,
+      distinctApproaches: distinctApproaches
+    };
   },
 
   /**
@@ -1999,27 +2173,16 @@ var CoreTrends = {
 
     var legacy = CoreTrends.getGoLiveOutcomePatterns(cfg, viewModeOpts);
     var completions = [];
-    var onTime = 0;
-    var slipped = 0;
-    var slippageDays = [];
 
     (legacy.recentCompletions || []).forEach(function (row) {
       completions.push({
         deploymentId: row.deploymentId,
         accountName: row.accountName,
         completionDate: row.actualGoLive || row.completionDate,
-        targetDate: row.finalTarget || row.originalBaseline,
-        slippageDays: row.finalTargetSlippageDays != null
-          ? row.finalTargetSlippageDays : row.baselineSlippageDays,
+        targetDate: row.originalBaseline,
+        slippageDays: row.baselineSlippageDays,
         targetDateChangeCount: row.mtpDateChangeCount
       });
-      var slip = row.finalTargetSlippageDays != null
-        ? row.finalTargetSlippageDays : row.baselineSlippageDays;
-      if (slip <= 0) onTime++;
-      else {
-        slipped++;
-        slippageDays.push(slip);
-      }
     });
 
     return {
@@ -2027,14 +2190,15 @@ var CoreTrends = {
       windowMonths: windowMonths,
       cutoffDate: cutoff,
       sampleSize: legacy.sampleSize || completions.length,
-      onTimeOrEarlyCount: onTime || legacy.baselineAccuracy.onTimeOrEarlyCount || 0,
-      slippedCount: slipped || legacy.baselineAccuracy.slippedCount || 0,
+      onTimeOrEarlyCount: legacy.baselineAccuracy ? legacy.baselineAccuracy.onTimeOrEarlyCount : 0,
+      slippedCount: legacy.baselineAccuracy ? legacy.baselineAccuracy.slippedCount : 0,
       onTimePct: legacy.baselineAccuracy ? legacy.baselineAccuracy.onTimePct : 0,
       avgSlippageDays: legacy.baselineAccuracy ? legacy.baselineAccuracy.avgSlippageDays : 0,
       medianSlippageDays: legacy.baselineAccuracy ? legacy.baselineAccuracy.medianSlippageDays : 0,
       targetDateMovementDistribution: legacy.mtpDateMovementDistribution || {},
       byApproach: legacy.byApproach || [],
       byPartner: legacy.byPartner || [],
+      approachDiagnostics: legacy.approachDiagnostics || {},
       recentCompletions: completions.slice(0, 25),
       fieldsUsed: [
         'Target_Project_Completion_Date__c',
@@ -2206,6 +2370,7 @@ var CoreTrends = {
             return d >= cutoffDate;
           })
           .map(function (r) {
+            var phaseVal = r.phase || r.servicesApproach || r.deploymentPhase || '';
             return {
               deploymentId:       r.deploymentId,
               parentDeploymentId: r.parentDeploymentId || '',
@@ -2214,8 +2379,9 @@ var CoreTrends = {
               deploymentName:   r.deploymentName   || '',
               partner:          r.partner           || '',
               deliveryDirector: r.deliveryDirector  || '',
-              servicesApproach: r.servicesApproach  || r.deploymentPhase || '',
-              deploymentPhase:  r.servicesApproach  || r.deploymentPhase || '',
+              phase:            phaseVal,
+              servicesApproach: phaseVal,
+              deploymentPhase:  phaseVal,
               lastGoLiveDate:   r.lastGoLiveDate     || '',
               firstMtpActual:   r.lastGoLiveDate     || '',
               startDate:        r.startDate          || '',
@@ -2335,7 +2501,7 @@ var CoreTrends = {
       if (dur <= 0) return;
       durations.push(dur);
 
-      var approach = String(dep.servicesApproach || dep.deploymentPhase || 'Unknown').trim();
+      var approach = CoreTrends._resolveDeploymentApproach_(dep);
       if (!byApproach[approach]) byApproach[approach] = [];
       byApproach[approach].push(dur);
     });

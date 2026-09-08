@@ -4409,6 +4409,9 @@ function _sfdcDataVersion_(cfg) {
         partner:        dep.partner,
         industry:       dep.industry,
         status:         dep.status,          // retained for display; not used as filter
+        phase:          dep.phase || '',
+        servicesApproach: dep.phase || dep.servicesApproach || '',
+        deploymentPhase:  dep.phase || dep.deploymentPhase || '',
         recentDates:    filteredRecentDates, // only in-window dates
         lastGoLiveDate: lastGoLiveDate
       });
@@ -4703,6 +4706,8 @@ function _sfdcDataVersion_(cfg) {
       health: health,
       stage: first.stage || '',
       phase: first.phase || '',
+      servicesApproach: first.phase || '',
+      deploymentPhase: first.phase || '',
       status: first.overallStatus || '',
       isPhased: false,
       deploymentRowSource: 'productFunctionGoLiveEventGrouped',

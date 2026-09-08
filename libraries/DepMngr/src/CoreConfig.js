@@ -135,11 +135,13 @@
 
 /**
  * @typedef {Object} TrendsConfig   T1
- * @property {number} cacheTtlSeconds              CacheService TTL for Trends metrics. Default 3600.
- * @property {number} trendsWindowMonths           Rolling window for benchmarks. Default 12.
- * @property {number} timeInStageOutlierMultiple   Multiplier for outlier detection. Default 2.
- * @property {number} timeInStageMinSampleSize     Min sample size for outlier flags. Default 10.
- * @property {number} byPartnerMinSampleSize       Min sample size for by-partner rollups. Default 5.
+ * @property {number}  cacheTtlSeconds              CacheService TTL for Trends metrics. Default 3600.
+ * @property {number}  trendsWindowMonths           Rolling window for benchmarks. Default 12.
+ * @property {number}  timeInStageOutlierMultiple   Multiplier for outlier detection. Default 2.
+ * @property {number}  timeInStageMinSampleSize     Min sample size for outlier flags. Default 10.
+ * @property {number}  byPartnerMinSampleSize       Min sample size for by-partner rollups. Default 5.
+ * @property {boolean} vNextEnabled                 ProductMode Trends v1 bundled UI. Default false.
+ * @property {string}  defaultWindow                Default time window key: '12m' | '24m' | '60m'. Default '12m'.
  */
 
 /**
@@ -310,6 +312,13 @@ var CoreConfig = (function () {
       cfg.deploymentHealthPlan.metricsEnabled = false;
     if (!cfg.deploymentHealthPlan.issueCategoryDelimiter)
       cfg.deploymentHealthPlan.issueCategoryDelimiter = ';';
+
+    // -------------------------------------------------------------------------
+    // Executive Watch (SFDC_Wellness) — enabled by default for all apps
+    // -------------------------------------------------------------------------
+    cfg.executiveWatch = cfg.executiveWatch || {};
+    if (cfg.executiveWatch.enabled === undefined)
+      cfg.executiveWatch.enabled = true;
 
     // -------------------------------------------------------------------------
     // Active deployments (ProductMode union — EVI/AI opt-in)
@@ -753,16 +762,34 @@ var CoreConfig = (function () {
       cfg.ui.deploymentHealthPlan || {}
     );
 
+    // Mirror executiveWatch to ui for client-side APP_UI_CONFIG access.
+    cfg.ui.executiveWatch = Object.assign(
+      {},
+      cfg.executiveWatch,
+      cfg.ui.executiveWatch || {}
+    );
+
     // -------------------------------------------------------------------------
     // Trends (T1)
     // -------------------------------------------------------------------------
-    if (cfg.trends) {
-      if (cfg.trends.cacheTtlSeconds === undefined)            cfg.trends.cacheTtlSeconds            = 3600;
-      if (cfg.trends.trendsWindowMonths === undefined)         cfg.trends.trendsWindowMonths         = 12;
-      if (cfg.trends.timeInStageOutlierMultiple === undefined) cfg.trends.timeInStageOutlierMultiple = 2;
-      if (cfg.trends.timeInStageMinSampleSize === undefined)   cfg.trends.timeInStageMinSampleSize   = 10;
-      if (cfg.trends.byPartnerMinSampleSize === undefined)     cfg.trends.byPartnerMinSampleSize     = 5;
+    cfg.trends = cfg.trends || {};
+    if (cfg.trends.cacheTtlSeconds === undefined)            cfg.trends.cacheTtlSeconds            = 3600;
+    if (cfg.trends.trendsWindowMonths === undefined)         cfg.trends.trendsWindowMonths         = 12;
+    if (cfg.trends.timeInStageOutlierMultiple === undefined) cfg.trends.timeInStageOutlierMultiple = 2;
+    if (cfg.trends.timeInStageMinSampleSize === undefined)   cfg.trends.timeInStageMinSampleSize   = 10;
+    if (cfg.trends.byPartnerMinSampleSize === undefined)     cfg.trends.byPartnerMinSampleSize     = 5;
+    if (cfg.trends.vNextEnabled === undefined)               cfg.trends.vNextEnabled               = false;
+    if (!cfg.trends.defaultWindow)                           cfg.trends.defaultWindow              = '12m';
+
+    // Mirror trends config to ui for client-side APP_UI_CONFIG access.
+    cfg.ui.trendsTab = cfg.ui.trendsTab || {};
+    if (cfg.trends.vNextEnabled && cfg.ui.trendsTab.vNextEnabled === undefined) {
+      cfg.ui.trendsTab.vNextEnabled = cfg.trends.vNextEnabled;
     }
+    if (cfg.trends.defaultWindow && !cfg.ui.trendsTab.defaultWindow) {
+      cfg.ui.trendsTab.defaultWindow = cfg.trends.defaultWindow;
+    }
+    cfg.ui.trends = Object.assign({}, cfg.trends, cfg.ui.trends || {});
     if (cfg.sheets && !cfg.sheets.deploymentHistory) {
       cfg.sheets.deploymentHistory = 'SFDC_DeploymentHistory';
     }
@@ -795,5 +822,20 @@ var CoreConfig = (function () {
     return cfg;
   }
 
-  return { withDefaults: withDefaults };
+  /**
+   * True when Executive Watch (SFDC_Wellness) is enabled for this app.
+   * Default true — only explicit `executiveWatch.enabled === false` disables.
+   *
+   * @param {AppConfig} appConfig
+   * @return {boolean}
+   */
+  function isExecutiveWatchEnabled(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    return cfg.executiveWatch.enabled !== false;
+  }
+
+  return {
+    withDefaults: withDefaults,
+    isExecutiveWatchEnabled: isExecutiveWatchEnabled
+  };
 })();

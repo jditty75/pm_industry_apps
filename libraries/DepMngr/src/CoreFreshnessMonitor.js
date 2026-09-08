@@ -562,13 +562,21 @@ var CoreFreshnessMonitor = (function () {
    * @return {Array<string>}
    */
   function resolveExpectedSheets_(cfg, ss) {
+    var expectedSheets;
     if (cfg.freshness && Array.isArray(cfg.freshness.expectedSheets) && cfg.freshness.expectedSheets.length) {
-      return cfg.freshness.expectedSheets.slice();
+      expectedSheets = cfg.freshness.expectedSheets.slice();
+    } else {
+      var fromConfig = discoverSfdcSheetsFromConfig_(cfg);
+      expectedSheets = fromConfig.length ? fromConfig : DEFAULT_EXPECTED_SHEETS.slice();
     }
 
-    var fromConfig = discoverSfdcSheetsFromConfig_(cfg);
-    if (fromConfig.length) return fromConfig;
-    return DEFAULT_EXPECTED_SHEETS.slice();
+    if (!CoreConfig.isExecutiveWatchEnabled(cfg)) {
+      var wellnessSheet = (cfg.sheets && cfg.sheets.wellness) || 'SFDC_Wellness';
+      expectedSheets = expectedSheets.filter(function(name) {
+        return name !== wellnessSheet;
+      });
+    }
+    return expectedSheets;
   }
 
   /**

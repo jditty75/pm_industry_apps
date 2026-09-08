@@ -1227,7 +1227,7 @@ var CoreData = (function () {
       metaUsername: meta.username || '',
       metaTimestamp: meta.timestamp || ''
     };
-    _attachWellnessFieldsToRow_(base, wellness);
+    _attachWellnessFieldsToRow_(base, wellness, cfg);
 
     var derived = buildEffectiveDeploymentRow_(base, overridesMap || {});
     derived.deploymentId = _deriveProductFunctionDeploymentId_(parentId, pf);
@@ -2428,6 +2428,7 @@ var CoreData = (function () {
 
     var report = {
       appName: cfg.appId || 'UNKNOWN',
+      executiveWatchEnabled: CoreConfig.isExecutiveWatchEnabled(cfg),
       productModeSourceMode: sourceMode,
       productModeDisplayGrain: displayGrain,
       productModeCountGrain: countGrain,
@@ -2746,8 +2747,14 @@ var CoreData = (function () {
    * @return {Array<Object>}
    * @private
    */
-  function readWellnessPlansRaw_(cfg) {
-    if (_cache.wellnessRows !== null) return _cache.wellnessRows;
+  function readWellnessPlansRaw_(cfg, options) {
+    options = options || {};
+    var bypassGate = options.bypassExecutiveWatchGate === true;
+    if (!bypassGate && !CoreConfig.isExecutiveWatchEnabled(cfg)) {
+      if (_cache.wellnessRows === null) _cache.wellnessRows = [];
+      return _cache.wellnessRows;
+    }
+    if (_cache.wellnessRows !== null && !bypassGate) return _cache.wellnessRows;
 
     var sheetName = (cfg && cfg.sheets && cfg.sheets.wellness) || 'SFDC_Wellness';
     var rows = [];
@@ -2975,8 +2982,14 @@ var CoreData = (function () {
    * @return {Object}
    * @private
    */
-  function _attachWellnessFieldsToRow_(row, wellness) {
+  function _attachWellnessFieldsToRow_(row, wellness, cfg) {
     if (!row) return row;
+    if (cfg && !CoreConfig.isExecutiveWatchEnabled(cfg)) {
+      row.isExecutiveWatch = false;
+      row.wellnessData = null;
+      row.customerWellness = null;
+      return row;
+    }
     if (!wellness) {
       row.isExecutiveWatch = false;
       row.wellnessData = null;
@@ -3005,12 +3018,18 @@ var CoreData = (function () {
    * @return {Object}
    * @private
    */
-  function buildWellnessMap_(cfg) {
-    if (_cache.wellnessMap !== null) return _cache.wellnessMap;
+  function buildWellnessMap_(cfg, options) {
+    options = options || {};
+    var bypassGate = options.bypassExecutiveWatchGate === true;
+    if (!bypassGate && !CoreConfig.isExecutiveWatchEnabled(cfg)) {
+      if (_cache.wellnessMap === null) _cache.wellnessMap = {};
+      return _cache.wellnessMap;
+    }
+    if (_cache.wellnessMap !== null && !bypassGate) return _cache.wellnessMap;
 
     var rawRows = [];
     try {
-      rawRows = readWellnessPlansRaw_(cfg) || [];
+      rawRows = readWellnessPlansRaw_(cfg, options) || [];
     } catch (e) {
       Logger.log('CoreData.buildWellnessMap_: readWellnessPlansRaw_ failed: ' + e);
       _cache.wellnessMap = {};
@@ -3044,16 +3063,18 @@ var CoreData = (function () {
    */
   function _debugWellnessData(config) {
     var cfg = CoreConfig.withDefaults(config);
+    var ewEnabled = CoreConfig.isExecutiveWatchEnabled(cfg);
     var sheetName = (cfg.sheets && cfg.sheets.wellness) || 'SFDC_Wellness';
     var sheetExists = false;
     try {
       sheetExists = !!getSpreadsheet_().getSheetByName(sheetName);
     } catch (e) { /* no-op */ }
 
+    var bypassOpts = { bypassExecutiveWatchGate: true };
     _cache.wellnessRows = null;
     _cache.wellnessMap = null;
-    var rawRows = readWellnessPlansRaw_(cfg) || [];
-    var map = buildWellnessMap_(cfg) || {};
+    var rawRows = readWellnessPlansRaw_(cfg, bypassOpts) || [];
+    var map = buildWellnessMap_(cfg, bypassOpts) || {};
 
     var withAccountId = 0;
     var missingAccountId = 0;
@@ -3118,8 +3139,34 @@ var CoreData = (function () {
       }
     });
 
+    var shadowDeploymentRowsWithExecutiveWatch = 0;
+    var shadowSample = [];
+    var shadowRows = [];
+    try {
+      shadowRows = getActiveCountDeployments(cfg, { product: 'all' }) || [];
+    } catch (e) {
+      Logger.log('CoreData._debugWellnessData: getActiveCountDeployments failed: ' + e);
+    }
+    shadowRows.forEach(function(row) {
+      var wKey = (row.accountId || '').slice(0, 15);
+      if (!wKey || !map[wKey]) return;
+      shadowDeploymentRowsWithExecutiveWatch++;
+      if (shadowSample.length < 5) {
+        var wellness = map[wKey];
+        shadowSample.push({
+          accountName: row.accountName || '',
+          accountId: row.accountId || '',
+          isExecutiveWatch: true,
+          cxLeader: wellness.cxLeader || '',
+          overallHealthStatus: wellness.overallHealthStatus || '',
+          issueCategories: (wellness.issueCategories || []).slice()
+        });
+      }
+    });
+
     var result = {
       appName: cfg.appId || '',
+      executiveWatchEnabled: ewEnabled,
       sheetName: sheetName,
       sheetExists: sheetExists,
       wellnessRowCount: rawRows.length,
@@ -3147,7 +3194,10 @@ var CoreData = (function () {
         };
       }),
       deploymentRowsChecked: deploymentRows.length,
+      runtimeExecutiveWatchRows: enrichedCount,
       deploymentRowsWithExecutiveWatch: enrichedCount,
+      shadowDeploymentRowsWithExecutiveWatch: shadowDeploymentRowsWithExecutiveWatch,
+      sampleShadowEnrichedRows: shadowSample,
       sampleEnrichedRows: sampleEnriched
     };
 
@@ -3598,6 +3648,7 @@ var CoreData = (function () {
     var result = {
       appName: cfg.appId || cfg.ui && cfg.ui.appTitle || '',
       enabled: enabled,
+      executiveWatchEnabled: CoreConfig.isExecutiveWatchEnabled(cfg),
       sheetName: sheetName,
       sheetExists: sheetExists,
       dhpRowCount: rawRows.length,
@@ -3830,7 +3881,7 @@ function _sfdcDataVersion_(cfg) {
       };
       var _wKey = (rowObj.accountId || '').slice(0, 15);
       var _wellness = _wellnessMap[_wKey] || null;
-      _attachWellnessFieldsToRow_(rowObj, _wellness);
+      _attachWellnessFieldsToRow_(rowObj, _wellness, cfg);
       rows.push(rowObj);
     }
 
@@ -7019,7 +7070,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           deploymentName:   r.deploymentName,
           deliveryDirector: r.damFullName || '',
           partner:          r.partner     || '',
-          isExecutiveWatch: !!r.isExecutiveWatch,
+          isExecutiveWatch: CoreConfig.isExecutiveWatchEnabled(cfg) && !!r.isExecutiveWatch,
           surveyType:       ev.kind,
           eventDate:        _coerceUiDateField_(ev.eventDate),
           products:         ev.products,
@@ -8403,7 +8454,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var redCount       = activeRows.filter(function(r) { return r.health === 'Red'; }).length;
     var yellowCount    = activeRows.filter(function(r) { return r.health === 'Yellow'; }).length;
     var greenCount     = activeRows.filter(function(r) { return r.health === 'Green'; }).length;
-    var ewCount        = activeRows.filter(function(r) { return r.isExecutiveWatch; }).length;
+    var ewEnabled      = CoreConfig.isExecutiveWatchEnabled(cfg);
+    var ewCount        = ewEnabled
+      ? activeRows.filter(function(r) { return r.isExecutiveWatch; }).length
+      : 0;
 
     // TOP HIGH RISK — ProductMode uses PF go-live events; IndustryMode uses active deployment MTP.
     var topHighRisk = [];
@@ -8514,6 +8568,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     });
 
     return {
+      executiveWatchEnabled: ewEnabled,
       totals: {
         totalActive:    totalActive,
         red:            redCount,
@@ -8540,7 +8595,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa       = (productOpts && productOpts.product) || 'all';
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
-    var cacheKey = _perfKey_(cfg, 'overviewData:v7');
+    var cacheKey = _perfKey_(cfg, 'overviewData:v8');
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
 

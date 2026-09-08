@@ -34,6 +34,10 @@ var APP_CONFIG = {
     issueCategoryDelimiter: ';'
   },
 
+  executiveWatch: {
+    enabled: false
+  },
+
   sheets: {
     activeDeployments:     'ActiveDeployments',
     goLives:               'Go Lives',
@@ -176,6 +180,7 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
+      { id: 'trends',      label: 'Trends' },
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' }
     ],
@@ -183,7 +188,7 @@ var APP_CONFIG = {
     mgmPglTab: {
       enabled: false
     },
-    trendsTab: { enabled: false },
+    trendsTab: { enabled: true, vNextEnabled: true, defaultWindow: '12m' },
     enableAccountLinks: true,
     deploymentsTable: {
       showIndustry: false,
@@ -281,7 +286,9 @@ var APP_CONFIG = {
     trendsWindowMonths:           12,
     timeInStageOutlierMultiple:   2,
     timeInStageMinSampleSize:     10,
-    byPartnerMinSampleSize:       5
+    byPartnerMinSampleSize:       5,
+    vNextEnabled:                 true,
+    defaultWindow:                '12m'
   },
 
   momentum: {

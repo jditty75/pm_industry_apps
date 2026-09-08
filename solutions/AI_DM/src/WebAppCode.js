@@ -352,6 +352,32 @@ function debugPortfolioHealthVNext() {
 }
 
 /**
+ * Create a Google Slides deck from ProductMode Portfolio Health vNext.
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function createPortfolioHealthSlides(viewModeOpts, productOpts) {
+  if (!CoreLib || !CoreLib.CorePortfolioHealth || typeof CoreLib.CorePortfolioHealth.createPortfolioHealthSlides !== 'function') {
+    throw new Error('CorePortfolioHealth.createPortfolioHealthSlides is not available. Confirm CoreLib was pushed and app binding is current.');
+  }
+  return CoreLib.CorePortfolioHealth.createPortfolioHealthSlides(APP_CONFIG, viewModeOpts, productOpts);
+}
+
+/**
+ * Dry-run diagnostic for Portfolio Health Slides payload readiness.
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function debugPortfolioHealthSlidesPayload(viewModeOpts, productOpts) {
+  if (!CoreLib || !CoreLib.CorePortfolioHealth || typeof CoreLib.CorePortfolioHealth.debugPortfolioHealthSlidesPayload !== 'function') {
+    throw new Error('CorePortfolioHealth.debugPortfolioHealthSlidesPayload is not available. Confirm CoreLib was pushed and app binding is current.');
+  }
+  return CoreLib.CorePortfolioHealth.debugPortfolioHealthSlidesPayload(APP_CONFIG, viewModeOpts, productOpts);
+}
+
+/**
  * P2: Portfolio Momentum server endpoint.
  * Returns null if momentum is not enabled for this app.
  */
@@ -1051,6 +1077,45 @@ function getTrendsGoLiveOutcomeData(viewModeOpts) {
     viewModeOpts || {},
     CacheService.getScriptCache()
   );
+}
+
+/**
+ * Trends v1 readiness diagnostic. Run from the Apps Script editor.
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function debugTrendsReadiness(viewModeOpts, productOpts) {
+  if (!CoreLib || !CoreLib.CoreTrends || typeof CoreLib.CoreTrends.debugTrendsReadiness !== 'function') {
+    throw new Error('CoreTrends.debugTrendsReadiness is not available. Confirm CoreLib was pushed and app binding is current.');
+  }
+  return CoreLib.CoreTrends.debugTrendsReadiness(APP_CONFIG, viewModeOpts, productOpts);
+}
+
+/**
+ * Bundled Trends v1 dashboard payload (single server execution).
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function getTrendsDashboardData(viewModeOpts, productOpts) {
+  if (!CoreLib || !CoreLib.CoreTrends || typeof CoreLib.CoreTrends.getTrendsDashboardData !== 'function') {
+    throw new Error('CoreTrends.getTrendsDashboardData is not available. Confirm CoreLib was pushed and app binding is current.');
+  }
+  return CoreLib.CoreTrends.getTrendsDashboardData(APP_CONFIG, viewModeOpts, productOpts);
+}
+
+/**
+ * Trends v1 bundled dashboard diagnostic with timing/section counts.
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function debugTrendsDashboardData(viewModeOpts, productOpts) {
+  if (!CoreLib || !CoreLib.CoreTrends || typeof CoreLib.CoreTrends.debugTrendsDashboardData !== 'function') {
+    throw new Error('CoreTrends.debugTrendsDashboardData is not available. Confirm CoreLib was pushed and app binding is current.');
+  }
+  return CoreLib.CoreTrends.debugTrendsDashboardData(APP_CONFIG, viewModeOpts, productOpts);
 }
 
 function _debug_personalization() {
@@ -1918,4 +1983,8 @@ function debugPortfolioMomentumIndustryGrowth() {
 
   Logger.log('============================================================');
   Logger.log('DEBUG COMPLETE');
+}
+function _authTestSlidesApp() {
+  var p = SlidesApp.create('Portfolio Health Slides Auth Test');
+  Logger.log(p.getUrl());
 }

@@ -1,13 +1,6 @@
 {
   "timeZone": "America/New_York",
   "exceptionLogging": "STACKDRIVER",
-  "oauthScopes": [
-    "https://mail.google.com/",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/script.external_request",
-    "https://www.googleapis.com/auth/script.scriptapp",
-    "https://www.googleapis.com/auth/userinfo.email"
-  ],
   "runtimeVersion": "V8",
   "dependencies": {
     "enabledAdvancedServices": [
@@ -21,13 +14,19 @@
       {
         "userSymbol": "CoreLib",
         "libraryId": "1qIBm-m342W-uJVhnWu0iGZQu-ovnI2qaTuKCKoZej94lsvjalQViAhi3",
-        "version": "0",
-        "developmentMode": true
+        "version": "112"
       }
     ]
   },
   "webapp": {
     "executeAs": "USER_DEPLOYING",
     "access": "DOMAIN"
-  }
+  },
+  "oauthScopes": [
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/userinfo.email"
+  ]
 }

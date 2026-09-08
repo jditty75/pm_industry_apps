@@ -26,6 +26,19 @@
 var APP_CONFIG = {
   appId: 'SLG',
 
+  executiveWatch: {
+  enabled: true
+  },
+
+  deploymentHealthPlan: {
+    enabled: true,
+    sheetName: 'SFDC_DHP',
+    chipEnabled: true,
+    expandedDetailsEnabled: true,
+    metricsEnabled: false,
+    issueCategoryDelimiter: ';'
+  },
+  
   sheets: {
     activeDeployments:     'ActiveDeployments',
     goLives:               'Go Lives',
@@ -190,8 +203,8 @@ var APP_CONFIG = {
     mgmPglTab: {
       enabled: true
     },
-    // T1: Trends tab.
-    trendsTab: { enabled: false },
+    // T1: Trends tab — v1 enabled for SLG pilot.
+    trendsTab: { enabled: true, vNextEnabled: true, defaultWindow: '12m' },
     enableAccountLinks: true,
     deploymentsTable: {
       showIndustry: false,
@@ -283,7 +296,9 @@ var APP_CONFIG = {
     trendsWindowMonths:           12,
     timeInStageOutlierMultiple:   2,
     timeInStageMinSampleSize:     10,
-    byPartnerMinSampleSize:       5
+    byPartnerMinSampleSize:       5,
+    vNextEnabled:                 true,
+    defaultWindow:                '12m'
   },
 
   // ---------------------------------------------------------------------------

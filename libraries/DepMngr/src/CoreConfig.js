@@ -140,7 +140,7 @@
  * @property {number}  timeInStageOutlierMultiple   Multiplier for outlier detection. Default 2.
  * @property {number}  timeInStageMinSampleSize     Min sample size for outlier flags. Default 10.
  * @property {number}  byPartnerMinSampleSize       Min sample size for by-partner rollups. Default 5.
- * @property {boolean} vNextEnabled                 ProductMode Trends v1 bundled UI. Default false.
+ * @property {boolean} vNextEnabled                 Trends v1 bundled UI (ProductMode or IndustryMode). Default false.
  * @property {string}  defaultWindow                Default time window key: '12m' | '24m' | '60m'. Default '12m'.
  */
 

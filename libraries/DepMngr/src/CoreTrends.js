@@ -1090,56 +1090,256 @@ var CoreTrends = {
   // TRENDS V1 BUNDLED BACKEND + DIAGNOSTICS
   // ===========================================================================
 
+  /** @const {number} Warn when UI payload JSON exceeds this size (bytes). */
+  _TRENDS_UI_PAYLOAD_WARN_BYTES_: 200 * 1024,
+
+  /** @const {number} Skip optional heavy sections after this elapsed ms. */
+  _TRENDS_UI_TIME_BUDGET_MS_: 45000,
+
   /**
-   * Returns bundled Trends v1 payload in a single Apps Script execution.
-   * Builds historyMap once; reuses the seven metric functions without CacheService.
-   *
-   * @param {AppConfig} cfg
-   * @param {Object=} viewModeOpts
-   * @param {Object=} productOpts
-   * @param {CacheService=} cache  Ignored — bundled endpoint always computes fresh.
+   * Returns a zeroed completion-trend section for partial UI payloads.
    * @return {Object}
+   * @private
    */
-  getTrendsDashboardData: function (cfg, viewModeOpts, productOpts, cache) {
-    cfg = CoreConfig.withDefaults(cfg);
-    var t0 = Date.now();
-    var warnings = [];
+  _emptyCompletionTrendForUi_: function () {
+    return {
+      label: 'Completion / Go-Live Trend',
+      windowMonths: 12,
+      sampleSize: 0,
+      onTimeOrEarlyCount: 0,
+      slippedCount: 0,
+      onTimePct: 0,
+      avgSlippageDays: 0,
+      medianSlippageDays: 0,
+      targetDateMovementDistribution: {},
+      recentCompletions: []
+    };
+  },
 
-    var scope = CoreTrends.buildPortfolioHistoryParentIdSet_(cfg, viewModeOpts, productOpts);
-    var tHistoryStart = Date.now();
-    var historyMap = CoreHistory.getHistoryMap(cfg);
-    var getHistoryMapMs = Date.now() - tHistoryStart;
-    var historySummary = CoreTrends._buildHistorySummary_(cfg, historyMap, scope, warnings);
+  /**
+   * Deep-clones a Trends payload and converts Date values to ISO strings.
+   * @param {Object} obj
+   * @return {Object}
+   * @private
+   */
+  _ensureTrendsSerializable_: function (obj) {
+    return JSON.parse(JSON.stringify(obj, function (_key, val) {
+      if (val instanceof Date) return val.toISOString();
+      return val;
+    }));
+  },
 
-    var timeInRed = CoreTrends.getTimeInRedMetrics(cfg, viewModeOpts);
-    var healthTrend = CoreTrends.getHealthTrajectory(cfg);
-    var healthByPartner = CoreTrends.getHealthByPartner(cfg, viewModeOpts);
-    var healthByDeliveryDirector = CoreTrends.getHealthByDeliveryDirector(cfg, viewModeOpts);
-    var timeInStage = CoreTrends.getTimeInStageMetrics(cfg, viewModeOpts);
-    var targetDateMovement = CoreTrends._buildTargetDateMovementMetrics_(
-      cfg, scope, historyMap, viewModeOpts, warnings);
-    var productionDateMovement = CoreTrends._buildProductionDateMovementMetrics_(
-      cfg, scope, historyMap, viewModeOpts, warnings);
-    var completionTrend = CoreTrends._buildCompletionTrendMetrics_(
-      cfg, scope, historyMap, viewModeOpts, productOpts, warnings);
+  /**
+   * Builds schedule-movement summary counts for compact UI payloads.
+   * @param {Array<Object>} inFlight
+   * @param {string} changeCountKey
+   * @return {{ inFlightCount: number, overdueCount: number, withChangesCount: number, onTrackCount: number }}
+   * @private
+   */
+  _trendsMovementSummaryCounts_: function (inFlight, changeCountKey) {
+    inFlight = inFlight || [];
+    var overdueCount = 0;
+    var withChangesCount = 0;
+    var onTrackCount = 0;
+    inFlight.forEach(function (d) {
+      var changes = d[changeCountKey] || 0;
+      if (changes > 0) withChangesCount++;
+      if (d.isOverdue) overdueCount++;
+      else if (changes > 0) onTrackCount++;
+    });
+    return {
+      inFlightCount: inFlight.length,
+      overdueCount: overdueCount,
+      withChangesCount: withChangesCount,
+      onTrackCount: onTrackCount
+    };
+  },
 
-    var kpis = CoreTrends._buildTrendsKpis_(
-      scope, historySummary, timeInRed, targetDateMovement, completionTrend);
+  /**
+   * Compacts a raw Trends dashboard payload for google.script.run transport.
+   * Omits verbose diagnostics, caps list sizes, and strips non-render fields.
+   *
+   * @param {Object} raw
+   * @param {Array<string>} warnings
+   * @return {Object}
+   * @private
+   */
+  _compactTrendsDashboardPayload_: function (raw, warnings) {
+    warnings = warnings || [];
+    var caps = {
+      partnerRows: 20,
+      ddRows: 20,
+      outliers: 10,
+      redDeployments: 10,
+      recentCompletions: 15,
+      sampleArrays: 5
+    };
 
-    var totalMs = Date.now() - t0;
-    Logger.log('CoreTrends.getTrendsDashboardData: completed in ' + totalMs + 'ms ' +
-               '(historyMap=' + getHistoryMapMs + 'ms, deploymentsTrended=' +
-               kpis.deploymentsTrended + ')');
+    var pc = raw.productContext || {};
+    var productContext = {
+      enabled: !!pc.enabled,
+      productAreaCount: pc.productAreaCount || 0,
+      functionCount: pc.functionCount || 0,
+      productAreas: (pc.productAreas || []).slice(0, caps.sampleArrays),
+      functions: (pc.functions || []).slice(0, caps.sampleArrays),
+      sampleProductFunctions: (pc.sampleProductFunctions || []).slice(0, caps.sampleArrays)
+    };
+
+    var ic = raw.industryContext || {};
+    var industryContext = {
+      enabled: !!ic.enabled,
+      industryCount: ic.industryCount || 0,
+      regionCount: ic.regionCount || 0,
+      subRegionCount: ic.subRegionCount || 0,
+      industries: (ic.industries || []).slice(0, caps.sampleArrays),
+      regions: (ic.regions || []).slice(0, caps.sampleArrays),
+      subRegions: (ic.subRegions || []).slice(0, caps.sampleArrays)
+    };
+
+    var hs = raw.historySummary || {};
+    var historySummary = {
+      sheetExists: !!hs.sheetExists,
+      historyRowCount: hs.historyRowCount || 0,
+      historyEventCount: hs.historyEventCount || 0,
+      distinctParentIds: hs.distinctParentIds || 0,
+      matchedParentIds: hs.matchedParentIds || 0,
+      unmatchedPortfolioParentIds: hs.unmatchedPortfolioParentIds || 0,
+      unmatchedHistoryParentIds: hs.unmatchedHistoryParentIds || 0,
+      minCreatedDate: hs.minCreatedDate || null,
+      maxCreatedDate: hs.maxCreatedDate || null
+    };
+
+    var tir = raw.timeInRed || {};
+    var timeInRed = {
+      aggregates: tir.aggregates || {},
+      historicalAggregates: tir.historicalAggregates || {},
+      currentRedDeployments: (tir.currentRedDeployments || []).slice(0, caps.redDeployments).map(function (r) {
+        return {
+          deploymentId: String(r.deploymentId || ''),
+          accountName: String(r.accountName || ''),
+          deploymentName: String(r.deploymentName || ''),
+          currentDurationDays: r.currentDurationDays || 0
+        };
+      })
+    };
+
+    var tis = raw.timeInStage || {};
+    var timeInStage = {
+      stageBenchmarks: tis.stageBenchmarks || [],
+      outliers: (tis.outliers || []).slice(0, caps.outliers).map(function (o) {
+        return {
+          accountName: String(o.accountName || ''),
+          currentStage: String(o.currentStage || ''),
+          currentStageDurationDays: o.currentStageDurationDays || 0,
+          multipleOfMedian: o.multipleOfMedian || 0
+        };
+      }),
+      currentStateByDeployment: (tis.currentStateByDeployment || []).map(function (d) {
+        return { currentStage: String(d.currentStage || 'Unknown') };
+      })
+    };
+
+    var tdm = raw.targetDateMovement || {};
+    var tCounts = CoreTrends._trendsMovementSummaryCounts_(tdm.inFlight, 'targetDateChangeCount');
+    var targetDateMovement = {
+      label: tdm.label || 'Target Date Movement',
+      movementDistribution: tdm.movementDistribution || {},
+      sampleSize: tdm.sampleSize || tCounts.inFlightCount,
+      inFlightCount: tCounts.inFlightCount,
+      overdueCount: tCounts.overdueCount,
+      withChangesCount: tCounts.withChangesCount,
+      onTrackCount: tCounts.onTrackCount
+    };
+
+    var pdm = raw.productionDateMovement || {};
+    var pCounts = CoreTrends._trendsMovementSummaryCounts_(pdm.inFlight, 'productionDateChangeCount');
+    var productionDateMovement = {
+      label: pdm.label || 'Production Date Movement',
+      movementDistribution: pdm.movementDistribution || {},
+      sampleSize: pdm.sampleSize || pCounts.inFlightCount,
+      inFlightCount: pCounts.inFlightCount,
+      withChangesCount: pCounts.withChangesCount
+    };
+
+    var ct = raw.completionTrend || {};
+    var completionTrend = {
+      label: ct.label || 'Completion / Go-Live Trend',
+      windowMonths: ct.windowMonths || 12,
+      sampleSize: ct.sampleSize || 0,
+      onTimeOrEarlyCount: ct.onTimeOrEarlyCount || 0,
+      slippedCount: ct.slippedCount || 0,
+      onTimePct: ct.onTimePct || 0,
+      avgSlippageDays: ct.avgSlippageDays || 0,
+      medianSlippageDays: ct.medianSlippageDays || 0,
+      targetDateMovementDistribution: ct.targetDateMovementDistribution || ct.mtpDateMovementDistribution || {},
+      recentCompletions: (ct.recentCompletions || []).slice(0, caps.recentCompletions).map(function (r) {
+        return {
+          deploymentId: String(r.deploymentId || ''),
+          accountName: String(r.accountName || ''),
+          completionDate: String(r.completionDate || r.actualGoLive || ''),
+          slippageDays: r.slippageDays != null ? r.slippageDays : r.baselineSlippageDays,
+          targetDateChangeCount: r.targetDateChangeCount != null ? r.targetDateChangeCount : r.mtpDateChangeCount
+        };
+      })
+    };
+
+    var hbp = raw.healthByPartner || {};
+    var hiddenP = hbp.hiddenAllGreenPartners || {};
+    var healthByPartner = {
+      rows: (hbp.rows || []).slice(0, caps.partnerRows),
+      totalDeployments: hbp.totalDeployments || 0,
+      hiddenAllGreenPartners: {
+        count: hiddenP.count || 0,
+        deploymentCount: hiddenP.deploymentCount || 0,
+        partners: (hiddenP.partners || hiddenP.names || []).slice(0, caps.sampleArrays)
+      },
+      dataIntegrity: hbp.dataIntegrity || {}
+    };
+
+    var hdd = raw.healthByDeliveryDirector || {};
+    var hiddenD = hdd.hiddenAllGreenDeliveryDirectors || {};
+    var healthByDeliveryDirector = {
+      rows: (hdd.rows || []).slice(0, caps.ddRows),
+      totalDeployments: hdd.totalDeployments || 0,
+      hiddenAllGreenDeliveryDirectors: {
+        count: hiddenD.count || 0,
+        deploymentCount: hiddenD.deploymentCount || 0,
+        deliveryDirectors: (hiddenD.deliveryDirectors || hiddenD.names || []).slice(0, caps.sampleArrays)
+      },
+      dataIntegrity: hdd.dataIntegrity || {}
+    };
+
+    var ht = raw.healthTrend || {};
+    var healthTrend = {
+      points: (ht.points || []).map(function (pt) {
+        return {
+          label: String(pt.label || pt.reportMonth || ''),
+          reportMonth: String(pt.reportMonth || pt.label || ''),
+          green: pt.green || 0,
+          yellow: pt.yellow || 0,
+          red: pt.red || 0,
+          total: pt.total || 0,
+          greenPct: pt.greenPct || 0,
+          yellowPct: pt.yellowPct || 0,
+          redPct: pt.redPct || 0
+        };
+      }),
+      deltaSinceBaseline: ht.deltaSinceBaseline || null,
+      baselineCounts: ht.baselineCounts || null,
+      currentCounts: ht.currentCounts || null
+    };
 
     return {
-      ok: true,
-      appId: cfg.appId || '',
-      generatedAt: new Date().toISOString(),
-      trendsEnabled: !!(cfg.ui && cfg.ui.trendsTab && cfg.ui.trendsTab.enabled),
-      layoutMode: scope.layoutMode,
-      productContext: scope.productContext,
+      ok: raw.ok !== false,
+      partial: !!raw.partial,
+      appId: String(raw.appId || ''),
+      generatedAt: String(raw.generatedAt || new Date().toISOString()),
+      trendsEnabled: !!raw.trendsEnabled,
+      layoutMode: raw.layoutMode || 'industry',
+      productContext: productContext,
+      industryContext: industryContext,
       historySummary: historySummary,
-      kpis: kpis,
+      kpis: raw.kpis || {},
       healthTrend: healthTrend,
       timeInRed: timeInRed,
       healthByPartner: healthByPartner,
@@ -1148,12 +1348,175 @@ var CoreTrends = {
       targetDateMovement: targetDateMovement,
       productionDateMovement: productionDateMovement,
       completionTrend: completionTrend,
-      warnings: warnings,
-      timing: {
-        getHistoryMapMs: getHistoryMapMs,
-        totalMs: totalMs
-      }
+      warnings: (raw.warnings || []).concat(warnings)
     };
+  },
+
+  /**
+   * Returns bundled Trends v1 payload in a single Apps Script execution.
+   * Builds historyMap once; compacts and serializes the UI payload before return.
+   *
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {CacheService=} cache  Optional script cache for metric sub-calls.
+   * @return {Object}
+   */
+  getTrendsDashboardData: function (cfg, viewModeOpts, productOpts, cache) {
+    cfg = CoreConfig.withDefaults(cfg);
+    var t0 = Date.now();
+    var warnings = [];
+    var timing = {};
+    var partial = false;
+    var scriptCache = cache;
+    try {
+      scriptCache = scriptCache || CacheService.getScriptCache();
+    } catch (e) {
+      scriptCache = null;
+    }
+
+    try {
+      var tScope = Date.now();
+      var scope = CoreTrends.buildPortfolioHistoryParentIdSet_(cfg, viewModeOpts, productOpts);
+      timing.buildScopeMs = Date.now() - tScope;
+
+      var tHistoryStart = Date.now();
+      var historyMap = CoreHistory.getHistoryMap(cfg);
+      timing.getHistoryMapMs = Date.now() - tHistoryStart;
+
+      var tSummary = Date.now();
+      var historySummary = CoreTrends._buildHistorySummary_(cfg, historyMap, scope, warnings);
+      timing.historySummaryMs = Date.now() - tSummary;
+
+      var tRed = Date.now();
+      var timeInRed = CoreTrends.getTimeInRedMetrics(cfg, viewModeOpts, scriptCache);
+      timing.timeInRedMs = Date.now() - tRed;
+
+      var tHealth = Date.now();
+      var healthTrend = CoreTrends.getHealthTrajectory(cfg, scriptCache);
+      timing.healthTrajectoryMs = Date.now() - tHealth;
+
+      var tPartner = Date.now();
+      var healthByPartner = CoreTrends.getHealthByPartner(cfg, viewModeOpts, scriptCache);
+      timing.healthByPartnerMs = Date.now() - tPartner;
+
+      var tDd = Date.now();
+      var healthByDeliveryDirector = CoreTrends.getHealthByDeliveryDirector(cfg, viewModeOpts, scriptCache);
+      timing.healthByDeliveryDirectorMs = Date.now() - tDd;
+
+      var timeInStage = { currentStateByDeployment: [], stageBenchmarks: [], outliers: [] };
+      var targetDateMovement = {
+        label: 'Target Date Movement',
+        movementDistribution: {},
+        inFlight: [],
+        sampleSize: 0
+      };
+      var productionDateMovement = {
+        label: 'Production Date Movement',
+        movementDistribution: {},
+        inFlight: [],
+        sampleSize: 0
+      };
+      var completionTrend = CoreTrends._emptyCompletionTrendForUi_();
+
+      var elapsed = Date.now() - t0;
+      if (elapsed < CoreTrends._TRENDS_UI_TIME_BUDGET_MS_) {
+        var tStage = Date.now();
+        timeInStage = CoreTrends.getTimeInStageMetrics(cfg, viewModeOpts, scriptCache);
+        timing.timeInStageMs = Date.now() - tStage;
+      } else {
+        partial = true;
+        warnings.push('Time-in-stage metrics were omitted due to runtime constraints.');
+      }
+
+      elapsed = Date.now() - t0;
+      if (elapsed < CoreTrends._TRENDS_UI_TIME_BUDGET_MS_) {
+        var tTarget = Date.now();
+        targetDateMovement = CoreTrends._buildTargetDateMovementMetrics_(
+          cfg, scope, historyMap, viewModeOpts, warnings, historySummary);
+        timing.targetDateMovementMs = Date.now() - tTarget;
+
+        var tProd = Date.now();
+        productionDateMovement = CoreTrends._buildProductionDateMovementMetrics_(
+          cfg, scope, historyMap, viewModeOpts, warnings);
+        timing.productionDateMovementMs = Date.now() - tProd;
+      } else {
+        partial = true;
+        warnings.push('Schedule movement metrics were omitted due to runtime constraints.');
+      }
+
+      elapsed = Date.now() - t0;
+      if (elapsed < CoreTrends._TRENDS_UI_TIME_BUDGET_MS_) {
+        var tCompletion = Date.now();
+        completionTrend = CoreTrends._buildCompletionTrendMetrics_(
+          cfg, scope, historyMap, viewModeOpts, productOpts, warnings);
+        timing.completionTrendMs = Date.now() - tCompletion;
+      } else {
+        partial = true;
+        warnings.push('Completion trend metrics were omitted due to runtime constraints.');
+      }
+
+      var kpis = CoreTrends._buildTrendsKpis_(
+        scope, historySummary, timeInRed, targetDateMovement, completionTrend);
+
+      var rawPayload = {
+        ok: true,
+        partial: partial,
+        appId: cfg.appId || '',
+        generatedAt: new Date().toISOString(),
+        trendsEnabled: !!(cfg.ui && cfg.ui.trendsTab && cfg.ui.trendsTab.enabled),
+        layoutMode: scope.layoutMode,
+        productContext: scope.productContext,
+        industryContext: scope.industryContext,
+        historySummary: historySummary,
+        kpis: kpis,
+        healthTrend: healthTrend,
+        timeInRed: timeInRed,
+        healthByPartner: healthByPartner,
+        healthByDeliveryDirector: healthByDeliveryDirector,
+        timeInStage: timeInStage,
+        targetDateMovement: targetDateMovement,
+        productionDateMovement: productionDateMovement,
+        completionTrend: completionTrend,
+        warnings: warnings
+      };
+
+      var tCompact = Date.now();
+      var payload = CoreTrends._compactTrendsDashboardPayload_(rawPayload, []);
+      timing.compactMs = Date.now() - tCompact;
+
+      payload = CoreTrends._ensureTrendsSerializable_(payload);
+      var payloadJson = JSON.stringify(payload);
+      var payloadBytes = payloadJson.length;
+      payload.payloadBytes = payloadBytes;
+      timing.payloadBytes = payloadBytes;
+      timing.totalMs = Date.now() - t0;
+
+      if (payloadBytes > CoreTrends._TRENDS_UI_PAYLOAD_WARN_BYTES_) {
+        warnings.push('UI payload exceeds 200KB (' + payloadBytes + ' bytes).');
+        Logger.log('CoreTrends.getTrendsDashboardData: WARNING payload size ' + payloadBytes + ' bytes');
+      }
+
+      payload.warnings = warnings;
+      payload.timing = timing;
+
+      Logger.log('CoreTrends.getTrendsDashboardData: completed in ' + timing.totalMs + 'ms ' +
+        '(historyMap=' + timing.getHistoryMapMs + 'ms, payloadBytes=' + payloadBytes +
+        ', deploymentsTrended=' + (kpis.deploymentsTrended || 0) +
+        (partial ? ', partial=true' : '') + ')');
+
+      return payload;
+    } catch (err) {
+      timing.totalMs = Date.now() - t0;
+      Logger.log('CoreTrends.getTrendsDashboardData: error — ' + err);
+      return {
+        ok: false,
+        error: String(err),
+        code: 'TRENDS_DASHBOARD_FAILED',
+        timing: timing,
+        warnings: warnings
+      };
+    }
   },
 
   /**
@@ -1203,6 +1566,15 @@ var CoreTrends = {
         functionCount: 0,
         sampleProductFunctions: []
       },
+      industryContext: {
+        enabled: false,
+        industryCount: 0,
+        regionCount: 0,
+        subRegionCount: 0,
+        industries: [],
+        regions: [],
+        subRegions: []
+      },
       resolverSamples: [],
       fieldAvailability: {},
       warnings: warnings,
@@ -1218,6 +1590,7 @@ var CoreTrends = {
       var scope = CoreTrends.buildPortfolioHistoryParentIdSet_(cfg, viewModeOpts, productOpts);
       diagnostic.layoutMode = scope.layoutMode;
       diagnostic.productContext = scope.productContext;
+      diagnostic.industryContext = scope.industryContext;
 
       var tHistoryStart = Date.now();
       var historyMap = CoreHistory.getHistoryMap(cfg);
@@ -1294,6 +1667,11 @@ var CoreTrends = {
         ', unmatched history=' + diagnostic.unmatchedHistoryParentIdCount);
       Logger.log('product areas: ' + diagnostic.productContext.productAreaCount +
         ', functions: ' + diagnostic.productContext.functionCount);
+      if (diagnostic.industryContext && diagnostic.industryContext.enabled) {
+        Logger.log('industries: ' + diagnostic.industryContext.industryCount +
+          ', regions: ' + diagnostic.industryContext.regionCount +
+          ', sub-regions: ' + diagnostic.industryContext.subRegionCount);
+      }
       Logger.log('getHistoryMapMs: ' + diagnostic.getHistoryMapMs +
         ', totalMs: ' + diagnostic.totalMs);
       if (warnings.length) {
@@ -1336,6 +1714,7 @@ var CoreTrends = {
       result.dashboardOk = !!payload.ok;
       result.timing = payload.timing || {};
       result.warnings = payload.warnings || [];
+      result.payloadBytes = payload.payloadBytes || 0;
       result.sectionCounts = {
         currentRed: ((payload.timeInRed || {}).currentRedDeployments || []).length,
         healthTrajectoryPoints: ((payload.healthTrend || {}).points || []).length,
@@ -1345,20 +1724,16 @@ var CoreTrends = {
         hiddenAllGreenDeliveryDirectors:
           ((payload.healthByDeliveryDirector || {}).hiddenAllGreenDeliveryDirectors || {}).count || 0,
         timeInStageActive: ((payload.timeInStage || {}).currentStateByDeployment || []).length,
-        targetDateInFlight: ((payload.targetDateMovement || {}).inFlight || []).length,
-        productionDateInFlight: ((payload.productionDateMovement || {}).inFlight || []).length,
+        timeInStageOutliers: ((payload.timeInStage || {}).outliers || []).length,
+        targetDateInFlight: (payload.targetDateMovement || {}).inFlightCount ||
+          ((payload.targetDateMovement || {}).inFlight || []).length,
+        productionDateInFlight: (payload.productionDateMovement || {}).inFlightCount ||
+          ((payload.productionDateMovement || {}).inFlight || []).length,
         completionSampleSize: (payload.completionTrend || {}).sampleSize || 0,
-        approachDiagnostics: (payload.completionTrend || {}).approachDiagnostics ||
-          ((payload.completionTrend || {}).byApproach ? {} : {})
+        partial: !!payload.partial
       };
-      var approachDiag = (payload.completionTrend && payload.completionTrend.approachDiagnostics) || {};
-      if (approachDiag.distinctApproaches) {
-        result.approachDiagnostics = approachDiag;
-        Logger.log('CoreTrends.debugTrendsDashboardData: approachDiagnostics=' +
-          JSON.stringify(approachDiag));
-      }
-      Logger.log('CoreTrends.debugTrendsDashboardData: sectionCounts=' +
-        JSON.stringify(result.sectionCounts));
+      Logger.log('CoreTrends.debugTrendsDashboardData: payloadBytes=' + result.payloadBytes +
+        ', sectionCounts=' + JSON.stringify(result.sectionCounts));
     } catch (err) {
       result.ok = false;
       result.error = String(err);
@@ -1591,7 +1966,8 @@ var CoreTrends = {
       parentIds: parentIds,
       parentIdList: parentIdList,
       unresolvedRows: unresolvedRows,
-      productContext: CoreTrends._extractProductContext_(deployments, layoutMode)
+      productContext: CoreTrends._extractProductContext_(deployments, layoutMode),
+      industryContext: CoreTrends._extractIndustryContext_(deployments, layoutMode)
     };
   },
 
@@ -1852,6 +2228,47 @@ var CoreTrends = {
   },
 
   /**
+   * Lightweight industry/region lens context for IndustryMode Trends v1.
+   *
+   * @param {Array<Object>} deployments
+   * @param {string} layoutMode
+   * @return {Object}
+   * @private
+   */
+  _extractIndustryContext_: function (deployments, layoutMode) {
+    var ctx = {
+      enabled: layoutMode === 'industry',
+      industries: [],
+      regions: [],
+      subRegions: [],
+      industryCount: 0,
+      regionCount: 0,
+      subRegionCount: 0
+    };
+    if (layoutMode !== 'industry') return ctx;
+
+    var industrySet = {};
+    var regionSet = {};
+    var subRegionSet = {};
+    (deployments || []).forEach(function (row) {
+      var industry = String((row && row.industry) || '').trim();
+      var region = String((row && row.region) || '').trim();
+      var subRegion = String((row && row.subRegion) || '').trim();
+      if (industry) industrySet[industry] = true;
+      if (region) regionSet[region] = true;
+      if (subRegion) subRegionSet[subRegion] = true;
+    });
+
+    ctx.industries = Object.keys(industrySet).sort();
+    ctx.regions = Object.keys(regionSet).sort();
+    ctx.subRegions = Object.keys(subRegionSet).sort();
+    ctx.industryCount = ctx.industries.length;
+    ctx.regionCount = ctx.regions.length;
+    ctx.subRegionCount = ctx.subRegions.length;
+    return ctx;
+  },
+
+  /**
    * @param {AppConfig} cfg
    * @param {Object} historyMap
    * @param {Object} scope
@@ -2023,7 +2440,7 @@ var CoreTrends = {
    * @return {Object}
    * @private
    */
-  _buildTargetDateMovementMetrics_: function (cfg, scope, historyMap, viewModeOpts, warnings) {
+  _buildTargetDateMovementMetrics_: function (cfg, scope, historyMap, viewModeOpts, warnings, historySummary) {
     var today = CoreTrends._todayStr_();
     var inFlight = [];
     var movementCounts = { neverChanged: 0, changedOnce: 0, changedTwoThree: 0, changedFourPlus: 0 };
@@ -2077,8 +2494,9 @@ var CoreTrends = {
       });
     });
 
-    if (!CoreTrends._getRecommendedFieldAvailability_(
-      (CoreTrends._buildHistorySummary_(cfg, historyMap, scope, warnings).fieldCounts), warnings
+    var fieldCounts = (historySummary && historySummary.fieldCounts) ||
+      CoreTrends._buildHistorySummary_(cfg, historyMap, scope, warnings).fieldCounts;
+    if (!CoreTrends._getRecommendedFieldAvailability_(fieldCounts, warnings
     )['Target_Project_Completion_Date__c']) {
       warnings.push('Target Date Movement: Target_Project_Completion_Date__c sparse in history.');
     }
@@ -2199,7 +2617,7 @@ var CoreTrends = {
       byApproach: legacy.byApproach || [],
       byPartner: legacy.byPartner || [],
       approachDiagnostics: legacy.approachDiagnostics || {},
-      recentCompletions: completions.slice(0, 25),
+      recentCompletions: completions.slice(0, 15),
       fieldsUsed: [
         'Target_Project_Completion_Date__c',
         'First_Move_to_Production_Date_Actual__c',

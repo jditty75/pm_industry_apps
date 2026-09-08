@@ -1086,7 +1086,16 @@ function getTrendsDashboardData(viewModeOpts, productOpts) {
   if (!CoreLib || !CoreLib.CoreTrends || typeof CoreLib.CoreTrends.getTrendsDashboardData !== 'function') {
     throw new Error('CoreTrends.getTrendsDashboardData is not available. Confirm CoreLib was pushed and app binding is current.');
   }
-  return CoreLib.CoreTrends.getTrendsDashboardData(APP_CONFIG, viewModeOpts, productOpts);
+  try {
+    return CoreLib.CoreTrends.getTrendsDashboardData(APP_CONFIG, viewModeOpts, productOpts);
+  } catch (err) {
+    Logger.log('getTrendsDashboardData: error — ' + err);
+    return {
+      ok: false,
+      error: String(err),
+      code: 'TRENDS_DASHBOARD_FAILED'
+    };
+  }
 }
 
 /**

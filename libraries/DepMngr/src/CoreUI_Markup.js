@@ -1618,8 +1618,8 @@ function _CoreUI_Markup_buildAuditDetailModal_(ui) {
  * Builds the Trends tab shell. Data fetching and DOM rendering are handled
  * client-side by loadTrendsTab / renderTrendsDashboardV1_ in CoreUI_Js.js.
  *
- * ProductMode vNext apps get a minimal shell; legacy IndustryMode apps get
- * the five-tier layout (spec §3g).
+ * When trends.vNextEnabled is true, apps get the minimal v1 shell (bundled load).
+ * Otherwise legacy five-tier layout (spec §3g).
  *
  * @param {Object} ui
  * @param {Object=} cfg
@@ -1627,9 +1627,8 @@ function _CoreUI_Markup_buildAuditDetailModal_(ui) {
  */
 function _CoreUI_Markup_buildTrendsTab_(ui, cfg) {
   var trendsCfg = (cfg && cfg.trends) || {};
-  var vNextProduct = !!(cfg && cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled &&
-    (trendsCfg.vNextEnabled || (ui.trendsTab && ui.trendsTab.vNextEnabled)));
-  if (vNextProduct) {
+  var vNextEnabled = !!(trendsCfg.vNextEnabled || (ui.trendsTab && ui.trendsTab.vNextEnabled));
+  if (vNextEnabled) {
     return _CoreUI_Markup_buildTrendsTabV1_(ui, cfg);
   }
   return _CoreUI_Markup_buildTrendsTabLegacy_(ui);
@@ -1643,8 +1642,11 @@ function _CoreUI_Markup_buildTrendsTab_(ui, cfg) {
  * @return {string}
  */
 function _CoreUI_Markup_buildTrendsTabV1_(ui, cfg) {
+  var trendsCfg = (cfg && cfg.trends) || {};
+  var windowMonths = trendsCfg.trendsWindowMonths || 12;
   return [
-    '<div id="trends-tab" class="tab-content trends-v1-tab">',
+    '<div id="trends-tab" class="tab-content trends-v1-tab" data-trends-vnext="1" data-trends-window-months="' +
+      String(windowMonths) + '">',
     '  <div id="trends-v1-loading" class="trends-v1-loading">',
     '    <div class="trends-v1-spin"></div>',
     '    <strong class="trends-v1-loading-title">Loading deployment trends&hellip;</strong>',
@@ -1664,7 +1666,7 @@ function _CoreUI_Markup_buildTrendsTabV1_(ui, cfg) {
  */
 function _CoreUI_Markup_buildTrendsTabLegacy_(ui) {
   return [
-    '<div id="trends-tab" class="tab-content">',
+    '<div id="trends-tab" class="tab-content" data-trends-vnext="0">',
     '',
     '  <!-- Trends: info banner + toolbar -->',
     '  <div class="info-banner">',

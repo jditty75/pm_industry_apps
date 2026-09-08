@@ -1062,13 +1062,14 @@ var CorePortfolioHealth = (function () {
     });
 
     var dhpSet = buildDhpMatchedSet_(dhpMetrics.matchedDhpDeploymentIds);
-    var ewSet = buildExecutiveWatchAccountSet_(countRows);
+    var ewEnabled = CoreConfig.isExecutiveWatchEnabled(cfg);
+    var ewSet = ewEnabled ? buildExecutiveWatchAccountSet_(countRows) : {};
 
     var upcomingWithHealthPlans = 0;
     var upcomingOnExecutiveWatch = 0;
     upcoming30Events.forEach(function (ev) {
       if (goLiveEventHasHealthPlan_(ev, dhpSet)) upcomingWithHealthPlans++;
-      if (goLiveEventOnExecutiveWatch_(ev, ewSet)) upcomingOnExecutiveWatch++;
+      if (ewEnabled && goLiveEventOnExecutiveWatch_(ev, ewSet)) upcomingOnExecutiveWatch++;
     });
 
     var upcoming30 = upcoming30Events.length;
@@ -1246,9 +1247,13 @@ var CorePortfolioHealth = (function () {
     // DHP metrics
     var dhpMetrics = buildDhpMetrics_(cfg, countRows);
 
+    var ewEnabled = CoreConfig.isExecutiveWatchEnabled(cfg);
+
     // Executive Watch (Wellness / isExecutiveWatch on count rows)
-    var executiveWatch = healthRows.filter(function (row) { return !!row.isExecutiveWatch; }).length;
-    var executiveWatchPct = totalActive > 0 ? executiveWatch / totalActive : 0;
+    var executiveWatch = ewEnabled
+      ? healthRows.filter(function (row) { return !!row.isExecutiveWatch; }).length
+      : 0;
+    var executiveWatchPct = (ewEnabled && totalActive > 0) ? executiveWatch / totalActive : 0;
 
     // Partner + industry concentration
     var partnerDist = buildRankedDistribution_(healthRows, partnerNameForRow_, totalActive, topN);
@@ -1287,6 +1292,7 @@ var CorePortfolioHealth = (function () {
     return {
       vNext: true,
       layoutMode: cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled ? 'product' : 'industry',
+      executiveWatchEnabled: ewEnabled,
 
       appId:        baseSnapshot.appId,
       title:        baseSnapshot.title,
@@ -1372,6 +1378,7 @@ var CorePortfolioHealth = (function () {
       diagnostic: 'debugPortfolioHealthVNext',
       appId: cfg && cfg.appId ? String(cfg.appId) : 'unknown',
       generatedAt: new Date().toISOString(),
+      executiveWatchEnabled: CoreConfig.isExecutiveWatchEnabled(cfg),
       vNextEnabled: !!(cfg && cfg.report && cfg.report.portfolioHealth && cfg.report.portfolioHealth.vNextEnabled),
       portfolioTotalActive: 0,
       dhpOpenHealthPlans: 0,
@@ -1388,7 +1395,8 @@ var CorePortfolioHealth = (function () {
       recent60: 0,
       upcomingWithHealthPlans: 0,
       upcomingOnExecutiveWatch: 0,
-      upcomingGoLivesMismatchWarning: false
+      upcomingGoLivesMismatchWarning: false,
+      slidesExportAvailable: true
     };
 
     try {
@@ -1410,6 +1418,16 @@ var CorePortfolioHealth = (function () {
 
       diagnostic.executiveWatch = ps.executiveWatch || 0;
       diagnostic.executiveWatchPct = ps.executiveWatchPct || 0;
+      if (!diagnostic.executiveWatchEnabled) {
+        diagnostic.runtimeExecutiveWatch = diagnostic.executiveWatch;
+        try {
+          var wellnessDbg = CoreData._debugWellnessData(cfg);
+          diagnostic.shadowExecutiveWatch = wellnessDbg.shadowDeploymentRowsWithExecutiveWatch;
+        } catch (shadowErr) {
+          diagnostic.shadowExecutiveWatch = null;
+          diagnostic.shadowExecutiveWatchError = String(shadowErr);
+        }
+      }
       diagnostic.partnerDistributionCount = (pc.partnerDistribution || []).length;
       diagnostic.topPartner = pc.topPartner || null;
       diagnostic.topIndustry = pc.topIndustry || null;
@@ -1488,10 +1506,1128 @@ var CorePortfolioHealth = (function () {
   }
 
   // ---------------------------------------------------------------------------
+  // PORTFOLIO HEALTH — GOOGLE SLIDES EXPORT (ProductMode vNext)
+  // ---------------------------------------------------------------------------
+
+  /** @const {Object<string, string>} */
+  var PH_SLIDES_COLORS_ = {
+    navy: '#0F4C81',
+    green: '#10B981',
+    yellow: '#F59E0B',
+    red: '#EF4444',
+    dhp: '#6D28D9',
+    indigo: '#4F46E5',
+    teal: '#0891B2',
+    partner: '#64748B',
+    text: '#0F172A',
+    muted: '#64748B',
+    cardBg: '#F8FAFC',
+    white: '#FFFFFF',
+    track: '#E2E8F0'
+  };
+
+  /**
+   * @param {*} value
+   * @param {number=} fallback
+   * @return {number}
+   * @private
+   */
+  function phSlidesSafeNum_(value, fallback) {
+    var n = Number(value);
+    return isNaN(n) ? (fallback || 0) : n;
+  }
+
+  /**
+   * @param {number} part
+   * @param {number} whole
+   * @return {number}
+   * @private
+   */
+  function phSlidesPctOf_(part, whole) {
+    whole = phSlidesSafeNum_(whole, 0);
+    return whole > 0 ? phSlidesSafeNum_(part, 0) / whole : 0;
+  }
+
+  /**
+   * @param {number} pct
+   * @return {string}
+   * @private
+   */
+  function formatPct_(pct) {
+    if (pct === undefined || pct === null || isNaN(pct)) return '0%';
+    return (Math.round(pct * 1000) / 10) + '%';
+  }
+
+  /**
+   * @param {*} text
+   * @param {number=} maxLen
+   * @return {string}
+   * @private
+   */
+  function safeText_(text, maxLen) {
+    var s = String(text === undefined || text === null ? '' : text).trim();
+    if (!maxLen || s.length <= maxLen) return s;
+    return s.slice(0, Math.max(1, maxLen - 1)) + '\u2026';
+  }
+
+  /**
+   * @param {*} text
+   * @param {number=} maxLen
+   * @return {string}
+   * @private
+   */
+  function truncateText_(text, maxLen) {
+    return safeText_(text, maxLen);
+  }
+
+  /**
+   * @param {Object} snapshot
+   * @return {number}
+   * @private
+   */
+  function phSlidesOpenHealthPlans_(snapshot) {
+    var ps = snapshot.portfolioStatus || {};
+    var dhi = snapshot.deploymentHealthInsights || {};
+    if (ps.openHealthPlans !== undefined && ps.openHealthPlans !== null) {
+      return phSlidesSafeNum_(ps.openHealthPlans, 0);
+    }
+    return phSlidesSafeNum_(dhi.openHealthPlans, 0);
+  }
+
+  /**
+   * @param {Object} snapshot
+   * @return {Object}
+   * @private
+   */
+  function phSlidesGoLiveReadiness_(snapshot) {
+    if (snapshot.goLiveReadiness) return snapshot.goLiveReadiness;
+    var ps = snapshot.portfolioStatus || {};
+    return {
+      upcoming30: phSlidesSafeNum_(ps.upcomingGoLives30, 0),
+      recent60: 0,
+      upcomingWithHealthPlans: 0,
+      upcomingOnExecutiveWatch: 0
+    };
+  }
+
+  /**
+   * @param {Array<Object>} raw
+   * @return {Array<Object>}
+   * @private
+   */
+  function phSlidesDistItems_(raw) {
+    if (!raw) return [];
+    return Array.isArray(raw) ? raw : [];
+  }
+
+  /**
+   * @param {Object} row
+   * @param {number} total
+   * @param {string=} labelKey
+   * @return {{label: string, count: number, pct: number}}
+   * @private
+   */
+  function phSlidesNormalizeDistRow_(row, total, labelKey) {
+    labelKey = labelKey || 'label';
+    var label = row[labelKey] || row.label || row.category || row.name || 'Unknown';
+    var count = phSlidesSafeNum_(row.count !== undefined ? row.count : row.total, 0);
+    var pct = row.pct;
+    if (pct === undefined || pct === null || isNaN(pct)) {
+      if (row.percent !== undefined && row.percent !== null) pct = row.percent;
+      else if (row.portfolioPct !== undefined && row.portfolioPct !== null) pct = row.portfolioPct;
+      else if (row.share !== undefined && row.share !== null) pct = row.share;
+      else pct = phSlidesPctOf_(count, total);
+    }
+    return { label: String(label), count: count, pct: pct };
+  }
+
+  /**
+   * @param {Object} snapshot
+   * @return {Array<Object>}
+   * @private
+   */
+  function phSlidesPartnerDistribution_(snapshot) {
+    var pc = snapshot.portfolioConcentration || {};
+    var raw = phSlidesDistItems_(pc.partnerDistribution);
+    if (!raw.length) return [];
+    var total = phSlidesSafeNum_(pc.partnerTotal, 0);
+    if (!total) {
+      total = raw.reduce(function (s, r) { return s + phSlidesSafeNum_(r.count, 0); }, 0);
+    }
+    return raw.map(function (r) { return phSlidesNormalizeDistRow_(r, total); });
+  }
+
+  /**
+   * @param {Object} snapshot
+   * @return {Array<Object>}
+   * @private
+   */
+  function phSlidesIndustryDistribution_(snapshot) {
+    var pc = snapshot.portfolioConcentration || {};
+    var raw = phSlidesDistItems_(pc.industryDistribution);
+    if (!raw.length) return [];
+    var total = phSlidesSafeNum_(pc.industryTotal, 0);
+    if (!total) {
+      total = raw.reduce(function (s, r) { return s + phSlidesSafeNum_(r.count, 0); }, 0);
+    }
+    return raw.map(function (r) { return phSlidesNormalizeDistRow_(r, total); });
+  }
+
+  /**
+   * @param {Object} snapshot
+   * @return {Array<Object>}
+   * @private
+   */
+  function phSlidesIssueCategories_(snapshot) {
+    var dhi = snapshot.deploymentHealthInsights || {};
+    var cats = dhi.issueCategories || [];
+    var openPlans = phSlidesOpenHealthPlans_(snapshot);
+    var denom = openPlans || cats.reduce(function (s, c) {
+      return s + phSlidesSafeNum_(c.count, 0);
+    }, 0);
+    return cats.map(function (c) {
+      return phSlidesNormalizeDistRow_(c, denom, 'category');
+    });
+  }
+
+  /**
+   * @param {Object} snapshot
+   * @return {Array<Object>}
+   * @private
+   */
+  function phSlidesHealthPlanConcentration_(snapshot) {
+    var dhi = snapshot.deploymentHealthInsights || {};
+    var raw = phSlidesDistItems_(dhi.healthPlansByPartner);
+    if (!raw.length) return [];
+    var openPlans = phSlidesOpenHealthPlans_(snapshot);
+    var total = openPlans || raw.reduce(function (s, r) {
+      return s + phSlidesSafeNum_(r.count, 0);
+    }, 0);
+    return raw.map(function (r) { return phSlidesNormalizeDistRow_(r, total); });
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {AppConfig} cfg
+   * @return {Object}
+   * @private
+   */
+  function phSlidesInitLayout_(presentation, snapshot, cfg) {
+    var pw = presentation.getPageWidth();
+    var ph = presentation.getPageHeight();
+    var margin = 36;
+    var headerH = 50;
+    var footerH = 26;
+    return {
+      pres: presentation,
+      cfg: cfg,
+      snapshot: snapshot,
+      pw: pw,
+      ph: ph,
+      margin: margin,
+      headerH: headerH,
+      footerH: footerH,
+      contentLeft: margin,
+      contentTop: margin + headerH + 10,
+      contentWidth: pw - (margin * 2),
+      contentBottom: ph - margin - footerH - 6,
+      font: 'Arial',
+      generatedLabel: snapshot.generatedLabel || ''
+    };
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {string} title
+   * @param {string=} subtitle
+   * @private
+   */
+  function addSlideHeader_(slide, layout, title, subtitle) {
+    var bar = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, 0, 0, layout.pw, layout.headerH);
+    bar.getFill().setSolidFill(PH_SLIDES_COLORS_.navy);
+    bar.getBorder().setTransparent();
+
+    var titleBox = slide.insertShape(
+      SlidesApp.ShapeType.TEXT_BOX,
+      layout.margin,
+      8,
+      layout.pw - (layout.margin * 2),
+      22
+    );
+    titleBox.getFill().setTransparent();
+    titleBox.getBorder().setTransparent();
+    var titleText = titleBox.getText();
+    titleText.setText(safeText_(title, 80));
+    titleText.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(16)
+      .setBold(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.white);
+
+    if (subtitle) {
+      var subBox = slide.insertShape(
+        SlidesApp.ShapeType.TEXT_BOX,
+        layout.margin,
+        30,
+        layout.pw - (layout.margin * 2),
+        16
+      );
+      subBox.getFill().setTransparent();
+      subBox.getBorder().setTransparent();
+      var subText = subBox.getText();
+      subText.setText(safeText_(subtitle, 120));
+      subText.getTextStyle()
+        .setFontFamily(layout.font)
+        .setFontSize(9)
+        .setForegroundColor('#CBD5E1');
+    }
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @private
+   */
+  function addSlideFooter_(slide, layout) {
+    var footerText = 'Workday Confidential';
+    if (layout.generatedLabel) {
+      footerText += '  |  Generated ' + layout.generatedLabel;
+    }
+    var footerBox = slide.insertShape(
+      SlidesApp.ShapeType.TEXT_BOX,
+      layout.margin,
+      layout.ph - layout.margin - layout.footerH + 4,
+      layout.contentWidth,
+      layout.footerH
+    );
+    footerBox.getFill().setTransparent();
+    footerBox.getBorder().setTransparent();
+    var ft = footerBox.getText();
+    ft.setText(footerText);
+    ft.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(8)
+      .setForegroundColor(PH_SLIDES_COLORS_.muted);
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} x
+   * @param {number} y
+   * @param {number} w
+   * @param {number} h
+   * @param {string} title
+   * @private
+   */
+  function addSectionTitle_(slide, layout, x, y, w, title) {
+    var box = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x, y, w, 18);
+    box.getFill().setTransparent();
+    box.getBorder().setTransparent();
+    var t = box.getText();
+    t.setText(safeText_(title, 60));
+    t.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(12)
+      .setBold(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.navy);
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} x
+   * @param {number} y
+   * @param {number} w
+   * @param {number} h
+   * @param {string} label
+   * @param {string|number} value
+   * @param {string=} sub
+   * @param {string=} accentColor
+   * @private
+   */
+  function addKpiCard_(slide, layout, x, y, w, h, label, value, sub, accentColor) {
+    var card = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, x, y, w, h);
+    card.getFill().setSolidFill(PH_SLIDES_COLORS_.cardBg);
+    card.getBorder().getLineFill().setSolidFill(PH_SLIDES_COLORS_.track);
+
+    if (accentColor) {
+      var accent = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, w, 3);
+      accent.getFill().setSolidFill(accentColor);
+      accent.getBorder().setTransparent();
+    }
+
+    var labelBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, y + 8, w - 16, 14);
+    labelBox.getFill().setTransparent();
+    labelBox.getBorder().setTransparent();
+    var lt = labelBox.getText();
+    lt.setText(safeText_(label, 40).toUpperCase());
+    lt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(7)
+      .setBold(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.muted);
+
+    var valueBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, y + 22, w - 16, 28);
+    valueBox.getFill().setTransparent();
+    valueBox.getBorder().setTransparent();
+    var vt = valueBox.getText();
+    vt.setText(String(value));
+    vt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(22)
+      .setBold(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.text);
+
+    if (sub) {
+      var subBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, y + h - 18, w - 16, 14);
+      subBox.getFill().setTransparent();
+      subBox.getBorder().setTransparent();
+      var st = subBox.getText();
+      st.setText(safeText_(sub, 36));
+      st.getTextStyle()
+        .setFontFamily(layout.font)
+        .setFontSize(8)
+        .setForegroundColor(PH_SLIDES_COLORS_.muted);
+    }
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} x
+   * @param {number} y
+   * @param {number} w
+   * @param {number} h
+   * @param {string} label
+   * @param {string|number} value
+   * @param {string=} sub
+   * @param {string=} accentColor
+   * @private
+   */
+  function addMetricCard_(slide, layout, x, y, w, h, label, value, sub, accentColor) {
+    addKpiCard_(slide, layout, x, y, w, h, label, value, sub, accentColor);
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} y
+   * @param {string} label
+   * @param {number} count
+   * @param {number} pct
+   * @param {number} maxCount
+   * @param {string} barColor
+   * @return {number}
+   * @private
+   */
+  function addHorizontalBar_(slide, layout, y, label, count, pct, maxCount, barColor) {
+    var rowH = 22;
+    var labelW = 150;
+    var valueW = 72;
+    var barX = layout.contentLeft + labelW + 6;
+    var barW = layout.contentWidth - labelW - valueW - 12;
+    var fillW = maxCount > 0 ? Math.max(4, (count / maxCount) * barW) : 0;
+
+    var labelBox = slide.insertShape(
+      SlidesApp.ShapeType.TEXT_BOX,
+      layout.contentLeft,
+      y,
+      labelW,
+      rowH
+    );
+    labelBox.getFill().setTransparent();
+    labelBox.getBorder().setTransparent();
+    var lt = labelBox.getText();
+    lt.setText(truncateText_(label, 24));
+    lt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(8)
+      .setForegroundColor(PH_SLIDES_COLORS_.text);
+
+    var track = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, barX, y + 6, barW, 10);
+    track.getFill().setSolidFill(PH_SLIDES_COLORS_.track);
+    track.getBorder().setTransparent();
+
+    if (fillW > 0) {
+      var fill = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, barX, y + 6, fillW, 10);
+      fill.getFill().setSolidFill(barColor || PH_SLIDES_COLORS_.navy);
+      fill.getBorder().setTransparent();
+    }
+
+    var valueBox = slide.insertShape(
+      SlidesApp.ShapeType.TEXT_BOX,
+      barX + barW + 6,
+      y,
+      valueW,
+      rowH
+    );
+    valueBox.getFill().setTransparent();
+    valueBox.getBorder().setTransparent();
+    var vt = valueBox.getText();
+    vt.setText(count + ' (' + formatPct_(pct) + ')');
+    vt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(8)
+      .setForegroundColor(PH_SLIDES_COLORS_.muted);
+    vt.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.END);
+
+    return y + rowH;
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} x
+   * @param {number} y
+   * @param {number} w
+   * @param {number} h
+   * @param {Array<{label: string, count: number, pct: number, color: string}>} segments
+   * @private
+   */
+  function addSplitBar_(slide, layout, x, y, w, h, segments) {
+    var cursor = x;
+    segments.forEach(function (seg) {
+      var segW = Math.max(0, w * phSlidesSafeNum_(seg.pct, 0));
+      if (segW < 1) return;
+      var rect = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, cursor, y, segW, h);
+      rect.getFill().setSolidFill(seg.color || PH_SLIDES_COLORS_.navy);
+      rect.getBorder().setTransparent();
+      if (segW >= 36) {
+        var tbox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, cursor + 4, y + 2, segW - 8, h - 4);
+        tbox.getFill().setTransparent();
+        tbox.getBorder().setTransparent();
+        var tt = tbox.getText();
+        tt.setText(seg.count + ' (' + formatPct_(seg.pct) + ')');
+        tt.getTextStyle()
+          .setFontFamily(layout.font)
+          .setFontSize(9)
+          .setBold(true)
+          .setForegroundColor(PH_SLIDES_COLORS_.white);
+      }
+      cursor += segW;
+    });
+
+    var legendY = y + h + 8;
+    var legendX = x;
+    segments.forEach(function (seg) {
+      var dot = slide.insertShape(SlidesApp.ShapeType.ELLIPSE, legendX, legendY + 2, 8, 8);
+      dot.getFill().setSolidFill(seg.color || PH_SLIDES_COLORS_.navy);
+      dot.getBorder().setTransparent();
+      var leg = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, legendX + 12, legendY, 160, 14);
+      leg.getFill().setTransparent();
+      leg.getBorder().setTransparent();
+      var lt = leg.getText();
+      lt.setText(safeText_(seg.label, 28) + ': ' + seg.count + ' (' + formatPct_(seg.pct) + ')');
+      lt.getTextStyle()
+        .setFontFamily(layout.font)
+        .setFontSize(9)
+        .setForegroundColor(PH_SLIDES_COLORS_.text);
+      legendX += 180;
+    });
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} x
+   * @param {number} y
+   * @param {number} w
+   * @param {Object} insight
+   * @private
+   */
+  function addInsightBox_(slide, layout, x, y, w, insight) {
+    if (!insight) return;
+    var tone = insight.tone || 'neutral';
+    var accent = PH_SLIDES_COLORS_.navy;
+    if (tone === 'risk') accent = PH_SLIDES_COLORS_.red;
+    else if (tone === 'watch') accent = PH_SLIDES_COLORS_.yellow;
+    else if (tone === 'positive') accent = PH_SLIDES_COLORS_.green;
+
+    var box = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, x, y, w, 52);
+    box.getFill().setSolidFill(PH_SLIDES_COLORS_.cardBg);
+    box.getBorder().getLineFill().setSolidFill(PH_SLIDES_COLORS_.track);
+    var accentBar = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, 4, 52);
+    accentBar.getFill().setSolidFill(accent);
+    accentBar.getBorder().setTransparent();
+
+    var titleBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 12, y + 6, w - 20, 14);
+    titleBox.getFill().setTransparent();
+    titleBox.getBorder().setTransparent();
+    var tt = titleBox.getText();
+    tt.setText(safeText_(insight.title || 'Insight', 40));
+    tt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(9)
+      .setBold(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.navy);
+
+    var textBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 12, y + 22, w - 20, 26);
+    textBox.getFill().setTransparent();
+    textBox.getBorder().setTransparent();
+    var txt = textBox.getText();
+    txt.setText(safeText_(insight.text || '', 160));
+    txt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(9)
+      .setForegroundColor(PH_SLIDES_COLORS_.text);
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} x
+   * @param {number} y
+   * @param {number} w
+   * @param {string} title
+   * @param {Object|null} item
+   * @private
+   */
+  function addCalloutTile_(slide, layout, x, y, w, title, item) {
+    if (!item || !item.label) return;
+    var tile = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, x, y, w, 44);
+    tile.getFill().setSolidFill(PH_SLIDES_COLORS_.cardBg);
+    tile.getBorder().getLineFill().setSolidFill(PH_SLIDES_COLORS_.track);
+
+    var titleBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 10, y + 6, w - 20, 12);
+    titleBox.getFill().setTransparent();
+    titleBox.getBorder().setTransparent();
+    var tt = titleBox.getText();
+    tt.setText(safeText_(title, 30).toUpperCase());
+    tt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(7)
+      .setBold(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.muted);
+
+    var valBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 10, y + 18, w - 20, 14);
+    valBox.getFill().setTransparent();
+    valBox.getBorder().setTransparent();
+    var vt = valBox.getText();
+    vt.setText(truncateText_(item.label, 32));
+    vt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(11)
+      .setBold(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.text);
+
+    var metaBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 10, y + 32, w - 20, 10);
+    metaBox.getFill().setTransparent();
+    metaBox.getBorder().setTransparent();
+    var mt = metaBox.getText();
+    mt.setText(item.count + ' (' + formatPct_(item.pct) + ')');
+    mt.getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(8)
+      .setForegroundColor(PH_SLIDES_COLORS_.muted);
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {Object} layout
+   * @param {number} y
+   * @param {Array<Object>} items
+   * @param {string} barColor
+   * @param {string=} emptyText
+   * @return {number}
+   * @private
+   */
+  function addBarList_(slide, layout, y, items, barColor, emptyText) {
+    if (!items || !items.length) {
+      var empty = slide.insertShape(
+        SlidesApp.ShapeType.TEXT_BOX,
+        layout.contentLeft,
+        y,
+        layout.contentWidth,
+        20
+      );
+      empty.getFill().setTransparent();
+      empty.getBorder().setTransparent();
+      empty.getText().setText(emptyText || 'No data available.');
+      empty.getText().getTextStyle()
+        .setFontFamily(layout.font)
+        .setFontSize(10)
+        .setForegroundColor(PH_SLIDES_COLORS_.muted);
+      return y + 24;
+    }
+    var maxCount = 0;
+    items.forEach(function (it) {
+      if (it.count > maxCount) maxCount = it.count;
+    });
+    if (!maxCount) maxCount = 1;
+    var cursor = y;
+    items.forEach(function (it) {
+      cursor = addHorizontalBar_(
+        slide, layout, cursor, it.label, it.count, it.pct, maxCount, barColor
+      );
+    });
+    return cursor;
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {Object} layout
+   * @private
+   */
+  function buildPhSlideKpiSummary_(slide, presentation, snapshot, layout) {
+    addSlideHeader_(slide, layout, 'Product Portfolio Health', 'KPI Summary');
+    addSlideFooter_(slide, layout);
+
+    var ps = snapshot.portfolioStatus || {};
+    var glr = phSlidesGoLiveReadiness_(snapshot);
+    var totalActive = phSlidesSafeNum_(ps.totalActive, 0);
+    var atRisk = phSlidesSafeNum_(ps.atRisk, phSlidesSafeNum_(ps.yellow, 0) + phSlidesSafeNum_(ps.red, 0));
+    var green = phSlidesSafeNum_(ps.green, 0);
+    var executiveWatch = phSlidesSafeNum_(ps.executiveWatch, 0);
+    var openPlans = phSlidesOpenHealthPlans_(snapshot);
+    var upcoming30 = phSlidesSafeNum_(glr.upcoming30 !== undefined ? glr.upcoming30 : glr.upcoming, 0);
+    var ewEnabled = snapshot.executiveWatchEnabled !== false;
+
+    var atRiskPct = ps.atRiskPct !== undefined ? ps.atRiskPct : phSlidesPctOf_(atRisk, totalActive);
+    var greenPct = ps.greenPct !== undefined ? ps.greenPct : phSlidesPctOf_(green, totalActive);
+    var ewPct = ewEnabled && ps.executiveWatchPct !== undefined
+      ? ps.executiveWatchPct
+      : phSlidesPctOf_(executiveWatch, totalActive);
+    var openPlansPct = ps.openHealthPlansPct !== undefined
+      ? ps.openHealthPlansPct
+      : phSlidesPctOf_(openPlans, totalActive);
+
+    var contextParts = [];
+    if (snapshot.appId) contextParts.push(snapshot.appId);
+    if (snapshot.monthLabel) contextParts.push(snapshot.monthLabel);
+    if (layout.generatedLabel) contextParts.push('Generated ' + layout.generatedLabel);
+    var contextLine = contextParts.join(' \u00B7 ');
+
+    if (contextLine) {
+      var ctxBox = slide.insertShape(
+        SlidesApp.ShapeType.TEXT_BOX,
+        layout.contentLeft,
+        layout.contentTop,
+        layout.contentWidth,
+        14
+      );
+      ctxBox.getFill().setTransparent();
+      ctxBox.getBorder().setTransparent();
+      ctxBox.getText().setText(safeText_(contextLine, 120));
+      ctxBox.getText().getTextStyle()
+        .setFontFamily(layout.font)
+        .setFontSize(9)
+        .setForegroundColor(PH_SLIDES_COLORS_.muted);
+    }
+
+    var gridTop = layout.contentTop + 18;
+    var gap = 10;
+    var cardW = (layout.contentWidth - (gap * 2)) / 3;
+    var cardH = 68;
+    var kpis = [
+      { label: 'Active Product Deployments', value: totalActive, sub: 'Portfolio total', color: PH_SLIDES_COLORS_.navy },
+      { label: 'At Risk', value: atRisk, sub: formatPct_(atRiskPct) + ' of portfolio', color: PH_SLIDES_COLORS_.red },
+      { label: 'Green', value: green, sub: formatPct_(greenPct) + ' of portfolio', color: PH_SLIDES_COLORS_.green }
+    ];
+    if (ewEnabled) {
+      kpis.push({
+        label: 'Executive Watch',
+        value: executiveWatch,
+        sub: formatPct_(ewPct) + ' of portfolio',
+        color: PH_SLIDES_COLORS_.yellow
+      });
+    }
+    kpis.push(
+      { label: 'Open Health Plans', value: openPlans, sub: formatPct_(openPlansPct) + ' of portfolio', color: PH_SLIDES_COLORS_.dhp },
+      { label: 'Upcoming Go-Lives', value: upcoming30, sub: 'Next 30 days', color: PH_SLIDES_COLORS_.navy }
+    );
+
+    kpis.forEach(function (kpi, idx) {
+      var col = idx % 3;
+      var row = Math.floor(idx / 3);
+      var x = layout.contentLeft + (col * (cardW + gap));
+      var y = gridTop + (row * (cardH + gap));
+      addKpiCard_(slide, layout, x, y, cardW, cardH, kpi.label, kpi.value, kpi.sub, kpi.color);
+    });
+
+    var insights = Array.isArray(snapshot.executiveInsights) ? snapshot.executiveInsights : [];
+    if (insights.length) {
+      addInsightBox_(
+        slide,
+        layout,
+        layout.contentLeft,
+        gridTop + (cardH + gap) * 2 + 12,
+        layout.contentWidth,
+        insights[0]
+      );
+    }
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {Object} layout
+   * @private
+   */
+  function buildPhSlideDeliveryReadiness_(slide, presentation, snapshot, layout) {
+    addSlideHeader_(slide, layout, 'Delivery Ownership & Go-Live Readiness', snapshot.appId || '');
+    addSlideFooter_(slide, layout);
+
+    var own = snapshot.deliveryOwnership || {};
+    var workdayLed = phSlidesSafeNum_(own.workdayLed, 0);
+    var partnerLed = phSlidesSafeNum_(own.partnerLed, 0);
+    var ownTotal = phSlidesSafeNum_(own.total, workdayLed + partnerLed);
+    var workdayPct = own.workdayPct !== undefined ? own.workdayPct : phSlidesPctOf_(workdayLed, ownTotal);
+    var partnerPct = own.partnerPct !== undefined ? own.partnerPct : phSlidesPctOf_(partnerLed, ownTotal);
+
+    var glr = phSlidesGoLiveReadiness_(snapshot);
+    var upcoming30 = phSlidesSafeNum_(glr.upcoming30 !== undefined ? glr.upcoming30 : glr.upcoming, 0);
+    var recent60 = phSlidesSafeNum_(glr.recent60 !== undefined ? glr.recent60 : glr.recent, 0);
+    var withHp = phSlidesSafeNum_(
+      glr.upcomingWithHealthPlans !== undefined ? glr.upcomingWithHealthPlans : glr.withHealthPlans,
+      0
+    );
+    var glEw = phSlidesSafeNum_(
+      glr.upcomingOnExecutiveWatch !== undefined ? glr.upcomingOnExecutiveWatch : glr.executiveWatch,
+      0
+    );
+    var ewEnabled = snapshot.executiveWatchEnabled !== false;
+
+    var leftW = layout.contentWidth * 0.48;
+    var rightX = layout.contentLeft + leftW + 16;
+    var rightW = layout.contentWidth - leftW - 16;
+    var y = layout.contentTop;
+
+    addSectionTitle_(slide, layout, layout.contentLeft, y, leftW, 'Delivery Ownership');
+    addSplitBar_(slide, layout, layout.contentLeft, y + 22, leftW, 24, [
+      { label: 'Workday-led', count: workdayLed, pct: workdayPct, color: PH_SLIDES_COLORS_.navy },
+      { label: 'Partner-led', count: partnerLed, pct: partnerPct, color: PH_SLIDES_COLORS_.partner }
+    ]);
+
+    addSectionTitle_(slide, layout, rightX, y, rightW, 'Go-Live Readiness');
+    var miniW = (rightW - 10) / 2;
+    var miniH = 58;
+    addMetricCard_(slide, layout, rightX, y + 22, miniW, miniH, 'Upcoming', upcoming30, 'Next 30 days', PH_SLIDES_COLORS_.navy);
+    addMetricCard_(slide, layout, rightX + miniW + 10, y + 22, miniW, miniH, 'Recent', recent60, 'Last 60 days', PH_SLIDES_COLORS_.partner);
+    addMetricCard_(slide, layout, rightX, y + 22 + miniH + 8, miniW, miniH, 'With Health Plans', withHp, 'Upcoming go-lives', PH_SLIDES_COLORS_.dhp);
+    if (ewEnabled) {
+      addMetricCard_(slide, layout, rightX + miniW + 10, y + 22 + miniH + 8, miniW, miniH,
+        'Executive Watch', glEw, 'Upcoming go-lives', PH_SLIDES_COLORS_.yellow);
+    }
+
+    var insights = Array.isArray(snapshot.executiveInsights) ? snapshot.executiveInsights : [];
+    var goLiveInsight = null;
+    insights.forEach(function (ins) {
+      if (!goLiveInsight && ins && ins.title === 'Go-Live') goLiveInsight = ins;
+    });
+    if (!goLiveInsight && insights.length > 1) goLiveInsight = insights[1];
+    if (goLiveInsight) {
+      addInsightBox_(slide, layout, layout.contentLeft, y + 88, layout.contentWidth, goLiveInsight);
+    }
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {Object} layout
+   * @private
+   */
+  function buildPhSlidePartnerAnalysis_(slide, presentation, snapshot, layout) {
+    addSlideHeader_(slide, layout, 'Partner Analysis', snapshot.appId || '');
+    addSlideFooter_(slide, layout);
+
+    var dist = phSlidesPartnerDistribution_(snapshot);
+    var pc = snapshot.portfolioConcentration || {};
+    var topPartner = pc.topPartner
+      ? { label: pc.topPartner.name, count: pc.topPartner.count, pct: pc.topPartner.percent }
+      : (dist.length ? dist[0] : null);
+
+    var own = snapshot.deliveryOwnership || {};
+    var partnerPct = own.partnerPct;
+
+    var y = layout.contentTop;
+    if (topPartner) {
+      addCalloutTile_(slide, layout, layout.contentLeft, y, 260, 'Top Partner', topPartner);
+      y += 52;
+    }
+    if (partnerPct !== undefined && partnerPct !== null) {
+      var shareBox = slide.insertShape(
+        SlidesApp.ShapeType.TEXT_BOX,
+        layout.contentLeft + 270,
+        layout.contentTop + 10,
+        220,
+        24
+      );
+      shareBox.getFill().setTransparent();
+      shareBox.getBorder().setTransparent();
+      shareBox.getText().setText('Partner-led share: ' + formatPct_(partnerPct));
+      shareBox.getText().getTextStyle()
+        .setFontFamily(layout.font)
+        .setFontSize(10)
+        .setForegroundColor(PH_SLIDES_COLORS_.text);
+    }
+
+    addBarList_(slide, layout, y + 4, dist, PH_SLIDES_COLORS_.navy, 'Partner distribution is not available for this portfolio.');
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {Object} layout
+   * @private
+   */
+  function buildPhSlideIndustryAnalysis_(slide, presentation, snapshot, layout) {
+    addSlideHeader_(slide, layout, 'Industry Analysis', snapshot.appId || '');
+    addSlideFooter_(slide, layout);
+
+    var dist = phSlidesIndustryDistribution_(snapshot);
+    var pc = snapshot.portfolioConcentration || {};
+    var topIndustry = pc.topIndustry
+      ? { label: pc.topIndustry.name, count: pc.topIndustry.count, pct: pc.topIndustry.percent }
+      : (dist.length ? dist[0] : null);
+
+    var y = layout.contentTop;
+    if (topIndustry) {
+      addCalloutTile_(slide, layout, layout.contentLeft, y, 260, 'Top Industry', topIndustry);
+      y += 52;
+    }
+
+    addBarList_(slide, layout, y + 4, dist, PH_SLIDES_COLORS_.teal, 'Industry distribution is not available for this portfolio.');
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {Object} layout
+   * @private
+   */
+  function buildPhSlideDhpIssueCategories_(slide, presentation, snapshot, layout) {
+    addSlideHeader_(slide, layout, 'Deployment Health Plan Issue Categories', snapshot.appId || '');
+    addSlideFooter_(slide, layout);
+
+    var dhi = snapshot.deploymentHealthInsights || {};
+    var dist = phSlidesIssueCategories_(snapshot);
+    var topIssue = dhi.topIssueCategory
+      ? {
+        label: dhi.topIssueCategory,
+        count: phSlidesSafeNum_(dhi.topIssueCategoryCount, 0),
+        pct: phSlidesPctOf_(dhi.topIssueCategoryCount, phSlidesOpenHealthPlans_(snapshot))
+      }
+      : (dist.length ? dist[0] : null);
+
+    var y = layout.contentTop;
+    if (topIssue && topIssue.label) {
+      addCalloutTile_(slide, layout, layout.contentLeft, y, 280, 'Top Issue Category', topIssue);
+      y += 52;
+    }
+
+    var note = slide.insertShape(
+      SlidesApp.ShapeType.TEXT_BOX,
+      layout.contentLeft,
+      y,
+      layout.contentWidth,
+      14
+    );
+    note.getFill().setTransparent();
+    note.getBorder().setTransparent();
+    note.getText().setText('Health plans may include more than one issue category.');
+    note.getText().getTextStyle()
+      .setFontFamily(layout.font)
+      .setFontSize(8)
+      .setItalic(true)
+      .setForegroundColor(PH_SLIDES_COLORS_.muted);
+    y += 18;
+
+    addBarList_(
+      slide,
+      layout,
+      y,
+      dist,
+      PH_SLIDES_COLORS_.dhp,
+      'No issue categories found for open health plans.'
+    );
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Page} slide
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {Object} layout
+   * @private
+   */
+  function buildPhSlideHealthPlanConcentration_(slide, presentation, snapshot, layout) {
+    addSlideHeader_(slide, layout, 'Health Plan Concentration', 'By Partner');
+    addSlideFooter_(slide, layout);
+
+    var openPlans = phSlidesOpenHealthPlans_(snapshot);
+    var dist = phSlidesHealthPlanConcentration_(snapshot);
+    var dhi = snapshot.deploymentHealthInsights || {};
+    var hpConc = dhi.healthPlanConcentration || {};
+    var topConc = hpConc.name
+      ? { label: hpConc.name, count: hpConc.count, pct: hpConc.percent }
+      : (dist.length ? dist[0] : null);
+
+    var y = layout.contentTop;
+    addKpiCard_(
+      slide,
+      layout,
+      layout.contentLeft,
+      y,
+      180,
+      58,
+      'Open Health Plans',
+      openPlans,
+      'Active deployments with plans',
+      PH_SLIDES_COLORS_.dhp
+    );
+
+    if (topConc && topConc.label) {
+      addCalloutTile_(slide, layout, layout.contentLeft + 196, y, 260, 'Highest Concentration', topConc);
+    }
+    y += 66;
+
+    addBarList_(
+      slide,
+      layout,
+      y,
+      dist,
+      PH_SLIDES_COLORS_.indigo,
+      'Health plan concentration is not available for this portfolio.'
+    );
+  }
+
+  /**
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {Object} snapshot
+   * @param {AppConfig} cfg
+   * @private
+   */
+  function buildPortfolioSlidesDeck_(presentation, snapshot, cfg) {
+    var layout = phSlidesInitLayout_(presentation, snapshot, cfg);
+    var slides = presentation.getSlides();
+    var first = slides[0];
+    first.getPageElements().forEach(function (el) { el.remove(); });
+
+    buildPhSlideKpiSummary_(first, presentation, snapshot, layout);
+    buildPhSlideDeliveryReadiness_(presentation.appendSlide(), presentation, snapshot, layout);
+    buildPhSlidePartnerAnalysis_(presentation.appendSlide(), presentation, snapshot, layout);
+    buildPhSlideIndustryAnalysis_(presentation.appendSlide(), presentation, snapshot, layout);
+    buildPhSlideDhpIssueCategories_(presentation.appendSlide(), presentation, snapshot, layout);
+    buildPhSlideHealthPlanConcentration_(presentation.appendSlide(), presentation, snapshot, layout);
+  }
+
+  /**
+   * Create a Google Slides deck for ProductMode Portfolio Health vNext.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function createPortfolioHealthSlides(config, viewModeOpts, productOpts) {
+    try {
+      var snapshot = getSnapshot(config, viewModeOpts, productOpts);
+      if (!snapshot || snapshot.vNext !== true || snapshot.layoutMode !== 'product') {
+        return {
+          ok: false,
+          code: 'NOT_VNEXT_PRODUCT',
+          error: 'Portfolio Health Slides export is currently available for Product Portfolio Health only.'
+        };
+      }
+
+      var cfg = CoreConfig.withDefaults(config);
+      var appLabel = snapshot.appId || cfg.appId || 'Portfolio';
+      var monthLabel = snapshot.monthLabel || Utilities.formatDate(
+        new Date(),
+        Session.getScriptTimeZone(),
+        'MMMM yyyy'
+      );
+      var title = appLabel + ' Portfolio Health - ' + monthLabel;
+
+      Logger.log('createPortfolioHealthSlides: creating deck — ' + title);
+      var presentation = SlidesApp.create(title);
+      buildPortfolioSlidesDeck_(presentation, snapshot, cfg);
+
+      var result = {
+        ok: true,
+        presentationId: presentation.getId(),
+        url: presentation.getUrl(),
+        title: title,
+        slideCount: presentation.getSlides().length
+      };
+      Logger.log('createPortfolioHealthSlides: created ' + result.presentationId);
+      return result;
+    } catch (err) {
+      Logger.log('createPortfolioHealthSlides: error — ' + err);
+      return {
+        ok: false,
+        code: 'SLIDES_CREATE_FAILED',
+        error: String(err)
+      };
+    }
+  }
+
+  /**
+   * Dry-run diagnostic for Portfolio Health Slides payload readiness.
+   *
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function debugPortfolioHealthSlidesPayload(cfg, viewModeOpts, productOpts) {
+    var diagnostic = {
+      ok: true,
+      diagnostic: 'debugPortfolioHealthSlidesPayload',
+      slideCount: 6,
+      vNext: false,
+      layoutMode: 'unknown',
+      partnerDistributionCount: 0,
+      industryDistributionCount: 0,
+      issueCategoryCount: 0,
+      healthPlansByPartnerCount: 0,
+      openHealthPlans: 0,
+      topIssueCategory: '',
+      topPartner: null,
+      topIndustry: null,
+      healthPlanConcentration: null
+    };
+
+    try {
+      var snapshot = getSnapshot(cfg, viewModeOpts, productOpts);
+      diagnostic.vNext = !!snapshot.vNext;
+      diagnostic.layoutMode = snapshot.layoutMode || 'unknown';
+      diagnostic.partnerDistributionCount = phSlidesPartnerDistribution_(snapshot).length;
+      diagnostic.industryDistributionCount = phSlidesIndustryDistribution_(snapshot).length;
+      diagnostic.issueCategoryCount = phSlidesIssueCategories_(snapshot).length;
+      diagnostic.healthPlansByPartnerCount = phSlidesHealthPlanConcentration_(snapshot).length;
+      diagnostic.openHealthPlans = phSlidesOpenHealthPlans_(snapshot);
+
+      var dhi = snapshot.deploymentHealthInsights || {};
+      var pc = snapshot.portfolioConcentration || {};
+      diagnostic.topIssueCategory = dhi.topIssueCategory || '';
+      diagnostic.topPartner = pc.topPartner || null;
+      diagnostic.topIndustry = pc.topIndustry || null;
+      diagnostic.healthPlanConcentration = dhi.healthPlanConcentration || null;
+    } catch (err) {
+      diagnostic.ok = false;
+      diagnostic.error = String(err);
+      Logger.log('debugPortfolioHealthSlidesPayload: error — ' + err);
+    }
+
+    return diagnostic;
+  }
+
+  // ---------------------------------------------------------------------------
   // EXPORTS
   // ---------------------------------------------------------------------------
   return {
     getSnapshot: getSnapshot,
-    debugPortfolioHealthVNext: debugPortfolioHealthVNext
+    debugPortfolioHealthVNext: debugPortfolioHealthVNext,
+    createPortfolioHealthSlides: createPortfolioHealthSlides,
+    debugPortfolioHealthSlidesPayload: debugPortfolioHealthSlidesPayload
   };
 })();

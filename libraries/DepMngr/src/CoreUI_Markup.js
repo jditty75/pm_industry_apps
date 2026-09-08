@@ -74,7 +74,8 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     _accessRole: role,
     _isReadOnly: isReadOnly,
     overviewTab: cfg.overviewTab || {},
-    freshness: cfg.freshness || {}
+    freshness: cfg.freshness || {},
+    executiveWatch: cfg.executiveWatch || { enabled: true }
   });
 
   // S1: splice the Student tab into filteredUi.tabs dynamically based on
@@ -131,13 +132,15 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi, cfg));
   if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi, cfg));
   if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
-  if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi));
+  if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi, cfg));
   if (tabIds.indexOf('student') !== -1) parts.push(_CoreUI_Markup_buildStudentTab_(filteredUi, cfg));
 
   parts.push('</div>'); // .container
 
-  // Executive Watch modal — informational, available to all roles.
-  parts.push(_CoreUI_Markup_buildExecWatchModal_());
+  // Executive Watch modal — informational, available to all roles when enabled.
+  if (CoreConfig.isExecutiveWatchEnabled(cfg)) {
+    parts.push(_CoreUI_Markup_buildExecWatchModal_());
+  }
   parts.push(_CoreUI_Markup_buildDeploymentHealthPlanModal_());
 
   // Modals — only included for power users (read-only never opens them).
@@ -254,6 +257,7 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
   var ownerLabel   = dt.ownerColumnLabel || 'Delivery Director';
   var searchPh     = dt.searchPlaceholder || 'Search by account, deployment name, partner...';
   var expandable   = dt.expandableRows !== false;  // default true
+  var ewEnabled    = !ui.executiveWatch || ui.executiveWatch.enabled !== false;
 
   // Build column headers. The leftmost column is the chevron when expandable.
   var headers = [];
@@ -291,7 +295,9 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
     '      <div class="filter-group" id="health-chip-group">',
     // Health chips are rendered/wired by JS so the active set reflects defaultHealthFilter.
     '      </div>',
-    '      <button id="exec-watch-chip" class="filter-chip" type="button" onclick="toggleExecWatchFilter()">&#x26A0; Executive Watch</button>',
+    ewEnabled
+      ? '      <button id="exec-watch-chip" class="filter-chip" type="button" onclick="toggleExecWatchFilter()">&#x26A0; Executive Watch</button>'
+      : '',
     '      <span class="filter-label">Owner:</span>',
     '      <select id="owner-filter" class="filter-select" aria-label="Owner filter" onchange="onDeploymentFilterChange()"></select>',
     '      <div class="deployments-filter-popover-wrap" id="deployments-filter-popover-wrap">',
@@ -895,6 +901,7 @@ function _CoreUI_Markup_buildPortfolioTab_(ui, cfg) {
   var vNextProduct = !!(cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled && phCfg.vNextEnabled);
   var exportImageEnabled = phCfg.exportImageEnabled !== false;
   var slideExportEnabled = !(phCfg.slideExportEnabled === false) && !vNextProduct && phCfg.exportSlidesEnabled !== false;
+  var exportSlidesVNextEnabled = vNextProduct && phCfg.exportSlidesEnabled !== false;
 
   var toggleHtml = momentumEnabled ? [
     '  <div class="portfolio-subview-toggle seg-control no-export" id="portfolio-subview-toggle">',
@@ -933,11 +940,14 @@ function _CoreUI_Markup_buildPortfolioTab_(ui, cfg) {
       ? '  <div class="full-portfolio-indicator">\u2139\uFE0F This view always reflects the full team \u2014 used for external communication.</div>'
       : ''),
     '  <div class="info-banner">',
-    '    📤 Executive portfolio snapshot. Use <strong>Export Image</strong> to download a slide-ready PNG.',
+    '    📤 Executive portfolio snapshot. Use <strong>Export Image</strong> or <strong>Export Slides</strong> for shareable outputs.',
     '  </div>',
+    '  <div id="ph-slides-export-status" class="ph-slides-export-status hidden no-export"></div>',
+    '  <div id="ph-slides-export-success" class="ph-slides-export-success hidden no-export"></div>',
     '  <div class="ph-toolbar no-export">',
     '    <button class="btn btn-secondary" onclick="loadPortfolioHealth()" style="margin-right: 8px;">🔄 Refresh</button>',
     (ui._isReadOnly || !exportImageEnabled ? '' : '    <button class="btn btn-primary" onclick="downloadPortfolioHealthImage()">⬇ Export Image <span id="ph-spinner" class="spinner hidden"></span></button>'),
+    (ui._isReadOnly || !exportSlidesVNextEnabled ? '' : '    <button class="btn btn-secondary" id="ph-export-slides-btn" onclick="exportPortfolioHealthSlides()"><span id="ph-export-slides-btn-label">⬇ Export Slides</span> <span id="ph-slides-export-spinner" class="ph-slides-export-spinner hidden"></span></button>'),
     (ui._isReadOnly || !slideExportEnabled ? '' : '    <button class="btn btn-secondary" onclick="downloadPortfolioHealthSlidePng()">⬇ Download PNG (16:9 Slide) <span id="ph-slide-spinner" class="spinner hidden"></span></button>'),
     '  </div>',
     toggleHtml,
@@ -1605,19 +1615,54 @@ function _CoreUI_Markup_buildAuditDetailModal_(ui) {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the Trends tab shell.  All data fetching and DOM rendering are
- * handled client-side by `_trends_*` functions in CoreUI_Js.js.
+ * Builds the Trends tab shell. Data fetching and DOM rendering are handled
+ * client-side by loadTrendsTab / renderTrendsDashboardV1_ in CoreUI_Js.js.
  *
- * Five-tier layout (spec §3g):
- *   Tier 1  — Time-in-Red KPI strip (3 cards)
- *   Tier 2  — Health Trajectory sparkline table + Health by Partner stacked bars (side-by-side)
- *   Tier 3  — Health by Delivery Director table
- *   Tier 4  — Time in Stage + Time to Go-Live (side-by-side)
- *   Tier 5  — Go-Live Outcome Patterns accordion
+ * ProductMode vNext apps get a minimal shell; legacy IndustryMode apps get
+ * the five-tier layout (spec §3g).
  *
  * @param {Object} ui
+ * @param {Object=} cfg
+ * @return {string}
  */
-function _CoreUI_Markup_buildTrendsTab_(ui) {
+function _CoreUI_Markup_buildTrendsTab_(ui, cfg) {
+  var trendsCfg = (cfg && cfg.trends) || {};
+  var vNextProduct = !!(cfg && cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled &&
+    (trendsCfg.vNextEnabled || (ui.trendsTab && ui.trendsTab.vNextEnabled)));
+  if (vNextProduct) {
+    return _CoreUI_Markup_buildTrendsTabV1_(ui, cfg);
+  }
+  return _CoreUI_Markup_buildTrendsTabLegacy_(ui);
+}
+
+/**
+ * ProductMode Trends v1 shell — content rendered by renderTrendsDashboardV1_.
+ *
+ * @param {Object} ui
+ * @param {Object=} cfg
+ * @return {string}
+ */
+function _CoreUI_Markup_buildTrendsTabV1_(ui, cfg) {
+  return [
+    '<div id="trends-tab" class="tab-content trends-v1-tab">',
+    '  <div id="trends-v1-loading" class="trends-v1-loading">',
+    '    <div class="trends-v1-spin"></div>',
+    '    <strong class="trends-v1-loading-title">Loading deployment trends&hellip;</strong>',
+    '    <span class="trends-v1-loading-sub">Bundled load &middot; may take 10&ndash;20 seconds</span>',
+    '  </div>',
+    '  <div id="trends-v1-root" class="trends-v1-app hidden"></div>',
+    '  <div id="trends-v1-error" class="trends-v1-error hidden"></div>',
+    '</div>'
+  ].join('\n');
+}
+
+/**
+ * Legacy five-tier Trends tab (IndustryMode / SLG-style).
+ *
+ * @param {Object} ui
+ * @return {string}
+ */
+function _CoreUI_Markup_buildTrendsTabLegacy_(ui) {
   return [
     '<div id="trends-tab" class="tab-content">',
     '',

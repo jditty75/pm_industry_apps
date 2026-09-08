@@ -1,13 +1,6 @@
 {
   "timeZone": "America/New_York",
   "exceptionLogging": "STACKDRIVER",
-  "oauthScopes": [
-    "https://mail.google.com/",
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/script.external_request",
-    "https://www.googleapis.com/auth/script.scriptapp",
-    "https://www.googleapis.com/auth/userinfo.email"
-  ],
   "runtimeVersion": "V8",
   "dependencies": {
     "enabledAdvancedServices": [
@@ -29,5 +22,13 @@
   "webapp": {
     "executeAs": "USER_DEPLOYING",
     "access": "DOMAIN"
-  }
+  },
+  "oauthScopes": [
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.scriptapp",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/presentations"
+  ]
 }

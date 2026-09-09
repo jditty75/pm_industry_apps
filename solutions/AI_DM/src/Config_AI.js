@@ -26,14 +26,31 @@ var APP_CONFIG = {
 
   activeDeployments: {
     productModeUnionEnabled: true,
-    productModeSourceMode: 'pfOnly',
-    productModeDisplayGrain: 'deploymentProduct',
-    productModeCountGrain: 'deploymentProduct',
+    productModeSourceMode: 'parentAndProductFunctionUnion',
+    productModeStructuredProductAreas: [
+      'Workday HiredScore',
+      'Workday Paradox'
+    ],
+    productModeDeploymentNameIncludes: [
+      'HiredScore',
+      'Paradox'
+    ],
+    productModeDeploymentNameExcludes: [
+      'Legacy'
+    ],
+    productModeNameMatch: {
+      field: 'deploymentName',
+      caseInsensitive: true
+    },
+    productModeDisplayGrain: 'parentDeployment',
+    productModeCountGrain: 'parentDeployment',
     productModeGoLiveGrain: 'accountDate',
-    productModeDataSource: 'productFunction',
+    productModeDataSource: 'parentAndProductFunctionUnion',
     productModeHistoricalSource: 'productFunction',
     productModeGoLiveSource: 'productFunction',
-    productModeUnionStatuses: ['Active'],
+    productModeUnionStatuses: ['Active', 'Complete'],
+    productModeDefaultSurfaceStatuses: ['Active'],
+    productModeTrendsStatuses: ['Active', 'Complete'],
     allowPfRowsWithoutParentStatus: false,
     productModeExcludePhases: [],
     productModeExcludeCustomer360: false
@@ -202,6 +219,7 @@ var APP_CONFIG = {
       enabled: false
     },
     trendsTab: { enabled: true, vNextEnabled: true, defaultWindow: '12m' },
+    notable: { enabled: false },
     enableAccountLinks: true,
     deploymentsTable: {
       showIndustry: false,
@@ -293,6 +311,7 @@ var APP_CONFIG = {
     primarySheet: 'SFDC_DeploymentProductFunctions',
     watchSheet: 'SFDC_DeploymentProductFunctions',
     expectedSheets: [
+      'SFDC_Deployments',
       'SFDC_DeploymentProductFunctions',
       'Contacts1',
       'Contacts2',

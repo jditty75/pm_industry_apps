@@ -889,6 +889,14 @@ function _debugSfdcColumns() {
 }
 
 /**
+ * ProductMode canonical union count diagnostic. Run from the Apps Script editor.
+ * @return {Object}
+ */
+function _debugProductModeCanonicalUnionCounts() {
+  return CoreLib.CoreData._debugProductModeCanonicalUnionCounts(APP_CONFIG, 10);
+}
+
+/**
  * ProductMode active deployment union diagnostic. Run from the Apps Script editor.
  * Compares workbook parent/PF counts to getAllDeployments output.
  */

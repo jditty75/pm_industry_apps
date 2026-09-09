@@ -625,6 +625,86 @@ var CoreAnalytics = (function () {
   }
 
   /**
+   * ProductMode: PS Region breakdown grouped by normalized row.region
+   * (Deployment__r.Customer__r.PS_Region_New__c), using canonical parent deployments.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} opts  { applyReportProductScope?: boolean, applyReportExclusions?: boolean }
+   * @return {Object}
+   */
+  function getPsRegionBreakdown(config, opts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var effectiveRows = CoreData.getProductModeCanonicalDeployments(cfg);
+    effectiveRows = CoreData.filterDeploymentsByStudent_(effectiveRows, 'exclude', cfg);
+    if (opts && opts.applyReportProductScope === true) {
+      effectiveRows = CoreData.filterRowsByReportProductScope_(effectiveRows, cfg);
+    }
+    if (opts && opts.applyReportExclusions === true) {
+      effectiveRows = CoreData.filterRowsExcludedFromReport_(effectiveRows);
+    }
+    var activeRows = effectiveRows.filter(function (r) {
+      return r.overallStatus === 'Active';
+    });
+    var total = activeRows.length;
+
+    var countsByRegion = {};
+    var unassignedCount = 0;
+    activeRows.forEach(function (row) {
+      var region = CoreData.getDeploymentGroupingValue(row, cfg);
+      if (!region || region === 'Unknown') {
+        unassignedCount++;
+      } else {
+        countsByRegion[region] = (countsByRegion[region] || 0) + 1;
+      }
+    });
+
+    var namedEntries = Object.keys(countsByRegion).map(function (k) {
+      return { approach: k, count: countsByRegion[k] };
+    });
+    namedEntries.sort(function (a, b) {
+      if (b.count !== a.count) return b.count - a.count;
+      return String(a.approach).localeCompare(String(b.approach));
+    });
+    var allEntries = namedEntries.slice();
+    if (unassignedCount > 0) {
+      allEntries.push({ approach: 'Unassigned', count: unassignedCount });
+    }
+
+    var rawPcts    = allEntries.map(function (e) { return total > 0 ? (e.count / total) * 100 : 0; });
+    var flooredPcts = rawPcts.map(function (p) { return Math.floor(p); });
+    var remainders  = rawPcts.map(function (p, i) { return p - flooredPcts[i]; });
+    var flooredSum  = flooredPcts.reduce(function (s, v) { return s + v; }, 0);
+    var leftover    = 100 - flooredSum;
+    var idxByRemainder = remainders.map(function (_, i) { return i; });
+    idxByRemainder.sort(function (a, b) {
+      if (remainders[b] !== remainders[a]) return remainders[b] - remainders[a];
+      return a - b;
+    });
+    var displayPcts = flooredPcts.slice();
+    for (var j = 0; j < leftover; j++) {
+      displayPcts[idxByRemainder[j]]++;
+    }
+
+    var resultRows = allEntries.map(function (e, i) {
+      return {
+        approach:   e.approach,
+        count:      e.count,
+        pct:        total > 0 ? e.count / total : 0,
+        displayPct: displayPcts[i]
+      };
+    });
+
+    return {
+      rows:             resultRows,
+      totalDeployments: total,
+      dataIntegrity: {
+        unassignedCount: unassignedCount,
+        showDisclaimer:  unassignedCount > 0
+      }
+    };
+  }
+
+  /**
    * Phase 3b: diagnostic cross-check — logs code-computed breakdown values.
    * Run via Apps Script editor to verify Phase 3b migration output.
    *
@@ -720,6 +800,7 @@ var CoreAnalytics = (function () {
     getHealthHistory:     getHealthHistory,
     getPartnerBreakdown:  getPartnerBreakdown,
     getApproachBreakdown: getApproachBreakdown,
+    getPsRegionBreakdown: getPsRegionBreakdown,
     _validatePhase3b:     _validatePhase3b
   };
 

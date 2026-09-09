@@ -69,7 +69,11 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 
   // Pre-filter the tabs array so the tab BAR builder also reflects the filter.
   var filteredUi = Object.assign({}, ui, {
-    tabs: (ui.tabs || []).filter(function (t) { return _isTabAllowed(t.id); }),
+    tabs: (ui.tabs || []).filter(function (t) {
+      if (!_isTabAllowed(t.id)) return false;
+      if (t.id === 'notable' && ui.notable && ui.notable.enabled === false) return false;
+      return true;
+    }),
     // Read-only flag for builders that need to hide in-tab controls.
     _accessRole: role,
     _isReadOnly: isReadOnly,
@@ -252,9 +256,16 @@ function _CoreUI_Markup_buildTabBar_(ui) {
 
 function _CoreUI_Markup_buildDeploymentsTab_(ui) {
   var dt = ui.deploymentsTable || {};
-  var showIndustry = !!dt.showIndustry;
+  var isPM = !!ui.isProductModeApp;
+  var showIndustry = !!dt.showIndustry && !isPM;
   var showEm       = !!dt.showEmColumn;
+  var showEngMgr   = isPM || !!dt.showEngagementManagerColumn;
+  var showPsRegion = isPM || !!dt.showPsRegionColumn;
+  var hideDD       = isPM || !!dt.hideDeliveryDirectorColumn;
   var ownerLabel   = dt.ownerColumnLabel || 'Delivery Director';
+  var ownerFilterLabel = dt.ownerFilterLabel || (isPM ? 'Engagement Manager' : 'Owner');
+  var groupingLabel = (ui.portfolioGrouping && ui.portfolioGrouping.label) ||
+    (isPM ? 'PS Region' : 'Industry');
   var searchPh     = dt.searchPlaceholder || 'Search by account, deployment name, partner...';
   var expandable   = dt.expandableRows !== false;  // default true
   var ewEnabled    = !ui.executiveWatch || ui.executiveWatch.enabled !== false;
@@ -267,9 +278,11 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
   if (showIndustry) headers.push('<th>Industry</th>');
   headers.push('<th>Deployment Name</th>');
   headers.push('<th>Partner</th>');
-  if (showEm) headers.push('<th>EM</th>');
+  if (showEm && !showEngMgr) headers.push('<th>EM</th>');
   headers.push('<th>MTP Date</th>');
-  if (!showEm) headers.push('<th>' + _CoreUI_Markup_esc_(ownerLabel) + '</th>');
+  if (showEngMgr) headers.push('<th>Engagement Manager</th>');
+  if (showPsRegion) headers.push('<th>PS Region</th>');
+  if (!showEm && !hideDD) headers.push('<th>' + _CoreUI_Markup_esc_(ownerLabel) + '</th>');
   // Stage 1: hide Actions and Meta Info columns for read-only users.
   if (!ui._isReadOnly) {
     headers.push('<th>Actions</th>');
@@ -298,8 +311,9 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
     ewEnabled
       ? '      <button id="exec-watch-chip" class="filter-chip" type="button" onclick="toggleExecWatchFilter()">&#x26A0; Executive Watch</button>'
       : '',
-    '      <span class="filter-label">Owner:</span>',
-    '      <select id="owner-filter" class="filter-select" aria-label="Owner filter" onchange="onDeploymentFilterChange()"></select>',
+    '      <span class="filter-label">' + _CoreUI_Markup_esc_(ownerFilterLabel) + ':</span>',
+    '      <select id="owner-filter" class="filter-select" aria-label="' +
+      _CoreUI_Markup_attr_(ownerFilterLabel + ' filter') + '" onchange="onDeploymentFilterChange()"></select>',
     '      <div class="deployments-filter-popover-wrap" id="deployments-filter-popover-wrap">',
     '        <button class="filter-drawer-toggle" id="filter-drawer-toggle" type="button" onclick="toggleFilterDrawer()" aria-expanded="false" aria-controls="filter-drawer" aria-haspopup="dialog">',
     '          <span id="filter-drawer-toggle-icon">⊕</span>',
@@ -327,8 +341,9 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
     '              <label class="advanced-filter-label" for="industry-filter">Industry</label>',
     '              <select id="industry-filter" class="filter-select" onchange="onDeploymentFilterChange()"></select>',
     '            </div>',
-    '            <div class="advanced-filter-field hidden" id="region-filter-field">',
-    '              <label class="advanced-filter-label" for="region-filter">Region</label>',
+    '            <div class="advanced-filter-field' + (isPM ? '' : ' hidden') + '" id="region-filter-field">',
+    '              <label class="advanced-filter-label" for="region-filter">' +
+      _CoreUI_Markup_esc_(groupingLabel) + '</label>',
     '              <select id="region-filter" class="filter-select" onchange="onDeploymentFilterChange()"></select>',
     '            </div>',
     '            <div class="advanced-filter-field hidden" id="ps-subregion-filter-field">',

@@ -333,6 +333,40 @@ var CoreConfig = (function () {
     if (!Array.isArray(cfg.activeDeployments.productModeUnionStatuses)) {
       cfg.activeDeployments.productModeUnionStatuses = ['Active'];
     }
+    if (!Array.isArray(cfg.activeDeployments.productModeStructuredProductAreas)) {
+      cfg.activeDeployments.productModeStructuredProductAreas = [];
+    }
+    if (!Array.isArray(cfg.activeDeployments.productModeDeploymentNameIncludes)) {
+      cfg.activeDeployments.productModeDeploymentNameIncludes = [];
+    }
+    if (!Array.isArray(cfg.activeDeployments.productModeDeploymentNameExcludes)) {
+      cfg.activeDeployments.productModeDeploymentNameExcludes =
+        cfg.activeDeployments.productModeUnionEnabled ? ['Legacy'] : [];
+    }
+    if (!cfg.activeDeployments.productModeNameMatch ||
+        typeof cfg.activeDeployments.productModeNameMatch !== 'object') {
+      cfg.activeDeployments.productModeNameMatch = {
+        field: 'deploymentName',
+        caseInsensitive: true
+      };
+    } else {
+      if (!cfg.activeDeployments.productModeNameMatch.field) {
+        cfg.activeDeployments.productModeNameMatch.field = 'deploymentName';
+      }
+      if (cfg.activeDeployments.productModeNameMatch.caseInsensitive === undefined) {
+        cfg.activeDeployments.productModeNameMatch.caseInsensitive = true;
+      }
+    }
+    if (!Array.isArray(cfg.activeDeployments.productModeDefaultSurfaceStatuses)) {
+      cfg.activeDeployments.productModeDefaultSurfaceStatuses = ['Active'];
+    }
+    if (!Array.isArray(cfg.activeDeployments.productModeTrendsStatuses)) {
+      cfg.activeDeployments.productModeTrendsStatuses =
+        (Array.isArray(cfg.activeDeployments.productModeUnionStatuses) &&
+         cfg.activeDeployments.productModeUnionStatuses.length)
+          ? cfg.activeDeployments.productModeUnionStatuses.slice()
+          : ['Active', 'Complete'];
+    }
     if (cfg.activeDeployments.allowPfRowsWithoutParentStatus === undefined) {
       cfg.activeDeployments.allowPfRowsWithoutParentStatus = false;
     }
@@ -364,6 +398,22 @@ var CoreConfig = (function () {
     }
     if (!cfg.activeDeployments.productModeGoLiveGrain) {
       cfg.activeDeployments.productModeGoLiveGrain = 'accountDate';
+    }
+    // ProductMode PF / union apps: canonical parent-deployment grain (Deployment__r.Id).
+    if (cfg.activeDeployments.productModeUnionEnabled &&
+        (cfg.activeDeployments.productModeDataSource === 'productFunction' ||
+         cfg.activeDeployments.productModeSourceMode === 'pfOnly' ||
+         cfg.activeDeployments.productModeSourceMode === 'parentAndProductFunctionUnion')) {
+      if (!cfg.activeDeployments.productModeDisplayGrain ||
+          cfg.activeDeployments.productModeDisplayGrain === 'deploymentProduct' ||
+          cfg.activeDeployments.productModeDisplayGrain === 'pfRow') {
+        cfg.activeDeployments.productModeDisplayGrain = 'parentDeployment';
+      }
+      if (!cfg.activeDeployments.productModeCountGrain ||
+          cfg.activeDeployments.productModeCountGrain === 'pfRow' ||
+          cfg.activeDeployments.productModeCountGrain === 'deploymentProduct') {
+        cfg.activeDeployments.productModeCountGrain = 'parentDeployment';
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -526,15 +576,24 @@ var CoreConfig = (function () {
     if (!Array.isArray(cfg.freshness.expectedSheets)) {
       cfg.freshness.expectedSheets = [];
     }
-    // ProductMode apps: PF sheet is the primary freshness source for active deployment data.
+    // ProductMode apps: both SFDC source sheets matter for union membership.
     if (cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled) {
       var pfFreshnessSheet = cfg.sheets.sfdcDeploymentProductFunctions ||
         'SFDC_DeploymentProductFunctions';
+      var depFreshnessSheet = cfg.sheets.deployments || 'SFDC_Deployments';
       if (!cfg.freshness.primarySheet) {
         cfg.freshness.primarySheet = pfFreshnessSheet;
       }
-      if (!cfg.freshness.watchSheet || cfg.freshness.watchSheet === 'SFDC_Deployments') {
+      if (!cfg.freshness.watchSheet) {
         cfg.freshness.watchSheet = pfFreshnessSheet;
+      }
+      if (cfg.activeDeployments.productModeSourceMode === 'parentAndProductFunctionUnion') {
+        if (cfg.freshness.expectedSheets.indexOf(depFreshnessSheet) < 0) {
+          cfg.freshness.expectedSheets.push(depFreshnessSheet);
+        }
+        if (cfg.freshness.expectedSheets.indexOf(pfFreshnessSheet) < 0) {
+          cfg.freshness.expectedSheets.push(pfFreshnessSheet);
+        }
       }
     }
 
@@ -653,6 +712,31 @@ var CoreConfig = (function () {
       cfg.ui.deploymentsTable.showStageColumn = false;
     if (cfg.ui.deploymentsTable.expandableRows === undefined)
       cfg.ui.deploymentsTable.expandableRows = true;
+
+    // ProductMode UI flag + deployments table defaults (EVI/AI and future ProductMode apps).
+    cfg.ui.isProductModeApp = isProductModeApp(cfg);
+    if (cfg.ui.isProductModeApp) {
+      if (cfg.ui.deploymentsTable.metaInfoMode === undefined)
+        cfg.ui.deploymentsTable.metaInfoMode = 'minimal';
+      if (cfg.ui.deploymentsTable.hideDeliveryDirectorColumn === undefined)
+        cfg.ui.deploymentsTable.hideDeliveryDirectorColumn = true;
+      if (cfg.ui.deploymentsTable.showEngagementManagerColumn === undefined)
+        cfg.ui.deploymentsTable.showEngagementManagerColumn = true;
+      if (cfg.ui.deploymentsTable.showPsRegionColumn === undefined)
+        cfg.ui.deploymentsTable.showPsRegionColumn = true;
+      if (cfg.ui.deploymentsTable.showMissingDDHighlight === undefined)
+        cfg.ui.deploymentsTable.showMissingDDHighlight = false;
+      if (!cfg.ui.deploymentsTable.ownerFilterLabel)
+        cfg.ui.deploymentsTable.ownerFilterLabel = 'Engagement Manager';
+      if (!cfg.ui.portfolioGrouping) {
+        cfg.ui.portfolioGrouping = { field: 'region', label: 'PS Region' };
+      }
+    }
+
+    // Notable tab toggle (mirrors trendsTab.enabled pattern).
+    cfg.ui.notable = cfg.ui.notable || {};
+    if (cfg.ui.notable.enabled === undefined)
+      cfg.ui.notable.enabled = true;
 
     // Go Lives table (per-row visual config)
     cfg.ui.goLivesTable = cfg.ui.goLivesTable || {};
@@ -834,8 +918,51 @@ var CoreConfig = (function () {
     return cfg.executiveWatch.enabled !== false;
   }
 
+  /**
+   * True when the app uses ProductMode union (EVI, AI, and future ProductMode apps).
+   *
+   * @param {AppConfig} appConfig
+   * @return {boolean}
+   */
+  function isProductModeApp(appConfig) {
+    var cfg = appConfig && appConfig.activeDeployments ? appConfig : withDefaults(appConfig || {});
+    return !!(cfg.activeDeployments && cfg.activeDeployments.productModeUnionEnabled === true);
+  }
+
+  /**
+   * Normalized deployment row field used for portfolio grouping/filtering/reporting.
+   * ProductMode apps use PS Region (`region`); IndustryMode apps use `industry`.
+   *
+   * @param {AppConfig} appConfig
+   * @return {'region'|'industry'}
+   */
+  function getPortfolioGroupingField(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    if (cfg.ui && cfg.ui.portfolioGrouping && cfg.ui.portfolioGrouping.field) {
+      return cfg.ui.portfolioGrouping.field === 'region' ? 'region' : 'industry';
+    }
+    return isProductModeApp(cfg) ? 'region' : 'industry';
+  }
+
+  /**
+   * User-facing label for the portfolio grouping dimension.
+   *
+   * @param {AppConfig} appConfig
+   * @return {string}
+   */
+  function getPortfolioGroupingLabel(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    if (cfg.ui && cfg.ui.portfolioGrouping && cfg.ui.portfolioGrouping.label) {
+      return cfg.ui.portfolioGrouping.label;
+    }
+    return isProductModeApp(cfg) ? 'PS Region' : 'Industry';
+  }
+
   return {
     withDefaults: withDefaults,
-    isExecutiveWatchEnabled: isExecutiveWatchEnabled
+    isExecutiveWatchEnabled: isExecutiveWatchEnabled,
+    isProductModeApp: isProductModeApp,
+    getPortfolioGroupingField: getPortfolioGroupingField,
+    getPortfolioGroupingLabel: getPortfolioGroupingLabel
   };
 })();

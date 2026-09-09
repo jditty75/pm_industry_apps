@@ -2528,6 +2528,48 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     return innerHtml;
   }
 
+  function _buildPsRegionBreakdownContentV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var result;
+    try {
+      result = CoreAnalytics.getPsRegionBreakdown(cfg, V2_REPORT_SCOPE_OPTS_);
+    } catch (err) {
+      Logger.log('CoreReport._buildPsRegionBreakdownContentV2_: failed: ' + err);
+      return '<p style="font-size:11px; color:#cc0000;">\u26A0 PS Region Breakdown unavailable: ' +
+        CoreUtils.escapeHtml(String(err)) + '</p>';
+    }
+
+    if (!result.rows || !result.rows.length) {
+      return '<p style="font-size:11px; color:#666666;">(No data)</p>';
+    }
+
+    var maxPct = 0;
+    result.rows.forEach(function (row) {
+      if (row.pct > maxPct) maxPct = row.pct;
+    });
+
+    var visible = result.rows.slice(0, V2_BREAKDOWN_TOP_N_);
+    var remaining = result.rows.length - visible.length;
+
+    var barsHtml = visible.map(function (row) {
+      var barPct = maxPct > 0 ? (row.pct / maxPct) * 100 : 0;
+      var displayPct = row.displayPct !== undefined ? row.displayPct : Math.round(row.pct * 100);
+      var rightLabel = row.count + ' (' + displayPct + '%)';
+      return renderDivBarV2_(row.approach, barPct, '#0f4c81', rightLabel);
+    }).join('');
+
+    if (remaining > 0) {
+      barsHtml += '<p style="font-size:10px; color:#999999; margin:4px 0 0 0; font-family:Arial,sans-serif;">+' +
+        remaining + ' more</p>';
+    }
+
+    var innerHtml = barsHtml;
+    if (result.dataIntegrity.showDisclaimer) {
+      innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.approachBreakdown);
+    }
+    return innerHtml;
+  }
+
   /**
    * V2.1: Partner + Services Approach side-by-side (Gmail-safe two-column table).
    * @param {AppConfig} config
@@ -2537,9 +2579,13 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   function renderPartnerAndApproachSectionV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var partnerHtml = _buildPartnerBreakdownContentV2_(cfg);
+    var isProductMode = CoreConfig.isProductModeApp(cfg);
 
+    var rightHeading = isProductMode ? 'PS Region Breakdown' : 'Services Approach Breakdown';
     var approachHtml;
-    if (!cfg.report.sections || cfg.report.sections.approach !== false) {
+    if (isProductMode) {
+      approachHtml = _buildPsRegionBreakdownContentV2_(cfg);
+    } else if (!cfg.report.sections || cfg.report.sections.approach !== false) {
       approachHtml = _buildApproachBreakdownContentV2_(cfg);
     } else {
       approachHtml = '<p style="font-size:11px; color:#666666;">(Section disabled)</p>';
@@ -2555,7 +2601,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<td style="width:50%; vertical-align:top; padding-right:8px;">' +
       '<div style="' + SUB_HEADING + '">Partner Breakdown</div>' + partnerHtml + '</td>' +
       '<td style="width:50%; vertical-align:top; padding-left:8px;">' +
-      '<div style="' + SUB_HEADING + '">Services Approach Breakdown</div>' + approachHtml + '</td>' +
+      '<div style="' + SUB_HEADING + '">' + rightHeading + '</div>' + approachHtml + '</td>' +
       '</tr></table>';
 
     return '<div style="margin-bottom:32px;">' + innerHtml + '</div>';

@@ -116,8 +116,12 @@ var CoreData = (function () {
     // Force a fresh read by clearing tier 1 first; the function will then
     // write fresh data to both tier 1 and tier 2.
     _cache.sfdcRows = null;
+    _cache.pfRows = null;
     try {
-      if (usesProductModePfDataSource_(cfg)) {
+      if (usesProductModeParentAndPfUnion_(cfg)) {
+        readSfdcDeploymentsRaw_(cfg);
+        readSfdcProductFunctionsRaw_(cfg);
+      } else if (usesProductModePfDataSource_(cfg)) {
         readProductModePfRowsRaw_(cfg);
       } else {
         readSfdcDeploymentsRaw_(cfg);
@@ -691,6 +695,9 @@ var CoreData = (function () {
    */
   function _getProductModeDisplayGrain_(cfg) {
     if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return 'pfRow';
+    if (usesProductModePfDataSource_(cfg) || usesProductModeParentAndPfUnion_(cfg)) {
+      return 'parentDeployment';
+    }
     var grain = cfg.activeDeployments && cfg.activeDeployments.productModeDisplayGrain;
     if (grain === 'parentDeployment' || grain === 'deploymentProduct') return grain;
     return 'pfRow';
@@ -698,14 +705,16 @@ var CoreData = (function () {
 
   /**
    * ProductMode count grain for Overview / analytics / portfolio KPI totals.
-   * Independent of display grain. Unset or invalid values follow display grain
-   * so existing apps keep prior count behavior.
+   * PF-sourced ProductMode apps always use parentDeployment (Deployment__r.Id).
    * @param {AppConfig} cfg
    * @return {'pfRow'|'parentDeployment'|'deploymentProduct'}
    * @private
    */
   function _getProductModeCountGrain_(cfg) {
     if (!isProductModeActiveDeploymentsUnionEnabled_(cfg)) return 'pfRow';
+    if (usesProductModePfDataSource_(cfg) || usesProductModeParentAndPfUnion_(cfg)) {
+      return 'parentDeployment';
+    }
     var grain = cfg.activeDeployments && cfg.activeDeployments.productModeCountGrain;
     if (grain === 'parentDeployment' || grain === 'deploymentProduct' || grain === 'pfRow') {
       return grain;
@@ -722,6 +731,540 @@ var CoreData = (function () {
   function _getProductModeGoLiveGrain_(cfg) {
     return (cfg.activeDeployments && cfg.activeDeployments.productModeGoLiveGrain) ||
       'accountDate';
+  }
+
+  /**
+   * True when ProductMode uses the parent + PF canonical union builder.
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function usesProductModeParentAndPfUnion_(cfg) {
+    return isProductModeActiveDeploymentsUnionEnabled_(cfg) &&
+      _getProductModeSourceMode_(cfg) === 'parentAndProductFunctionUnion';
+  }
+
+  /**
+   * Configured structured product areas for ProductMode portfolio membership.
+   * Falls back to report.productScope.includeAreas when unset.
+   * @param {AppConfig} cfg
+   * @return {Array<string>}
+   * @private
+   */
+  function getProductModeStructuredProductAreas_(cfg) {
+    var ad = cfg.activeDeployments || {};
+    if (Array.isArray(ad.productModeStructuredProductAreas) &&
+        ad.productModeStructuredProductAreas.length) {
+      return ad.productModeStructuredProductAreas.slice();
+    }
+    var scope = cfg.report && cfg.report.productScope;
+    if (scope && Array.isArray(scope.includeAreas) && scope.includeAreas.length) {
+      return scope.includeAreas.slice();
+    }
+    return [];
+  }
+
+  /**
+   * Configured deployment-name tokens for ProductMode portfolio membership.
+   * Falls back to report.productScope.nameTokens when unset.
+   * @param {AppConfig} cfg
+   * @return {Array<string>}
+   * @private
+   */
+  function getProductModeDeploymentNameIncludes_(cfg) {
+    var ad = cfg.activeDeployments || {};
+    if (Array.isArray(ad.productModeDeploymentNameIncludes) &&
+        ad.productModeDeploymentNameIncludes.length) {
+      return ad.productModeDeploymentNameIncludes.slice();
+    }
+    var scope = cfg.report && cfg.report.productScope;
+    if (scope && Array.isArray(scope.nameTokens) && scope.nameTokens.length) {
+      return scope.nameTokens.slice();
+    }
+    return [];
+  }
+
+  /**
+   * Lowercase set of configured structured product areas.
+   * @param {AppConfig} cfg
+   * @return {Object<string, boolean>}
+   * @private
+   */
+  function _buildProductModeAreaSet_(cfg) {
+    var areaSet = {};
+    getProductModeStructuredProductAreas_(cfg).forEach(function (area) {
+      var normalized = String(area || '').trim().toLowerCase();
+      if (normalized) areaSet[normalized] = true;
+    });
+    return areaSet;
+  }
+
+  /**
+   * @param {Object} pf
+   * @param {Object<string, boolean>} areaSet
+   * @return {boolean}
+   * @private
+   */
+  function _pfMatchesStructuredProductArea_(pf, areaSet) {
+    var pa = String((pf && pf.productArea) || '').trim().toLowerCase();
+    return !!(pa && areaSet[pa]);
+  }
+
+  /**
+   * @param {string} deploymentName
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function _deploymentNameMatchesProductModeToken_(deploymentName, cfg) {
+    var tokens = getProductModeDeploymentNameIncludes_(cfg);
+    if (!tokens.length) return false;
+    var nameMatch = (cfg.activeDeployments && cfg.activeDeployments.productModeNameMatch) || {};
+    var field = nameMatch.field || 'deploymentName';
+    if (field !== 'deploymentName') return false;
+    var haystack = String(deploymentName || '');
+    if (!haystack) return false;
+    if (nameMatch.caseInsensitive !== false) haystack = haystack.toLowerCase();
+    for (var i = 0; i < tokens.length; i++) {
+      var token = String(tokens[i] || '').trim();
+      if (!token) continue;
+      var needle = nameMatch.caseInsensitive !== false ? token.toLowerCase() : token;
+      if (haystack.indexOf(needle) >= 0) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Configured deployment-name exclusion tokens for ProductMode portfolio membership.
+   * @param {AppConfig} cfg
+   * @return {Array<string>}
+   * @private
+   */
+  function getProductModeDeploymentNameExcludeTokens_(cfg) {
+    var ad = cfg.activeDeployments || {};
+    if (Array.isArray(ad.productModeDeploymentNameExcludes)) {
+      return ad.productModeDeploymentNameExcludes.slice();
+    }
+    return [];
+  }
+
+  /**
+   * True when a deployment name matches any ProductMode exclusion token (deployment name only).
+   * @param {AppConfig} cfg
+   * @param {string} deploymentName
+   * @return {boolean}
+   * @private
+   */
+  function isProductModeExcludedDeploymentName_(cfg, deploymentName) {
+    var tokens = getProductModeDeploymentNameExcludeTokens_(cfg);
+    if (!tokens.length) return false;
+    var haystack = String(deploymentName || '').trim();
+    if (!haystack) return false;
+    haystack = haystack.toLowerCase();
+    for (var i = 0; i < tokens.length; i++) {
+      var token = String(tokens[i] || '').trim();
+      if (!token) continue;
+      if (haystack.indexOf(token.toLowerCase()) >= 0) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Resolves parent deployment name for ProductMode union membership checks.
+   * @param {Object=} parentRow
+   * @param {Object=} pfRow
+   * @return {string}
+   * @private
+   */
+  function _resolveUnionParentDeploymentName_(parentRow, pfRow) {
+    if (parentRow && parentRow.deploymentName) return String(parentRow.deploymentName).trim();
+    if (pfRow && pfRow.deploymentName) return String(pfRow.deploymentName).trim();
+    return '';
+  }
+
+  /**
+   * Status scope for a ProductMode surface.
+   * @param {AppConfig} cfg
+   * @param {string} surfaceName  'default' | 'trends' | other
+   * @return {Array<string>}
+   * @private
+   */
+  function getProductModeSurfaceStatusScope_(cfg, surfaceName) {
+    var ad = cfg.activeDeployments || {};
+    if (surfaceName === 'trends' &&
+        Array.isArray(ad.productModeTrendsStatuses) &&
+        ad.productModeTrendsStatuses.length) {
+      return ad.productModeTrendsStatuses.slice();
+    }
+    if (Array.isArray(ad.productModeDefaultSurfaceStatuses) &&
+        ad.productModeDefaultSurfaceStatuses.length) {
+      return ad.productModeDefaultSurfaceStatuses.slice();
+    }
+    return _getProductModeUnionStatuses_(cfg);
+  }
+
+  /**
+   * @param {string} status
+   * @param {Array<string>} statusScope
+   * @return {boolean}
+   * @private
+   */
+  function _statusInProductModeScope_(status, statusScope) {
+    if (!Array.isArray(statusScope) || !statusScope.length) return true;
+    var normalized = String(status || '').trim();
+    if (!normalized) return false;
+    return statusScope.indexOf(normalized) >= 0;
+  }
+
+  /**
+   * Resolves parent deployment status preferring SFDC_Deployments.
+   * @param {Object=} parentRow
+   * @param {Object=} pfRow
+   * @return {string}
+   * @private
+   */
+  function _resolveUnionParentStatus_(parentRow, pfRow) {
+    if (parentRow && parentRow.overallStatus) return String(parentRow.overallStatus).trim();
+    if (pfRow && pfRow.overallStatus) return String(pfRow.overallStatus).trim();
+    return '';
+  }
+
+  /**
+   * @param {Array<Object>} parentRows
+   * @return {Object<string, Object>}
+   * @private
+   */
+  function _buildParentRowsById_(parentRows) {
+    var map = {};
+    (parentRows || []).forEach(function (row) {
+      if (!row || !row.deploymentId) return;
+      var canon = _canonicalId_(row.deploymentId);
+      map[canon] = row;
+      if (canon.length >= 15) map[canon.slice(0, 15)] = row;
+    });
+    return map;
+  }
+
+  /**
+   * Collects parent deployment IDs with scoped PF product-area membership.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} pfRows
+   * @param {Object<string, Object>} parentById
+   * @param {Array<string>} statusScope
+   * @return {Object<string, boolean>}
+   * @private
+   */
+  function collectProductModeStructuredScopeDeploymentIds_(cfg, pfRows, parentById, statusScope) {
+    var areaSet = _buildProductModeAreaSet_(cfg);
+    var ids = {};
+    (pfRows || []).forEach(function (pf) {
+      if (!_pfMatchesStructuredProductArea_(pf, areaSet)) return;
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      if (!parentId) return;
+      var parent = parentById[parentId] || parentById[parentId.slice(0, 15)] || null;
+      var status = _resolveUnionParentStatus_(parent, pf);
+      if (!_statusInProductModeScope_(status, statusScope)) return;
+      var deploymentName = _resolveUnionParentDeploymentName_(parent, pf);
+      if (isProductModeExcludedDeploymentName_(cfg, deploymentName)) return;
+      ids[parentId] = true;
+    });
+    return ids;
+  }
+
+  /**
+   * Collects parent deployment IDs from SFDC_Deployments name-token membership.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} deploymentRows
+   * @param {Array<string>} statusScope
+   * @return {Object<string, boolean>}
+   * @private
+   */
+  function collectProductModeNameMatchedDeploymentIds_(cfg, deploymentRows, statusScope) {
+    var ids = {};
+    (deploymentRows || []).forEach(function (row) {
+      if (!row || !row.deploymentId) return;
+      if (!_deploymentNameMatchesProductModeToken_(row.deploymentName, cfg)) return;
+      if (isProductModeExcludedDeploymentName_(cfg, row.deploymentName)) return;
+      var status = String(row.overallStatus || '').trim();
+      if (!_statusInProductModeScope_(status, statusScope)) return;
+      ids[_canonicalId_(row.deploymentId)] = true;
+    });
+    return ids;
+  }
+
+  /**
+   * Groups scoped PF rows by parent deployment ID.
+   * @param {Array<Object>} pfRows
+   * @param {Object<string, boolean>} areaSet
+   * @return {Object<string, Array<Object>>}
+   * @private
+   */
+  function _groupScopedPfRowsByParentId_(pfRows, areaSet) {
+    var groups = {};
+    (pfRows || []).forEach(function (pf) {
+      if (!_pfMatchesStructuredProductArea_(pf, areaSet)) return;
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      if (!parentId) return;
+      if (!groups[parentId]) groups[parentId] = [];
+      groups[parentId].push(pf);
+    });
+    return groups;
+  }
+
+  /**
+   * @param {Array<Object>} pfRows
+   * @param {string} parentId
+   * @return {Object|null}
+   * @private
+   */
+  function _findPfRowForParent_(pfRows, parentId) {
+    var target = _canonicalId_(parentId);
+    var prefix = target.length >= 15 ? target.slice(0, 15) : target;
+    for (var i = 0; i < (pfRows || []).length; i++) {
+      var pf = pfRows[i];
+      if (!pf) continue;
+      var pid = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      if (pid === target || (prefix.length >= 15 && pid.slice(0, 15) === prefix)) return pf;
+    }
+    return null;
+  }
+
+  /**
+   * @param {Object} inclusionMeta
+   * @return {Array<string>}
+   * @private
+   */
+  function _portfolioInclusionSourcesFromMeta_(inclusionMeta) {
+    var sources = [];
+    if (inclusionMeta && inclusionMeta.structuredScope) sources.push('structuredScope');
+    if (inclusionMeta && inclusionMeta.nameMatch) sources.push('nameMatch');
+    return sources;
+  }
+
+  /**
+   * Builds one ProductMode union row from SFDC_Deployments parent fields.
+   * @param {Object} parentRow
+   * @param {Array<Object>} scopedPfRows
+   * @param {AppConfig} cfg
+   * @param {Object} metaMap
+   * @param {Object} overridesMap
+   * @param {Object} wellnessMap
+   * @param {Object} inclusionMeta
+   * @param {string} parentFieldSource
+   * @param {string} parentMatchStatus
+   * @return {Object}
+   * @private
+   */
+  function _buildUnionRowFromParent_(
+    parentRow, scopedPfRows, cfg, metaMap, overridesMap, wellnessMap,
+    inclusionMeta, parentFieldSource, parentMatchStatus) {
+    var parentId = _canonicalId_(parentRow.deploymentId);
+    var meta = (metaMap && metaMap[parentId]) || {};
+    var accountId = parentRow.accountId || '';
+    var wKey = accountId ? accountId.slice(0, 15) : '';
+    var wellness = (wellnessMap && wKey && wellnessMap[wKey]) || null;
+    var base = Object.assign({}, parentRow, {
+      rowIndex: parentRow.rowIndex || 0,
+      deliveryDirector: meta.deliveryDirector || '',
+      ddNotes: meta.ddNotes || '',
+      metaUsername: meta.username || '',
+      metaTimestamp: meta.timestamp || ''
+    });
+    _attachWellnessFieldsToRow_(base, wellness, cfg);
+
+    var derived = buildEffectiveDeploymentRow_(base, overridesMap || {});
+    derived.deploymentId = parentId;
+    derived.parentDeploymentId = parentId;
+    derived.deploymentFk = parentId;
+    derived.deploymentRowSource = 'productModeUnion';
+    derived.parentMatchStatus = parentMatchStatus;
+    derived.parentFieldSource = parentFieldSource;
+    derived.portfolioInclusionSources = _portfolioInclusionSourcesFromMeta_(inclusionMeta);
+
+    var productFunctions = (scopedPfRows || []).map(function (pf) {
+      return _buildPfDetailObject_(pf);
+    });
+    var functions = [];
+    var productAreas = [];
+    (scopedPfRows || []).forEach(function (pf) {
+      var fa = String(pf.funcArea || '').trim();
+      if (fa && functions.indexOf(fa) < 0) functions.push(fa);
+      var pa = String(pf.productArea || '').trim();
+      if (pa && productAreas.indexOf(pa) < 0) productAreas.push(pa);
+    });
+
+    derived.productFunctions = productFunctions;
+    derived.productFunctionCount = productFunctions.length;
+    derived.productAreas = productAreas;
+    derived.functions = functions;
+    derived.productArea = productAreas.join(', ');
+    derived.funcArea = functions.join(', ');
+    return derived;
+  }
+
+  /**
+   * Builds one ProductMode union row from PF relationship fields when parent is missing.
+   * @param {string} parentId
+   * @param {Array<Object>} scopedPfRows
+   * @param {Array<Object>} pfRows
+   * @param {AppConfig} cfg
+   * @param {Object} metaMap
+   * @param {Object} overridesMap
+   * @param {Object} wellnessMap
+   * @param {Object} inclusionMeta
+   * @return {Object|null}
+   * @private
+   */
+  function _buildUnionRowFromPfFallback_(
+    parentId, scopedPfRows, pfRows, cfg, metaMap, overridesMap, wellnessMap, inclusionMeta) {
+    var pf = (scopedPfRows && scopedPfRows.length) ? scopedPfRows[0] :
+      _findPfRowForParent_(pfRows, parentId);
+    if (!pf) return null;
+
+    var canonParentId = _canonicalId_(parentId);
+    var meta = (metaMap && metaMap[canonParentId]) || {};
+    var accountId = pf.accountId || '';
+    var wKey = accountId ? accountId.slice(0, 15) : '';
+    var wellness = (wellnessMap && wKey && wellnessMap[wKey]) || null;
+    var base = {
+      deploymentId: canonParentId,
+      parentDeploymentId: canonParentId,
+      deploymentFk: canonParentId,
+      deploymentName: pf.deploymentName || '',
+      accountId: accountId,
+      accountName: pf.accountName || '',
+      industry: pf.industry || '',
+      region: pf.region || '',
+      subRegion: pf.subRegion || '',
+      subRegionAlt: pf.subRegionAlt || '',
+      deploymentStartDate: pf.deploymentStartDate || '',
+      mtpDate: pf.mtpDate || '',
+      firstMtpDateActual: pf.firstMtpDateActual || '',
+      overallStatus: pf.overallStatus || '',
+      phase: pf.phase || '',
+      stage: pf.stage || '',
+      health: pf.health || '',
+      completionDate: pf.completionDate || '',
+      wdEngManager: pf.wdEngManager || '',
+      damFullName: pf.damFullName || '',
+      primingPartner: pf.primingPartner || '',
+      implPartner: pf.implPartner || '',
+      partner: pf.partner || '',
+      currentUpdate: pf.currentUpdate || '',
+      rowIndex: 0,
+      deliveryDirector: meta.deliveryDirector || '',
+      ddNotes: meta.ddNotes || '',
+      metaUsername: meta.username || '',
+      metaTimestamp: meta.timestamp || ''
+    };
+    _attachWellnessFieldsToRow_(base, wellness, cfg);
+
+    return _buildUnionRowFromParent_(
+      base, scopedPfRows || [], cfg, metaMap, overridesMap, wellnessMap,
+      inclusionMeta, 'pfFallback', 'pfFallbackParent');
+  }
+
+  /**
+   * Merges union parent IDs into canonical ProductMode deployment rows.
+   * @param {AppConfig} cfg
+   * @param {Object<string, Object>} inclusionById
+   * @param {Object<string, Object>} parentById
+   * @param {Object<string, Array<Object>>} pfByParent
+   * @param {Array<Object>} pfRows
+   * @param {Object} metaMap
+   * @param {Object} overridesMap
+   * @param {Object} wellnessMap
+   * @return {Array<Object>}
+   * @private
+   */
+  function mergeProductModeParentAndPfRows_(
+    cfg, inclusionById, parentById, pfByParent, pfRows, metaMap, overridesMap, wellnessMap) {
+    var rows = [];
+    Object.keys(inclusionById || {}).forEach(function (parentId) {
+      var inclusionMeta = inclusionById[parentId] || {};
+      var scopedPfRows = (pfByParent && pfByParent[parentId]) || [];
+      var parent = parentById[parentId] || parentById[parentId.slice(0, 15)] || null;
+      var row;
+      if (parent) {
+        row = _buildUnionRowFromParent_(
+          parent, scopedPfRows, cfg, metaMap, overridesMap, wellnessMap,
+          inclusionMeta, 'sfdcDeployments', 'matchedParent');
+      } else {
+        row = _buildUnionRowFromPfFallback_(
+          parentId, scopedPfRows, pfRows, cfg, metaMap, overridesMap, wellnessMap, inclusionMeta);
+      }
+      if (row && row.deploymentId &&
+          !isProductModeExcludedDeploymentName_(cfg, row.deploymentName)) {
+        rows.push(row);
+      }
+    });
+    return rows;
+  }
+
+  /**
+   * ProductMode canonical union: structured PF scope + SFDC_Deployments name match.
+   * @param {AppConfig} cfg  Already-defaulted config.
+   * @param {Object=} opts  { surface: string, productOpts: Object }
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildProductModeCanonicalUnionRows_(cfg, opts) {
+    opts = opts || {};
+    var surface = opts.surface || 'default';
+    var statusScope = getProductModeSurfaceStatusScope_(cfg, surface);
+
+    var parentRows = [];
+    var pfRows = [];
+    try { parentRows = readSfdcDeploymentsRaw_(cfg) || []; } catch (e) {
+      Logger.log('CoreData.buildProductModeCanonicalUnionRows_: readSfdcDeploymentsRaw_ failed: ' + e);
+    }
+    try { pfRows = readSfdcProductFunctionsRaw_(cfg) || []; } catch (e) {
+      Logger.log('CoreData.buildProductModeCanonicalUnionRows_: readSfdcProductFunctionsRaw_ failed: ' + e);
+    }
+
+    var parentById = _buildParentRowsById_(parentRows);
+    var areaSet = _buildProductModeAreaSet_(cfg);
+    var pfByParent = _groupScopedPfRowsByParentId_(pfRows, areaSet);
+
+    var structuredIds = collectProductModeStructuredScopeDeploymentIds_(
+      cfg, pfRows, parentById, statusScope);
+    var nameMatchedIds = collectProductModeNameMatchedDeploymentIds_(
+      cfg, parentRows, statusScope);
+
+    var inclusionById = {};
+    Object.keys(structuredIds).forEach(function (id) {
+      if (!inclusionById[id]) inclusionById[id] = { structuredScope: false, nameMatch: false };
+      inclusionById[id].structuredScope = true;
+    });
+    Object.keys(nameMatchedIds).forEach(function (id) {
+      if (!inclusionById[id]) inclusionById[id] = { structuredScope: false, nameMatch: false };
+      inclusionById[id].nameMatch = true;
+    });
+
+    var metaMap = getDeploymentsMetaMap_(cfg);
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+    var wellnessMap = {};
+    try { wellnessMap = buildWellnessMap_(cfg) || {}; } catch (e) {
+      Logger.log('CoreData.buildProductModeCanonicalUnionRows_: buildWellnessMap_ failed: ' + e);
+    }
+
+    var rows = mergeProductModeParentAndPfRows_(
+      cfg, inclusionById, parentById, pfByParent, pfRows, metaMap, overridesMap, wellnessMap);
+    var beforeNameExclude = rows.length;
+    rows = rows.filter(function (row) {
+      return !isProductModeExcludedDeploymentName_(cfg, row.deploymentName);
+    });
+    if (beforeNameExclude !== rows.length) {
+      Logger.log('CoreData.buildProductModeCanonicalUnionRows_: excluded ' +
+                 (beforeNameExclude - rows.length) + ' row(s) by deployment name.');
+    }
+
+    Logger.log('CoreData.buildProductModeCanonicalUnionRows_: ' + rows.length +
+               ' rows (surface=' + surface + ', statuses=' + JSON.stringify(statusScope) +
+               ', structured=' + Object.keys(structuredIds).length +
+               ', nameMatch=' + Object.keys(nameMatchedIds).length +
+               ', union=' + Object.keys(inclusionById).length + ').');
+    return rows;
   }
 
   /**
@@ -863,6 +1406,18 @@ var CoreData = (function () {
     var row = _buildPfOnlyDeploymentRow_(pf, cfg, metaMap, overridesMap, primary.index, wellnessMap);
     row.deploymentName = String(pf.deploymentName || row.deploymentName || '').trim();
 
+    // Parent-deployment health: rollup across all PF detail rows for this Deployment__r.Id.
+    // Normally health is consistent at parent level; mixed child health is an extreme edge case.
+    var parentOv = (overridesMap && overridesMap[parentId]) || {};
+    if (parentOv.overrideHealth) {
+      row.health = parentOv.overrideHealth;
+    } else {
+      var childHealths = groupItems.map(function (item) {
+        return (item.pf && item.pf.health) || '';
+      });
+      row.health = _rollupParentDeploymentHealth_(childHealths);
+    }
+
     var productFunctions = groupItems.map(function (item) {
       return _buildPfDetailObject_(item.pf);
     });
@@ -979,7 +1534,7 @@ var CoreData = (function () {
    */
   function getProductModeHistoricalPfRows_(cfg, productOpts) {
     var pa = (productOpts && productOpts.product) || 'all';
-    var cacheKey = 'hist:' + pa;
+    var cacheKey = usesProductModeParentAndPfUnion_(cfg) ? ('hist:v2:' + pa) : ('hist:' + pa);
     if (_cache.historicalPfByProduct && _cache.historicalPfByProduct[cacheKey]) {
       return _cache.historicalPfByProduct[cacheKey];
     }
@@ -991,7 +1546,14 @@ var CoreData = (function () {
       return [];
     }
     pfRows = filterProductModePfRowsByProduct_(pfRows, pa, cfg);
-    pfRows = filterRowsByReportProductScope_(pfRows, cfg);
+    if (usesProductModeParentAndPfUnion_(cfg)) {
+      var areaSet = _buildProductModeAreaSet_(cfg);
+      pfRows = (pfRows || []).filter(function (pf) {
+        return _pfMatchesStructuredProductArea_(pf, areaSet);
+      });
+    } else {
+      pfRows = filterRowsByReportProductScope_(pfRows, cfg);
+    }
     pfRows = filterDeploymentsByStudent_(pfRows, 'exclude', cfg);
     if (!_cache.historicalPfByProduct) _cache.historicalPfByProduct = {};
     _cache.historicalPfByProduct[cacheKey] = pfRows;
@@ -1022,7 +1584,10 @@ var CoreData = (function () {
       phases: []
     };
     _cache.reportBuildCtx = ctx;
-    if (usesProductModePfDataSource_(cfg)) {
+    if (usesProductModeParentAndPfUnion_(cfg)) {
+      readSfdcDeploymentsRaw_(cfg);
+      readSfdcProductFunctionsRaw_(cfg);
+    } else if (usesProductModePfDataSource_(cfg)) {
       readSfdcProductFunctionsRaw_(cfg);
     }
     try {
@@ -1318,23 +1883,43 @@ var CoreData = (function () {
    * @private
    */
   function getProductModeActiveCountRows_(cfg, productOpts) {
+    return getProductModeCanonicalDeployments(cfg, productOpts);
+  }
+
+  /**
+   * ProductMode canonical active parent deployments from SFDC_DeploymentProductFunctions,
+   * grouped by Deployment__r.Id (parentDeployment grain). One row per unique parent deployment.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} productOpts  { product: string }
+   * @return {Array<Object>}
+   */
+  function getProductModeCanonicalDeployments(config, productOpts, surfaceOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (!usesProductModePfDataSource_(cfg) && !usesProductModeParentAndPfUnion_(cfg)) {
+      return getAllEffectiveDeployments(cfg, productOpts);
+    }
+
     var pa = (productOpts && productOpts.product) || 'all';
-    var cacheKey = String(pa);
+    var surface = (surfaceOpts && surfaceOpts.surface) || 'default';
+    var cacheKey = usesProductModeParentAndPfUnion_(cfg)
+      ? ('canonical:v4:parentAndPfUnionNameExcludes:' + surface + ':' + String(pa))
+      : ('canonical:v2:parentDeployment:' + String(pa));
     if (_cache.countByProduct && _cache.countByProduct[cacheKey]) {
       return _cache.countByProduct[cacheKey];
     }
 
-    var countGrain = _getProductModeCountGrain_(cfg);
-    var displayGrain = _getProductModeDisplayGrain_(cfg);
     var rows;
-
-    if (countGrain === displayGrain) {
-      rows = getAllEffectiveDeployments(cfg, productOpts) || [];
+    if (usesProductModeParentAndPfUnion_(cfg)) {
+      rows = buildProductModeCanonicalUnionRows_(cfg, {
+        surface: surface,
+        productOpts: productOpts
+      });
     } else {
-      rows = _buildProductModePfOnlyRowsAtGrain_(cfg, countGrain);
-      rows = _attachDdContactsToRows_(rows, cfg);
-      rows = filterDeploymentsByProduct_(rows, pa, cfg);
+      rows = _buildProductModePfOnlyRowsAtGrain_(cfg, 'parentDeployment');
     }
+    rows = _attachDdContactsToRows_(rows, cfg);
+    rows = filterDeploymentsByProduct_(rows, pa, cfg);
 
     if (!_cache.countByProduct) _cache.countByProduct = {};
     _cache.countByProduct[cacheKey] = rows;
@@ -1342,8 +1927,55 @@ var CoreData = (function () {
   }
 
   /**
+   * ProductMode Trends population: corrected union with Active + Complete scope.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   */
+  function getProductModeTrendsDeployments(config, viewModeOpts, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (!usesProductModeParentAndPfUnion_(cfg)) {
+      return getAllDeployments(cfg, viewModeOpts, productOpts);
+    }
+
+    var pa = (productOpts && productOpts.product) || 'all';
+    var cacheKey = 'trends:v4:parentAndPfUnionNameExcludes:' + String(pa);
+    if (_cache.effectiveByProduct && _cache.effectiveByProduct[cacheKey]) {
+      return applyViewModeFilter_(cfg, _cache.effectiveByProduct[cacheKey], viewModeOpts);
+    }
+
+    var rows = buildProductModeCanonicalUnionRows_(cfg, {
+      surface: 'trends',
+      productOpts: productOpts
+    });
+    rows = _attachDdContactsToRows_(rows, cfg);
+    rows = filterDeploymentsByProduct_(rows, pa, cfg);
+    rows = filterDeploymentsByStudent_(rows, 'exclude', cfg);
+
+    if (!_cache.effectiveByProduct) _cache.effectiveByProduct = {};
+    _cache.effectiveByProduct[cacheKey] = rows;
+    return applyViewModeFilter_(cfg, rows, viewModeOpts);
+  }
+
+  /**
+   * Portfolio grouping value for a deployment row (PS Region in ProductMode, Industry otherwise).
+   *
+   * @param {Object} row
+   * @param {AppConfig} config
+   * @return {string}
+   */
+  function getDeploymentGroupingValue(row, config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var field = CoreConfig.getPortfolioGroupingField(cfg);
+    var val = String((row && row[field]) || '').trim();
+    return val || 'Unknown';
+  }
+
+  /**
    * Active rows for app-level KPI counts (Overview, analytics, portfolio totals).
-   * ProductMode uses productModeCountGrain; IndustryMode uses parent deployments.
+   * ProductMode uses canonical parent-deployment grain; IndustryMode uses parent deployments.
    *
    * @param {AppConfig} config
    * @param {Object=} productOpts
@@ -1351,8 +1983,8 @@ var CoreData = (function () {
    */
   function getActiveCountDeployments(config, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
-    if (usesProductModePfDataSource_(cfg)) {
-      return getProductModeActiveCountRows_(cfg, productOpts);
+    if (usesProductModePfDataSource_(cfg) || usesProductModeParentAndPfUnion_(cfg)) {
+      return getProductModeCanonicalDeployments(cfg, productOpts, { surface: 'default' });
     }
     return getAllEffectiveDeployments(cfg, productOpts);
   }
@@ -1697,6 +2329,12 @@ var CoreData = (function () {
     try {
       if (isProductModeActiveDeploymentsUnionEnabled_(cfg)) {
         var sourceMode = _getProductModeSourceMode_(cfg);
+        if (sourceMode === 'parentAndProductFunctionUnion') {
+          effective = getProductModeCanonicalDeployments(cfg, productOpts, { surface: 'default' });
+          if (!_cache.effectiveByProduct) _cache.effectiveByProduct = {};
+          _cache.effectiveByProduct[cacheKey] = effective;
+          return effective;
+        }
         if (sourceMode === 'pfOnly') {
           effective = buildProductModePfOnlyEffectiveDeployments_(cfg);
         } else if (sourceMode === 'parentPlusPf') {
@@ -2475,6 +3113,230 @@ var CoreData = (function () {
     Logger.log('=== _debugProductModeCounts(' + (cfg.appId || '?') + ') ===');
     Logger.log('  report=' + JSON.stringify(report));
     if (mismatch) Logger.log('  NOTE: ' + mismatch);
+    return report;
+  }
+
+  /**
+   * Collects ProductMode parent deployment IDs excluded by deployment-name tokens.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} parentRows
+   * @param {Array<Object>} pfRows
+   * @param {Object<string, Object>} parentById
+   * @param {Array<string>} statusScope
+   * @return {Object<string, Object>}
+   * @private
+   */
+  function _collectProductModeNameExcludedByScope_(cfg, parentRows, pfRows, parentById, statusScope) {
+    var excluded = {};
+    var areaSet = _buildProductModeAreaSet_(cfg);
+
+    (pfRows || []).forEach(function (pf) {
+      if (!_pfMatchesStructuredProductArea_(pf, areaSet)) return;
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      if (!parentId) return;
+      var parent = parentById[parentId] || parentById[parentId.slice(0, 15)] || null;
+      var status = _resolveUnionParentStatus_(parent, pf);
+      if (!_statusInProductModeScope_(status, statusScope)) return;
+      var deploymentName = _resolveUnionParentDeploymentName_(parent, pf);
+      if (!isProductModeExcludedDeploymentName_(cfg, deploymentName)) return;
+      var parentFieldSource = parent ? 'sfdcDeployments' : 'pfFallback';
+      if (!excluded[parentId]) {
+        excluded[parentId] = {
+          deploymentId: parentId,
+          accountName: (parent && parent.accountName) || pf.accountName || '',
+          deploymentName: deploymentName,
+          overallStatus: status,
+          health: (parent && parent.health) || pf.health || '',
+          source: 'structuredScope',
+          parentFieldSource: parentFieldSource
+        };
+      }
+    });
+
+    (parentRows || []).forEach(function (row) {
+      if (!row || !row.deploymentId) return;
+      if (!_deploymentNameMatchesProductModeToken_(row.deploymentName, cfg)) return;
+      var status = String(row.overallStatus || '').trim();
+      if (!_statusInProductModeScope_(status, statusScope)) return;
+      if (!isProductModeExcludedDeploymentName_(cfg, row.deploymentName)) return;
+      var parentId = _canonicalId_(row.deploymentId);
+      if (!excluded[parentId]) {
+        excluded[parentId] = {
+          deploymentId: parentId,
+          accountName: row.accountName || '',
+          deploymentName: row.deploymentName || '',
+          overallStatus: status,
+          health: row.health || '',
+          source: 'nameMatch',
+          parentFieldSource: 'sfdcDeployments'
+        };
+      } else if (excluded[parentId].source === 'structuredScope') {
+        excluded[parentId].source = 'structuredScope+nameMatch';
+      }
+    });
+
+    return excluded;
+  }
+
+  /**
+   * ProductMode canonical union count diagnostic for EVI/AI validation.
+   * @param {AppConfig} config
+   * @param {number=} sampleLimit
+   * @return {Object}
+   */
+  function _debugProductModeCanonicalUnionCounts(config, sampleLimit) {
+    var cfg = CoreConfig.withDefaults(config);
+    var limit = sampleLimit || 5;
+    var activeScope = getProductModeSurfaceStatusScope_(cfg, 'default');
+    var trendsScope = getProductModeSurfaceStatusScope_(cfg, 'trends');
+
+    var parentRows = [];
+    var pfRows = [];
+    try { parentRows = readSfdcDeploymentsRaw_(cfg) || []; } catch (e) {}
+    try { pfRows = readSfdcProductFunctionsRaw_(cfg) || []; } catch (e) {}
+    var parentById = _buildParentRowsById_(parentRows);
+
+    var structuredActive = collectProductModeStructuredScopeDeploymentIds_(
+      cfg, pfRows, parentById, activeScope);
+    var nameActive = collectProductModeNameMatchedDeploymentIds_(
+      cfg, parentRows, activeScope);
+    var structuredTrends = collectProductModeStructuredScopeDeploymentIds_(
+      cfg, pfRows, parentById, trendsScope);
+    var nameTrends = collectProductModeNameMatchedDeploymentIds_(
+      cfg, parentRows, trendsScope);
+
+    function countOverlap_(a, b) {
+      var n = 0;
+      Object.keys(a).forEach(function (id) { if (b[id]) n++; });
+      return n;
+    }
+    function onlyInFirst_(a, b) {
+      var out = [];
+      Object.keys(a).forEach(function (id) {
+        if (!b[id]) out.push(id);
+      });
+      return out;
+    }
+    function unionCount_(a, b) {
+      var set = {};
+      Object.keys(a).forEach(function (id) { set[id] = true; });
+      Object.keys(b).forEach(function (id) { set[id] = true; });
+      return Object.keys(set).length;
+    }
+
+    var overlapActive = countOverlap_(structuredActive, nameActive);
+    var structuredOnlyIds = onlyInFirst_(structuredActive, nameActive);
+    var nameOnlyIds = onlyInFirst_(nameActive, structuredActive);
+
+    var excludedActiveByName = _collectProductModeNameExcludedByScope_(
+      cfg, parentRows, pfRows, parentById, activeScope);
+    var excludedTrendsByName = _collectProductModeNameExcludedByScope_(
+      cfg, parentRows, pfRows, parentById, trendsScope);
+    var excludedActiveIds = Object.keys(excludedActiveByName);
+    var excludedTrendsIds = Object.keys(excludedTrendsByName);
+
+    var finalUnionActiveRows = [];
+    try {
+      finalUnionActiveRows = buildProductModeCanonicalUnionRows_(cfg, { surface: 'default' }) || [];
+    } catch (e) {
+      Logger.log('_debugProductModeCanonicalUnionCounts: build failed: ' + e);
+    }
+    var finalUnionTrendsRows = [];
+    try {
+      finalUnionTrendsRows = buildProductModeCanonicalUnionRows_(cfg, { surface: 'trends' }) || [];
+    } catch (e) {
+      Logger.log('_debugProductModeCanonicalUnionCounts: trends build failed: ' + e);
+    }
+
+    var healthCounts = { Red: 0, Yellow: 0, Green: 0, Other: 0 };
+    finalUnionActiveRows.forEach(function (row) {
+      var h = String(row.health || '').trim();
+      if (healthCounts[h] !== undefined) healthCounts[h]++;
+      else healthCounts.Other++;
+    });
+
+    var pfFallbackParentCount = 0;
+    finalUnionActiveRows.forEach(function (row) {
+      if (row.parentFieldSource === 'pfFallback' || row.parentMatchStatus === 'pfFallbackParent') {
+        pfFallbackParentCount++;
+      }
+    });
+
+    function sampleRows_(ids, rowsById, label) {
+      return ids.slice(0, limit).map(function (id) {
+        var row = rowsById[id] || parentById[id] || parentById[id.slice(0, 15)] || null;
+        return {
+          deploymentId: id,
+          accountName: row ? (row.accountName || '') : '',
+          deploymentName: row ? (row.deploymentName || '') : '',
+          overallStatus: row ? (row.overallStatus || '') : '',
+          health: row ? (row.health || '') : '',
+          source: label
+        };
+      });
+    }
+
+    var activeRowsById = {};
+    finalUnionActiveRows.forEach(function (row) {
+      activeRowsById[_canonicalId_(row.deploymentId)] = row;
+    });
+
+    var report = {
+      appId: cfg.appId || '',
+      productModeSourceMode: _getProductModeSourceMode_(cfg),
+      activeScope: activeScope,
+      trendsScope: trendsScope,
+      structuredScopeActiveParentCount: Object.keys(structuredActive).length,
+      nameMatchActiveParentCount: Object.keys(nameActive).length,
+      overlapActiveCount: overlapActive,
+      structuredOnlyActiveCount: structuredOnlyIds.length,
+      nameOnlyActiveCount: nameOnlyIds.length,
+      finalUnionActiveCount: finalUnionActiveRows.length,
+      finalUnionActiveHealthCounts: healthCounts,
+      structuredScopeActiveCompleteParentCount: Object.keys(structuredTrends).length,
+      nameMatchActiveCompleteParentCount: Object.keys(nameTrends).length,
+      finalUnionActiveCompleteCount: finalUnionTrendsRows.length,
+      pfFallbackParentCount: pfFallbackParentCount,
+      sampleStructuredOnly: sampleRows_(structuredOnlyIds, activeRowsById, 'structuredOnly'),
+      sampleNameOnly: sampleRows_(nameOnlyIds, activeRowsById, 'nameOnly'),
+      sampleOverlap: sampleRows_(
+        Object.keys(structuredActive).filter(function (id) { return nameActive[id]; }),
+        activeRowsById,
+        'overlap'
+      ),
+      excludedByNameTokens: getProductModeDeploymentNameExcludeTokens_(cfg),
+      excludedByNameActiveCount: excludedActiveIds.length,
+      excludedByNameActiveCompleteCount: excludedTrendsIds.length,
+      sampleExcludedByName: excludedActiveIds.slice(0, limit).map(function (id) {
+        return excludedActiveByName[id];
+      })
+    };
+
+    if ((cfg.appId || '') === 'EVI_DM' || (cfg.appId || '') === 'EVI') {
+      report.eviWorkbookBaseline = {
+        structuredScopeActiveParentCount: 129,
+        nameMatchActiveParentCount: 132,
+        overlapActiveCount: 86,
+        finalUnionActiveCount: 175,
+        finalUnionActiveHealthCounts: { Red: 4, Yellow: 7, Green: 164, Other: 0 },
+        excludedByNameActiveCount: 1
+      };
+      report.eviBaselineMatch = {
+        structuredScopeActiveParentCount:
+          report.structuredScopeActiveParentCount === 129,
+        nameMatchActiveParentCount:
+          report.nameMatchActiveParentCount === 132,
+        overlapActiveCount: report.overlapActiveCount === 86,
+        finalUnionActiveCount: report.finalUnionActiveCount === 175,
+        healthRed: healthCounts.Red === 4,
+        healthYellow: healthCounts.Yellow === 7,
+        healthGreen: healthCounts.Green === 164,
+        excludedByNameActiveCount: report.excludedByNameActiveCount >= 1
+      };
+    }
+
+    Logger.log('=== _debugProductModeCanonicalUnionCounts(' + (cfg.appId || '?') + ') ===');
+    Logger.log('  report=' + JSON.stringify(report));
     return report;
   }
 
@@ -3711,7 +4573,7 @@ function _sfdcDataVersion_(cfg) {
       ? cfg.freshness.watchSheet : deploymentsSheet;
     var watchTargets = {};
     watchTargets[watchSheet] = true;
-    if (usesProductModePfDataSource_(cfg)) {
+    if (usesProductModePfDataSource_(cfg) || usesProductModeParentAndPfUnion_(cfg)) {
       watchTargets[pfSheet] = true;
     }
     watchTargets[deploymentsSheet] = true;
@@ -3872,8 +4734,8 @@ function _sfdcDataVersion_(cfg) {
         stage:               cellStr_(colStage),
         health:              cellStr_(colHealth),
         completionDate:      cellStr_(colCompletionDate),
-        wdEngManager:        cellStr_(colEM),
-        damFullName:         cellStr_(colDAM),
+        wdEngManager:        normalizeSalesforceRelatedName_(cellStr_(colEM), 'Full_Name__c'),
+        damFullName:         normalizeSalesforceRelatedName_(cellStr_(colDAM), 'Full_Name__c'),
         primingPartner:      cellStr_(colPrimingPartner),
         implPartner:         cellStr_(colImplPartner),
         partner:             cellStr_(colPartner),
@@ -4097,8 +4959,7 @@ function _sfdcDataVersion_(cfg) {
    * @private
    */
   function _productModeUsesSeparateCountGrain_(cfg) {
-    if (!usesProductModePfDataSource_(cfg)) return false;
-    return _getProductModeCountGrain_(cfg) !== _getProductModeDisplayGrain_(cfg);
+    return false;
   }
 
   /**
@@ -4507,6 +5368,17 @@ function _sfdcDataVersion_(cfg) {
       if (!byName[name]) byName[name] = cid;
     });
     return { byName: byName };
+  }
+
+  /**
+   * Rolls up health across grouped PF rows: Red > Yellow > Green > blank/unknown.
+   * Mixed child health within one Deployment__r.Id group is an extreme edge case.
+   * @param {Array<string>} healths
+   * @return {string}
+   * @private
+   */
+  function _rollupParentDeploymentHealth_(healths) {
+    return _rollupGoLiveHealth_(healths);
   }
 
   /**
@@ -5212,6 +6084,85 @@ function _sfdcDataVersion_(cfg) {
   }
 
   /**
+   * Adds parent-level go-live events for union members without scoped PF date rows.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} results
+   * @param {Object} options
+   * @param {string} goLiveType
+   * @param {string} windowStartKey
+   * @param {string} windowEndKey
+   * @return {Array<Object>}
+   * @private
+   */
+  function _appendUnionParentGoLiveFallbacks_(cfg, results, options, goLiveType, windowStartKey, windowEndKey) {
+    if (!usesProductModeParentAndPfUnion_(cfg)) return results || [];
+    results = results || [];
+    var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var unionRows = buildProductModeCanonicalUnionRows_(cfg, {
+      surface: goLiveType === 'actual' ? 'trends' : 'default',
+      productOpts: options.productOpts
+    });
+    var seenParents = {};
+    results.forEach(function (row) {
+      var pid = _canonicalId_(row.parentDeploymentId || row.deploymentId);
+      if (pid) seenParents[pid] = true;
+    });
+
+    unionRows.forEach(function (dep) {
+      var parentId = _canonicalId_(dep.parentDeploymentId || dep.deploymentId);
+      if (!parentId || seenParents[parentId]) return;
+      var ov = goLivesOverrides[dep.accountName] || {};
+      if (ov.exclude) return;
+
+      var dateKey = null;
+      if (goLiveType === 'actual') {
+        dateKey = _toDateKey_(dep.firstMtpDateActual);
+      } else {
+        var activeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
+                            cfg.salesforce.statusValues.active) || 'Active';
+        var status = String(dep.overallStatus || '').trim();
+        if (status && status !== activeStatus) return;
+        dateKey = _toDateKey_(ov.overrideDate || dep.mtpDate);
+      }
+      if (!dateKey || !_dateKeyInRange_(dateKey, windowStartKey, windowEndKey)) return;
+
+      var eventRow = {
+        deploymentId: parentId,
+        parentDeploymentId: parentId,
+        deploymentFk: parentId,
+        accountId: dep.accountId || '',
+        accountName: dep.accountName || '',
+        deploymentName: dep.deploymentName || '',
+        partner: ov.overridePartner || dep.partner || '',
+        industry: dep.industry || '',
+        region: dep.region || '',
+        subRegion: dep.subRegion || '',
+        health: dep.health || '',
+        goLiveDate: dateKey,
+        goLiveType: goLiveType,
+        productFunctions: [],
+        productFunctionCount: 0,
+        productAreas: [],
+        functions: [],
+        deploymentRowSource: 'productModeUnionParentFallback',
+        parentMatchStatus: dep.parentMatchStatus || 'matchedParent',
+        dateSource: goLiveType === 'actual' ? 'Parent Actual MTP' : 'Parent Current MTP'
+      };
+      if (goLiveType === 'actual') {
+        eventRow.recentDates = [{ date: dateKey, products: [] }];
+        eventRow.lastGoLiveDate = dateKey;
+      } else {
+        eventRow.upcomingDates = [{ date: dateKey, products: [] }];
+        eventRow.nextGoLiveDate = dateKey;
+        eventRow.mtpDate = dateKey;
+      }
+      results.push(eventRow);
+      seenParents[parentId] = true;
+    });
+    return results;
+  }
+
+  /**
    * Canonical ProductMode PF go-live event builder used by Overview, Go Lives, and report.
    * @param {AppConfig} cfg
    * @param {Object=} options
@@ -5251,7 +6202,8 @@ function _sfdcDataVersion_(cfg) {
     var rawDetails = _collectProductModeGoLivePfDetails_(
       pfRows, cfg, goLiveType, windowStartKey, windowEndKey, goLivesOverrides);
     var grouped = _groupProductModeGoLivePfDetails_(rawDetails);
-    var results = grouped.events;
+    var results = _appendUnionParentGoLiveFallbacks_(
+      cfg, grouped.events, options, goLiveType, windowStartKey, windowEndKey);
 
     if (Array.isArray(options.healthFilter) && options.healthFilter.length) {
       results = results.filter(function (row) {
@@ -6210,6 +7162,27 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Normalizes a Salesforce related-object export to a clean display name.
+   * Handles blank values, already-clean strings, and object-like strings with
+   * Full_Name__c=... (attributes may appear before or after the name field).
+   *
+   * @param {any} value
+   * @param {string=} fieldName  Field to extract when value is object-like. Default Full_Name__c.
+   * @return {string}
+   * @private
+   */
+  function normalizeSalesforceRelatedName_(value, fieldName) {
+    var s = String(value || '').trim();
+    if (!s) return '';
+    var target = String(fieldName || 'Full_Name__c').trim();
+    if (s.indexOf('{') >= 0 || s.indexOf(target + '=') >= 0) {
+      var parsed = _parseSfdcObjectField_(s, target);
+      if (parsed) return parsed;
+    }
+    return s;
+  }
+
+  /**
    * Extracts Account Id from a Customer__r object export via attributes.url fallback.
    * @param {any} raw
    * @return {string}
@@ -6422,9 +7395,11 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       }
       function resolveField_(flatCol, objectCol, objectField) {
         var flat = cellStr_(flatCol);
-        if (flat) return flat;
+        if (flat) {
+          return normalizeSalesforceRelatedName_(flat, objectField);
+        }
         if (objectCol >= 0 && objectField) {
-          return _parseSfdcObjectField_(row[objectCol], objectField);
+          return normalizeSalesforceRelatedName_(row[objectCol], objectField);
         }
         return '';
       }
@@ -6984,7 +7959,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Active deployments (raw, Active-only).
     var activeRows = [];
     try {
-      if (usesProductModePfDataSource_(cfg)) {
+      if (usesProductModeParentAndPfUnion_(cfg)) {
+        activeRows = getActiveCountDeployments(cfg) || [];
+        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+      } else if (usesProductModePfDataSource_(cfg)) {
         var effectivePf = getAllEffectiveDeployments(cfg) || [];
         var byParent = {};
         effectivePf.forEach(function (r) {
@@ -8444,8 +9422,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa = (productOpts && productOpts.product) || 'all';
 
     var activeRows;
-    if (usesProductModePfDataSource_(cfg)) {
-      activeRows = getActiveCountDeployments(cfg, productOpts) || [];
+    if (usesProductModePfDataSource_(cfg) || usesProductModeParentAndPfUnion_(cfg)) {
+      activeRows = getProductModeCanonicalDeployments(cfg, productOpts, { surface: 'default' }) || [];
       activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
     } else {
       var allRows = readSfdcDeploymentsRaw_(cfg);
@@ -8600,7 +9578,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa       = (productOpts && productOpts.product) || 'all';
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
-    var cacheKey = _perfKey_(cfg, 'overviewData:v8');
+    var overviewCacheBase = usesProductModeParentAndPfUnion_(cfg)
+      ? 'overviewData:v11:parentAndPfUnionNameExcludes'
+      : 'overviewData:v9:parentDeployment';
+    var cacheKey = _perfKey_(cfg, overviewCacheBase);
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
 
@@ -9446,6 +10427,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
     getActiveCountDeployments:           getActiveCountDeployments,
+    getProductModeCanonicalDeployments:  getProductModeCanonicalDeployments,
+    getProductModeTrendsDeployments:     getProductModeTrendsDeployments,
+    _debugProductModeCanonicalUnionCounts: _debugProductModeCanonicalUnionCounts,
+    getDeploymentGroupingValue:          getDeploymentGroupingValue,
     _validateEffectiveDeployments:       _validateEffectiveDeployments,
     _validateProductModeActiveDeploymentsUnion: _validateProductModeActiveDeploymentsUnion,
     _debugProductModeActiveDeploymentsUnion: _debugProductModeActiveDeploymentsUnion,

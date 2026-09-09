@@ -101,11 +101,11 @@ var CorePortfolioHealth = (function () {
     var industrySplit;
 
     if (industryMode === 'all' && industryDisplayMode === 'topNWithOther') {
-      industrySplit = buildTopIndustriesSplit_(countRows, industryTopN);
+      industrySplit = buildTopIndustriesSplit_(countRows, industryTopN, cfg);
     } else if (industryMode === 'all') {
-      industrySplit = buildAllIndustriesSplit_(countRows);
+      industrySplit = buildAllIndustriesSplit_(countRows, cfg);
     } else {
-      industrySplit = buildIndustrySplit_(countRows, ph.industryBuckets || []);
+      industrySplit = buildIndustrySplit_(countRows, ph.industryBuckets || [], cfg);
     }
 
     Logger.log(
@@ -269,7 +269,7 @@ var CorePortfolioHealth = (function () {
    * @return {Object}
    * @private
    */
-  function buildIndustrySplit_(rows, buckets) {
+  function buildIndustrySplit_(rows, buckets, cfg) {
     var bucketLabels = buckets.map(function (b) { return b.label; });
 
     // Normalize match values once for case-insensitive comparison.
@@ -296,7 +296,7 @@ var CorePortfolioHealth = (function () {
       var counts = bucketLabels.map(function () { return 0; });
       rows.forEach(function (r) {
         if (String(r.health || '').trim() !== h) return;
-        var idx = bucketIndexFor(r.industry);
+        var idx = bucketIndexFor(cfg ? CoreData.getDeploymentGroupingValue(r, cfg) : r.industry);
         if (idx >= 0) counts[idx]++;
       });
       var sub = counts.reduce(function (s, c) { return s + c; }, 0);
@@ -343,7 +343,7 @@ var CorePortfolioHealth = (function () {
    * @return {Object}
    * @private
    */
-  function buildTopIndustriesSplit_(rows, topN) {
+  function buildTopIndustriesSplit_(rows, topN, cfg) {
     topN = Math.max(1, Number(topN || 10));
 
     var byIndustry = {};
@@ -353,8 +353,9 @@ var CorePortfolioHealth = (function () {
       var health = String(r.health || '').trim();
       if (health !== 'Green' && health !== 'Yellow' && health !== 'Red') return;
 
-      var industry = String(r.industry || '').trim();
-      if (!industry) industry = 'Unknown';
+      var industry = cfg
+        ? CoreData.getDeploymentGroupingValue(r, cfg)
+        : (String(r.industry || '').trim() || 'Unknown');
 
       if (!byIndustry[industry]) {
         byIndustry[industry] = {
@@ -441,13 +442,15 @@ var CorePortfolioHealth = (function () {
    * @return {Object}
    * @private
    */
-  function buildAllIndustriesSplit_(rows) {
+  function buildAllIndustriesSplit_(rows, cfg) {
     var healths = ['Green', 'Yellow', 'Red'];
 
     var industrySet = {};
     rows.forEach(function (r) {
-      var industry = String(r.industry || '').trim();
-      if (!industry) return;
+      var industry = cfg
+        ? CoreData.getDeploymentGroupingValue(r, cfg)
+        : String(r.industry || '').trim();
+      if (!industry || industry === 'Unknown') return;
       industrySet[industry] = true;
     });
 
@@ -460,8 +463,10 @@ var CorePortfolioHealth = (function () {
 
       rows.forEach(function (r) {
         if (String(r.health || '').trim() !== h) return;
-        var industry = String(r.industry || '').trim();
-        if (!industry) return;
+        var industry = cfg
+          ? CoreData.getDeploymentGroupingValue(r, cfg)
+          : String(r.industry || '').trim();
+        if (!industry || industry === 'Unknown') return;
         var idx = bucketLabels.indexOf(industry);
         if (idx >= 0) counts[idx]++;
       });
@@ -854,7 +859,10 @@ var CorePortfolioHealth = (function () {
    * @return {string}
    * @private
    */
-  function industryNameForRow_(row) {
+  function industryNameForRow_(row, cfg) {
+    if (cfg && CoreConfig.isProductModeApp(cfg)) {
+      return CoreData.getDeploymentGroupingValue(row, cfg);
+    }
     var ind = String(row.industry || '').trim();
     return ind || 'Unknown';
   }
@@ -1257,7 +1265,9 @@ var CorePortfolioHealth = (function () {
 
     // Partner + industry concentration
     var partnerDist = buildRankedDistribution_(healthRows, partnerNameForRow_, totalActive, topN);
-    var industryDist = buildRankedDistribution_(healthRows, industryNameForRow_, totalActive, topN);
+    var industryDist = buildRankedDistribution_(healthRows, function (r) {
+      return industryNameForRow_(r, cfg);
+    }, totalActive, topN);
 
     // Health plan concentration by partner (DHP only)
     var hpByPartner = buildHealthPlansByPartner_(countRows, dhpMetrics, topN);
@@ -1526,6 +1536,18 @@ var CorePortfolioHealth = (function () {
     track: '#E2E8F0'
   };
 
+  /** @const {Object<string, number>} Shared slide layout zones (points). */
+  var PH_SLIDES_LAYOUT_ = {
+    MARGIN: 36,
+    HEADER_H: 50,
+    FOOTER_H: 26,
+    FOOTER_PAD: 12,
+    BODY_GAP: 10,
+    BAR_ROW_MIN_H: 22,
+    BAR_ROW_MAX_H: 28,
+    INSIGHT_H: 52
+  };
+
   /**
    * @param {*} value
    * @param {number=} fallback
@@ -1716,9 +1738,13 @@ var CorePortfolioHealth = (function () {
   function phSlidesInitLayout_(presentation, snapshot, cfg) {
     var pw = presentation.getPageWidth();
     var ph = presentation.getPageHeight();
-    var margin = 36;
-    var headerH = 50;
-    var footerH = 26;
+    var margin = PH_SLIDES_LAYOUT_.MARGIN;
+    var headerH = PH_SLIDES_LAYOUT_.HEADER_H;
+    var footerH = PH_SLIDES_LAYOUT_.FOOTER_H;
+    var footerPad = PH_SLIDES_LAYOUT_.FOOTER_PAD;
+    var bodyTop = margin + headerH + PH_SLIDES_LAYOUT_.BODY_GAP;
+    var footerY = ph - margin - footerH;
+    var contentBottom = footerY - footerPad;
     return {
       pres: presentation,
       cfg: cfg,
@@ -1728,13 +1754,51 @@ var CorePortfolioHealth = (function () {
       margin: margin,
       headerH: headerH,
       footerH: footerH,
+      footerY: footerY,
       contentLeft: margin,
-      contentTop: margin + headerH + 10,
+      contentTop: bodyTop,
+      bodyTop: bodyTop,
       contentWidth: pw - (margin * 2),
-      contentBottom: ph - margin - footerH - 6,
+      contentBottom: contentBottom,
+      bodyBottom: contentBottom,
+      bodyHeight: contentBottom - bodyTop,
       font: 'Arial',
       generatedLabel: snapshot.generatedLabel || ''
     };
+  }
+
+  /**
+   * Trim ranked bar-list rows to fit maxRows, aggregating overflow into Other.
+   *
+   * @param {Array<Object>} items
+   * @param {number} maxRows
+   * @return {Array<Object>}
+   * @private
+   */
+  function phSlidesTrimBarItems_(items, maxRows) {
+    if (!items || !items.length || items.length <= maxRows) {
+      return items ? items.slice() : [];
+    }
+    maxRows = Math.max(1, maxRows);
+    if (maxRows === 1) {
+      var totalCount = 0;
+      var totalPct = 0;
+      items.forEach(function (r) {
+        totalCount += phSlidesSafeNum_(r.count, 0);
+        totalPct += phSlidesSafeNum_(r.pct, 0);
+      });
+      return [{ label: 'Other', count: totalCount, pct: totalPct }];
+    }
+    var kept = items.slice(0, maxRows - 1);
+    var rest = items.slice(maxRows - 1);
+    var otherCount = 0;
+    var otherPct = 0;
+    rest.forEach(function (r) {
+      otherCount += phSlidesSafeNum_(r.count, 0);
+      otherPct += phSlidesSafeNum_(r.pct, 0);
+    });
+    kept.push({ label: 'Other', count: otherCount, pct: otherPct });
+    return kept;
   }
 
   /**
@@ -1798,7 +1862,7 @@ var CorePortfolioHealth = (function () {
     var footerBox = slide.insertShape(
       SlidesApp.ShapeType.TEXT_BOX,
       layout.margin,
-      layout.ph - layout.margin - layout.footerH + 4,
+      layout.footerY + 4,
       layout.contentWidth,
       layout.footerH
     );
@@ -1920,13 +1984,17 @@ var CorePortfolioHealth = (function () {
    * @param {number} pct
    * @param {number} maxCount
    * @param {string} barColor
+   * @param {number=} rowH
    * @return {number}
    * @private
    */
-  function addHorizontalBar_(slide, layout, y, label, count, pct, maxCount, barColor) {
-    var rowH = 22;
+  function addHorizontalBar_(slide, layout, y, label, count, pct, maxCount, barColor, rowH) {
+    rowH = rowH || PH_SLIDES_LAYOUT_.BAR_ROW_MIN_H;
     var labelW = 150;
     var valueW = 72;
+    var barH = Math.max(8, Math.round(rowH * 0.45));
+    var barYOffset = Math.round((rowH - barH) / 2);
+    var fontSize = rowH < 20 ? 7 : 8;
     var barX = layout.contentLeft + labelW + 6;
     var barW = layout.contentWidth - labelW - valueW - 12;
     var fillW = maxCount > 0 ? Math.max(4, (count / maxCount) * barW) : 0;
@@ -1944,15 +2012,19 @@ var CorePortfolioHealth = (function () {
     lt.setText(truncateText_(label, 24));
     lt.getTextStyle()
       .setFontFamily(layout.font)
-      .setFontSize(8)
+      .setFontSize(fontSize)
       .setForegroundColor(PH_SLIDES_COLORS_.text);
 
-    var track = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, barX, y + 6, barW, 10);
+    var track = slide.insertShape(
+      SlidesApp.ShapeType.ROUND_RECTANGLE, barX, y + barYOffset, barW, barH
+    );
     track.getFill().setSolidFill(PH_SLIDES_COLORS_.track);
     track.getBorder().setTransparent();
 
     if (fillW > 0) {
-      var fill = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, barX, y + 6, fillW, 10);
+      var fill = slide.insertShape(
+        SlidesApp.ShapeType.ROUND_RECTANGLE, barX, y + barYOffset, fillW, barH
+      );
       fill.getFill().setSolidFill(barColor || PH_SLIDES_COLORS_.navy);
       fill.getBorder().setTransparent();
     }
@@ -1970,7 +2042,7 @@ var CorePortfolioHealth = (function () {
     vt.setText(count + ' (' + formatPct_(pct) + ')');
     vt.getTextStyle()
       .setFontFamily(layout.font)
-      .setFontSize(8)
+      .setFontSize(fontSize)
       .setForegroundColor(PH_SLIDES_COLORS_.muted);
     vt.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.END);
 
@@ -2131,10 +2203,19 @@ var CorePortfolioHealth = (function () {
    * @param {Array<Object>} items
    * @param {string} barColor
    * @param {string=} emptyText
+   * @param {Object=} opts
+   * @param {number=} opts.bottomY
+   * @param {number=} opts.minRowH
+   * @param {number=} opts.maxRows
    * @return {number}
    * @private
    */
-  function addBarList_(slide, layout, y, items, barColor, emptyText) {
+  function addBarList_(slide, layout, y, items, barColor, emptyText, opts) {
+    opts = opts || {};
+    var bottomY = opts.bottomY !== undefined ? opts.bottomY : layout.contentBottom;
+    var minRowH = opts.minRowH || PH_SLIDES_LAYOUT_.BAR_ROW_MIN_H;
+    var maxRowH = PH_SLIDES_LAYOUT_.BAR_ROW_MAX_H;
+
     if (!items || !items.length) {
       var empty = slide.insertShape(
         SlidesApp.ShapeType.TEXT_BOX,
@@ -2152,18 +2233,32 @@ var CorePortfolioHealth = (function () {
         .setForegroundColor(PH_SLIDES_COLORS_.muted);
       return y + 24;
     }
+
+    var availableH = Math.max(minRowH, bottomY - y);
+    var maxFit = Math.floor(availableH / minRowH);
+    if (opts.maxRows && opts.maxRows < maxFit) maxFit = opts.maxRows;
+    if (maxFit < 1) maxFit = 1;
+
+    var displayItems = phSlidesTrimBarItems_(items, maxFit);
+    var rowH = Math.floor(availableH / displayItems.length);
+    if (rowH > maxRowH) rowH = maxRowH;
+    if (rowH < minRowH) rowH = minRowH;
+
     var maxCount = 0;
-    items.forEach(function (it) {
+    displayItems.forEach(function (it) {
       if (it.count > maxCount) maxCount = it.count;
     });
     if (!maxCount) maxCount = 1;
+
     var cursor = y;
-    items.forEach(function (it) {
+    for (var i = 0; i < displayItems.length; i++) {
+      if (cursor + rowH > bottomY) break;
       cursor = addHorizontalBar_(
-        slide, layout, cursor, it.label, it.count, it.pct, maxCount, barColor
+        slide, layout, cursor, displayItems[i].label, displayItems[i].count,
+        displayItems[i].pct, maxCount, barColor, rowH
       );
-    });
-    return cursor;
+    }
+    return Math.min(cursor, bottomY);
   }
 
   /**
@@ -2251,14 +2346,17 @@ var CorePortfolioHealth = (function () {
 
     var insights = Array.isArray(snapshot.executiveInsights) ? snapshot.executiveInsights : [];
     if (insights.length) {
-      addInsightBox_(
-        slide,
-        layout,
-        layout.contentLeft,
-        gridTop + (cardH + gap) * 2 + 12,
-        layout.contentWidth,
-        insights[0]
-      );
+      var insightTop = gridTop + (cardH + gap) * 2 + 12;
+      if (insightTop + PH_SLIDES_LAYOUT_.INSIGHT_H <= layout.contentBottom) {
+        addInsightBox_(
+          slide,
+          layout,
+          layout.contentLeft,
+          insightTop,
+          layout.contentWidth,
+          insights[0]
+        );
+      }
     }
   }
 
@@ -2307,13 +2405,19 @@ var CorePortfolioHealth = (function () {
     addSectionTitle_(slide, layout, rightX, y, rightW, 'Go-Live Readiness');
     var miniW = (rightW - 10) / 2;
     var miniH = 58;
-    addMetricCard_(slide, layout, rightX, y + 22, miniW, miniH, 'Upcoming', upcoming30, 'Next 30 days', PH_SLIDES_COLORS_.navy);
-    addMetricCard_(slide, layout, rightX + miniW + 10, y + 22, miniW, miniH, 'Recent', recent60, 'Last 60 days', PH_SLIDES_COLORS_.partner);
-    addMetricCard_(slide, layout, rightX, y + 22 + miniH + 8, miniW, miniH, 'With Health Plans', withHp, 'Upcoming go-lives', PH_SLIDES_COLORS_.dhp);
+    var miniGap = 8;
+    var sectionOffset = 22;
+    addMetricCard_(slide, layout, rightX, y + sectionOffset, miniW, miniH, 'Upcoming', upcoming30, 'Next 30 days', PH_SLIDES_COLORS_.navy);
+    addMetricCard_(slide, layout, rightX + miniW + 10, y + sectionOffset, miniW, miniH, 'Recent', recent60, 'Last 60 days', PH_SLIDES_COLORS_.partner);
+    addMetricCard_(slide, layout, rightX, y + sectionOffset + miniH + miniGap, miniW, miniH, 'With Health Plans', withHp, 'Upcoming go-lives', PH_SLIDES_COLORS_.dhp);
     if (ewEnabled) {
-      addMetricCard_(slide, layout, rightX + miniW + 10, y + 22 + miniH + 8, miniW, miniH,
+      addMetricCard_(slide, layout, rightX + miniW + 10, y + sectionOffset + miniH + miniGap, miniW, miniH,
         'Executive Watch', glEw, 'Upcoming go-lives', PH_SLIDES_COLORS_.yellow);
     }
+
+    var splitBarBottom = y + sectionOffset + 24 + 8 + 14;
+    var cardsBottom = y + sectionOffset + miniH + miniGap + miniH;
+    var columnsBottom = Math.max(splitBarBottom, cardsBottom);
 
     var insights = Array.isArray(snapshot.executiveInsights) ? snapshot.executiveInsights : [];
     var goLiveInsight = null;
@@ -2322,7 +2426,11 @@ var CorePortfolioHealth = (function () {
     });
     if (!goLiveInsight && insights.length > 1) goLiveInsight = insights[1];
     if (goLiveInsight) {
-      addInsightBox_(slide, layout, layout.contentLeft, y + 88, layout.contentWidth, goLiveInsight);
+      var insightH = PH_SLIDES_LAYOUT_.INSIGHT_H;
+      var insightY = columnsBottom + 12;
+      if (insightY + insightH <= layout.contentBottom) {
+        addInsightBox_(slide, layout, layout.contentLeft, insightY, layout.contentWidth, goLiveInsight);
+      }
     }
   }
 
@@ -2368,7 +2476,11 @@ var CorePortfolioHealth = (function () {
         .setForegroundColor(PH_SLIDES_COLORS_.text);
     }
 
-    addBarList_(slide, layout, y + 4, dist, PH_SLIDES_COLORS_.navy, 'Partner distribution is not available for this portfolio.');
+    addBarList_(
+      slide, layout, y + 4, dist, PH_SLIDES_COLORS_.navy,
+      'Partner distribution is not available for this portfolio.',
+      { bottomY: layout.contentBottom }
+    );
   }
 
   /**
@@ -2394,7 +2506,11 @@ var CorePortfolioHealth = (function () {
       y += 52;
     }
 
-    addBarList_(slide, layout, y + 4, dist, PH_SLIDES_COLORS_.teal, 'Industry distribution is not available for this portfolio.');
+    addBarList_(
+      slide, layout, y + 4, dist, PH_SLIDES_COLORS_.teal,
+      'Industry distribution is not available for this portfolio.',
+      { bottomY: layout.contentBottom }
+    );
   }
 
   /**
@@ -2447,7 +2563,8 @@ var CorePortfolioHealth = (function () {
       y,
       dist,
       PH_SLIDES_COLORS_.dhp,
-      'No issue categories found for open health plans.'
+      'No issue categories found for open health plans.',
+      { bottomY: layout.contentBottom }
     );
   }
 
@@ -2495,7 +2612,8 @@ var CorePortfolioHealth = (function () {
       y,
       dist,
       PH_SLIDES_COLORS_.indigo,
-      'Health plan concentration is not available for this portfolio.'
+      'Health plan concentration is not available for this portfolio.',
+      { bottomY: layout.contentBottom }
     );
   }
 

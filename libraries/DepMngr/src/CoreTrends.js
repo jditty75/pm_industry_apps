@@ -1937,9 +1937,15 @@ var CoreTrends = {
     var layoutMode = CoreTrends._getLayoutMode_(cfg);
     var deployments = [];
     try {
-      deployments = CoreData.getAllDeployments(cfg, viewModeOpts, productOpts) || [];
+      if (CoreConfig.isProductModeApp(cfg) &&
+          cfg.activeDeployments &&
+          cfg.activeDeployments.productModeSourceMode === 'parentAndProductFunctionUnion') {
+        deployments = CoreData.getProductModeTrendsDeployments(cfg, viewModeOpts, productOpts) || [];
+      } else {
+        deployments = CoreData.getAllDeployments(cfg, viewModeOpts, productOpts) || [];
+      }
     } catch (e) {
-      Logger.log('CoreTrends.buildPortfolioHistoryParentIdSet_: getAllDeployments failed: ' + e);
+      Logger.log('CoreTrends.buildPortfolioHistoryParentIdSet_: deployment read failed: ' + e);
       deployments = [];
     }
 

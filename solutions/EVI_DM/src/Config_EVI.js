@@ -159,7 +159,13 @@ var APP_CONFIG = {
       vNextEnabled: true,
       exportImageEnabled: true,
       exportSlidesEnabled: true,
-      healthPlanConcentrationDimension: 'partner'
+      healthPlanConcentrationDimension: 'partner',
+      slidesExport: {
+        destinationMode: 'root',
+        folderId: '0AIzxk9EPUwqRUk9PVA',
+        shareMode: 'inherit',
+        filename: 'EVI Portfolio Health - {userEmail} - {timestamp}'
+      }
     },
 
     sections: { approach: true },
@@ -169,9 +175,9 @@ var APP_CONFIG = {
       fromAlias: '',
       to: [],
       cc: [],
-      bcc: 'jeffrey.ditty@workday.com',
-      allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'Evisort \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      bcc: ['jeffrey.ditty@workday.com','sunil.wadhwa@workday.com'],
+      allowedSenders: ['jeffrey.ditty@workday.com','sunil.wadhwa@workday.com'],
+      subjectTemplate: 'Evisort - Monthly Deployment Health Report - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },

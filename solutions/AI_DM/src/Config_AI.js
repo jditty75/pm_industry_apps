@@ -173,7 +173,13 @@ var APP_CONFIG = {
       vNextEnabled: true,
       exportImageEnabled: true,
       exportSlidesEnabled: true,
-      healthPlanConcentrationDimension: 'partner'
+      healthPlanConcentrationDimension: 'partner',
+      slidesExport: {
+        destinationMode: 'root',
+        folderId: '1Y1ECvEgHXfKWvvdK74bPVMjLxvPYQu9L',
+        shareMode: 'inherit',
+        filename: 'AI Portfolio Health - {userEmail} - {timestamp}'
+      }
     },
 
     sections: { approach: true },

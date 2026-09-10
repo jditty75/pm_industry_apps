@@ -108,6 +108,15 @@
  */
 
 /**
+ * Portfolio Health Slides export destination (app config overrides folderId).
+ * @typedef {Object} PortfolioHealthSlidesExportConfig
+ * @property {'root'|'folder'} destinationMode  'root' = deployer My Drive root (default).
+ * @property {string}            folderId         Shared folder ID when destinationMode is 'folder'.
+ * @property {'inherit'}         shareMode        Reserved for future sharing; 'inherit' uses folder ACLs.
+ * @property {string}            filename         Title template; tokens: {appName},{appId},{userEmail},{date},{timestamp},{deckType}.
+ */
+
+/**
  * @typedef {Object} ReportConfig
  * @property {string}  inlineFilename
  * @property {string}  outlookFilename
@@ -517,6 +526,16 @@ var CoreConfig = (function () {
       cfg.report.portfolioHealth.historyWindowMonths = 6;
     if (cfg.report.portfolioHealth.slideExportEnabled === undefined)
       cfg.report.portfolioHealth.slideExportEnabled = true;
+    cfg.report.portfolioHealth.slidesExport = cfg.report.portfolioHealth.slidesExport || {};
+    if (!cfg.report.portfolioHealth.slidesExport.destinationMode)
+      cfg.report.portfolioHealth.slidesExport.destinationMode = 'root';
+    if (cfg.report.portfolioHealth.slidesExport.folderId === undefined)
+      cfg.report.portfolioHealth.slidesExport.folderId = '';
+    if (!cfg.report.portfolioHealth.slidesExport.shareMode)
+      cfg.report.portfolioHealth.slidesExport.shareMode = 'inherit';
+    if (!cfg.report.portfolioHealth.slidesExport.filename)
+      cfg.report.portfolioHealth.slidesExport.filename =
+        '{appName} Portfolio Health - {userEmail} - {timestamp}';
 
     // N8: V2 report sections + native Gmail distribution defaults.
     cfg.report.sections = cfg.report.sections || {};
@@ -714,18 +733,17 @@ var CoreConfig = (function () {
       cfg.ui.deploymentsTable.expandableRows = true;
 
     // ProductMode UI flag + deployments table defaults (EVI/AI and future ProductMode apps).
+    // Force ProductMode table behavior even when APP_CONFIG still carries IndustryMode
+    // deploymentsTable keys (e.g. showMissingDDHighlight: true from legacy shells).
     cfg.ui.isProductModeApp = isProductModeApp(cfg);
     if (cfg.ui.isProductModeApp) {
-      if (cfg.ui.deploymentsTable.metaInfoMode === undefined)
-        cfg.ui.deploymentsTable.metaInfoMode = 'minimal';
-      if (cfg.ui.deploymentsTable.hideDeliveryDirectorColumn === undefined)
-        cfg.ui.deploymentsTable.hideDeliveryDirectorColumn = true;
+      cfg.ui.deploymentsTable.metaInfoMode = 'minimal';
+      cfg.ui.deploymentsTable.hideDeliveryDirectorColumn = true;
+      cfg.ui.deploymentsTable.showMissingDDHighlight = false;
       if (cfg.ui.deploymentsTable.showEngagementManagerColumn === undefined)
         cfg.ui.deploymentsTable.showEngagementManagerColumn = true;
       if (cfg.ui.deploymentsTable.showPsRegionColumn === undefined)
         cfg.ui.deploymentsTable.showPsRegionColumn = true;
-      if (cfg.ui.deploymentsTable.showMissingDDHighlight === undefined)
-        cfg.ui.deploymentsTable.showMissingDDHighlight = false;
       if (!cfg.ui.deploymentsTable.ownerFilterLabel)
         cfg.ui.deploymentsTable.ownerFilterLabel = 'Engagement Manager';
       if (!cfg.ui.portfolioGrouping) {
@@ -919,6 +937,18 @@ var CoreConfig = (function () {
   }
 
   /**
+   * True when the Notable Deployments feature is enabled for this app.
+   * Default true — only explicit `ui.notable.enabled === false` disables.
+   *
+   * @param {AppConfig} appConfig
+   * @return {boolean}
+   */
+  function isNotableEnabled(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    return cfg.ui.notable.enabled !== false;
+  }
+
+  /**
    * True when the app uses ProductMode union (EVI, AI, and future ProductMode apps).
    *
    * @param {AppConfig} appConfig
@@ -961,6 +991,7 @@ var CoreConfig = (function () {
   return {
     withDefaults: withDefaults,
     isExecutiveWatchEnabled: isExecutiveWatchEnabled,
+    isNotableEnabled: isNotableEnabled,
     isProductModeApp: isProductModeApp,
     getPortfolioGroupingField: getPortfolioGroupingField,
     getPortfolioGroupingLabel: getPortfolioGroupingLabel

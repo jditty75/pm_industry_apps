@@ -71,7 +71,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   var filteredUi = Object.assign({}, ui, {
     tabs: (ui.tabs || []).filter(function (t) {
       if (!_isTabAllowed(t.id)) return false;
-      if (t.id === 'notable' && ui.notable && ui.notable.enabled === false) return false;
+      if (t.id === 'notable' && !CoreConfig.isNotableEnabled(cfg)) return false;
       return true;
     }),
     // Read-only flag for builders that need to hide in-tab controls.
@@ -405,7 +405,7 @@ function _CoreUI_Markup_buildGoLivesTab_(ui) {
 
   // Column headers — context-sensitive labels set by JS based on current view.
   var headers = [
-    '<th id="golives-date-header">Date</th>',
+    '<th id="golives-date-header" class="golives-sortable-header" onclick="toggleGoLivesDateSort()" role="button" tabindex="0" title="Sort by date">Date</th>',
     '<th>Account Name</th>'
   ];
   if (showIndustry) headers.push('<th>Industry</th>');

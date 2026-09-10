@@ -1099,7 +1099,29 @@ var CoreData = (function () {
     derived.functions = functions;
     derived.productArea = productAreas.join(', ');
     derived.funcArea = functions.join(', ');
+    _backfillParentGeoFromPfRows_(derived, scopedPfRows);
     return derived;
+  }
+
+  /**
+   * When a parent deployment row lacks Customer__r geo fields, backfill from scoped PF rows.
+   * @param {Object} derived
+   * @param {Array<Object>} scopedPfRows
+   * @private
+   */
+  function _backfillParentGeoFromPfRows_(derived, scopedPfRows) {
+    if (!derived || !scopedPfRows || !scopedPfRows.length) return;
+    var geoFields = ['region', 'subRegion', 'subRegionAlt', 'industry'];
+    geoFields.forEach(function (fieldName) {
+      if (String(derived[fieldName] || '').trim()) return;
+      for (var i = 0; i < scopedPfRows.length; i++) {
+        var val = String((scopedPfRows[i] || {})[fieldName] || '').trim();
+        if (val) {
+          derived[fieldName] = val;
+          break;
+        }
+      }
+    });
   }
 
   /**
@@ -3281,9 +3303,31 @@ var CoreData = (function () {
       activeRowsById[_canonicalId_(row.deploymentId)] = row;
     });
 
+    var sampleCanonicalRows = finalUnionActiveRows.slice(0, limit).map(function (row) {
+      return {
+        deploymentId: row.deploymentId || '',
+        accountName: row.accountName || '',
+        deploymentName: row.deploymentName || '',
+        region: row.region || '',
+        wdEngManager: row.wdEngManager || '',
+        reviewUsername: row.reviewUsername || '',
+        reviewTimestamp: row.reviewTimestamp || '',
+        parentFieldSource: row.parentFieldSource || '',
+        parentMatchStatus: row.parentMatchStatus || ''
+      };
+    });
+
     var report = {
       appId: cfg.appId || '',
       productModeSourceMode: _getProductModeSourceMode_(cfg),
+      clientUiDefaults: {
+        isProductModeApp: !!(cfg.ui && cfg.ui.isProductModeApp),
+        metaInfoMode: (cfg.ui && cfg.ui.deploymentsTable && cfg.ui.deploymentsTable.metaInfoMode) || '',
+        showMissingDDHighlight: !!(cfg.ui && cfg.ui.deploymentsTable &&
+          cfg.ui.deploymentsTable.showMissingDDHighlight),
+        hideDeliveryDirectorColumn: !!(cfg.ui && cfg.ui.deploymentsTable &&
+          cfg.ui.deploymentsTable.hideDeliveryDirectorColumn)
+      },
       activeScope: activeScope,
       trendsScope: trendsScope,
       structuredScopeActiveParentCount: Object.keys(structuredActive).length,
@@ -3309,7 +3353,14 @@ var CoreData = (function () {
       excludedByNameActiveCompleteCount: excludedTrendsIds.length,
       sampleExcludedByName: excludedActiveIds.slice(0, limit).map(function (id) {
         return excludedActiveByName[id];
-      })
+      }),
+      sampleCanonicalRows: sampleCanonicalRows,
+      canonicalRowsWithRegion: finalUnionActiveRows.filter(function (row) {
+        return String(row.region || '').trim();
+      }).length,
+      canonicalRowsMissingRegion: finalUnionActiveRows.filter(function (row) {
+        return !String(row.region || '').trim();
+      }).length
     };
 
     if ((cfg.appId || '') === 'EVI_DM' || (cfg.appId || '') === 'EVI') {
@@ -4652,15 +4703,33 @@ function _sfdcDataVersion_(cfg) {
       return -1;
     }
 
+    function findExact_(headerName) {
+      var target = String(headerName || '').trim().toLowerCase();
+      for (var ei = 0; ei < lowerH.length; ei++) {
+        if (lowerH[ei] === target) return ei;
+      }
+      return -1;
+    }
+
+    function resolveCol_(exactHeader, keywordFallbacks, positionalFallback) {
+      var exact = findExact_(exactHeader);
+      if (exact >= 0) return exact;
+      return detect_(keywordFallbacks || [], positionalFallback);
+    }
+
     // ── Column detection — 24-col standard layout (confirmed 2026-06-24) ──────
     var colId             = detect_(['id'],                                                    0);
     var colName           = detect_(['name'],                                                  1);
-    var colAccountId      = detect_(['customer__c'],                                           2);
-    var colAccountName    = detect_(['customer__r.name', 'customer__r'],                       3);
-    var colIndustry       = detect_(['customer__r.industry', 'industry'],                      4);
-    var colRegion         = detect_(['ps_region_new', 'region_new', 'region'],                 5);
-    var colSubRegion      = detect_(['ps_sub_region__c', 'ps_sub_region', 'sub_region'],       6);
-    var colSubRegionAlt   = detect_(['subregion__c', 'subregion'],                             7);
+    var colAccountId      = resolveCol_('Customer__c', ['customer__c'],                        2);
+    var colCustomerRId    = resolveCol_('Customer__r.Id', ['customer__r.id'],                  -1);
+    var colAccountName    = resolveCol_('Customer__r.Name', ['customer__r.name'],              3);
+    var colIndustry       = resolveCol_('Customer__r.Industry', ['customer__r.industry', 'industry'], 4);
+    var colRegion         = resolveCol_('Customer__r.PS_Region_New__c',
+      ['ps_region_new__c', 'ps_region_new', 'region_new'],                                   5);
+    var colSubRegion      = resolveCol_('Customer__r.PS_Sub_Region__c',
+      ['ps_sub_region__c', 'ps_sub_region', 'sub_region'],                                     6);
+    var colSubRegionAlt   = resolveCol_('Customer__r.SubRegion__c', ['subregion__c', 'subregion'], 7);
+    var colCustomerObject = findExact_('Customer__r');
     var colBillingState   = detect_(['billingstate', 'billing_state'],                         8);
     var colBillingCity    = detect_(['billingcity', 'billing_city'],                           9);
     var colStartDate      = detect_(['deployment_start_date'],                                10);
@@ -4710,6 +4779,26 @@ function _sfdcDataVersion_(cfg) {
         if (isNaN(d.getTime())) return '';
         return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
       }
+      function resolveField_(flatCol, objectCol, objectField) {
+        var flat = cellStr_(flatCol);
+        if (flat) {
+          return normalizeSalesforceRelatedName_(flat, objectField);
+        }
+        if (objectCol >= 0 && objectField) {
+          return normalizeSalesforceRelatedName_(row[objectCol], objectField);
+        }
+        return '';
+      }
+      function resolveAccountId_() {
+        var direct = cellStr_(colAccountId);
+        if (direct) return direct;
+        var fromCustomerRId = cellStr_(colCustomerRId);
+        if (fromCustomerRId) return fromCustomerRId;
+        if (colCustomerObject >= 0) {
+          return _parseSfdcAccountIdFromCustomerObject_(row[colCustomerObject]);
+        }
+        return '';
+      }
 
       var deploymentId = cellStr_(colId);
       if (!deploymentId) continue; // skip rows with no SF Id
@@ -4717,12 +4806,12 @@ function _sfdcDataVersion_(cfg) {
       var rowObj = {
         deploymentId:        deploymentId,
         deploymentName:      cellStr_(colName),
-        accountId:           cellStr_(colAccountId),
-        accountName:         cellStr_(colAccountName),
-        industry:            cellStr_(colIndustry),
-        region:              cellStr_(colRegion),
-        subRegion:           cellStr_(colSubRegion),
-        subRegionAlt:        cellStr_(colSubRegionAlt),
+        accountId:           resolveAccountId_(),
+        accountName:         resolveField_(colAccountName, colCustomerObject, 'Name'),
+        industry:            resolveField_(colIndustry, colCustomerObject, 'Industry'),
+        region:              resolveField_(colRegion, colCustomerObject, 'PS_Region_New__c'),
+        subRegion:           resolveField_(colSubRegion, colCustomerObject, 'PS_Sub_Region__c'),
+        subRegionAlt:        resolveField_(colSubRegionAlt, colCustomerObject, 'SubRegion__c'),
         billingState:        cellStr_(colBillingState),
         billingCity:         cellStr_(colBillingCity),
         deploymentStartDate: cellStr_(colStartDate),
@@ -9259,7 +9348,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    */
   function _normalizeStage_(s) {
     return String(s || '')
-      .replace(/&/g, 'and')
+      .replace(/&/g, ' and ')
+      .replace(/-/g, ' ')
+      .replace(/_/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
@@ -9267,17 +9358,28 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
   /**
    * Maps a deployment stage to its lifecycle bucket.
+   * Unmatched, blank, or unexpected values fold into Building (no Other bucket).
    * @param {string} stage
-   * @return {'starting'|'building'|'landing'|'other'}
+   * @return {'starting'|'building'|'landing'}
    * @private
    */
   function _bucketForStage_(stage) {
     var s = _normalizeStage_(stage);
-    if (s === 'on-boarding' || s === 'plan') return 'starting';
-    if (s === 'architect and configure' || s === 'configure and prototype' || s === 'test') return 'building';
-    if (s === 'deploy' || s === 'post prod') return 'landing';
-    return 'other';
+    if (!s) return 'building';
+    if (s === 'on boarding' || s === 'onboarding' || s === 'plan') return 'starting';
+    if (s === 'architect and configure' || s === 'configure and prototype' || s === 'test') {
+      return 'building';
+    }
+    if (s === 'deploy' || s === 'post prod' || s === 'post production') return 'landing';
+    return 'building';
   }
+
+  /** Canonical stage labels shown under each lifecycle bucket in Overview. */
+  var _LIFECYCLE_CANONICAL_STAGES_ = {
+    starting: ['On-Boarding', 'Plan'],
+    building: ['Architect & Configure', 'Configure and Prototype', 'Test'],
+    landing: ['Deploy', 'Post Prod']
+  };
 
   /**
    * Normalizes a date value to a YYYY-MM-DD key in the script timezone.
@@ -9528,25 +9630,23 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     }
     var upcomingGoLivesBlock = { total: upcomingTotal, items: upcomingItems };
 
-    // LIFECYCLE BUCKETS
+    // LIFECYCLE BUCKETS — Deployment Stage mapped to Starting / Building / Landing.
     var buckets = {
-      starting: { count: 0, stages: {} },
-      building: { count: 0, stages: {} },
-      landing:  { count: 0, stages: {} },
-      other:    { count: 0, stages: {} }
+      starting: { count: 0 },
+      building: { count: 0 },
+      landing:  { count: 0 }
     };
     activeRows.forEach(function(r) {
       var key = _bucketForStage_(r.stage);
       buckets[key].count++;
-      if (r.stage) buckets[key].stages[r.stage] = true;
     });
     var lifecycleBuckets = {};
-    ['starting', 'building', 'landing', 'other'].forEach(function(key) {
+    ['starting', 'building', 'landing'].forEach(function(key) {
       var b = buckets[key];
       lifecycleBuckets[key] = {
         count:   b.count,
         percent: totalActive > 0 ? Math.round(b.count / totalActive * 100) : 0,
-        stages:  Object.keys(b.stages).sort()
+        stages:  _LIFECYCLE_CANONICAL_STAGES_[key] || []
       };
     });
 
@@ -9579,8 +9679,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
     var overviewCacheBase = usesProductModeParentAndPfUnion_(cfg)
-      ? 'overviewData:v11:parentAndPfUnionNameExcludes'
-      : 'overviewData:v9:parentDeployment';
+      ? 'overviewData:v12:lifecycleDeploymentStage'
+      : 'overviewData:v10:lifecycleDeploymentStage';
     var cacheKey = _perfKey_(cfg, overviewCacheBase);
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;

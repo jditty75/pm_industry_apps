@@ -1545,6 +1545,9 @@ var CorePortfolioHealth = (function () {
     BODY_GAP: 10,
     BAR_ROW_MIN_H: 22,
     BAR_ROW_MAX_H: 28,
+    BAR_ROW_GAP: 6,
+    CALLOUT_TILE_H: 50,
+    CARD_SECTION_GAP: 14,
     INSIGHT_H: 52
   };
 
@@ -1923,7 +1926,20 @@ var CorePortfolioHealth = (function () {
       accent.getBorder().setTransparent();
     }
 
-    var labelBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, y + 8, w - 16, 14);
+    var subH = 12;
+    var subBottomPad = 12;
+    var valueGap = 6;
+    var labelTop = accentColor ? y + 10 : y + 8;
+    var labelH = 11;
+    var valueTop = labelTop + labelH + 2;
+    var subTop = y + h - subBottomPad - subH;
+    var valueH = subTop - valueGap - valueTop;
+    if (valueH < 14) valueH = 14;
+    var valueFont = 22;
+    if (valueH < 20 || h < 70) valueFont = 18;
+    if (valueH < 16 || h < 64) valueFont = 16;
+
+    var labelBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, labelTop, w - 16, labelH);
     labelBox.getFill().setTransparent();
     labelBox.getBorder().setTransparent();
     var lt = labelBox.getText();
@@ -1934,19 +1950,19 @@ var CorePortfolioHealth = (function () {
       .setBold(true)
       .setForegroundColor(PH_SLIDES_COLORS_.muted);
 
-    var valueBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, y + 22, w - 16, 28);
+    var valueBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, valueTop, w - 16, valueH);
     valueBox.getFill().setTransparent();
     valueBox.getBorder().setTransparent();
     var vt = valueBox.getText();
     vt.setText(String(value));
     vt.getTextStyle()
       .setFontFamily(layout.font)
-      .setFontSize(22)
+      .setFontSize(valueFont)
       .setBold(true)
       .setForegroundColor(PH_SLIDES_COLORS_.text);
 
     if (sub) {
-      var subBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, y + h - 18, w - 16, 14);
+      var subBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 8, subTop, w - 16, subH);
       subBox.getFill().setTransparent();
       subBox.getBorder().setTransparent();
       var st = subBox.getText();
@@ -1990,7 +2006,7 @@ var CorePortfolioHealth = (function () {
    */
   function addHorizontalBar_(slide, layout, y, label, count, pct, maxCount, barColor, rowH) {
     rowH = rowH || PH_SLIDES_LAYOUT_.BAR_ROW_MIN_H;
-    var labelW = 150;
+    var labelW = 176;
     var valueW = 72;
     var barH = Math.max(8, Math.round(rowH * 0.45));
     var barYOffset = Math.round((rowH - barH) / 2);
@@ -2009,7 +2025,7 @@ var CorePortfolioHealth = (function () {
     labelBox.getFill().setTransparent();
     labelBox.getBorder().setTransparent();
     var lt = labelBox.getText();
-    lt.setText(truncateText_(label, 24));
+    lt.setText(truncateText_(label, 32));
     lt.getTextStyle()
       .setFontFamily(layout.font)
       .setFontSize(fontSize)
@@ -2067,17 +2083,21 @@ var CorePortfolioHealth = (function () {
       var rect = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, cursor, y, segW, h);
       rect.getFill().setSolidFill(seg.color || PH_SLIDES_COLORS_.navy);
       rect.getBorder().setTransparent();
-      if (segW >= 36) {
-        var tbox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, cursor + 4, y + 2, segW - 8, h - 4);
+      if (segW >= 56) {
+        var segFont = segW >= 88 ? 9 : 8;
+        var tbox = slide.insertShape(
+          SlidesApp.ShapeType.TEXT_BOX, cursor + 4, y + 3, segW - 8, h - 6
+        );
         tbox.getFill().setTransparent();
         tbox.getBorder().setTransparent();
         var tt = tbox.getText();
         tt.setText(seg.count + ' (' + formatPct_(seg.pct) + ')');
         tt.getTextStyle()
           .setFontFamily(layout.font)
-          .setFontSize(9)
+          .setFontSize(segFont)
           .setBold(true)
           .setForegroundColor(PH_SLIDES_COLORS_.white);
+        tt.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
       }
       cursor += segW;
     });
@@ -2157,9 +2177,12 @@ var CorePortfolioHealth = (function () {
    * @param {Object|null} item
    * @private
    */
-  function addCalloutTile_(slide, layout, x, y, w, title, item) {
+  function addCalloutTile_(slide, layout, x, y, w, title, item, tileH) {
     if (!item || !item.label) return;
-    var tile = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, x, y, w, 44);
+    tileH = tileH || PH_SLIDES_LAYOUT_.CALLOUT_TILE_H;
+    var metaH = 12;
+    var metaBottomPad = 12;
+    var tile = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, x, y, w, tileH);
     tile.getFill().setSolidFill(PH_SLIDES_COLORS_.cardBg);
     tile.getBorder().getLineFill().setSolidFill(PH_SLIDES_COLORS_.track);
 
@@ -2174,7 +2197,8 @@ var CorePortfolioHealth = (function () {
       .setBold(true)
       .setForegroundColor(PH_SLIDES_COLORS_.muted);
 
-    var valBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 10, y + 18, w - 20, 14);
+    var metaTop = y + tileH - metaBottomPad - metaH;
+    var valBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 10, y + 18, w - 20, metaTop - y - 20);
     valBox.getFill().setTransparent();
     valBox.getBorder().setTransparent();
     var vt = valBox.getText();
@@ -2185,7 +2209,7 @@ var CorePortfolioHealth = (function () {
       .setBold(true)
       .setForegroundColor(PH_SLIDES_COLORS_.text);
 
-    var metaBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 10, y + 32, w - 20, 10);
+    var metaBox = slide.insertShape(SlidesApp.ShapeType.TEXT_BOX, x + 10, metaTop, w - 20, metaH);
     metaBox.getFill().setTransparent();
     metaBox.getBorder().setTransparent();
     var mt = metaBox.getText();
@@ -2234,13 +2258,16 @@ var CorePortfolioHealth = (function () {
       return y + 24;
     }
 
+    var rowGap = PH_SLIDES_LAYOUT_.BAR_ROW_GAP;
+    var perRowMin = minRowH + rowGap;
     var availableH = Math.max(minRowH, bottomY - y);
-    var maxFit = Math.floor(availableH / minRowH);
+    var maxFit = Math.floor((availableH + rowGap) / perRowMin);
     if (opts.maxRows && opts.maxRows < maxFit) maxFit = opts.maxRows;
     if (maxFit < 1) maxFit = 1;
 
     var displayItems = phSlidesTrimBarItems_(items, maxFit);
-    var rowH = Math.floor(availableH / displayItems.length);
+    var gapTotal = displayItems.length > 1 ? (displayItems.length - 1) * rowGap : 0;
+    var rowH = Math.floor((availableH - gapTotal) / displayItems.length);
     if (rowH > maxRowH) rowH = maxRowH;
     if (rowH < minRowH) rowH = minRowH;
 
@@ -2257,6 +2284,9 @@ var CorePortfolioHealth = (function () {
         slide, layout, cursor, displayItems[i].label, displayItems[i].count,
         displayItems[i].pct, maxCount, barColor, rowH
       );
+      if (i < displayItems.length - 1) {
+        cursor += rowGap;
+      }
     }
     return Math.min(cursor, bottomY);
   }
@@ -2397,15 +2427,15 @@ var CorePortfolioHealth = (function () {
     var y = layout.contentTop;
 
     addSectionTitle_(slide, layout, layout.contentLeft, y, leftW, 'Delivery Ownership');
-    addSplitBar_(slide, layout, layout.contentLeft, y + 22, leftW, 24, [
+    addSplitBar_(slide, layout, layout.contentLeft, y + 22, leftW, 28, [
       { label: 'Workday-led', count: workdayLed, pct: workdayPct, color: PH_SLIDES_COLORS_.navy },
       { label: 'Partner-led', count: partnerLed, pct: partnerPct, color: PH_SLIDES_COLORS_.partner }
     ]);
 
     addSectionTitle_(slide, layout, rightX, y, rightW, 'Go-Live Readiness');
     var miniW = (rightW - 10) / 2;
-    var miniH = 58;
-    var miniGap = 8;
+    var miniH = 68;
+    var miniGap = 10;
     var sectionOffset = 22;
     addMetricCard_(slide, layout, rightX, y + sectionOffset, miniW, miniH, 'Upcoming', upcoming30, 'Next 30 days', PH_SLIDES_COLORS_.navy);
     addMetricCard_(slide, layout, rightX + miniW + 10, y + sectionOffset, miniW, miniH, 'Recent', recent60, 'Last 60 days', PH_SLIDES_COLORS_.partner);
@@ -2415,7 +2445,7 @@ var CorePortfolioHealth = (function () {
         'Executive Watch', glEw, 'Upcoming go-lives', PH_SLIDES_COLORS_.yellow);
     }
 
-    var splitBarBottom = y + sectionOffset + 24 + 8 + 14;
+    var splitBarBottom = y + sectionOffset + 28 + 8 + 14;
     var cardsBottom = y + sectionOffset + miniH + miniGap + miniH;
     var columnsBottom = Math.max(splitBarBottom, cardsBottom);
 
@@ -2427,7 +2457,10 @@ var CorePortfolioHealth = (function () {
     if (!goLiveInsight && insights.length > 1) goLiveInsight = insights[1];
     if (goLiveInsight) {
       var insightH = PH_SLIDES_LAYOUT_.INSIGHT_H;
-      var insightY = columnsBottom + 12;
+      var insightGap = PH_SLIDES_LAYOUT_.CARD_SECTION_GAP;
+      var insightY = columnsBottom + insightGap;
+      var maxInsightY = layout.contentBottom - insightH - PH_SLIDES_LAYOUT_.FOOTER_PAD;
+      if (insightY > maxInsightY) insightY = maxInsightY;
       if (insightY + insightH <= layout.contentBottom) {
         addInsightBox_(slide, layout, layout.contentLeft, insightY, layout.contentWidth, goLiveInsight);
       }
@@ -2457,7 +2490,7 @@ var CorePortfolioHealth = (function () {
     var y = layout.contentTop;
     if (topPartner) {
       addCalloutTile_(slide, layout, layout.contentLeft, y, 260, 'Top Partner', topPartner);
-      y += 52;
+      y += PH_SLIDES_LAYOUT_.CALLOUT_TILE_H + 4;
     }
     if (partnerPct !== undefined && partnerPct !== null) {
       var shareBox = slide.insertShape(
@@ -2503,7 +2536,7 @@ var CorePortfolioHealth = (function () {
     var y = layout.contentTop;
     if (topIndustry) {
       addCalloutTile_(slide, layout, layout.contentLeft, y, 260, 'Top Industry', topIndustry);
-      y += 52;
+      y += PH_SLIDES_LAYOUT_.CALLOUT_TILE_H + 4;
     }
 
     addBarList_(
@@ -2537,7 +2570,7 @@ var CorePortfolioHealth = (function () {
     var y = layout.contentTop;
     if (topIssue && topIssue.label) {
       addCalloutTile_(slide, layout, layout.contentLeft, y, 280, 'Top Issue Category', topIssue);
-      y += 52;
+      y += PH_SLIDES_LAYOUT_.CALLOUT_TILE_H + 4;
     }
 
     var note = slide.insertShape(
@@ -2588,13 +2621,14 @@ var CorePortfolioHealth = (function () {
       : (dist.length ? dist[0] : null);
 
     var y = layout.contentTop;
+    var topCardH = 68;
     addKpiCard_(
       slide,
       layout,
       layout.contentLeft,
       y,
       180,
-      58,
+      topCardH,
       'Open Health Plans',
       openPlans,
       'Active deployments with plans',
@@ -2602,9 +2636,9 @@ var CorePortfolioHealth = (function () {
     );
 
     if (topConc && topConc.label) {
-      addCalloutTile_(slide, layout, layout.contentLeft + 196, y, 260, 'Highest Concentration', topConc);
+      addCalloutTile_(slide, layout, layout.contentLeft + 196, y, 260, 'Highest Concentration', topConc, topCardH);
     }
-    y += 66;
+    y += topCardH + PH_SLIDES_LAYOUT_.CARD_SECTION_GAP;
 
     addBarList_(
       slide,
@@ -2615,6 +2649,149 @@ var CorePortfolioHealth = (function () {
       'Health plan concentration is not available for this portfolio.',
       { bottomY: layout.contentBottom }
     );
+  }
+
+  /**
+   * Resolves the accessing user's email for Slides export filenames.
+   * Prefers active user, then effective user, then a safe fallback.
+   *
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function phSlidesResolveUserEmail_(cfg) {
+    try {
+      var access = CoreUsers.getCurrentUserAccess(cfg);
+      if (access && access.email) return access.email;
+    } catch (err) {
+      Logger.log('phSlidesResolveUserEmail_: CoreUsers failed — ' + err);
+    }
+    try {
+      var e = Session.getActiveUser().getEmail();
+      if (e) return e;
+      e = Session.getEffectiveUser().getEmail();
+      if (e) return e;
+    } catch (err2) {
+      Logger.log('phSlidesResolveUserEmail_: Session failed — ' + err2);
+    }
+    return 'unknown-user';
+  }
+
+  /**
+   * Builds token map for Slides export filename templates.
+   *
+   * @param {AppConfig} cfg
+   * @param {Object} snapshot
+   * @return {Object<string,string>}
+   * @private
+   */
+  function phSlidesFormatTokens_(cfg, snapshot) {
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    var appId = snapshot.appId || cfg.appId || '';
+    return {
+      appName: appId || 'Portfolio',
+      appId: appId,
+      userEmail: phSlidesResolveUserEmail_(cfg),
+      date: Utilities.formatDate(now, tz, 'yyyy-MM-dd'),
+      timestamp: Utilities.formatDate(now, tz, 'yyyy-MM-dd_HH-mm'),
+      deckType: 'Portfolio Health'
+    };
+  }
+
+  /**
+   * Sanitizes a generated Slides deck title for Drive/Slides readability.
+   *
+   * @param {string} title
+   * @return {string}
+   * @private
+   */
+  function phSlidesSanitizeFilename_(title) {
+    var s = String(title || '')
+      .replace(/[\/\\:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (s.length > 180) s = s.slice(0, 180).trim();
+    return s || 'Portfolio Health';
+  }
+
+  /**
+   * Applies cfg.report.portfolioHealth.slidesExport.filename tokens.
+   *
+   * @param {string} template
+   * @param {AppConfig} cfg
+   * @param {Object} snapshot
+   * @return {string}
+   * @private
+   */
+  function phSlidesApplyFilenameTemplate_(template, cfg, snapshot) {
+    var tpl = String(template || '').trim();
+    if (!tpl) return '';
+    var tokens = phSlidesFormatTokens_(cfg, snapshot);
+    var out = tpl;
+    Object.keys(tokens).forEach(function (key) {
+      out = out.split('{' + key + '}').join(tokens[key]);
+    });
+    return phSlidesSanitizeFilename_(out);
+  }
+
+  /**
+   * Legacy title when no filename template is configured.
+   *
+   * @param {AppConfig} cfg
+   * @param {Object} snapshot
+   * @return {string}
+   * @private
+   */
+  function phSlidesLegacyTitle_(cfg, snapshot) {
+    var appLabel = snapshot.appId || cfg.appId || 'Portfolio';
+    var monthLabel = snapshot.monthLabel || Utilities.formatDate(
+      new Date(),
+      Session.getScriptTimeZone(),
+      'MMMM yyyy'
+    );
+    return appLabel + ' Portfolio Health - ' + monthLabel;
+  }
+
+  /**
+   * Move a Portfolio Health Slides deck to a configured shared folder when enabled.
+   * Fail-open: logs move errors and returns diagnostics without throwing.
+   *
+   * @param {GoogleAppsScript.Slides.Presentation} presentation
+   * @param {AppConfig} cfg
+   * @return {Object}
+   * @private
+   */
+  function phSlidesApplyDestination_(presentation, cfg) {
+    var ph = (cfg.report && cfg.report.portfolioHealth) || {};
+    var exp = ph.slidesExport || {};
+    var mode = String(exp.destinationMode || 'root').toLowerCase();
+    var folderId = String(exp.folderId || '').trim();
+
+    if (mode !== 'folder' || !folderId) {
+      return { applied: false, reason: 'not_configured' };
+    }
+
+    try {
+      var file = DriveApp.getFileById(presentation.getId());
+      var folder = DriveApp.getFolderById(folderId);
+      file.moveTo(folder);
+      return {
+        applied: true,
+        mode: 'folder',
+        folderId: folderId,
+        folderName: folder.getName()
+      };
+    } catch (err) {
+      Logger.log('phSlidesApplyDestination_: failed — ' + err);
+      return {
+        applied: false,
+        mode: 'folder',
+        folderId: folderId,
+        reason: 'move_failed',
+        error: String(err)
+      };
+    }
   }
 
   /**
@@ -2643,7 +2820,7 @@ var CorePortfolioHealth = (function () {
    * @param {AppConfig} config
    * @param {Object=} viewModeOpts
    * @param {Object=} productOpts
-   * @return {Object}
+   * @return {{ok:boolean, presentationId?:string, url?:string, title?:string, slideCount?:number, destination?:Object, code?:string, error?:string}}
    */
   function createPortfolioHealthSlides(config, viewModeOpts, productOpts) {
     try {
@@ -2657,24 +2834,23 @@ var CorePortfolioHealth = (function () {
       }
 
       var cfg = CoreConfig.withDefaults(config);
-      var appLabel = snapshot.appId || cfg.appId || 'Portfolio';
-      var monthLabel = snapshot.monthLabel || Utilities.formatDate(
-        new Date(),
-        Session.getScriptTimeZone(),
-        'MMMM yyyy'
-      );
-      var title = appLabel + ' Portfolio Health - ' + monthLabel;
+      var exp = (cfg.report.portfolioHealth && cfg.report.portfolioHealth.slidesExport) || {};
+      var finalTitle = phSlidesApplyFilenameTemplate_(exp.filename, cfg, snapshot);
+      if (!finalTitle) finalTitle = phSlidesLegacyTitle_(cfg, snapshot);
 
-      Logger.log('createPortfolioHealthSlides: creating deck — ' + title);
-      var presentation = SlidesApp.create(title);
+      Logger.log('createPortfolioHealthSlides: creating deck — ' + finalTitle);
+      var presentation = SlidesApp.create(finalTitle);
       buildPortfolioSlidesDeck_(presentation, snapshot, cfg);
+      var dest = phSlidesApplyDestination_(presentation, cfg);
 
       var result = {
         ok: true,
         presentationId: presentation.getId(),
         url: presentation.getUrl(),
-        title: title,
-        slideCount: presentation.getSlides().length
+        title: finalTitle,
+        filename: finalTitle,
+        slideCount: presentation.getSlides().length,
+        destination: dest
       };
       Logger.log('createPortfolioHealthSlides: created ' + result.presentationId);
       return result;

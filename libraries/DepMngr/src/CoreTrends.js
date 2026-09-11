@@ -135,6 +135,8 @@ var CoreTrends = {
 
       currentRedDeployments.push({
         deploymentId:        dep.deploymentId,
+        parentDeploymentId:  dep.parentDeploymentId || '',
+        deploymentFk:        dep.deploymentFk || '',
         accountName:         dep.accountName         || '',
         deploymentName:      dep.deploymentName       || '',
         partner:             dep.partner              || '',
@@ -685,6 +687,8 @@ var CoreTrends = {
       if (row.currentStageDurationDays >= outlierMultiple * bench.medianDays) {
         outliers.push({
           deploymentId:             row.deploymentId,
+          parentDeploymentId:       row.parentDeploymentId || row.deploymentFk || '',
+          deploymentFk:             row.deploymentFk || '',
           accountName:              row.accountName,
           deploymentName:           row.deploymentName || '',
           currentStage:             stage,
@@ -800,6 +804,8 @@ var CoreTrends = {
 
       activeInFlight.push({
         deploymentId:          dep.deploymentId,
+        parentDeploymentId:    dep.parentDeploymentId || '',
+        deploymentFk:          dep.deploymentFk || '',
         accountName:           dep.accountName      || '',
         deploymentName:        dep.deploymentName    || '',
         partner:               dep.partner           || '',

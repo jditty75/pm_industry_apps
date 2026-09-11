@@ -217,9 +217,17 @@
 
 /**
  * @typedef {Object} UIGoLivesTabConfig  (Phase 2)
- * @property {string} defaultView          'recent' | 'upcoming' | 'all'
- * @property {number} recentWindowDays
- * @property {number} upcomingWindowDays
+ * @property {string}  defaultView           Legacy toggle default ('recent'|'upcoming'|'all'); explorer uses defaultTimePeriod/defaultGoLiveType
+ * @property {number}  recentWindowDays
+ * @property {number}  upcomingWindowDays
+ * @property {string}  [defaultTimePeriod]   Explorer: 'next90' | 'last60' | 'rolling12' | 'fiscalYearQuarter' | …
+ * @property {string}  [defaultGoLiveType]   Explorer: 'all' | 'completed' | 'upcoming'
+ * @property {boolean} [kpiStripEnabled]
+ * @property {number}  [initialRenderRows]
+ * @property {number}  [loadMoreIncrement]
+ * @property {number}  [maxRenderRows]
+ * @property {number}  [searchResultCap]
+ * @property {number}  [customRangeMaxMonths]
  */
 
 /**
@@ -767,11 +775,20 @@ var CoreConfig = (function () {
     if (!cfg.ui.goLivesTable.searchPlaceholder)
       cfg.ui.goLivesTable.searchPlaceholder = 'Search by account name...';
 
-    // Phase 2: Go Lives tab-level config (consolidated tab toggle)
+    // Phase 2: Go Lives tab-level config (Go-Live Explorer)
     cfg.ui.goLivesTab = cfg.ui.goLivesTab || {};
     if (!cfg.ui.goLivesTab.defaultView)        cfg.ui.goLivesTab.defaultView = 'recent';
     if (!cfg.ui.goLivesTab.recentWindowDays)   cfg.ui.goLivesTab.recentWindowDays = 60;
     if (!cfg.ui.goLivesTab.upcomingWindowDays) cfg.ui.goLivesTab.upcomingWindowDays = 90;
+    if (!cfg.ui.goLivesTab.defaultTimePeriod)   cfg.ui.goLivesTab.defaultTimePeriod = 'next90';
+    if (!cfg.ui.goLivesTab.defaultGoLiveType)   cfg.ui.goLivesTab.defaultGoLiveType = 'upcoming';
+    if (cfg.ui.goLivesTab.kpiStripEnabled === undefined)
+      cfg.ui.goLivesTab.kpiStripEnabled = true;
+    if (!cfg.ui.goLivesTab.initialRenderRows)  cfg.ui.goLivesTab.initialRenderRows = 50;
+    if (!cfg.ui.goLivesTab.loadMoreIncrement)  cfg.ui.goLivesTab.loadMoreIncrement = 50;
+    if (!cfg.ui.goLivesTab.maxRenderRows)      cfg.ui.goLivesTab.maxRenderRows = 400;
+    if (!cfg.ui.goLivesTab.searchResultCap)    cfg.ui.goLivesTab.searchResultCap = 250;
+    if (!cfg.ui.goLivesTab.customRangeMaxMonths) cfg.ui.goLivesTab.customRangeMaxMonths = 12;
 
     // MDS/PGL tab defaults (MDS-PGL Redesign 2026-06) — retained as csatTab alias (V2.8)
     cfg.ui.mgmPglTab = cfg.ui.mgmPglTab || {};

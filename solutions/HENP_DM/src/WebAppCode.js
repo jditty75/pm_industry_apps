@@ -52,6 +52,18 @@ function getUpcomingGoLivesData(viewModeOpts, productOpts) {
 }
 
 /**
+ * Go-Live Explorer bounded payload (period, filters, KPI strip, timeline, table rows).
+ *
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @param {Object=} filterState
+ */
+function getGoLivesExplorerData(viewModeOpts, productOpts, filterState) {
+  return CoreLib.CoreData.getGoLivesExplorerData(
+    APP_CONFIG, viewModeOpts || {}, productOpts, filterState || {});
+}
+
+/**
  * Returns the MDS/PGL month-grouped batch view for the requested horizon.
  *
  * @param {Object=} viewModeOpts  { viewMode:'my'|'all', ddDisplayName:string }

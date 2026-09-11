@@ -119,6 +119,18 @@ function getUpcomingGoLivesData(viewModeOpts, productOpts) {
   return CoreLib.CoreData.getUpcomingGoLives(APP_CONFIG, viewModeOpts, productOpts);
 }
 
+/**
+ * Go-Live Explorer bounded payload (period, filters, KPI strip, timeline, table rows).
+ *
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @param {Object=} filterState
+ */
+function getGoLivesExplorerData(viewModeOpts, productOpts, filterState) {
+  return CoreLib.CoreData.getGoLivesExplorerData(
+    APP_CONFIG, viewModeOpts || {}, productOpts, filterState || {});
+}
+
 // ============================================================================
 // MDS / PGL — MONTH-BATCH SURVEY VIEW
 // ============================================================================

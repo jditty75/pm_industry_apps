@@ -390,52 +390,168 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
 function _CoreUI_Markup_buildGoLivesTab_(ui) {
   var gt = ui.goLivesTable || {};
   var glt = ui.goLivesTab || {};
-  var showIndustry = !!gt.showIndustry;
-  var searchPh = gt.searchPlaceholder || 'Search by account name...';
-  var defaultView = glt.defaultView || 'recent';
-  var recentDays = glt.recentWindowDays || 60;
-  var upcomingDays = glt.upcomingWindowDays || 90;
+  var isPM = !!ui.isProductModeApp;
+  var groupingLabel = (ui.portfolioGrouping && ui.portfolioGrouping.label) ||
+    (isPM ? 'PS Region' : 'Region');
+  var searchPh = 'Search by account, deployment, partner, EM, region...';
+  var kpiEnabled = glt.kpiStripEnabled !== false;
+  var defaultPeriod = glt.defaultTimePeriod || 'next90';
+  var defaultType = glt.defaultGoLiveType || 'upcoming';
 
-  // Toggle buttons — JS marks the right one active based on defaultView.
-  function segBtn(id, label, isActive) {
-    return '<button class="seg-control-btn' + (isActive ? ' active' : '') +
-           '" data-golives-view="' + id + '" onclick="switchGoLivesView(\'' + id + '\')">' +
-           _CoreUI_Markup_esc_(label) + '</button>';
-  }
-
-  // Column headers — context-sensitive labels set by JS based on current view.
   var headers = [
-    '<th id="golives-date-header" class="golives-sortable-header" onclick="toggleGoLivesDateSort()" role="button" tabindex="0" title="Sort by date">Date</th>',
-    '<th>Account Name</th>'
+    '<th id="golives-date-header" class="golives-sortable-header" onclick="toggleGoLivesDateSort()" role="button" tabindex="0" title="Sort by date">Go Live Date</th>',
+    '<th>Account Name</th>',
+    '<th>Product Areas</th>',
+    '<th>Partner</th>',
+    '<th>Health</th>'
   ];
-  if (showIndustry) headers.push('<th>Industry</th>');
-  headers.push('<th id="golives-product-header">Product / Deployment</th>');
-  headers.push('<th>Partner</th>');
-  // Stage 1: hide Actions column for read-only users.
   if (!ui._isReadOnly) {
     headers.push('<th>Actions</th>');
   }
 
-  return [
+  var periodOptions = [
+    { id: 'last60', label: 'Last 60 Days' },
+    { id: 'next90', label: 'Next 90 Days' },
+    { id: 'rolling12', label: 'Rolling 12 Months' },
+    { id: 'currentMonth', label: 'Current Month' },
+    { id: 'previousMonth', label: 'Previous Month' },
+    { id: 'nextMonth', label: 'Next Month' },
+    { id: 'currentFQ', label: 'Current Fiscal Quarter' },
+    { id: 'nextFQ', label: 'Next Fiscal Quarter' },
+    { id: 'currentFY', label: 'Current Fiscal Year' },
+    { id: 'nextFY', label: 'Next Fiscal Year' },
+    { id: 'fiscalYearQuarter', label: 'Fiscal Year / Quarter' },
+    { id: 'custom', label: 'Custom Range' }
+  ];
+  var periodHtml = periodOptions.map(function (opt) {
+    var sel = opt.id === defaultPeriod ? ' selected' : '';
+    return '<option value="' + _CoreUI_Markup_attr_(opt.id) + '"' + sel + '>' +
+      _CoreUI_Markup_esc_(opt.label) + '</option>';
+  }).join('');
+
+  var typeOptions = [
+    { id: 'all', label: 'All' },
+    { id: 'completed', label: 'Completed' },
+    { id: 'upcoming', label: 'Upcoming' }
+  ];
+  var typeHtml = typeOptions.map(function (opt) {
+    var sel = opt.id === defaultType ? ' selected' : '';
+    return '<option value="' + _CoreUI_Markup_attr_(opt.id) + '"' + sel + '>' +
+      _CoreUI_Markup_esc_(opt.label) + '</option>';
+  }).join('');
+
+  var parts = [
     '<div id="golives-tab" class="tab-content">',
     '  <div class="info-banner">',
-    '    📅 Go Lives &mdash; recent past and upcoming, in one place.',
-    '  </div>',
-    '  <div class="seg-control" style="margin-bottom: var(--space-3);">',
-    '    ' + segBtn('recent',   'Recent (' + recentDays + ' days)',   defaultView === 'recent'),
-    '    ' + segBtn('upcoming', 'Upcoming (' + upcomingDays + ' days)', defaultView === 'upcoming'),
-    '    ' + segBtn('all',      'All',                                  defaultView === 'all'),
-    '  </div>',
-    '  <div class="control-bar">',
-    '    <div class="control-row">',
+    '    \uD83D\uDCC5 Go Lives &mdash; explore completed, upcoming, and active MTP-dated deployments.',
+    '  </div>'
+  ];
+
+  if (kpiEnabled) {
+    parts.push(
+      '  <div class="kpi-strip-card" id="golives-kpi-strip">',
+      '    <div class="section-title">Go-Live Summary</div>',
+      '    <div class="kpi-context" id="golives-kpi-context"></div>',
+      '    <div class="kpi-grid" id="golives-kpi-grid"></div>',
+      '    <div class="timeline-section" id="golives-timeline-section">',
+      '      <div class="section-title">Go-Live Timeline</div>',
+      '      <div class="timeline-bars" id="golives-timeline-bars"></div>',
+      '    </div>',
+      '  </div>'
+    );
+  }
+
+  parts.push(
+    '  <div class="control-bar deployments-filter-shell golives-filter-shell">',
+    '    <div class="deployments-filter-primary control-row">',
     '      <div class="search-box">',
-    '        <span class="search-icon">🔍</span>',
-    '        <input type="text" id="golives-search" placeholder="' + _CoreUI_Markup_attr_(searchPh) + '" onkeyup="searchGoLives()">',
+    '        <span class="search-icon">\uD83D\uDD0D</span>',
+    '        <input type="text" id="golives-search" placeholder="' + _CoreUI_Markup_attr_(searchPh) + '" oninput="onGoLivesSearchInput()">',
     '      </div>',
-    '      <button class="btn btn-secondary" onclick="clearGoLivesSearch()">Clear</button>',
+    '      <span class="filter-label">Time Period</span>',
+    '      <select id="golives-time-period" class="filter-select" aria-label="Time period" onchange="onGoLivesPeriodChange()">' + periodHtml + '</select>',
+    '      <span class="golives-fiscal-controls" id="golives-fiscal-controls" aria-hidden="true">',
+    '        <select id="golives-fiscal-year" class="filter-select" aria-label="Fiscal year" onchange="onGoLivesFiscalFilterChange()"></select>',
+    '        <select id="golives-fiscal-quarter" class="filter-select" aria-label="Fiscal quarter" onchange="onGoLivesFiscalFilterChange()">',
+    '          <option value="All" selected>All</option>',
+    '          <option value="Q1">Q1</option>',
+    '          <option value="Q2">Q2</option>',
+    '          <option value="Q3">Q3</option>',
+    '          <option value="Q4">Q4</option>',
+    '        </select>',
+    '      </span>',
+    '      <span class="filter-label">Go-Live Type</span>',
+    '      <select id="golives-type" class="filter-select" aria-label="Go-live type" onchange="onGoLivesTypeChange()">' + typeHtml + '</select>',
+    '      <div class="deployments-filter-popover-wrap" id="golives-filter-popover-wrap">',
+    '        <button class="filter-drawer-toggle" id="golives-filter-drawer-toggle" type="button" onclick="toggleGoLivesAdvancedFilters()" aria-expanded="false" aria-controls="golives-filter-drawer" aria-haspopup="dialog">',
+    '          <span id="golives-filter-drawer-toggle-icon">\u2295</span>',
+    '          <span>Advanced Filters</span>',
+    '          <span id="golives-filter-drawer-badge" class="badge hidden">0</span>',
+    '        </button>',
+    '        <div class="advanced-filter-popover" id="golives-filter-drawer" role="dialog" aria-modal="false" aria-labelledby="golives-advanced-filter-title">',
+    '          <div class="advanced-filter-popover-header">',
+    '            <div>',
+    '              <div class="advanced-filter-popover-title" id="golives-advanced-filter-title">Advanced Filters</div>',
+    '              <div class="advanced-filter-popover-subtitle">Refine partner, health, region, and more</div>',
+    '            </div>',
+    '            <button type="button" class="advanced-filter-popover-close" onclick="closeGoLivesAdvancedFilters()" aria-label="Close advanced filters">&times;</button>',
+    '          </div>',
+    '          <div class="advanced-filter-popover-grid advanced-filter-grid">',
+    '            <div class="advanced-filter-field">',
+    '              <label class="advanced-filter-label" for="golives-partner-filter">Partner</label>',
+    '              <select id="golives-partner-filter" class="filter-select" onchange="onGoLivesFilterChange({includeFilterOptions:false})"><option value="All">All</option></select>',
+    '            </div>',
+    '            <div class="advanced-filter-field">',
+    '              <label class="advanced-filter-label" for="golives-health-filter">Health</label>',
+    '              <select id="golives-health-filter" class="filter-select" onchange="onGoLivesFilterChange({includeFilterOptions:false})"><option value="All">All</option></select>',
+    '            </div>',
+    '            <div class="advanced-filter-field">',
+    '              <label class="advanced-filter-label" for="golives-region-filter">' + _CoreUI_Markup_esc_(groupingLabel) + '</label>',
+    '              <select id="golives-region-filter" class="filter-select" onchange="onGoLivesFilterChange({includeFilterOptions:false})"><option value="All">All</option></select>',
+    '            </div>',
+    '            <div class="advanced-filter-field">',
+    '              <label class="advanced-filter-label" for="golives-product-area-filter">Product Area</label>',
+    '              <select id="golives-product-area-filter" class="filter-select" onchange="onGoLivesFilterChange({includeFilterOptions:false})"><option value="All">All</option></select>',
+    '            </div>',
+    '            <div class="advanced-filter-field">',
+    '              <label class="advanced-filter-label" for="golives-em-filter">Engagement Manager</label>',
+    '              <select id="golives-em-filter" class="filter-select" onchange="onGoLivesFilterChange({includeFilterOptions:false})"><option value="All">All</option></select>',
+    '            </div>',
+    '          </div>',
+    '          <div class="advanced-filter-popover-actions">',
+    '            <button type="button" class="btn btn-secondary" onclick="resetGoLivesAdvancedFilters()">Reset advanced</button>',
+    '            <button type="button" class="btn btn-primary" onclick="closeGoLivesAdvancedFilters()">Done</button>',
+    '          </div>',
+    '        </div>',
+    '      </div>',
+    '      <button class="btn btn-secondary" type="button" onclick="clearAllGoLivesFilters()">Clear filters</button>',
+    '    </div>',
+    '    <div class="golives-custom-range-row" id="golives-custom-range-row" aria-hidden="true">',
+    '      <span class="golives-custom-range-label">Custom range</span>',
+    '      <div class="golives-custom-range-fields">',
+    '        <div class="golives-custom-range-field">',
+    '          <label for="golives-custom-from">From</label>',
+    '          <input type="date" id="golives-custom-from" onchange="onGoLivesCustomRangeChange()">',
+    '        </div>',
+    '        <span class="golives-custom-range-sep">&ndash;</span>',
+    '        <div class="golives-custom-range-field">',
+    '          <label for="golives-custom-to">To</label>',
+    '          <input type="date" id="golives-custom-to" onchange="onGoLivesCustomRangeChange()">',
+    '        </div>',
+    '        <button class="btn btn-primary golives-custom-range-apply" type="button" onclick="applyGoLivesCustomRange()">Apply</button>',
+    '      </div>',
+    '      <span class="golives-custom-range-hint" id="golives-custom-range-hint"></span>',
+    '      <span class="golives-custom-range-error hidden" id="golives-custom-range-error"></span>',
+    '    </div>',
+    '    <div class="deployments-active-filters hidden" id="golives-active-filters"></div>',
+    '    <div class="golives-filter-notes-row">',
+    '      <div class="golives-search-match-note hidden" id="golives-search-match-note"></div>',
+    '      <div class="golives-filter-helper">Search runs across all go-live types within the selected time period.</div>',
+    '      <div class="golives-fiscal-hint">Fiscal periods use Workday calendar &middot; Q1 Feb&ndash;Apr &middot; Q2 May&ndash;Jul &middot; Q3 Aug&ndash;Oct &middot; Q4 Nov&ndash;Jan</div>',
     '    </div>',
     '  </div>',
     '  <div class="table-container">',
+    '    <div class="golives-table-result-bar hidden" id="golives-table-result-bar"></div>',
     '    <div class="table-wrapper">',
     '      <table id="golives-table">',
     '        <thead><tr>' + headers.join('') + '</tr></thead>',
@@ -443,8 +559,18 @@ function _CoreUI_Markup_buildGoLivesTab_(ui) {
     '      </table>',
     '    </div>',
     '  </div>',
+    '  <div class="golives-load-more-bar" id="golives-load-more-bar">',
+    '    <div class="golives-load-more-row">',
+    '      <span id="golives-load-more-text"></span>',
+    '      <button class="btn btn-primary hidden" id="golives-load-more-btn" type="button" onclick="loadMoreGoLivesRows()">Load more</button>',
+    '    </div>',
+    '    <span class="golives-cap-note hidden" id="golives-cap-note">Showing first 400 of many records. Narrow filters to reduce results.</span>',
+    '  </div>',
+    '  <div id="golives-filter-backdrop" class="deployments-filter-backdrop" aria-hidden="true"></div>',
     '</div>'
-  ].join('\n');
+  );
+
+  return parts.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1323,7 +1449,7 @@ function _CoreUI_Markup_buildEditModal_(ui) {
     '    </div>',
     '    <div class="modal-body">',
     '      <form id="edit-form" class="form-grid">',
-    '        <input type="hidden" id="edit-row-index">',
+    '        <input type="hidden" id="edit-deployment-id">',
     '        <div class="form-group"><label class="form-label">Account Name (source)</label><input type="text" id="edit-account" class="form-input" readonly></div>',
     '        <div class="form-group"><label class="form-label">Deployment Name (source)</label><input type="text" id="edit-deployment" class="form-input" readonly></div>',
     emField,

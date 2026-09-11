@@ -68,7 +68,8 @@ var CoreData = (function () {
     dhpMap: null,               // result of buildDeploymentHealthPlanMap_
     wellnessRows: null,         // result of readWellnessPlansRaw_
     wellnessMap: null,          // result of buildWellnessMap_
-    reportBuildCtx: null        // active monthly-report build context (per execution)
+    reportBuildCtx: null,       // active monthly-report build context (per execution)
+    goLivesExplorerUniverseByKey: {} // tier 1 for getGoLivesExplorerUniverse_
   };
 
   /**
@@ -97,6 +98,7 @@ var CoreData = (function () {
     _cache.wellnessRows = null;
     _cache.wellnessMap = null;
     _cache.reportBuildCtx = null;
+    _cache.goLivesExplorerUniverseByKey = {};
     // Tier 2: sheet-tab cache. Layer 2. Clears all rows including mdsPglBatchView:* and overviewData:* keys.
     _perfCacheClearAll_();
     // Cross-module cache clears.
@@ -10510,6 +10512,1059 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   // ===========================================================================
+  // GO-LIVE EXPLORER (bounded period + filters + KPI strip)
+  // ===========================================================================
+
+  /**
+   * Workday fiscal year start calendar year for a date (FY runs Feb 1 – Jan 31).
+   * @param {Date} date
+   * @return {number}
+   * @private
+   */
+  function _workdayFiscalYearStartYear_(date) {
+    var m = date.getMonth();
+    var y = date.getFullYear();
+    return m === 0 ? y - 1 : y;
+  }
+
+  /**
+   * Workday fiscal quarter (1–4) for a date.
+   * Q1 Feb–Apr, Q2 May–Jul, Q3 Aug–Oct, Q4 Nov–Jan.
+   * @param {Date} date
+   * @return {number}
+   * @private
+   */
+  function _workdayFiscalQuarterOfDate_(date) {
+    var m = date.getMonth();
+    if (m >= 1 && m <= 3) return 1;
+    if (m >= 4 && m <= 6) return 2;
+    if (m >= 7 && m <= 9) return 3;
+    return 4;
+  }
+
+  /**
+   * Workday fiscal year end label year (FY named for calendar year in which it ends).
+   * @param {Date} date
+   * @return {number}
+   * @private
+   */
+  function _workdayFiscalYearEndYear_(date) {
+    return _workdayFiscalYearStartYear_(date) + 1;
+  }
+
+  /**
+   * Inclusive start/end date keys for a full Workday fiscal year.
+   * @param {number} fiscalYearStart  Calendar year in which FY starts (Feb 1).
+   * @return {{startKey: string, endKey: string}}
+   * @private
+   */
+  function _workdayFiscalYearRangeKeys_(fiscalYearStart) {
+    var tz = Session.getScriptTimeZone();
+    var start = new Date(fiscalYearStart, 1, 1);
+    var end = new Date(fiscalYearStart + 1, 0, 31);
+    return {
+      startKey: Utilities.formatDate(start, tz, 'yyyy-MM-dd'),
+      endKey: Utilities.formatDate(end, tz, 'yyyy-MM-dd')
+    };
+  }
+
+  /**
+   * Parses explorer fiscal year filter to FY end-year number.
+   * @param {*} raw
+   * @return {number}
+   * @private
+   */
+  function _parseExplorerFiscalYearEnd_(raw) {
+    if (raw === undefined || raw === null || raw === '') return NaN;
+    if (typeof raw === 'number' && !isNaN(raw)) return raw;
+    var m = String(raw).match(/FY?(\d{4})/i);
+    return m ? parseInt(m[1], 10) : NaN;
+  }
+
+  /**
+   * Inclusive start/end date keys for a Workday fiscal quarter.
+   * @param {number} fiscalYearStart  Calendar year in which FY starts (Feb 1).
+   * @param {number} quarter          1–4
+   * @return {{startKey: string, endKey: string}}
+   * @private
+   */
+  function _workdayFiscalQuarterRangeKeys_(fiscalYearStart, quarter) {
+    var tz = Session.getScriptTimeZone();
+    var ranges = {
+      1: { sm: 1, sd: 1, em: 3, ed: 30, ey: fiscalYearStart },
+      2: { sm: 4, sd: 1, em: 6, ed: 31, ey: fiscalYearStart },
+      3: { sm: 7, sd: 1, em: 9, ed: 30, ey: fiscalYearStart },
+      4: { sm: 10, sd: 1, em: 0, ed: 31, ey: fiscalYearStart + 1 }
+    };
+    var r = ranges[quarter] || ranges[1];
+    var start = new Date(fiscalYearStart, r.sm, r.sd);
+    var end = new Date(r.ey, r.em, r.ed);
+    return {
+      startKey: Utilities.formatDate(start, tz, 'yyyy-MM-dd'),
+      endKey: Utilities.formatDate(end, tz, 'yyyy-MM-dd')
+    };
+  }
+
+  /**
+   * Formats a date key as "Mon D, YYYY" for explorer labels.
+   * @param {string} dateKey
+   * @return {string}
+   * @private
+   */
+  function _formatExplorerDisplayDate_(dateKey) {
+    if (!dateKey) return '';
+    var parts = String(dateKey).split('-');
+    if (parts.length !== 3) return dateKey;
+    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var m = parseInt(parts[1], 10);
+    return months[m - 1] + ' ' + parseInt(parts[2], 10) + ', ' + parts[0];
+  }
+
+  /**
+   * Resolves explorer time-period filter to inclusive date keys + label.
+   * @param {Object} filterState
+   * @param {AppConfig} cfg
+   * @return {{valid: boolean, error: string, startKey: string, endKey: string, periodLabel: string}}
+   * @private
+   */
+  function _resolveGoLivesExplorerPeriod_(filterState, cfg) {
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var glt = (cfg.ui && cfg.ui.goLivesTab) || {};
+    var period = (filterState && filterState.timePeriod) || glt.defaultTimePeriod || 'next90';
+    var startKey = '';
+    var endKey = '';
+    var periodLabel = '';
+
+    function monthRange_(y, m) {
+      var start = new Date(y, m, 1);
+      var end = new Date(y, m + 1, 0);
+      return {
+        startKey: Utilities.formatDate(start, tz, 'yyyy-MM-dd'),
+        endKey: Utilities.formatDate(end, tz, 'yyyy-MM-dd')
+      };
+    }
+
+    if (period === 'custom') {
+      startKey = _toDateKey_(filterState.customStart);
+      endKey = _toDateKey_(filterState.customEnd);
+      if (!startKey || !endKey) {
+        return { valid: false, error: 'Custom range requires both From and To dates.', startKey: '', endKey: '', periodLabel: '' };
+      }
+      if (startKey > endKey) {
+        return { valid: false, error: 'Custom range From date must be before To date.', startKey: '', endKey: '', periodLabel: '' };
+      }
+      var maxMonths = glt.customRangeMaxMonths || 12;
+      var startD = new Date(startKey);
+      var limitD = new Date(startD.getFullYear(), startD.getMonth() + maxMonths, startD.getDate());
+      var endD = new Date(endKey);
+      if (endD > limitD) {
+        return { valid: false, error: 'Custom range cannot exceed ' + maxMonths + ' months.', startKey: '', endKey: '', periodLabel: '' };
+      }
+      periodLabel = _formatExplorerDisplayDate_(startKey) + ' \u2013 ' + _formatExplorerDisplayDate_(endKey);
+    } else if (period === 'last60') {
+      startKey = _addDaysToKey_(todayKey, -60);
+      endKey = todayKey;
+      periodLabel = 'Last 60 Days';
+    } else if (period === 'next90') {
+      startKey = todayKey;
+      endKey = _addDaysToKey_(todayKey, 90);
+      periodLabel = 'Next 90 Days';
+    } else if (period === 'fiscalYearQuarter') {
+      var fyEndYear = _parseExplorerFiscalYearEnd_(filterState.fiscalYear);
+      if (isNaN(fyEndYear)) {
+        fyEndYear = _workdayFiscalYearEndYear_(now);
+      }
+      var fyStart = fyEndYear - 1;
+      var quarterRaw = (filterState.fiscalQuarter || 'All').toString().trim();
+      var quarterNorm = quarterRaw.toUpperCase();
+      if (!quarterRaw || quarterNorm === 'ALL') {
+        var fyRange = _workdayFiscalYearRangeKeys_(fyStart);
+        startKey = fyRange.startKey;
+        endKey = fyRange.endKey;
+        periodLabel = 'FY' + fyEndYear;
+      } else {
+        var qNum = parseInt(quarterNorm.replace(/^Q/, ''), 10);
+        if (isNaN(qNum) || qNum < 1 || qNum > 4) qNum = 1;
+        var qRange = _workdayFiscalQuarterRangeKeys_(fyStart, qNum);
+        startKey = qRange.startKey;
+        endKey = qRange.endKey;
+        periodLabel = 'FY' + fyEndYear + ' Q' + qNum;
+      }
+    } else if (period === 'rolling12') {
+      startKey = _addDaysToKey_(todayKey, -365);
+      endKey = todayKey;
+      periodLabel = 'Rolling 12 Months';
+    } else if (period === 'currentMonth') {
+      var cm = monthRange_(now.getFullYear(), now.getMonth());
+      startKey = cm.startKey;
+      endKey = cm.endKey;
+      periodLabel = 'Current Month';
+    } else if (period === 'previousMonth') {
+      var pm = monthRange_(now.getFullYear(), now.getMonth() - 1);
+      startKey = pm.startKey;
+      endKey = pm.endKey;
+      periodLabel = 'Previous Month';
+    } else if (period === 'nextMonth') {
+      var nm = monthRange_(now.getFullYear(), now.getMonth() + 1);
+      startKey = nm.startKey;
+      endKey = nm.endKey;
+      periodLabel = 'Next Month';
+    } else if (period === 'currentFQ') {
+      var fy = _workdayFiscalYearStartYear_(now);
+      var fq = _workdayFiscalQuarterOfDate_(now);
+      var cqr = _workdayFiscalQuarterRangeKeys_(fy, fq);
+      startKey = cqr.startKey;
+      endKey = cqr.endKey;
+      periodLabel = 'Current Fiscal Quarter';
+    } else if (period === 'nextFQ') {
+      var fy2 = _workdayFiscalYearStartYear_(now);
+      var fq2 = _workdayFiscalQuarterOfDate_(now);
+      var nfy = fy2;
+      var nfq = fq2 + 1;
+      if (nfq > 4) { nfq = 1; nfy = fy2 + 1; }
+      var nqr = _workdayFiscalQuarterRangeKeys_(nfy, nfq);
+      startKey = nqr.startKey;
+      endKey = nqr.endKey;
+      periodLabel = 'Next Fiscal Quarter';
+    } else if (period === 'currentFY') {
+      var fy3 = _workdayFiscalYearStartYear_(now);
+      startKey = Utilities.formatDate(new Date(fy3, 1, 1), tz, 'yyyy-MM-dd');
+      endKey = Utilities.formatDate(new Date(fy3 + 1, 0, 31), tz, 'yyyy-MM-dd');
+      periodLabel = 'Current Fiscal Year';
+    } else if (period === 'nextFY') {
+      var fy4 = _workdayFiscalYearStartYear_(now) + 1;
+      startKey = Utilities.formatDate(new Date(fy4, 1, 1), tz, 'yyyy-MM-dd');
+      endKey = Utilities.formatDate(new Date(fy4 + 1, 0, 31), tz, 'yyyy-MM-dd');
+      periodLabel = 'Next Fiscal Year';
+    } else {
+      startKey = todayKey;
+      endKey = _addDaysToKey_(todayKey, 90);
+      periodLabel = 'Next 90 Days';
+    }
+
+    return { valid: true, error: '', startKey: startKey, endKey: endKey, periodLabel: periodLabel };
+  }
+
+  /**
+   * Classifies a resolved explorer period relative to today.
+   * Past when periodEnd &lt; today; future when periodStart &gt; today; mixed otherwise.
+   * @param {string} startKey
+   * @param {string} endKey
+   * @param {string} todayKey
+   * @return {'past'|'future'|'mixed'}
+   * @private
+   */
+  function _resolveGoLivesPeriodPosition_(startKey, endKey, todayKey) {
+    if (!startKey || !endKey || !todayKey) return 'mixed';
+    if (endKey < todayKey) return 'past';
+    if (startKey > todayKey) return 'future';
+    return 'mixed';
+  }
+
+  /**
+   * Normalizes Go-Live Type for the resolved period (defensive server alignment).
+   * @param {string} requestedType
+   * @param {'past'|'future'|'mixed'} periodPosition
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function _normalizeGoLivesTypeForPeriod_(requestedType, periodPosition, cfg, timePeriod) {
+    var defaultType = (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.defaultGoLiveType) || 'upcoming';
+    var type = (requestedType || defaultType).toLowerCase();
+    var period = (timePeriod || '').toLowerCase();
+    if (period === 'last60' || period === 'previousmonth') return 'completed';
+    if (period === 'next90' || period === 'nextmonth' || period === 'nextfq' || period === 'nextfy') return 'upcoming';
+    if (periodPosition === 'past') return 'completed';
+    if (periodPosition === 'future') return 'upcoming';
+    if (type === 'all' || type === 'upcoming' || type === 'completed') return type;
+    if (period === 'rolling12' || period === 'currentmonth' || period === 'currentfq' ||
+        period === 'currentfy' || period === 'fiscalyearquarter') return 'all';
+    return defaultType;
+  }
+
+  /**
+   * @param {number} count
+   * @param {number} denom
+   * @return {string}
+   * @private
+   */
+  function _formatExplorerPercent_(count, denom) {
+    if (!denom) return count ? '0%' : '\u2014';
+    var pct = (count / denom) * 100;
+    if (pct === 100) return '100%';
+    if (Math.abs(pct - Math.round(pct)) < 0.05) return Math.round(pct) + '%';
+    return pct.toFixed(1) + '%';
+  }
+
+  /**
+   * Industry-mode completed (actual) go-lives in an inclusive date range.
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {string} windowStartKey
+   * @param {string} windowEndKey
+   * @return {Array<Object>}
+   * @private
+   */
+  function _getIndustryModeCompletedGoLivesInRange_(cfg, viewModeOpts, productOpts, windowStartKey, windowEndKey) {
+    var pa = (productOpts && productOpts.product) || 'all';
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData._getIndustryModeCompletedGoLivesInRange_: read failed — ' + err);
+      return [];
+    }
+    sfdcRows = filterDeploymentsByProduct_(sfdcRows, pa, cfg);
+    var enrichmentMap = {};
+    try {
+      enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    } catch (err) {
+      Logger.log('CoreData._getIndustryModeCompletedGoLivesInRange_: enrichment failed — ' + err);
+    }
+
+    var results = [];
+    sfdcRows.forEach(function (dep) {
+      var enrichment = enrichmentMap[dep.deploymentId];
+      var allRecentDates = enrichment ? (enrichment.recentDates || []) : [];
+      var recentMatch = _latestRecentDateInRange_(dep, allRecentDates, windowStartKey, windowEndKey);
+      if (!recentMatch) return;
+      results.push({
+        deploymentId: dep.deploymentId,
+        accountId: dep.accountId,
+        accountName: dep.accountName,
+        deploymentName: dep.deploymentName,
+        partner: dep.partner,
+        industry: dep.industry,
+        region: dep.region || dep.industry || '',
+        subRegion: dep.subRegion,
+        health: dep.health,
+        wdEngManager: dep.wdEngManager,
+        recentDates: recentMatch.filteredRecentDates,
+        lastGoLiveDate: recentMatch.lastGoLiveDate,
+        recordType: 'completed',
+        goLiveDate: recentMatch.lastGoLiveDate
+      });
+    });
+
+    results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+    results = _enrichGoLiveRowsWithOverrides_(results, getDeploymentOverridesMap_(cfg), getGoLivesOverridesMap_(cfg));
+    return applyViewModeFilter_(cfg, results, viewModeOpts);
+  }
+
+  /**
+   * Industry-mode upcoming (target/MTP) go-lives in an inclusive date range.
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {string} windowStartKey
+   * @param {string} windowEndKey
+   * @return {Array<Object>}
+   * @private
+   */
+  function _getIndustryModeUpcomingGoLivesInRange_(cfg, viewModeOpts, productOpts, windowStartKey, windowEndKey) {
+    var allEffective = getAllEffectiveDeployments(cfg, productOpts);
+    var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var enrichmentMap = {};
+    try {
+      enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
+    } catch (err) {
+      Logger.log('CoreData._getIndustryModeUpcomingGoLivesInRange_: enrichment failed — ' + err);
+    }
+
+    var results = [];
+    var seenDeploymentIds = {};
+
+    allEffective.forEach(function (dep) {
+      if (!dep.deploymentId) return;
+      var enrichment = enrichmentMap[dep.deploymentId];
+      if (!enrichment) return;
+      var ov = goLivesOverrides[dep.accountName] || {};
+      if (ov.exclude) return;
+
+      var datesInWindow = (enrichment.upcomingDates || []).filter(function (ud) {
+        var key = _toDateKey_(ud && ud.date);
+        return key && _dateKeyInRange_(key, windowStartKey, windowEndKey);
+      });
+      if (datesInWindow.length === 0) return;
+
+      var nextGoLiveDate = ov.overrideDate
+        ? CoreUtils.formatDateToIsoString(ov.overrideDate)
+        : datesInWindow[0].date;
+      seenDeploymentIds[dep.deploymentId] = true;
+      results.push({
+        rowIndex: dep.rowIndex,
+        deploymentId: dep.deploymentId,
+        accountId: dep.accountId,
+        accountName: dep.accountName,
+        deploymentName: dep.deploymentName,
+        industry: dep.industry,
+        region: dep.region || dep.industry || '',
+        subRegion: dep.subRegion,
+        partner: ov.overridePartner || dep.partner,
+        health: dep.health,
+        wdEngManager: dep.wdEngManager,
+        upcomingDates: datesInWindow,
+        isPhased: enrichment.isPhased,
+        nextGoLiveDate: nextGoLiveDate,
+        mtpDate: nextGoLiveDate,
+        recordType: 'upcoming',
+        goLiveDate: nextGoLiveDate
+      });
+    });
+
+    allEffective.forEach(function (dep) {
+      if (!dep.deploymentId || seenDeploymentIds[dep.deploymentId]) return;
+      var ov = goLivesOverrides[dep.accountName] || {};
+      if (ov.exclude) return;
+      var mtpDate = ov.overrideDate
+        ? CoreUtils.formatDateToIsoString(ov.overrideDate)
+        : dep.mtpDate;
+      var key = _toDateKey_(mtpDate);
+      if (!key || !_dateKeyInRange_(key, windowStartKey, windowEndKey)) return;
+      results.push({
+        rowIndex: dep.rowIndex,
+        deploymentId: dep.deploymentId,
+        accountId: dep.accountId,
+        accountName: dep.accountName,
+        deploymentName: dep.deploymentName,
+        industry: dep.industry,
+        region: dep.region || dep.industry || '',
+        subRegion: dep.subRegion,
+        partner: ov.overridePartner || dep.partner,
+        health: dep.health,
+        wdEngManager: dep.wdEngManager,
+        upcomingDates: [{ date: mtpDate, products: [] }],
+        isPhased: false,
+        nextGoLiveDate: mtpDate,
+        mtpDate: mtpDate,
+        recordType: 'upcoming',
+        goLiveDate: mtpDate
+      });
+    });
+
+    results = filterDeploymentsByStudent_(results, 'exclude', cfg);
+    results = _enrichGoLiveRowsWithOverrides_(results, getDeploymentOverridesMap_(cfg), getGoLivesOverridesMap_(cfg));
+    return applyViewModeFilter_(cfg, results, viewModeOpts);
+  }
+
+  /**
+   * Fetches completed + upcoming explorer rows for a period (both modes).
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {string} windowStartKey
+   * @param {string} windowEndKey
+   * @return {{completed: Array<Object>, upcoming: Array<Object>}}
+   * @private
+   */
+  function _fetchGoLivesExplorerBaseRows_(cfg, viewModeOpts, productOpts, windowStartKey, windowEndKey) {
+    var completed = [];
+    var upcoming = [];
+    if (usesProductModePfGoLiveSource_(cfg)) {
+      completed = getProductModeGoLiveEvents_(cfg, {
+        type: 'recent',
+        startDate: windowStartKey,
+        endDate: windowEndKey,
+        productOpts: productOpts
+      }) || [];
+      upcoming = getProductModeGoLiveEvents_(cfg, {
+        type: 'upcoming',
+        startDate: windowStartKey,
+        endDate: windowEndKey,
+        productOpts: productOpts
+      }) || [];
+      completed = completed.map(function (r) {
+        var dateKey = r.goLiveDate || r.lastGoLiveDate || '';
+        return Object.assign({}, r, { recordType: 'completed', goLiveDate: dateKey });
+      });
+      upcoming = upcoming.map(function (r) {
+        var dateKey = r.goLiveDate || r.nextGoLiveDate || r.mtpDate || '';
+        return Object.assign({}, r, { recordType: 'upcoming', goLiveDate: dateKey });
+      });
+      completed = filterDeploymentsByStudent_(completed, 'exclude', cfg);
+      upcoming = filterDeploymentsByStudent_(upcoming, 'exclude', cfg);
+      completed = _enrichGoLiveRowsWithOverrides_(completed, getDeploymentOverridesMap_(cfg), getGoLivesOverridesMap_(cfg));
+      upcoming = _enrichGoLiveRowsWithOverrides_(upcoming, getDeploymentOverridesMap_(cfg), getGoLivesOverridesMap_(cfg));
+      completed = applyViewModeFilter_(cfg, completed, viewModeOpts);
+      upcoming = applyViewModeFilter_(cfg, upcoming, viewModeOpts);
+    } else {
+      completed = _getIndustryModeCompletedGoLivesInRange_(cfg, viewModeOpts, productOpts, windowStartKey, windowEndKey);
+      upcoming = _getIndustryModeUpcomingGoLivesInRange_(cfg, viewModeOpts, productOpts, windowStartKey, windowEndKey);
+    }
+    return { completed: completed, upcoming: upcoming };
+  }
+
+  /**
+   * @param {string} val
+   * @return {string|null}
+   * @private
+   */
+  function _normalizeExplorerFilterValue_(val) {
+    if (val === undefined || val === null) return null;
+    var s = String(val).trim();
+    if (!s || s === 'All') return null;
+    return s;
+  }
+
+  /**
+   * @param {Object} row
+   * @param {string} term
+   * @param {boolean} isProductMode
+   * @return {boolean}
+   * @private
+   */
+  function _goLivesExplorerRowMatchesSearch_(row, term, isProductMode) {
+    if (!term) return true;
+    var q = term.toLowerCase();
+    var fields = [
+      row.accountName, row.deploymentName, row.partner, row.wdEngManager,
+      row.industry, row.region, row.subRegion, row.productArea, row.funcArea,
+      row.displayDeploymentName, row.displayProductFunction, row.displayLabel
+    ];
+    if (row.productAreas && row.productAreas.length) {
+      fields = fields.concat(row.productAreas);
+    }
+    if (row.productFunctions && row.productFunctions.length) {
+      row.productFunctions.forEach(function (pf) {
+        fields.push(pf.productArea, pf.funcArea, pf.deploymentName);
+      });
+    }
+    for (var i = 0; i < fields.length; i++) {
+      if ((fields[i] || '').toString().toLowerCase().indexOf(q) !== -1) return true;
+    }
+    if (row.recentDates) {
+      for (var ri = 0; ri < row.recentDates.length; ri++) {
+        var prods = row.recentDates[ri].products || [];
+        for (var pi = 0; pi < prods.length; pi++) {
+          if (prods[pi].toLowerCase().indexOf(q) !== -1) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * @param {Object} row
+   * @param {Object} filterState
+   * @param {boolean} isProductMode
+   * @return {boolean}
+   * @private
+   */
+  function _goLivesExplorerRowMatchesAdvancedFilters_(row, filterState, isProductMode) {
+    var partner = _normalizeExplorerFilterValue_(filterState.partner);
+    var health = _normalizeExplorerFilterValue_(filterState.health);
+    var region = _normalizeExplorerFilterValue_(filterState.region);
+    var productArea = _normalizeExplorerFilterValue_(filterState.productArea);
+    var em = _normalizeExplorerFilterValue_(filterState.engagementManager);
+
+    if (partner && (row.partner || '') !== partner) return false;
+    if (health && (row.health || '') !== health) return false;
+    if (region) {
+      var rowRegion = isProductMode ? (row.region || '') : (row.region || row.industry || '');
+      if (rowRegion !== region) return false;
+    }
+    if (productArea) {
+      var areas = row.productAreas || [];
+      if (areas.indexOf(productArea) < 0 && (row.productArea || '') !== productArea) {
+        var matched = false;
+        if (row.productFunctions) {
+          for (var i = 0; i < row.productFunctions.length; i++) {
+            if ((row.productFunctions[i].productArea || '') === productArea) { matched = true; break; }
+          }
+        }
+        if (!matched) return false;
+      }
+    }
+    if (em && (row.wdEngManager || '') !== em) return false;
+    return true;
+  }
+
+  /**
+   * @param {Array<Object>} rows
+   * @param {boolean} isProductMode
+   * @return {Object}
+   * @private
+   */
+  var _GO_LIVES_EXPLORER_UNIVERSE_VER = 'v1';
+  var _GO_LIVES_EXPLORER_UNIVERSE_YEARS_BACK = 15;
+  var _GO_LIVES_EXPLORER_UNIVERSE_YEARS_FORWARD = 10;
+
+  /**
+   * Cache key for the Go Lives Explorer base universe (app/product/view-mode/data-version).
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {string}
+   * @private
+   */
+  function _goLivesExplorerUniverseCacheKey_(cfg, viewModeOpts, productOpts) {
+    var pa = (productOpts && productOpts.product) || 'all';
+    var vm = (viewModeOpts && viewModeOpts.viewMode) || 'all';
+    var dd = String((viewModeOpts && viewModeOpts.ddDisplayName) || '').trim();
+    var baseName = 'goLivesExplorerUniverse:' + _GO_LIVES_EXPLORER_UNIVERSE_VER +
+      ':vm=' + vm + ':dd=' + dd + ':product=' + pa;
+    return _perfKey_(cfg, baseName);
+  }
+
+  /**
+   * Wide date window used to build the explorer base universe (fiscal-year coverage).
+   * @return {{startKey: string, endKey: string}}
+   * @private
+   */
+  function _goLivesExplorerUniverseWindow_() {
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    var wideStart = Utilities.formatDate(
+      new Date(now.getFullYear() - _GO_LIVES_EXPLORER_UNIVERSE_YEARS_BACK, 0, 1), tz, 'yyyy-MM-dd');
+    var wideEnd = Utilities.formatDate(
+      new Date(now.getFullYear() + _GO_LIVES_EXPLORER_UNIVERSE_YEARS_FORWARD, 11, 31), tz, 'yyyy-MM-dd');
+    return { startKey: wideStart, endKey: wideEnd };
+  }
+
+  /**
+   * Collects distinct Workday fiscal years (FY labels) from explorer rows.
+   * @param {Array<Object>} rows
+   * @return {Array<string>}
+   * @private
+   */
+  function _collectGoLivesExplorerFiscalYearsFromRows_(rows) {
+    var years = {};
+
+    function addDateKey_(dk) {
+      if (!dk) return;
+      var d = new Date(dk);
+      if (isNaN(d.getTime())) return;
+      var fyEnd = _workdayFiscalYearEndYear_(d);
+      years[fyEnd] = 'FY' + fyEnd;
+    }
+
+    (rows || []).forEach(function (row) {
+      addDateKey_(row.goLiveDate || row.lastGoLiveDate || row.nextGoLiveDate || row.mtpDate);
+    });
+
+    return Object.keys(years).map(function (k) { return parseInt(k, 10); })
+      .sort(function (a, b) { return b - a; })
+      .map(function (y) { return years[y]; });
+  }
+
+  /**
+   * Filters explorer rows to an inclusive date window.
+   * @param {Array<Object>} rows
+   * @param {string} startKey
+   * @param {string} endKey
+   * @return {Array<Object>}
+   * @private
+   */
+  function _filterGoLivesExplorerRowsByPeriod_(rows, startKey, endKey) {
+    return (rows || []).filter(function (row) {
+      var dk = _toDateKey_(row.goLiveDate || row.lastGoLiveDate || row.nextGoLiveDate || row.mtpDate);
+      return dk && _dateKeyInRange_(dk, startKey, endKey);
+    });
+  }
+
+  /**
+   * Builds and caches the Go Lives Explorer base universe once per app/product/view mode.
+   * Does not apply time-period, search, go-live-type, or advanced filters.
+   *
+   * Tier 1: in-memory per execution. Tier 2: _PerfCache (same pattern as getOverviewSnapshot;
+   * cross-execution reads may miss when CacheService binds to the library project).
+   *
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {{rows: Array<Object>, fiscalYears: Array<string>, windowStart: string, windowEnd: string}}
+   * @private
+   */
+  function getGoLivesExplorerUniverse_(cfg, viewModeOpts, productOpts) {
+    cfg = CoreConfig.withDefaults(cfg);
+    var cacheKey = _goLivesExplorerUniverseCacheKey_(cfg, viewModeOpts, productOpts);
+
+    if (!_cache.goLivesExplorerUniverseByKey) _cache.goLivesExplorerUniverseByKey = {};
+    if (_cache.goLivesExplorerUniverseByKey[cacheKey]) {
+      return _cache.goLivesExplorerUniverseByKey[cacheKey];
+    }
+
+    var cached = _perfCacheRead_(cacheKey);
+    if (cached !== null) {
+      _cache.goLivesExplorerUniverseByKey[cacheKey] = cached;
+      return cached;
+    }
+
+    var win = _goLivesExplorerUniverseWindow_();
+    var base = _fetchGoLivesExplorerBaseRows_(cfg, viewModeOpts, productOpts, win.startKey, win.endKey);
+    var allRows = base.completed.concat(base.upcoming);
+    allRows = applyDeploymentHealthPlansToRows_(allRows, cfg);
+    var fiscalYears = _collectGoLivesExplorerFiscalYearsFromRows_(allRows);
+
+    var universe = {
+      rows: allRows,
+      fiscalYears: fiscalYears,
+      windowStart: win.startKey,
+      windowEnd: win.endKey
+    };
+    _cache.goLivesExplorerUniverseByKey[cacheKey] = universe;
+    _perfCacheWrite_(cacheKey, universe);
+    return universe;
+  }
+
+  function _collectGoLivesExplorerFilterOptions_(rows, isProductMode) {
+    var partners = {};
+    var health = {};
+    var regions = {};
+    var productAreas = {};
+    var ems = {};
+    (rows || []).forEach(function (row) {
+      var p = (row.partner || '').trim();
+      if (p) partners[p] = true;
+      var h = (row.health || '').trim();
+      if (h) health[h] = true;
+      var r = isProductMode ? (row.region || '').trim() : (row.region || row.industry || '').trim();
+      if (r) regions[r] = true;
+      if (row.productAreas && row.productAreas.length) {
+        row.productAreas.forEach(function (pa) { if (pa) productAreas[pa] = true; });
+      } else if (row.productArea) {
+        productAreas[row.productArea] = true;
+      }
+      var em = (row.wdEngManager || '').trim();
+      if (em) ems[em] = true;
+    });
+    function sorted_(obj) {
+      return Object.keys(obj).sort();
+    }
+    return {
+      partners: sorted_(partners),
+      health: sorted_(health),
+      regions: sorted_(regions),
+      productAreas: sorted_(productAreas),
+      engagementManagers: sorted_(ems)
+    };
+  }
+
+  /**
+   * @param {Object} row
+   * @param {string} timelineMode 'upcoming'|'completed'|'combined'
+   * @return {string}
+   * @private
+   */
+  function _explorerRowTimelineDateKey_(row, timelineMode) {
+    if (timelineMode === 'completed' && row.recordType === 'completed') {
+      return _toDateKey_(row.goLiveDate || row.lastGoLiveDate);
+    }
+    if (timelineMode === 'upcoming' && row.recordType === 'upcoming') {
+      return _toDateKey_(row.goLiveDate || row.nextGoLiveDate || row.mtpDate);
+    }
+    return _toDateKey_(row.goLiveDate || row.lastGoLiveDate || row.nextGoLiveDate || row.mtpDate);
+  }
+
+  /**
+   * @param {Array<Object>} rows
+   * @param {string} startKey
+   * @param {string} endKey
+   * @param {string} timelineMode
+   * @param {string} todayKey
+   * @return {Array<Object>}
+   * @private
+   */
+  function _computeGoLivesExplorerTimeline_(rows, startKey, endKey, timelineMode, todayKey) {
+    var tz = Session.getScriptTimeZone();
+    var buckets = {};
+    (rows || []).forEach(function (row) {
+      var dk = _explorerRowTimelineDateKey_(row, timelineMode);
+      if (!dk || !_dateKeyInRange_(dk, startKey, endKey)) return;
+      var monthKey = dk.slice(0, 7);
+      buckets[monthKey] = (buckets[monthKey] || 0) + 1;
+    });
+
+    var months = [];
+    var cursor = new Date(startKey);
+    var endD = new Date(endKey);
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    var guard = 0;
+    while (cursor <= endD && guard < 12) {
+      var mk = Utilities.formatDate(cursor, tz, 'yyyy-MM');
+      var monthStart = Utilities.formatDate(cursor, tz, 'yyyy-MM-dd');
+      var monthEnd = Utilities.formatDate(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0), tz, 'yyyy-MM-dd');
+      var label = Utilities.formatDate(cursor, tz, 'MMM');
+      var isCurrent = todayKey >= monthStart && todayKey <= monthEnd;
+      var isFuture = monthStart > todayKey;
+      months.push({
+        monthKey: mk,
+        label: label,
+        count: buckets[mk] || 0,
+        isCurrent: isCurrent,
+        isFuture: isFuture
+      });
+      cursor.setMonth(cursor.getMonth() + 1);
+      guard++;
+    }
+    return months;
+  }
+
+  /**
+   * @param {Array<Object>} rows
+   * @param {Object} filterState
+   * @param {string} periodLabel
+   * @param {boolean} searchActive
+   * @param {AppConfig} cfg
+   * @param {string} todayKey
+   * @return {Object}
+   * @private
+   */
+  function _computeGoLivesExplorerKpiSummary_(rows, effectiveGoLiveType, periodLabel, searchActive, cfg, todayKey) {
+    var workdayPartner = (cfg.report && cfg.report.portfolioHealth && cfg.report.portfolioHealth.workdayPartner) ||
+      'Workday Professional Services';
+    var goLiveType = (effectiveGoLiveType || 'upcoming').toLowerCase();
+    var completed = rows.filter(function (r) { return r.recordType === 'completed'; });
+    var upcoming = rows.filter(function (r) { return r.recordType === 'upcoming'; });
+    var atRisk = upcoming.filter(function (r) {
+      return r.health === 'Red' || r.health === 'Yellow';
+    });
+    var next30End = _addDaysToKey_(todayKey, 30);
+    var next30 = upcoming.filter(function (r) {
+      var dk = _toDateKey_(r.goLiveDate || r.nextGoLiveDate || r.mtpDate);
+      return dk && _dateKeyInRange_(dk, todayKey, next30End);
+    });
+    var openHp = upcoming.filter(function (r) { return !!r.hasHealthPlan; });
+    var wdLed = completed.filter(function (r) { return (r.partner || '').trim() === workdayPartner; });
+    var partnerLed = completed.filter(function (r) {
+      var p = (r.partner || '').trim();
+      return p && p !== workdayPartner;
+    });
+    var completedHp = completed.filter(function (r) { return !!r.hasHealthPlan; });
+
+    var cards = [];
+    var contextLine = '';
+
+    if (searchActive) {
+      contextLine = 'Summary reflects search results across all go-live types in the selected time period.';
+      var total = rows.length;
+      cards = [
+        { label: 'Matching Records', count: total, percent: _formatExplorerPercent_(total, total), subtext: periodLabel, risk: false },
+        { label: 'Completed', count: completed.length, percent: _formatExplorerPercent_(completed.length, total), subtext: 'Actual go-lives', risk: false },
+        { label: 'Upcoming', count: upcoming.length, percent: _formatExplorerPercent_(upcoming.length, total), subtext: 'Target/current dates', risk: false },
+        { label: 'At-Risk Upcoming', count: atRisk.length, percent: _formatExplorerPercent_(atRisk.length, upcoming.length), subtext: 'Red/Yellow of upcoming', risk: true }
+      ];
+    } else if (goLiveType === 'all') {
+      contextLine = 'Summary reflects all go-live records in the selected time period and filters.';
+      var allTotal = rows.length;
+      cards = [
+        { label: 'Total Go-Live Records', count: allTotal, percent: _formatExplorerPercent_(allTotal, allTotal), subtext: periodLabel, risk: false },
+        { label: 'Completed', count: completed.length, percent: _formatExplorerPercent_(completed.length, allTotal), subtext: 'Actual go-lives', risk: false },
+        { label: 'Upcoming', count: upcoming.length, percent: _formatExplorerPercent_(upcoming.length, allTotal), subtext: 'Target/current dates', risk: false },
+        { label: 'At-Risk Upcoming', count: atRisk.length, percent: _formatExplorerPercent_(atRisk.length, upcoming.length), subtext: 'Red/Yellow of upcoming', risk: true }
+      ];
+    } else if (goLiveType === 'upcoming') {
+      contextLine = 'Summary reflects upcoming go-lives in the selected time period and filters.';
+      var upTotal = upcoming.length;
+      cards = [
+        { label: 'Upcoming Go-Lives', count: upTotal, percent: _formatExplorerPercent_(upTotal, upTotal), subtext: periodLabel, risk: false },
+        { label: 'Next 30 Days', count: next30.length, percent: _formatExplorerPercent_(next30.length, upTotal), subtext: 'Near-term', risk: false },
+        { label: 'At-Risk Upcoming', count: atRisk.length, percent: _formatExplorerPercent_(atRisk.length, upTotal), subtext: 'Red/Yellow', risk: true },
+        { label: 'Open Health Plans', count: openHp.length, percent: _formatExplorerPercent_(openHp.length, upTotal), subtext: 'Active plans', risk: false }
+      ];
+    } else {
+      contextLine = 'Summary reflects completed go-lives in the selected time period and filters.';
+      var compTotal = completed.length;
+      cards = [
+        { label: 'Completed Go-Lives', count: compTotal, percent: _formatExplorerPercent_(compTotal, compTotal), subtext: periodLabel, risk: false },
+        { label: 'Workday-Led', count: wdLed.length, percent: _formatExplorerPercent_(wdLed.length, compTotal), subtext: 'Delivery ownership', risk: false },
+        { label: 'Partner-Led', count: partnerLed.length, percent: _formatExplorerPercent_(partnerLed.length, compTotal), subtext: 'Delivery ownership', risk: false },
+        { label: 'With Health Plans', count: completedHp.length, percent: _formatExplorerPercent_(completedHp.length, compTotal), subtext: 'Post go-live', risk: false }
+      ];
+    }
+
+    return { contextLine: contextLine, cards: cards };
+  }
+
+  /**
+   * Sorts explorer rows by date (and account name tie-break).
+   * @param {Array<Object>} rows
+   * @param {string} sortField
+   * @param {string} sortDirection
+   * @return {Array<Object>}
+   * @private
+   */
+  function _sortGoLivesExplorerRows_(rows, sortField, sortDirection) {
+    var asc = (sortDirection || 'asc').toLowerCase() === 'asc';
+    var field = sortField || 'goLiveDate';
+    rows.sort(function (a, b) {
+      var da = _toDateKey_(a[field] || a.goLiveDate);
+      var db = _toDateKey_(b[field] || b.goLiveDate);
+      var ta = da ? new Date(da).getTime() : NaN;
+      var tb = db ? new Date(db).getTime() : NaN;
+      var aInv = !da || isNaN(ta);
+      var bInv = !db || isNaN(tb);
+      if (aInv && bInv) return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+      if (aInv) return 1;
+      if (bInv) return -1;
+      if (ta < tb) return asc ? -1 : 1;
+      if (ta > tb) return asc ? 1 : -1;
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
+    return rows;
+  }
+
+  /**
+   * Bounded Go-Live Explorer payload for the web UI.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {Object=} filterState
+   * @return {Object}
+   */
+  function getGoLivesExplorerData(config, viewModeOpts, productOpts, filterState) {
+    var totalStart = Date.now();
+    var cfg = CoreConfig.withDefaults(config);
+    filterState = filterState || {};
+    var includeFilterOptions = filterState.includeFilterOptions !== false;
+    var period = _resolveGoLivesExplorerPeriod_(filterState, cfg);
+    if (!period.valid) {
+      return {
+        valid: false,
+        error: period.error,
+        rows: [],
+        totalCount: 0,
+        kpiSummary: { contextLine: '', cards: [] },
+        timeline: [],
+        filterOptions: { partners: [], health: [], regions: [], productAreas: [], engagementManagers: [], fiscalYears: [] },
+        periodLabel: '',
+        searchActive: false,
+        effectiveGoLiveType: '',
+        resolvedPeriodStart: '',
+        resolvedPeriodEnd: '',
+        periodPosition: 'mixed'
+      };
+    }
+
+    var tz = Session.getScriptTimeZone();
+    var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var periodPosition = _resolveGoLivesPeriodPosition_(period.startKey, period.endKey, todayKey);
+    var effectiveGoLiveType = _normalizeGoLivesTypeForPeriod_(
+      filterState.goLiveType, periodPosition, cfg, filterState.timePeriod);
+
+    var universeStart = Date.now();
+    var universe = getGoLivesExplorerUniverse_(cfg, viewModeOpts, productOpts);
+    var universeMs = Date.now() - universeStart;
+
+    var periodStart = Date.now();
+    var isPM = usesProductModePfGoLiveSource_(cfg);
+    var periodRows = _filterGoLivesExplorerRowsByPeriod_(universe.rows, period.startKey, period.endKey);
+    var periodMs = Date.now() - periodStart;
+
+    var filtersStart = Date.now();
+    var searchTerm = _normalizeExplorerFilterValue_(filterState.searchTerm);
+    var searchActive = !!searchTerm;
+    var goLiveType = effectiveGoLiveType;
+
+    var filtered = periodRows.filter(function (row) {
+      if (!_goLivesExplorerRowMatchesAdvancedFilters_(row, filterState, isPM)) return false;
+      if (searchActive) {
+        return _goLivesExplorerRowMatchesSearch_(row, searchTerm, isPM);
+      }
+      if (goLiveType === 'all') return true;
+      if (goLiveType === 'completed') return row.recordType === 'completed';
+      if (goLiveType === 'upcoming') return row.recordType === 'upcoming';
+      return true;
+    });
+    var filtersMs = Date.now() - filtersStart;
+
+    var kpisStart = Date.now();
+    var kpiSummary = _computeGoLivesExplorerKpiSummary_(
+      filtered, effectiveGoLiveType, period.periodLabel, searchActive, cfg, todayKey);
+    var kpisMs = Date.now() - kpisStart;
+
+    var timelineStart = Date.now();
+    var timelineMode = searchActive ? 'combined' : goLiveType;
+    if (timelineMode === 'completed') timelineMode = 'completed';
+    else if (timelineMode === 'upcoming') timelineMode = 'upcoming';
+    else timelineMode = 'combined';
+    var timeline = _computeGoLivesExplorerTimeline_(
+      filtered, period.startKey, period.endKey, timelineMode, todayKey);
+    var timelineMs = Date.now() - timelineStart;
+
+    var optionsStart = Date.now();
+    var filterOptions = { partners: [], health: [], regions: [], productAreas: [], engagementManagers: [], fiscalYears: [] };
+    if (includeFilterOptions) {
+      filterOptions = _collectGoLivesExplorerFilterOptions_(periodRows, isPM);
+      filterOptions.fiscalYears = universe.fiscalYears || [];
+    }
+    var optionsMs = Date.now() - optionsStart;
+
+    var sortStart = Date.now();
+    filtered = _sortGoLivesExplorerRows_(filtered, filterState.sortField, filterState.sortDirection);
+    var searchCap = (cfg.ui.goLivesTab && cfg.ui.goLivesTab.searchResultCap) || 250;
+    var totalCount = filtered.length;
+    if (searchActive && filtered.length > searchCap) {
+      filtered = filtered.slice(0, searchCap);
+    }
+    var sortMs = Date.now() - sortStart;
+    var totalMs = Date.now() - totalStart;
+
+    Logger.log('CoreData.getGoLivesExplorerData timings: universe=' + (universeMs / 1000).toFixed(1) + 's, ' +
+               'period=' + (periodMs / 1000).toFixed(1) + 's, filters=' + (filtersMs / 1000).toFixed(1) + 's, ' +
+               'kpis=' + (kpisMs / 1000).toFixed(1) + 's, timeline=' + (timelineMs / 1000).toFixed(1) + 's, ' +
+               'options=' + (optionsMs / 1000).toFixed(1) + 's, sort=' + (sortMs / 1000).toFixed(1) + 's, ' +
+               'total=' + (totalMs / 1000).toFixed(1) + 's (' + filtered.length + '/' + totalCount +
+               ' rows, universe=' + (universe.rows ? universe.rows.length : 0) +
+               ', period=' + periodRows.length + ', type=' + effectiveGoLiveType +
+               ', search=' + searchActive + ', options=' + includeFilterOptions + ')');
+
+    return {
+      valid: true,
+      error: '',
+      rows: filtered,
+      totalCount: totalCount,
+      kpiSummary: kpiSummary,
+      timeline: timeline,
+      filterOptions: filterOptions,
+      periodLabel: period.periodLabel,
+      searchActive: searchActive,
+      effectiveGoLiveType: effectiveGoLiveType,
+      resolvedPeriodStart: period.startKey,
+      resolvedPeriodEnd: period.endKey,
+      periodPosition: periodPosition
+    };
+  }
+
+  /**
+   * Diagnostic: cold vs warm getGoLivesExplorerData timings for the same filter state.
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {Object=} filterState
+   * @return {Object}
+   */
+  function _debugGoLivesExplorerPerformance(config, viewModeOpts, productOpts, filterState) {
+    var cfg = CoreConfig.withDefaults(config);
+    filterState = filterState || { timePeriod: 'next90', goLiveType: 'upcoming' };
+    _cache.goLivesExplorerUniverseByKey = {};
+    var coldStart = Date.now();
+    var cold = getGoLivesExplorerData(cfg, viewModeOpts, productOpts, filterState);
+    var coldMs = Date.now() - coldStart;
+    var warmStart = Date.now();
+    var warm = getGoLivesExplorerData(cfg, viewModeOpts, productOpts, filterState);
+    var warmMs = Date.now() - warmStart;
+    var cacheKey = _goLivesExplorerUniverseCacheKey_(cfg, viewModeOpts, productOpts);
+    return {
+      appId: cfg.appId,
+      cacheKey: cacheKey,
+      coldMs: coldMs,
+      warmMs: warmMs,
+      coldRowCount: cold.totalCount,
+      warmRowCount: warm.totalCount,
+      universeRowCount: (_cache.goLivesExplorerUniverseByKey[cacheKey] || {}).rows
+        ? _cache.goLivesExplorerUniverseByKey[cacheKey].rows.length : 0
+    };
+  }
+
+  // ===========================================================================
   // EXPORTS
   // ===========================================================================
 
@@ -10566,6 +11621,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     // Phase 3i additions
     getRecentGoLives:            getRecentGoLives,
+    getGoLivesExplorerData:      getGoLivesExplorerData,
+    _debugGoLivesExplorerPerformance: _debugGoLivesExplorerPerformance,
 
     getRecentGoLivesForNotablePicker: getRecentGoLivesForNotablePicker,
 

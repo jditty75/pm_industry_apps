@@ -1010,6 +1010,30 @@ var CoreData = (function () {
    * @return {Array<Object>}
    * @private
    */
+  /**
+   * Resolves DeploymentOverrides for a go-live row (event id or parent deployment id).
+   * @param {Object} row
+   * @param {Object} depMap
+   * @return {Object}
+   * @private
+   */
+  function _goLiveRowDeploymentOverride_(row, depMap) {
+    if (!row) return {};
+    depMap = depMap || {};
+    if (row.deploymentId && depMap[row.deploymentId]) {
+      return depMap[row.deploymentId];
+    }
+    var parentId = _canonicalId_(row.parentDeploymentId || row.deploymentFk);
+    if (parentId) {
+      return _deploymentOverrideForParentId_(parentId, depMap);
+    }
+    var parents = row.parentDeploymentIds;
+    if (Array.isArray(parents) && parents.length === 1) {
+      return _deploymentOverrideForParentId_(parents[0], depMap);
+    }
+    return {};
+  }
+
   function _enrichGoLiveRowsWithOverrides_(rows, deploymentOverridesMap, goLivesOverridesMap) {
     if (!Array.isArray(rows) || !rows.length) return rows || [];
 
@@ -1017,9 +1041,8 @@ var CoreData = (function () {
     var glMap = goLivesOverridesMap || {};
 
     return rows.map(function (row) {
-      var depId = row.deploymentId || '';
       var acct = row.accountName || '';
-      var depOv = depId ? (depMap[depId] || {}) : {};
+      var depOv = _goLiveRowDeploymentOverride_(row, depMap);
       var glOv = acct ? (glMap[acct] || {}) : {};
       var excluded = !!(
         row.excludeFromReport ||
@@ -1032,7 +1055,7 @@ var CoreData = (function () {
         excludeFromReport: excluded,
         goLiveDate:        glOv.overrideDate
           ? CoreUtils.formatDateToIsoString(glOv.overrideDate)
-          : (row.goLiveDate || row.mtpDate || '')
+          : (row.goLiveDate || row.nextGoLiveDate || row.mtpDate || '')
       }, _buildGoLiveOverrideMeta_(row, depOv, glOv));
     });
   }
@@ -2491,6 +2514,44 @@ var CoreData = (function () {
     if (v === null || v === undefined) return false;
     if (v instanceof Date) return !isNaN(v.getTime());
     return String(v).trim() !== '';
+  }
+
+  /**
+   * DeploymentOverrides entry for a PF/parent deployment id (parent-keyed lookup).
+   * @param {string} parentDeploymentId
+   * @param {Object} deploymentOverridesMap
+   * @return {Object}
+   * @private
+   */
+  function _deploymentOverrideForParentId_(parentDeploymentId, deploymentOverridesMap) {
+    var parentId = _canonicalId_(parentDeploymentId);
+    if (!parentId) return {};
+    var resolved = _resolveDeploymentOverrideEntry_({
+      deploymentId: parentId,
+      parentDeploymentId: parentId,
+      deploymentFk: parentId
+    }, deploymentOverridesMap || {});
+    return resolved.ov || {};
+  }
+
+  /**
+   * Upcoming go-live date key for a PF row (GoLives override > deployment MTP override > PF target).
+   * @param {Object} pf
+   * @param {Object} glOv
+   * @param {Object} depOv
+   * @return {string} YYYY-MM-DD or ''
+   * @private
+   */
+  function _resolvePfUpcomingGoLiveDateKey_(pf, glOv, depOv) {
+    glOv = glOv || {};
+    depOv = depOv || {};
+    if (_hasOverrideCellValue_(glOv.overrideDate)) {
+      return _toDateKey_(glOv.overrideDate);
+    }
+    if (_hasOverrideCellValue_(depOv.overrideMtp)) {
+      return _toDateKey_(depOv.overrideMtp);
+    }
+    return _toDateKey_(pf.targetGoLive);
   }
 
   /**
@@ -5849,9 +5910,10 @@ function _sfdcDataVersion_(cfg) {
 
   /**
    * Resolves 0-based column indices for SFDC_Deployments.
-   * When cfg.columns defines DEPLOYMENT_ID and OVERALL_STATUS (IndustryMode 24-col
-   * layout), uses those 1-based positions — same contract as APP_CONFIG trace
-   * parsing. Otherwise falls back to header keyword detection.
+   * Salesforce export tabs (Id, Overall_Status__c, …) use header keyword detection
+   * when those headers are present. cfg.columns positional mapping is used only when
+   * DEPLOYMENT_ID / OVERALL_STATUS indexes validate against the actual header row
+   * and the sheet does not look like a standard SFDC export layout.
    *
    * @param {AppConfig} cfg
    * @param {Array<string>} headers  Trimmed header row.
@@ -5892,47 +5954,38 @@ function _sfdcDataVersion_(cfg) {
       return idx < headers.length ? idx : -1;
     }
 
-    var cols = cfg.columns || {};
-    var cfgId = idxFromCfg_(cols.DEPLOYMENT_ID);
-    var cfgStatus = idxFromCfg_(cols.OVERALL_STATUS);
-    var useCfg = cfgId >= 0 && cfgStatus >= 0;
+    function headerLooksLikeDeploymentId_(header) {
+      var h = String(header || '').trim().toLowerCase();
+      if (h === 'id') return true;
+      if (h.indexOf('deployment') !== -1 && h.indexOf('id') !== -1) return true;
+      return false;
+    }
 
-    var indices;
-    if (useCfg) {
-      indices = {
-        colId:             cfgId,
-        colName:           idxFromCfg_(cols.DEPLOYMENT_NAME),
-        colAccountId:      idxFromCfg_(cols.ACCOUNT_ID),
-        colCustomerRId:    resolveCol_('Customer__r.Id', ['customer__r.id'], -1),
-        colAccountName:    idxFromCfg_(cols.ACCOUNT_NAME),
-        colIndustry:       idxFromCfg_(cols.INDUSTRY),
-        colRegion:         idxFromCfg_(cols.REGION),
-        colSubRegion:      idxFromCfg_(cols.SUB_REGION),
-        colSubRegionAlt:   idxFromCfg_(cols.SUB_REGION_ALT),
-        colCustomerObject: findExact_('Customer__r'),
-        colBillingState:   idxFromCfg_(cols.BILLING_STATE),
-        colBillingCity:    idxFromCfg_(cols.BILLING_CITY),
-        colStartDate:      idxFromCfg_(cols.DEPLOYMENT_START_DATE),
-        colMtpDate:        idxFromCfg_(cols.CURRENT_MTP_DATE),
-        colFirstMtpActual: detect_(['first_move_to_production_date_actual',
-          'move_to_production_date_actual', 'first_mtp_date_actual'], -1),
-        colFirstMtp:       idxFromCfg_(cols.FIRST_MTP_DATE),
-        colStatus:         cfgStatus,
-        colPhase:          idxFromCfg_(cols.DEPLOYMENT_PHASE),
-        colStage:          idxFromCfg_(cols.DEPLOYMENT_STAGE),
-        colHealth:         idxFromCfg_(cols.DEPLOYMENT_HEALTH),
-        colCompletionDate: idxFromCfg_(cols.COMPLETION_DATE),
-        colEM:             idxFromCfg_(cols.WD_ENG_MANAGER),
-        colDAM:            idxFromCfg_(cols.DAM_FULL_NAME),
-        colPrimingPartner: idxFromCfg_(cols.PRIMING_PARTNER),
-        colImplPartner:    idxFromCfg_(cols.IMPL_PARTNER),
-        colPartner:        idxFromCfg_(cols.PARTNER),
-        colSummary:        idxFromCfg_(cols.CURRENT_DEPLOYMENT_UPDATE)
-      };
-    } else {
+    function headerLooksLikeOverallStatus_(header) {
+      var h = String(header || '').trim().toLowerCase();
+      if (h === 'overall_status__c') return true;
+      if (h.indexOf('overall') !== -1 && h.indexOf('status') !== -1) return true;
+      return false;
+    }
+
+    /** Standard Salesforce SFDC_Deployments export header signatures. */
+    function hasRecognizableSfdcExportHeaders_() {
+      if (findExact_('Id') >= 0) return true;
+      if (findExact_('Overall_Status__c') >= 0) return true;
+      if (findExact_('Customer__r.Name') >= 0) return true;
+      if (findExact_('Deployment_Start_Date__c') >= 0) return true;
+      if (findExact_('Current_MTP_Date__c') >= 0) return true;
+      if (findExact_('Deployment_Phase__c') >= 0) return true;
+      if (findExact_('Deployment_Stage__c') >= 0) return true;
+      if (findExact_('Overall_Health__c') >= 0) return true;
+      if (findExact_('Name') >= 0 && detect_(['overall_status'], -1) >= 0) return true;
+      return false;
+    }
+
+    function buildHeaderKeywordIndices_() {
       var colIdDetected = findExact_('Id');
       if (colIdDetected < 0) colIdDetected = detect_(['id'], 0);
-      indices = {
+      return {
         colId:             colIdDetected,
         colName:           detect_(['name'], 1),
         colAccountId:      resolveCol_('Customer__c', ['customer__c'], 2),
@@ -5968,6 +6021,67 @@ function _sfdcDataVersion_(cfg) {
       };
     }
 
+    function buildCfgColumnIndices_(cfgId, cfgStatus) {
+      var cols = cfg.columns || {};
+      return {
+        colId:             cfgId,
+        colName:           idxFromCfg_(cols.DEPLOYMENT_NAME),
+        colAccountId:      idxFromCfg_(cols.ACCOUNT_ID),
+        colCustomerRId:    resolveCol_('Customer__r.Id', ['customer__r.id'], -1),
+        colAccountName:    idxFromCfg_(cols.ACCOUNT_NAME),
+        colIndustry:       idxFromCfg_(cols.INDUSTRY),
+        colRegion:         idxFromCfg_(cols.REGION),
+        colSubRegion:      idxFromCfg_(cols.SUB_REGION),
+        colSubRegionAlt:   idxFromCfg_(cols.SUB_REGION_ALT),
+        colCustomerObject: findExact_('Customer__r'),
+        colBillingState:   idxFromCfg_(cols.BILLING_STATE),
+        colBillingCity:    idxFromCfg_(cols.BILLING_CITY),
+        colStartDate:      idxFromCfg_(cols.DEPLOYMENT_START_DATE),
+        colMtpDate:        idxFromCfg_(cols.CURRENT_MTP_DATE),
+        colFirstMtpActual: detect_(['first_move_to_production_date_actual',
+          'move_to_production_date_actual', 'first_mtp_date_actual'], -1),
+        colFirstMtp:       idxFromCfg_(cols.FIRST_MTP_DATE),
+        colStatus:         cfgStatus,
+        colPhase:          idxFromCfg_(cols.DEPLOYMENT_PHASE),
+        colStage:          idxFromCfg_(cols.DEPLOYMENT_STAGE),
+        colHealth:         idxFromCfg_(cols.DEPLOYMENT_HEALTH),
+        colCompletionDate: idxFromCfg_(cols.COMPLETION_DATE),
+        colEM:             idxFromCfg_(cols.WD_ENG_MANAGER),
+        colDAM:            idxFromCfg_(cols.DAM_FULL_NAME),
+        colPrimingPartner: idxFromCfg_(cols.PRIMING_PARTNER),
+        colImplPartner:    idxFromCfg_(cols.IMPL_PARTNER),
+        colPartner:        idxFromCfg_(cols.PARTNER),
+        colSummary:        idxFromCfg_(cols.CURRENT_DEPLOYMENT_UPDATE)
+      };
+    }
+
+    var cols = cfg.columns || {};
+    var cfgId = idxFromCfg_(cols.DEPLOYMENT_ID);
+    var cfgStatus = idxFromCfg_(cols.OVERALL_STATUS);
+    var cfgLooksConfigured = cfgId >= 0 && cfgStatus >= 0;
+    var cfgValid = cfgLooksConfigured &&
+      headerLooksLikeDeploymentId_(headers[cfgId]) &&
+      headerLooksLikeOverallStatus_(headers[cfgStatus]);
+
+    var recognizableExport = hasRecognizableSfdcExportHeaders_();
+    var indices;
+    var source;
+
+    if (recognizableExport) {
+      indices = buildHeaderKeywordIndices_();
+      if (cfgLooksConfigured && !cfgValid) {
+        source = 'cfg.columns_rejected_header_mismatch';
+      } else {
+        source = 'header_keywords';
+      }
+    } else if (cfgValid) {
+      indices = buildCfgColumnIndices_(cfgId, cfgStatus);
+      source = 'cfg.columns_validated';
+    } else {
+      indices = buildHeaderKeywordIndices_();
+      source = cfgLooksConfigured ? 'cfg.columns_rejected_header_mismatch' : 'header_keywords';
+    }
+
     var headerByKey = {};
     Object.keys(indices).forEach(function (key) {
       var idx = indices[key];
@@ -5976,7 +6090,7 @@ function _sfdcDataVersion_(cfg) {
 
     return {
       indices: indices,
-      source: useCfg ? 'cfg.columns' : 'header_keywords',
+      source: source,
       headerByKey: headerByKey
     };
   }
@@ -6119,9 +6233,16 @@ function _sfdcDataVersion_(cfg) {
     var colPartner        = colResolved.indices.colPartner;
     var colSummary        = colResolved.indices.colSummary;
 
-    if (colResolved.source === 'cfg.columns') {
-      Logger.log('CoreData.readSfdcDeploymentsRaw_: using cfg.columns layout for "' +
-                 sheetName + '".');
+    Logger.log('CoreData.readSfdcDeploymentsRaw_: column resolution mode=' +
+               colResolved.source + ' for "' + sheetName + '".');
+    if (colResolved.source === 'cfg.columns_rejected_header_mismatch') {
+      var rejCols = cfg.columns || {};
+      var rejIdIdx = (rejCols.DEPLOYMENT_ID >= 1) ? rejCols.DEPLOYMENT_ID - 1 : -1;
+      var rejStIdx = (rejCols.OVERALL_STATUS >= 1) ? rejCols.OVERALL_STATUS - 1 : -1;
+      Logger.log('CoreData.readSfdcDeploymentsRaw_: cfg.columns rejected — DEPLOYMENT_ID col ' +
+                 rejCols.DEPLOYMENT_ID + ' header="' + (rejIdIdx >= 0 ? headers[rejIdIdx] : '') +
+                 '", OVERALL_STATUS col ' + rejCols.OVERALL_STATUS + ' header="' +
+                 (rejStIdx >= 0 ? headers[rejStIdx] : '') + '"; using header detection.');
     }
 
     if (colStatus < 0) {
@@ -6151,11 +6272,7 @@ function _sfdcDataVersion_(cfg) {
       function cellStr_(col) { return col >= 0 ? String(row[col] || '').trim() : ''; }
       function cellDate_(col) {
         if (col < 0) return '';
-        var raw = row[col];
-        if (!raw) return '';
-        var d = (raw instanceof Date) ? raw : new Date(raw);
-        if (isNaN(d.getTime())) return '';
-        return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+        return _sheetCellToDateKey_(row[col], tz);
       }
       function resolveField_(flatCol, objectCol, objectField) {
         var flat = cellStr_(flatCol);
@@ -7522,18 +7639,24 @@ function _sfdcDataVersion_(cfg) {
    * @param {string} windowStartKey
    * @param {string} windowEndKey
    * @param {Object} goLivesOverrides
+   * @param {Object=} deploymentOverrides  getDeploymentOverridesMap_(cfg)
    * @return {Array<Object>}
    * @private
    */
-  function _collectProductModeGoLivePfDetails_(pfRows, cfg, goLiveType, windowStartKey, windowEndKey, goLivesOverrides) {
+  function _collectProductModeGoLivePfDetails_(pfRows, cfg, goLiveType, windowStartKey, windowEndKey, goLivesOverrides, deploymentOverrides) {
     var activeStatus = (cfg.salesforce && cfg.salesforce.statusValues &&
                         cfg.salesforce.statusValues.active) || 'Active';
     var normalizedType = _normalizeProductModeGoLiveType_(goLiveType) || goLiveType;
+    var depMap = deploymentOverrides || {};
     var details = [];
     (pfRows || []).forEach(function (pf) {
       if (!pf || (!pf.deploymentFk && !pf.parentDeploymentId)) return;
       var ov = (goLivesOverrides && goLivesOverrides[pf.accountName]) || {};
       if (ov.exclude) return;
+
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      var depOv = _deploymentOverrideForParentId_(parentId, depMap);
+      if (depOv.exclude) return;
 
       var dateKey = null;
       if (normalizedType === 'actual') {
@@ -7541,7 +7664,7 @@ function _sfdcDataVersion_(cfg) {
       } else if (normalizedType === 'target') {
         var status = String(pf.overallStatus || '').trim();
         if (status && status !== activeStatus) return;
-        dateKey = _toDateKey_(ov.overrideDate || pf.targetGoLive);
+        dateKey = _resolvePfUpcomingGoLiveDateKey_(pf, ov, depOv);
       }
       if (!dateKey || !_dateKeyInRange_(dateKey, windowStartKey, windowEndKey)) return;
 
@@ -7572,10 +7695,11 @@ function _sfdcDataVersion_(cfg) {
 
     var pfRows = getProductModeHistoricalPfRows_(cfg, productOpts);
     var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var deploymentOverrides = getDeploymentOverridesMap_(cfg);
     var recentRaw = _collectProductModeGoLivePfDetails_(
-      pfRows, cfg, 'actual', recentStartKey, todayKey, goLivesOverrides);
+      pfRows, cfg, 'actual', recentStartKey, todayKey, goLivesOverrides, deploymentOverrides);
     var upcomingRaw = _collectProductModeGoLivePfDetails_(
-      pfRows, cfg, 'target', todayKey, upcomingEndKey, goLivesOverrides);
+      pfRows, cfg, 'target', todayKey, upcomingEndKey, goLivesOverrides, deploymentOverrides);
     var recentGrouped = _groupProductModeGoLivePfDetails_(recentRaw);
     var upcomingGrouped = _groupProductModeGoLivePfDetails_(upcomingRaw);
 
@@ -7672,6 +7796,7 @@ function _sfdcDataVersion_(cfg) {
     if (!usesProductModeParentAndPfUnion_(cfg)) return results || [];
     results = results || [];
     var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var deploymentOverrides = getDeploymentOverridesMap_(cfg);
     var unionRows = buildProductModeCanonicalUnionRows_(cfg, {
       surface: goLiveType === 'actual' ? 'trends' : 'default',
       productOpts: options.productOpts
@@ -7687,6 +7812,8 @@ function _sfdcDataVersion_(cfg) {
       if (!parentId || seenParents[parentId]) return;
       var ov = goLivesOverrides[dep.accountName] || {};
       if (ov.exclude) return;
+      var depOv = _deploymentOverrideForParentId_(parentId, deploymentOverrides);
+      if (depOv.exclude) return;
 
       var dateKey = null;
       if (goLiveType === 'actual') {
@@ -7696,7 +7823,13 @@ function _sfdcDataVersion_(cfg) {
                             cfg.salesforce.statusValues.active) || 'Active';
         var status = String(dep.overallStatus || '').trim();
         if (status && status !== activeStatus) return;
-        dateKey = _toDateKey_(ov.overrideDate || dep.mtpDate);
+        if (_hasOverrideCellValue_(ov.overrideDate)) {
+          dateKey = _toDateKey_(ov.overrideDate);
+        } else if (_hasOverrideCellValue_(depOv.overrideMtp)) {
+          dateKey = _toDateKey_(depOv.overrideMtp);
+        } else {
+          dateKey = _toDateKey_(dep.mtpDate);
+        }
       }
       if (!dateKey || !_dateKeyInRange_(dateKey, windowStartKey, windowEndKey)) return;
 
@@ -7773,8 +7906,9 @@ function _sfdcDataVersion_(cfg) {
 
     var pfRows = getProductModeHistoricalPfRows_(cfg, options.productOpts);
     var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+    var deploymentOverrides = getDeploymentOverridesMap_(cfg);
     var rawDetails = _collectProductModeGoLivePfDetails_(
-      pfRows, cfg, goLiveType, windowStartKey, windowEndKey, goLivesOverrides);
+      pfRows, cfg, goLiveType, windowStartKey, windowEndKey, goLivesOverrides, deploymentOverrides);
     var grouped = _groupProductModeGoLivePfDetails_(rawDetails);
     var results = _appendUnionParentGoLiveFallbacks_(
       cfg, grouped.events, options, goLiveType, windowStartKey, windowEndKey);
@@ -7802,6 +7936,163 @@ function _sfdcDataVersion_(cfg) {
                grouped.rawRowsGroupedIntoEvents + ' PF rows collapsed into account/date events) type=' +
                goLiveType);
     return results;
+  }
+
+  /**
+   * Debug-only: normalize a date-ish value to YYYY-MM-DD (same rules as go-live pipeline).
+   * @param {*} val
+   * @return {string}
+   */
+  function formatShortDateForDebug_(val) {
+    return _toDateKey_(val);
+  }
+
+  /**
+   * Self-check for calendar date-key normalization (run from Apps Script editor).
+   * @param {AppConfig=} config
+   * @return {{ allPass: boolean, results: Array<Object> }}
+   */
+  function debugCalendarDateKeyNormalization_(config) {
+    var cases = [
+      { label: 'date-only string', input: '2026-10-23', expect: '2026-10-23' },
+      { label: 'UTC midnight ISO', input: '2026-10-23T00:00:00.000Z', expect: '2026-10-23' },
+      { label: 'prior day string', input: '2026-10-22', expect: '2026-10-22' }
+    ];
+    var results = cases.map(function (c) {
+      var once = _toDateKey_(c.input);
+      var twice = _toDateKey_(once);
+      return {
+        label: c.label,
+        input: c.input,
+        once: once,
+        twice: twice,
+        expect: c.expect,
+        pass: once === c.expect && twice === c.expect
+      };
+    });
+    var allPass = results.every(function (r) { return r.pass; });
+    Logger.log('CoreData.debugCalendarDateKeyNormalization_: allPass=' + allPass +
+               ' results=' + JSON.stringify(results));
+    return { allPass: allPass, results: results };
+  }
+
+  /**
+   * Read-only trace of PF / override inputs for an upcoming go-live report row.
+   * @param {AppConfig} config
+   * @param {string=} optionalTokenOrDeploymentId
+   * @return {Object}
+   */
+  function debugUpcomingGoLiveReportRowSource_(config, optionalTokenOrDeploymentId) {
+    var cfg = CoreConfig.withDefaults(config);
+    var token = String(optionalTokenOrDeploymentId || '').trim();
+    var tokenLower = token.toLowerCase();
+    var histKey = usesProductModeParentAndPfUnion_(cfg) ? 'hist:v2:all' : 'hist:all';
+
+    function idMatches_(id) {
+      if (!token) return true;
+      var s = String(id || '').trim().toLowerCase();
+      if (!s) return false;
+      if (s === tokenLower || s.indexOf(tokenLower) >= 0) return true;
+      if (tokenLower.length >= 15 && s.indexOf(tokenLower.slice(0, 15)) >= 0) return true;
+      return false;
+    }
+
+    function describeRawDate_(val) {
+      return {
+        raw: val instanceof Date ? val.toISOString() : val,
+        type: val instanceof Date ? 'Date' : typeof val,
+        dateKey: _toDateKey_(val)
+      };
+    }
+
+    var depOverrides = getDeploymentOverridesMap_(cfg);
+    var glOverrides = getGoLivesOverridesMap_(cfg);
+    var deploymentOverrideForToken = null;
+    Object.keys(depOverrides).forEach(function (depId) {
+      if (!idMatches_(depId)) return;
+      var ov = depOverrides[depId];
+      deploymentOverrideForToken = {
+        deploymentId: depId,
+        overrideMtp: describeRawDate_(ov.overrideMtp),
+        excludeFromReport: !!ov.exclude,
+        overrideCurrentUpdate: ov.overrideCurrentUpdate || ''
+      };
+    });
+
+    var pfRows = getProductModeHistoricalPfRows_(cfg, { product: 'all' }) || [];
+    var matchingPfRows = [];
+    pfRows.forEach(function (pf) {
+      if (!pf) return;
+      var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+      if (token && !idMatches_(parentId) && !idMatches_(pf.pfRowId) &&
+          String(pf.accountName || '').toLowerCase().indexOf(tokenLower) < 0) {
+        return;
+      }
+      matchingPfRows.push({
+        pfRowId: pf.pfRowId || '',
+        parentDeploymentId: parentId,
+        accountName: pf.accountName || '',
+        deploymentName: pf.deploymentName || '',
+        productArea: pf.productArea || '',
+        funcArea: pf.funcArea || '',
+        overallStatus: pf.overallStatus || '',
+        targetGoLive: describeRawDate_(pf.targetGoLive),
+        actualGoLive: describeRawDate_(pf.actualGoLive)
+      });
+    });
+
+    var effectiveParent = null;
+    if (token) {
+      try {
+        var effective = getAllEffectiveDeployments(cfg, { product: 'all' }) || [];
+        effective.forEach(function (dep) {
+          if (!idMatches_(dep.deploymentId) && !idMatches_(dep.parentDeploymentId)) return;
+          effectiveParent = {
+            deploymentId: dep.deploymentId || '',
+            parentDeploymentId: dep.parentDeploymentId || '',
+            accountName: dep.accountName || '',
+            mtpDate: describeRawDate_(dep.mtpDate),
+            deploymentRowSource: dep.deploymentRowSource || ''
+          };
+        });
+      } catch (effErr) {
+        Logger.log('CoreData.debugUpcomingGoLiveReportRowSource_: effective lookup failed: ' + effErr);
+      }
+    }
+
+    var glOvForAccount = null;
+    if (effectiveParent && effectiveParent.accountName) {
+      glOvForAccount = glOverrides[effectiveParent.accountName] || null;
+    } else if (matchingPfRows.length && matchingPfRows[0].accountName) {
+      glOvForAccount = glOverrides[matchingPfRows[0].accountName] || null;
+    }
+    if (glOvForAccount) {
+      glOvForAccount = {
+        overrideDate: describeRawDate_(glOvForAccount.overrideDate),
+        exclude: !!glOvForAccount.exclude,
+        overridePartner: glOvForAccount.overridePartner || ''
+      };
+    }
+
+    return {
+      token: token || null,
+      usesProductModePfGoLiveSource: usesProductModePfGoLiveSource_(cfg),
+      usesProductModeParentUnion: usesProductModeParentAndPfUnion_(cfg),
+      deploymentOverrideForToken: deploymentOverrideForToken,
+      goLivesOverrideForAccount: glOvForAccount,
+      effectiveParentDeployment: effectiveParent,
+      matchingPfRows: matchingPfRows,
+      rawPfRowCount: matchingPfRows.length,
+      cacheLayer: {
+        historicalPfRowsFromExecutionCache: !!(
+          _cache.historicalPfByProduct && _cache.historicalPfByProduct[histKey]
+        ),
+        deploymentOverridesFromExecutionCache: _cache.overridesMap !== null,
+        goLivesOverridesFromExecutionCache: _cache.goLivesOverridesMap !== null,
+        reportBuildContextActive: !!_cache.reportBuildCtx,
+        note: 'Per-execution in-memory cache only; no stale cross-run report row cache.'
+      }
+    };
   }
 
   /**
@@ -9176,11 +9467,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       }
       function cellDate_(col) {
         if (col < 0) return '';
-        var raw = row[col];
-        if (!raw) return '';
-        var d = (raw instanceof Date) ? raw : new Date(raw);
-        if (isNaN(d.getTime())) return '';
-        return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+        return _sheetCellToDateKey_(row[col], tz);
       }
       function resolveField_(flatCol, objectCol, objectField) {
         var flat = cellStr_(flatCol);
@@ -10045,27 +10332,31 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   ];
 
   /**
+   * Sheet cell → YYYY-MM-DD without UTC-shifting date-only strings.
+   * @param {*} raw
+   * @param {string} tz
+   * @return {string}
+   * @private
+   */
+  function _sheetCellToDateKey_(raw, tz) {
+    if (!raw) return '';
+    var key = CoreUtils.toCalendarDateKey(raw, tz);
+    return key || '';
+  }
+
+  /**
    * Sanitizes ISO or locale date strings into YYYY-MM-DD.
+   * Date-only YYYY-MM-DD (and ISO prefixes) preserve the calendar date exactly.
    * @param {*} dVal
    * @return {string}
    * @private
    */
   function formatShortDate_(dVal) {
     if (!dVal || dVal === '\u2014' || dVal === 'null' || dVal === 'undefined') return '\u2014';
+    var key = CoreUtils.toCalendarDateKey(dVal, Session.getScriptTimeZone());
+    if (key) return key;
     var str = String(dVal).trim();
-
-    // Handle MM/DD/YYYY format
-    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
-      var parts = str.split('/');
-      var mm = parts[0].padStart(2, '0');
-      var dd = parts[1].padStart(2, '0');
-      var yyyy = parts[2];
-      return yyyy + '-' + mm + '-' + dd;
-    }
-
-    var d = new Date(str);
-    if (isNaN(d.getTime())) return str.split('T')[0] || '\u2014';
-    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    return str || '\u2014';
   }
 
   /**
@@ -11420,8 +11711,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     if (usesPfGoLive) {
       var pfRows = getProductModeHistoricalPfRows_(cfg, { product: pa });
       var goLivesOverrides = getGoLivesOverridesMap_(cfg);
+      var deploymentOverrides = getDeploymentOverridesMap_(cfg);
       var rawDetails = _collectProductModeGoLivePfDetails_(
-        pfRows, cfg, 'target', todayKey, highRiskEndKey, goLivesOverrides);
+        pfRows, cfg, 'target', todayKey, highRiskEndKey, goLivesOverrides, deploymentOverrides);
       rawPfTargetCount = rawDetails.length;
       redYellowPfCount = rawDetails.filter(function (d) {
         return d.health === 'Red' || d.health === 'Yellow';
@@ -11887,6 +12179,41 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Target go-live for the Student Records product function on a deployment (YYYY-MM-DD).
+   *
+   * @param {string} deploymentId
+   * @param {Object<string, Array<{function:string, targetGoLive:string}>>} pfMap
+   * @return {string}
+   * @private
+   */
+  function _studentRecordsTargetDateFromPfMap_(deploymentId, pfMap) {
+    var prods = (pfMap && pfMap[deploymentId]) ? pfMap[deploymentId] : [];
+    var want = 'student records';
+    for (var i = 0; i < prods.length; i++) {
+      var fn = String(prods[i]['function'] || '').trim().toLowerCase();
+      if (fn === want) {
+        return prods[i].targetGoLive || '';
+      }
+    }
+    return '';
+  }
+
+  /**
+   * Calendar YYYY-MM-DD for Student tab payloads (no timezone shift on date-only strings).
+   *
+   * @param {*} rawDate
+   * @return {string}
+   * @private
+   */
+  function _studentTabCalendarDateField_(rawDate) {
+    if (rawDate == null || rawDate === '') return '';
+    var key = CoreUtils.toCalendarDateKey(rawDate);
+    if (key) return key;
+    var iso = CoreUtils.extractIsoCalendarDateKey(rawDate);
+    return iso || '';
+  }
+
+  /**
    * Builds the server-side data payload for the Student tab.
    * Returns null when cfg.student?.enabled !== true.
    *
@@ -11907,17 +12234,20 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var deployments = studentRows.map(function (dep) {
       var sd = studentDataMap[dep.deploymentId] || {};
       return {
-        rowIndex:         dep.rowIndex,
-        deploymentId:     dep.deploymentId,
-        accountName:      dep.accountName,
-        deploymentName:   dep.deploymentName,
-        partner:          dep.partner,
-        overallStatus:    dep.overallStatus,
-        health:           dep.health,
-        phase:            dep.phase,
-        mtpDate:          dep.mtpDate,
-        registrationDate: sd.registrationDate || '',
-        notes:            sd.notes || ''
+        rowIndex:              dep.rowIndex,
+        deploymentId:          dep.deploymentId,
+        accountName:           dep.accountName,
+        deploymentName:        dep.deploymentName,
+        partner:               dep.partner,
+        overallStatus:         dep.overallStatus,
+        health:                dep.health,
+        phase:                 dep.phase,
+        mtpDate:               _studentTabCalendarDateField_(dep.mtpDate),
+        studentRecordsMtpDate: _studentTabCalendarDateField_(
+          _studentRecordsTargetDateFromPfMap_(dep.deploymentId, pfMap)
+        ),
+        registrationDate:      sd.registrationDate || '',
+        notes:                 sd.notes || ''
       };
     });
 
@@ -11994,6 +12324,224 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var d = rawDate instanceof Date ? rawDate : new Date(String(rawDate));
     if (isNaN(d.getTime())) return String(rawDate);
     return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+  }
+
+  /**
+   * Formats a date for UI display (matches CoreUI formatDate: "Sep 14, 2026").
+   *
+   * @param {*} rawDate
+   * @return {string}
+   * @private
+   */
+  function _formatUiShortDate_(rawDate) {
+    if (rawDate === null || rawDate === undefined || rawDate === '') return '';
+    var d = rawDate instanceof Date ? rawDate : new Date(String(rawDate));
+    if (isNaN(d.getTime())) return '';
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MMM d, yyyy');
+  }
+
+  /**
+   * HENP-only diagnostic: Student tab row dates vs expanded Student Products (calendar keys).
+   *
+   * @param {AppConfig} config
+   * @param {string=} optionalToken Filter on account, deployment name, or id.
+   * @return {{appId:string, rowCount:number, rows:Array<Object>, error?:string}}
+   */
+  function debugHenpStudentRowForUI(config, optionalToken) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (String(cfg.appId || '').toUpperCase() !== 'HENP') {
+      return { appId: cfg.appId || '', rowCount: 0, rows: [], error: 'debugHenpStudentRowForUI is HENP-only.' };
+    }
+    if (!cfg.student || cfg.student.enabled !== true) {
+      return { appId: cfg.appId || 'HENP', rowCount: 0, rows: [], error: 'Student is not enabled.' };
+    }
+
+    var token = optionalToken ? String(optionalToken).trim().toLowerCase() : '';
+    var tabPayload = buildStudentTabData_(cfg);
+    var deployments = (tabPayload && tabPayload.deployments) ? tabPayload.deployments : [];
+    var pfMap = (tabPayload && tabPayload.products) ? tabPayload.products : {};
+
+    var filtered = deployments;
+    if (token) {
+      filtered = deployments.filter(function (d) {
+        var hay = [
+          String(d.accountName || '').toLowerCase(),
+          String(d.deploymentName || '').toLowerCase(),
+          String(d.deploymentId || '').toLowerCase()
+        ].join(' ');
+        return hay.indexOf(token) >= 0;
+      });
+    }
+
+    var rows = filtered.slice(0, 20).map(function (d) {
+      var srRaw = _studentRecordsTargetDateFromPfMap_(d.deploymentId, pfMap);
+      var prods = pfMap[d.deploymentId] || [];
+      var studentRecordsPf = null;
+      for (var i = 0; i < prods.length; i++) {
+        var fn = String(prods[i]['function'] || '').trim().toLowerCase();
+        if (fn === 'student records') {
+          studentRecordsPf = prods[i];
+          break;
+        }
+      }
+      var productsDetail = prods.map(function (p) {
+        var tgt = p.targetGoLive || '';
+        return {
+          function: p['function'] || '',
+          targetGoLiveRaw: tgt,
+          targetGoLiveDateKey: _studentTabCalendarDateField_(tgt),
+          targetGoLiveDisplay: _formatUiShortDate_(tgt)
+        };
+      });
+
+      return {
+        accountName: d.accountName || '',
+        deploymentName: d.deploymentName || '',
+        deploymentId: d.deploymentId || '',
+        mtpDate: {
+          payloadRaw: d.mtpDate || '',
+          dateKey: _studentTabCalendarDateField_(d.mtpDate),
+          display: _formatUiShortDate_(d.mtpDate)
+        },
+        studentRecordsMtpDate: {
+          payloadRaw: d.studentRecordsMtpDate || '',
+          dateKey: _studentTabCalendarDateField_(d.studentRecordsMtpDate),
+          display: _formatUiShortDate_(d.studentRecordsMtpDate),
+          derivedFromPfTargetRaw: srRaw || '',
+          derivedFromPfDateKey: _studentTabCalendarDateField_(srRaw),
+          matchesStudentRecordsPfRow: !!(studentRecordsPf &&
+            _studentTabCalendarDateField_(d.studentRecordsMtpDate) ===
+            _studentTabCalendarDateField_(studentRecordsPf.targetGoLive || ''))
+        },
+        studentProducts: productsDetail
+      };
+    });
+
+    Logger.log('debugHenpStudentRowForUI: rows=' + rows.length + (token ? ', token=' + token : ''));
+    return { appId: cfg.appId || 'HENP', rowCount: filtered.length, rows: rows };
+  }
+
+  /**
+   * HENP-only diagnostic: trace Student tab MTP Date from SFDC sheet → effective row → UI payload.
+   * Non-mutating. Returns null fields when Student is disabled or app is not HENP.
+   *
+   * @param {AppConfig} config
+   * @param {string=} optionalAccountOrDeploymentToken Optional filter on account, deployment name, or id.
+   * @return {{appId:string, rowCount:number, sampleRows:Array<Object>, error?:string}}
+   */
+  function debugHenpStudentMtpDateTraceForUI(config, optionalAccountOrDeploymentToken) {
+    var cfg = CoreConfig.withDefaults(config);
+    if (String(cfg.appId || '').toUpperCase() !== 'HENP') {
+      return {
+        appId: cfg.appId || '',
+        rowCount: 0,
+        sampleRows: [],
+        error: 'debugHenpStudentMtpDateTraceForUI is HENP-only.'
+      };
+    }
+    if (!cfg.student || cfg.student.enabled !== true) {
+      return {
+        appId: cfg.appId || 'HENP',
+        rowCount: 0,
+        sampleRows: [],
+        error: 'Student is not enabled for this app.'
+      };
+    }
+
+    var token = optionalAccountOrDeploymentToken
+      ? String(optionalAccountOrDeploymentToken).trim().toLowerCase()
+      : '';
+    var sheetName = (cfg.sheets && cfg.sheets.deployments) || 'SFDC_Deployments';
+    var sfdcField = 'Deployment__r.Current_MTP_Date__c';
+    var sfdcColumnKey = 'CURRENT_MTP_DATE';
+
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg) || [];
+    } catch (readErr) {
+      Logger.log('debugHenpStudentMtpDateTraceForUI: SFDC read failed: ' + readErr);
+    }
+    var sfdcById = {};
+    sfdcRows.forEach(function (r) {
+      if (r && r.deploymentId) sfdcById[r.deploymentId] = r;
+    });
+
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+    var tabPayload = buildStudentTabData_(cfg);
+    var deployments = (tabPayload && tabPayload.deployments) ? tabPayload.deployments : [];
+    var pfMap = CoreSalesforce.getStudentProductFunctionsMap_(cfg) || {};
+
+    var filtered = deployments;
+    if (token) {
+      filtered = deployments.filter(function (d) {
+        var acct = String(d.accountName || '').toLowerCase();
+        var dep = String(d.deploymentName || '').toLowerCase();
+        var id = String(d.deploymentId || '').toLowerCase();
+        return acct.indexOf(token) >= 0 || dep.indexOf(token) >= 0 || id.indexOf(token) >= 0;
+      });
+    }
+
+    var sampleRows = filtered.slice(0, 20).map(function (d) {
+      var rawRow = sfdcById[d.deploymentId] || null;
+      var resolved = rawRow
+        ? _resolveDeploymentOverrideEntry_(rawRow, overridesMap)
+        : { ov: {}, lookupId: '' };
+      var ov = resolved.ov || {};
+      var hasOverride = !!(ov && ov.overrideMtp);
+      var rawSourceValue = hasOverride ? ov.overrideMtp : (rawRow ? rawRow.mtpDate : '');
+      var sourceFieldName = hasOverride ? 'DeploymentOverrides.Override_MTPDate' : sfdcField;
+      var sourceSheetName = hasOverride
+        ? ((cfg.sheets && cfg.sheets.deploymentOverrides) || 'DeploymentOverrides')
+        : sheetName;
+
+      var displayed = d.mtpDate;
+      var displayedType = displayed === null || displayed === undefined || displayed === ''
+        ? 'empty'
+        : (displayed instanceof Date ? 'Date' : typeof displayed);
+
+      var parsedDateValue = '';
+      if (displayed !== null && displayed !== undefined && displayed !== '') {
+        var pd = displayed instanceof Date ? displayed : new Date(String(displayed));
+        if (!isNaN(pd.getTime())) {
+          parsedDateValue = CoreUtils.formatDateToIsoString(pd);
+        }
+      }
+
+      var prods = pfMap[d.deploymentId] || [];
+      var productFunction = prods.length
+        ? prods.map(function (p) { return p['function'] || p.function || ''; }).filter(Boolean).join('; ')
+        : '';
+
+      return {
+        accountName: d.accountName || '',
+        deploymentName: d.deploymentName || '',
+        deploymentId: d.deploymentId || '',
+        productFunction: productFunction,
+        displayedMtpDateValue: displayed === null || displayed === undefined ? '' : String(displayed),
+        displayedMtpDateType: displayedType,
+        sourceFieldName: sourceFieldName,
+        sourceSheetName: sourceSheetName,
+        sourceColumnKey: hasOverride ? 'Override_MTPDate' : sfdcColumnKey,
+        rawSourceValue: rawSourceValue === null || rawSourceValue === undefined
+          ? ''
+          : (rawSourceValue instanceof Date ? rawSourceValue.toISOString() : String(rawSourceValue)),
+        rawSourceValueType: rawSourceValue === null || rawSourceValue === undefined
+          ? 'empty'
+          : (rawSourceValue instanceof Date ? 'Date' : typeof rawSourceValue),
+        overrideApplied: hasOverride,
+        parsedDateValue: parsedDateValue,
+        formattedShortDate: _formatUiShortDate_(displayed)
+      };
+    });
+
+    Logger.log('debugHenpStudentMtpDateTraceForUI: rowCount=' + deployments.length +
+               ', samples=' + sampleRows.length + (token ? ', token=' + token : ''));
+
+    return {
+      appId: cfg.appId || 'HENP',
+      rowCount: deployments.length,
+      sampleRows: sampleRows
+    };
   }
 
   /**
@@ -13285,6 +13833,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     _debugProductModeDeploymentDisplayGrain: _debugProductModeDeploymentDisplayGrain,
     _debugProductModeCounts:             _debugProductModeCounts,
     _debugProductModeGoLiveEvents: _debugProductModeGoLiveEvents,
+    formatShortDateForDebug_: formatShortDateForDebug_,
+    debugCalendarDateKeyNormalization_: debugCalendarDateKeyNormalization_,
+    debugUpcomingGoLiveReportRowSource_: debugUpcomingGoLiveReportRowSource_,
     _debugOverviewNextHighRisk: _debugOverviewNextHighRisk,
     _debugProductModeSources: _debugProductModeSources,
     resolveGoLiveDisplayDeploymentName_: resolveGoLiveDisplayDeploymentName_,
@@ -13355,6 +13906,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     filterRowsExcludedFromReport_: filterRowsExcludedFromReport_,
     buildStudentTabData_:        buildStudentTabData_,
     saveStudentDeploymentFields: saveStudentDeploymentFields,
+    debugHenpStudentMtpDateTraceForUI: debugHenpStudentMtpDateTraceForUI,
+    debugHenpStudentRowForUI:          debugHenpStudentRowForUI,
 
     // N7: MDS/PGL notifications (delegates to CoreNotify)
     getDeploymentContactsMap_:   getDeploymentContactsMap_,

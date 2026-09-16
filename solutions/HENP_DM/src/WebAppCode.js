@@ -401,6 +401,39 @@ function saveStudentDeploymentFields(deploymentId, patch) {
   return CoreLib.CoreData.saveStudentDeploymentFields(APP_CONFIG, deploymentId, patch);
 }
 
+/**
+ * HENP Student tab MTP Date trace (SFDC / overrides → effective → UI payload).
+ * Run from the Apps Script editor: debugHenpStudentMtpDateTraceForUI() or with a search token.
+ *
+ * @param {string=} optionalAccountOrDeploymentToken
+ * @return {Object}
+ */
+/**
+ * HENP Student tab row date diagnostic (payload vs Student Products calendar keys).
+ *
+ * @param {string=} optionalToken
+ * @return {Object}
+ */
+function debugHenpStudentRowForUI(optionalToken) {
+  if (!CoreLib || !CoreLib.CoreData ||
+      typeof CoreLib.CoreData.debugHenpStudentRowForUI !== 'function') {
+    throw new Error('debugHenpStudentRowForUI is not available on CoreLib.CoreData.');
+  }
+  return CoreLib.CoreData.debugHenpStudentRowForUI(APP_CONFIG, optionalToken);
+}
+
+function debugHenpStudentMtpDateTraceForUI(optionalAccountOrDeploymentToken) {
+  if (!CoreLib || !CoreLib.CoreData ||
+      typeof CoreLib.CoreData.debugHenpStudentMtpDateTraceForUI !== 'function') {
+    throw new Error(
+      'CoreData.debugHenpStudentMtpDateTraceForUI is not available. Push DepMngr HEAD and reload.');
+  }
+  return CoreLib.CoreData.debugHenpStudentMtpDateTraceForUI(
+    APP_CONFIG,
+    optionalAccountOrDeploymentToken
+  );
+}
+
 // ============================================================================
 // DIAGNOSTICS
 // ============================================================================

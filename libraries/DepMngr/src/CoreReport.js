@@ -1216,15 +1216,6 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<th style="' + TH_STYLE + '">Deployment</th>' +
       '<th style="' + TH_STYLE + '">Partner</th>';
 
-    function _fmtReportDate_(dateStr) {
-      if (!dateStr) return '';
-      var d = new Date(dateStr);
-      if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleDateString('en-US', {
-        year: 'numeric', month: 'short', day: 'numeric'
-      });
-    }
-
     var tbodyHtml = rows.map(function (row, ri) {
       var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
 
@@ -1343,15 +1334,6 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     '<th style="' + TH_STYLE + '">Account</th>' +
     '<th style="' + TH_STYLE + '">Deployment</th>' +
     '<th style="' + TH_STYLE + '">Partner</th>';
-
-  function _fmtReportDate_(dateStr) {
-    if (!dateStr) return '';
-    var d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('en-US', {
-      year: 'numeric', month: 'short', day: 'numeric'
-    });
-  }
 
   var tbodyHtml = rows.map(function (row, ri) {
     var defaultBg = (ri % 2 === 0) ? '#ffffff' : '#f7f7f7';
@@ -1997,16 +1979,87 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   }
 
   /**
+   * Extracts Y-M-D from a calendar date (YYYY-MM-DD or same date prefix before T).
+   * @param {*} value
+   * @return {{y:number,m:number,d:number}|null}
+   * @private
+   */
+  function parseReportCalendarDateParts_(value) {
+    if (value == null || value === '') return null;
+    if (value instanceof Date) {
+      if (isNaN(value.getTime())) return null;
+      return { y: value.getFullYear(), m: value.getMonth() + 1, d: value.getDate() };
+    }
+    var str = String(value).trim();
+    if (!str) return null;
+    var iso = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/.exec(str);
+    if (iso) {
+      var y = parseInt(iso[1], 10);
+      var mo = parseInt(iso[2], 10);
+      var day = parseInt(iso[3], 10);
+      if (mo >= 1 && mo <= 12 && day >= 1 && day <= 31) return { y: y, m: mo, d: day };
+    }
+    return null;
+  }
+
+  /**
+   * @param {{y:number,m:number,d:number}} parts
+   * @return {Date|null}
+   * @private
+   */
+  function calendarDateFromParts_(parts) {
+    if (!parts) return null;
+    var dt = new Date(parts.y, parts.m - 1, parts.d);
+    if (isNaN(dt.getTime())) return null;
+    if (dt.getFullYear() !== parts.y || dt.getMonth() !== parts.m - 1 || dt.getDate() !== parts.d) {
+      return null;
+    }
+    return dt;
+  }
+
+  /**
+   * Parses a value as a calendar date in local time (no UTC date-only shift).
+   * @param {*} value
+   * @return {Date|null}
+   * @private
+   */
+  function parseReportCalendarDateLocal_(value) {
+    var parts = parseReportCalendarDateParts_(value);
+    if (parts) return calendarDateFromParts_(parts);
+    if (value instanceof Date) {
+      if (isNaN(value.getTime())) return null;
+      return calendarDateFromParts_({
+        y: value.getFullYear(), m: value.getMonth() + 1, d: value.getDate()
+      });
+    }
+    var str = String(value).trim();
+    if (!str) return null;
+    var d = new Date(str);
+    if (isNaN(d.getTime())) return null;
+    return calendarDateFromParts_({ y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() });
+  }
+
+  /**
+   * Format a yyyy-MM-dd (or date-like) value for report display.
+   * @param {string|Date} dateStr
+   * @return {string}
+   * @private
+   */
+  function _fmtReportDate_(dateStr) {
+    if (!dateStr) return '';
+    var date = parseReportCalendarDateLocal_(dateStr);
+    if (!date) return String(dateStr);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  /**
    * N8 V2: format a yyyy-MM-dd date for report display.
-   * @param {string} dateStr
+   * @param {string|Date} dateStr
    * @return {string}
    * @private
    */
   function _fmtReportDateV2_(dateStr) {
-    if (!dateStr) return '';
-    var d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    return _fmtReportDate_(dateStr);
   }
 
   /**
@@ -2064,14 +2117,18 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
   function _filterUpcomingGoLivesForReportV2_(rows, windowDays) {
     if (!rows || !rows.length) return [];
 
+    var tz = Session.getScriptTimeZone();
     var now = new Date();
     now.setHours(0, 0, 0, 0);
     var windowEnd = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+    var startKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var endKey = Utilities.formatDate(windowEnd, tz, 'yyyy-MM-dd');
 
     function inWindow_(dateStr) {
       if (!dateStr) return false;
-      var d = new Date(dateStr);
-      return !isNaN(d.getTime()) && d >= now && d <= windowEnd;
+      var key = CoreData.formatShortDateForDebug_(dateStr);
+      if (!key) return false;
+      return key >= startKey && key <= endKey;
     }
 
     return rows.filter(function (row) {
@@ -2201,26 +2258,36 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
    * @return {string}
    * @private
    */
-  function _buildUpcomingGoLivesContentV2_(config) {
+  /**
+   * Rows fed to the V2 Upcoming Go-Lives table (post window/scope/exclusion filters).
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function _resolveUpcomingGoLivesReportRowsV2_(config) {
     var cfg = CoreConfig.withDefaults(config);
     var upcomingDays = cfg.report.upcomingWindowDays != null ? cfg.report.upcomingWindowDays : 60;
     var rows = CoreData.getUpcomingGoLives(cfg, null) || [];
     rows = _filterUpcomingGoLivesForReportV2_(rows, upcomingDays);
     rows = CoreData.filterRowsByReportProductScope_(rows, cfg);
     rows = CoreData.filterRowsExcludedFromReport_(rows);
-
-    var effectiveRows = _filterRowsByReportProductScopeV2_(
-      CoreData.getAllEffectiveDeployments(cfg), cfg
-    );
-    var effectiveByDeploymentId = _buildReportEffectiveLookup_(effectiveRows);
-
-    rows = rows.slice().sort(function (a, b) {
+    return rows.slice().sort(function (a, b) {
       var ad = a.nextGoLiveDate || a.mtpDate || '';
       var bd = b.nextGoLiveDate || b.mtpDate || '';
       if (ad < bd) return -1;
       if (ad > bd) return 1;
       return String(a.accountName || '').localeCompare(String(b.accountName || ''));
     });
+  }
+
+  function _buildUpcomingGoLivesContentV2_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var rows = _resolveUpcomingGoLivesReportRowsV2_(cfg);
+
+    var effectiveRows = _filterRowsByReportProductScopeV2_(
+      CoreData.getAllEffectiveDeployments(cfg), cfg
+    );
+    var effectiveByDeploymentId = _buildReportEffectiveLookup_(effectiveRows);
 
     return _buildGoLivesTableV2_(rows, effectiveByDeploymentId, 'upcomingDates',
       '(No upcoming go lives in report)');
@@ -2808,6 +2875,122 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     return { totalMs: totalMs, phases: phases, goLiveSummary: goLiveSummary };
   }
 
+  /**
+   * Read-only trace: upcoming go-live rows as seen by the V2 monthly report (before HTML).
+   * @param {AppConfig} config
+   * @param {string=} optionalTokenOrDeploymentId  deploymentId, parent id, or account substring
+   * @return {Object}
+   */
+  function debugUpcomingGoLiveReportRowsForUI(config, optionalTokenOrDeploymentId) {
+    var cfg = CoreConfig.withDefaults(config);
+    var token = String(optionalTokenOrDeploymentId || '').trim();
+    var reportRows = _resolveUpcomingGoLivesReportRowsV2_(cfg);
+    var sourceTrace = CoreData.debugUpcomingGoLiveReportRowSource_(cfg, token);
+    var matches = [];
+
+    function rowMatches_(row) {
+      if (!token) return true;
+      var t = token.toLowerCase();
+      function hit_(id) {
+        var s = String(id || '').trim().toLowerCase();
+        return s && (s === t || s.indexOf(t) >= 0 || (t.length >= 15 && s.indexOf(t.slice(0, 15)) >= 0));
+      }
+      if (hit_(row.deploymentId) || hit_(row.accountId) || hit_(row.parentDeploymentId)) return true;
+      if (String(row.accountName || '').toLowerCase().indexOf(t) >= 0) return true;
+      var parents = row.parentDeploymentIds || [];
+      for (var pi = 0; pi < parents.length; pi++) {
+        if (hit_(parents[pi])) return true;
+      }
+      var pfs = row.productFunctions || [];
+      for (var fi = 0; fi < pfs.length; fi++) {
+        if (hit_(pfs[fi].parentDeploymentId) || hit_(pfs[fi].deploymentFk)) return true;
+      }
+      return false;
+    }
+
+    function describeDate_(val) {
+      return {
+        raw: val instanceof Date ? val.toISOString() : val,
+        type: val instanceof Date ? 'Date' : typeof val,
+        dateKey: CoreData.formatShortDateForDebug_(val),
+        reportDisplayCurrent: _fmtReportDateV2_(val)
+      };
+    }
+
+    var depMtpKey = sourceTrace.deploymentOverrideForToken &&
+      sourceTrace.deploymentOverrideForToken.overrideMtp &&
+      sourceTrace.deploymentOverrideForToken.overrideMtp.dateKey;
+    var glDateKey = sourceTrace.goLivesOverrideForAccount &&
+      sourceTrace.goLivesOverrideForAccount.overrideDate &&
+      sourceTrace.goLivesOverrideForAccount.overrideDate.dateKey;
+
+    reportRows.forEach(function (row) {
+      if (!rowMatches_(row)) return;
+      var upcoming = row.upcomingDates || [];
+      var firstDate = upcoming.length ? upcoming[0].date : (row.nextGoLiveDate || row.mtpDate || '');
+      var firstDateKey = CoreData.formatShortDateForDebug_(firstDate);
+      var rawPfTargetKey = '';
+      if (sourceTrace.matchingPfRows && sourceTrace.matchingPfRows.length) {
+        rawPfTargetKey = sourceTrace.matchingPfRows[0].targetGoLive &&
+          sourceTrace.matchingPfRows[0].targetGoLive.dateKey || '';
+      }
+      var deploymentOverrideAffectsPfGoLiveDates = !!(
+        depMtpKey &&
+        !glDateKey &&
+        rawPfTargetKey &&
+        firstDateKey === depMtpKey &&
+        rawPfTargetKey !== depMtpKey
+      );
+      matches.push({
+        deploymentId: row.deploymentId || '',
+        parentDeploymentId: row.parentDeploymentId || '',
+        parentDeploymentIds: row.parentDeploymentIds || [],
+        accountId: row.accountId || '',
+        accountName: row.accountName || '',
+        deploymentName: row.deploymentName || '',
+        upcomingDates: upcoming,
+        upcomingDatesFirst: describeDate_(firstDate),
+        nextGoLiveDate: describeDate_(row.nextGoLiveDate),
+        mtpDate: describeDate_(row.mtpDate),
+        goLiveDate: describeDate_(row.goLiveDate),
+        targetGoLive: describeDate_(row.goLiveDate || row.nextGoLiveDate),
+        productArea: row.productArea || '',
+        functions: row.functions || [],
+        sourcePath: row.deploymentRowSource || '',
+        sourceType: row.dateSource || row.goLiveType || '',
+        overrideApplied: !!(row.hasAnyOverride || row.hasOperationalOverride),
+        goLivesOverrideApplied: !!(
+          sourceTrace.goLivesOverrideForAccount &&
+          sourceTrace.goLivesOverrideForAccount.overrideDate &&
+          sourceTrace.goLivesOverrideForAccount.overrideDate.dateKey
+        ),
+        deploymentOverrideApplied: !!(
+          sourceTrace.deploymentOverrideForToken &&
+          sourceTrace.deploymentOverrideForToken.overrideMtp &&
+          sourceTrace.deploymentOverrideForToken.overrideMtp.dateKey
+        ),
+        deploymentOverrideAffectsPfGoLiveDates: deploymentOverrideAffectsPfGoLiveDates,
+        productFunctionCount: row.productFunctionCount || 0,
+        eventKey: row.eventKey || '',
+        reportDateMainCell: _renderGoLiveDateMainCellV2_(row, 'upcomingDates')
+      });
+    });
+
+    var payload = {
+      appId: cfg.appId || '',
+      token: token || null,
+      reportUpcomingWindowDays: cfg.report.upcomingWindowDays != null ? cfg.report.upcomingWindowDays : 60,
+      productModeGoLiveSource: (cfg.activeDeployments && cfg.activeDeployments.productModeGoLiveSource) || '',
+      reportRowCount: reportRows.length,
+      matchCount: matches.length,
+      matches: matches,
+      sourceTrace: sourceTrace,
+      cacheLayer: sourceTrace.cacheLayer || {}
+    };
+    Logger.log('CoreReport.debugUpcomingGoLiveReportRowsForUI: ' + JSON.stringify(payload));
+    return payload;
+  }
+
   // --- EXPORTS ---------------------------------------------------------------
 
   return {
@@ -2818,6 +3001,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     exportReportV2ToDrive: exportReportV2ToDrive,
     buildReportV2: buildReportV2,
     buildReportV2WithAnalytics: buildReportV2WithAnalytics,
-    debugGmailReportPreviewPerformance: debugGmailReportPreviewPerformance
+    debugGmailReportPreviewPerformance: debugGmailReportPreviewPerformance,
+    debugUpcomingGoLiveReportRowsForUI: debugUpcomingGoLiveReportRowsForUI
   };
 })();

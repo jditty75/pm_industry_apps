@@ -22,6 +22,59 @@ var CoreUtils = (function () {
   }
 
   /**
+   * Extracts a calendar YYYY-MM-DD from a date-only or ISO-prefix string without
+   * timezone shifting (does not use Date parsing for YYYY-MM-DD prefixes).
+   *
+   * @param {*} value
+   * @return {string} YYYY-MM-DD or ''
+   */
+  function extractIsoCalendarDateKey(value) {
+    if (value == null || value === '') return '';
+    if (value instanceof Date) return '';
+    var str = String(value).trim();
+    if (!str) return '';
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/.exec(str);
+    if (!m) return '';
+    var mo = parseInt(m[2], 10);
+    var day = parseInt(m[3], 10);
+    if (mo < 1 || mo > 12 || day < 1 || day > 31) return '';
+    return m[1] + '-' + m[2] + '-' + m[3];
+  }
+
+  /**
+   * Normalizes a sheet/source value to a YYYY-MM-DD calendar key.
+   * Date-only strings preserve the leading calendar date; Date objects use timeZone.
+   *
+   * @param {*} value
+   * @param {string=} timeZone  Defaults to Session.getScriptTimeZone() at runtime.
+   * @return {string} YYYY-MM-DD or ''
+   */
+  function toCalendarDateKey(value, timeZone) {
+    if (value == null || value === '') return '';
+    var isoKey = extractIsoCalendarDateKey(value);
+    if (isoKey) return isoKey;
+    if (value instanceof Date) {
+      if (isNaN(value.getTime())) return '';
+      var tz = timeZone || Session.getScriptTimeZone();
+      return Utilities.formatDate(value, tz, 'yyyy-MM-dd');
+    }
+    var str = String(value).trim();
+    if (!str) return '';
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+      var parts = str.split('/');
+      var mm = parts[0].padStart(2, '0');
+      var dd = parts[1].padStart(2, '0');
+      return parts[2] + '-' + mm + '-' + dd;
+    }
+    var prefixFromSplit = extractIsoCalendarDateKey(str.split('T')[0]);
+    if (prefixFromSplit) return prefixFromSplit;
+    var d = new Date(str);
+    if (isNaN(d.getTime())) return '';
+    var tz2 = timeZone || Session.getScriptTimeZone();
+    return Utilities.formatDate(d, tz2, 'yyyy-MM-dd');
+  }
+
+  /**
    * Parses a display value ("34%", "0.34", "34") into 0–100,
    * or returns null if it cannot be interpreted as a percentage.
    *
@@ -113,6 +166,8 @@ var CoreUtils = (function () {
 
   return {
     formatDateToIsoString: formatDateToIsoString,
+    extractIsoCalendarDateKey: extractIsoCalendarDateKey,
+    toCalendarDateKey: toCalendarDateKey,
     parsePercentage: parsePercentage,
     escapeHtml: escapeHtml,
     normalizeText: normalizeText,

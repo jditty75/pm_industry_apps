@@ -244,6 +244,16 @@ function _debugGmailReportPreviewPerformance() {
 }
 
 /**
+ * Traces upcoming go-live rows as fed to the V2 monthly report (before HTML).
+ * @param {string=} optionalTokenOrDeploymentId  e.g. a0rVT00000i9xcDYAQ or account substring
+ * @return {Object}
+ */
+function debugUpcomingGoLiveReportRowsForUI(optionalTokenOrDeploymentId) {
+  return CoreLib.CoreReport.debugUpcomingGoLiveReportRowsForUI(
+    APP_CONFIG, optionalTokenOrDeploymentId);
+}
+
+/**
  * N8: production native Gmail send for the V2 monthly report.
  * @return {{status: string, error?: string}}
  */

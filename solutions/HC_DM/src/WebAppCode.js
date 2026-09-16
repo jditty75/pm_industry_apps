@@ -58,9 +58,14 @@ function getUpcomingGoLivesData(viewModeOpts, productOpts) {
  * @param {Object=} productOpts
  * @param {Object=} filterState
  */
-function getGoLivesExplorerData(viewModeOpts, productOpts, filterState) {
+function getGoLivesExplorerDataForUI(viewModeOpts, productOpts, filterState) {
   return CoreLib.CoreData.getGoLivesExplorerData(
     APP_CONFIG, viewModeOpts || {}, productOpts, filterState || {});
+}
+
+/** @deprecated Use getGoLivesExplorerDataForUI */
+function getGoLivesExplorerData(viewModeOpts, productOpts, filterState) {
+  return getGoLivesExplorerDataForUI(viewModeOpts, productOpts, filterState);
 }
 
 /**
@@ -357,6 +362,17 @@ function bulkClearMonthlyOverridesForUI() {
 
 function bulkClearAllOverridesForUI() {
   return CoreLib.CoreData.bulkClearAllOverrides(APP_CONFIG);
+}
+
+/**
+ * Clears a single deployment or go-lives override row.
+ * Power-user gated in CoreData.
+ *
+ * @param {string} type  'deployment' | 'golives'
+ * @param {string} idOrAccount
+ */
+function clearSingleOverrideForUI(type, idOrAccount) {
+  return CoreLib.CoreData.clearSingleOverride(APP_CONFIG, type, idOrAccount);
 }
 
 // ============================================================================
@@ -799,4 +815,22 @@ function _diag_montefiore5() {
   Logger.log('window=[' + wsKey + ' .. ' + todayKey + ']');
   Logger.log('slice(0,10)=[' + sliceKey + '] passes=' + (sliceKey>=wsKey && sliceKey<=todayKey));
   Logger.log('normalized =[' + normKey + '] passes=' + (normKey>=wsKey && normKey<=todayKey));
+}
+
+/**
+ * N2 manual cache flush — run from the Apps Script editor (or wire to a menu/trigger).
+ * Delegates to CoreLib so versioned tier-2 keys and the perf-cache registry are cleared.
+ *
+ * @return {Object} flush summary from CoreData.flushAppCaches
+ */
+function flushCache() {
+  return CoreLib.CoreData.flushAppCaches(APP_CONFIG);
+}
+
+/**
+ * UI/admin alias for flushCache (google.script.run parity).
+ * @return {Object}
+ */
+function flushAppCachesForUI() {
+  return CoreLib.CoreData.flushAppCaches(APP_CONFIG);
 }

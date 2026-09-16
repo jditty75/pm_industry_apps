@@ -232,12 +232,11 @@ var APP_CONFIG = {
 
     // Phase 2: consolidated Go Lives tab settings
     goLivesTab: {
+      mode: 'explorer',
       defaultView: 'recent',
       recentWindowDays: 60,
       upcomingWindowDays: 90
     },
-
-    // Phase 2: Manage Overrides tab settings
     manageOverrides: {
       showAuditTrail: true,
       bulkClearScopes: ['monthly', 'all']

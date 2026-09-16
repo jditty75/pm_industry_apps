@@ -172,11 +172,16 @@ var APP_CONFIG = {
 
     distribution: {
       enabled: false,
-      fromAlias: '',
+      fromAlias: 'jeffrey.ditty@workday.com',
       to: [],
       cc: [],
       bcc: ['jeffrey.ditty@workday.com','sunil.wadhwa@workday.com'],
-      allowedSenders: ['jeffrey.ditty@workday.com','sunil.wadhwa@workday.com'],
+      allowedSenders: [
+        'sunil.wadhwa@workday.com',
+        'earl.begonia@workday.com',
+        'mridhula.raghupathy@workday.com',
+        'jeffrey.ditty@workday.com'
+      ],
       subjectTemplate: 'Evisort - Monthly Deployment Health Report - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
@@ -234,6 +239,7 @@ var APP_CONFIG = {
     },
 
     goLivesTab: {
+      mode: 'explorer',
       defaultView: 'recent',
       recentWindowDays: 60,
       upcomingWindowDays: 90
@@ -279,7 +285,12 @@ var APP_CONFIG = {
 
   notify: {
     enabled: false,
-    allowedFromAliases: ['jeffrey.ditty@workday.com']
+    allowedFromAliases: [
+      'sunil.wadhwa@workday.com',
+      'earl.begonia@workday.com',
+      'mridhula.raghupathy@workday.com',
+      'jeffrey.ditty@workday.com'
+    ]
   },
 
   // ---------------------------------------------------------------------------

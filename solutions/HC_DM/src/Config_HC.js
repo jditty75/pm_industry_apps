@@ -187,6 +187,7 @@ var APP_CONFIG = {
     },
 
     goLivesTab: {
+      mode: 'explorer',
       defaultView:        'recent',
       recentWindowDays:   60,
       upcomingWindowDays: 90

@@ -168,6 +168,7 @@ var APP_CONFIG = {
       searchPlaceholder: 'Search by account name...'
     },
     goLivesTab: {
+      mode: 'legacy',
       defaultView: 'recent',
       recentWindowDays: 60,
       upcomingWindowDays: 90

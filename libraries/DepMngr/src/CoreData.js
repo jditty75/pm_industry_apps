@@ -280,9 +280,10 @@ var CoreData = (function () {
    * Writes a value to CacheService. Best-effort with one retry on failure.
    * @param {string} key
    * @param {*} value any JSON-serializable value
+   * @param {string=} registryAppId When set, records the base key for flushAppCaches.
    * @private
    */
-  function _perfCacheWrite_(key, value) {
+  function _perfCacheWrite_(key, value, registryAppId) {
     var attempts = 0;
     var maxAttempts = 2;
 
@@ -298,6 +299,7 @@ var CoreData = (function () {
         if (encoded.length <= _PERF_CACHE_CHUNK_SIZE) {
           cache.put(key, encoded, _PERF_CACHE_TTL_SEC);
           _perfCacheKnownKeys[key] = true;
+          if (registryAppId) _perfCacheRegistryAdd_(registryAppId, key);
           return;
         }
 
@@ -312,6 +314,7 @@ var CoreData = (function () {
         cache.put(key + ':manifest', JSON.stringify({ chunks: chunkCount, algorithm: 'gzip-base64' }), _PERF_CACHE_TTL_SEC);
 
         _perfCacheKnownKeys[key] = true;
+        if (registryAppId) _perfCacheRegistryAdd_(registryAppId, key);
         Logger.log('CoreData._perfCacheWrite_: chunked key=' + key + ' into ' + chunkCount + ' pieces.');
         return;
       } catch (err) {
@@ -367,6 +370,331 @@ var CoreData = (function () {
     } catch (err) {
       Logger.log('CoreData._perfCacheClearAll_: ' + err);
     }
+  }
+
+  var _PERF_CACHE_REGISTRY_MAX_KEYS = 100;
+  var _PERF_CACHE_REGISTRY_PROP_PREFIX = 'perfCacheRegistry:';
+
+  /**
+   * Script property key holding tier-2 base keys written for an app.
+   * @param {string} appId
+   * @return {string}
+   * @private
+   */
+  function _perfCacheRegistryPropertyKey_(appId) {
+    return _PERF_CACHE_REGISTRY_PROP_PREFIX + (appId || 'default');
+  }
+
+  /**
+   * @param {string} appId
+   * @return {string[]}
+   * @private
+   */
+  function _perfCacheRegistryRead_(appId) {
+    try {
+      var raw = PropertiesService.getScriptProperties().getProperty(_perfCacheRegistryPropertyKey_(appId));
+      if (!raw) return [];
+      var parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      Logger.log('CoreData._perfCacheRegistryRead_: ' + err);
+      return [];
+    }
+  }
+
+  /**
+   * @param {string} appId
+   * @param {string[]} baseKeys
+   * @private
+   */
+  function _perfCacheRegistryWrite_(appId, baseKeys) {
+    try {
+      PropertiesService.getScriptProperties().setProperty(
+        _perfCacheRegistryPropertyKey_(appId),
+        JSON.stringify(baseKeys));
+    } catch (err) {
+      Logger.log('CoreData._perfCacheRegistryWrite_: ' + err);
+    }
+  }
+
+  /**
+   * @param {string} appId
+   * @private
+   */
+  function _perfCacheRegistryClear_(appId) {
+    try {
+      PropertiesService.getScriptProperties().deleteProperty(_perfCacheRegistryPropertyKey_(appId));
+    } catch (err) {
+      Logger.log('CoreData._perfCacheRegistryClear_: ' + err);
+    }
+  }
+
+  /**
+   * Records a tier-2 base key (not chunk/manifest keys) for later flush.
+   * @param {string} appId
+   * @param {string} baseKey
+   * @private
+   */
+  function _perfCacheRegistryAdd_(appId, baseKey) {
+    if (!appId || !baseKey) return;
+    var list = _perfCacheRegistryRead_(appId);
+    if (list.indexOf(baseKey) >= 0) return;
+    list.push(baseKey);
+    while (list.length > _PERF_CACHE_REGISTRY_MAX_KEYS) {
+      list.shift();
+    }
+    _perfCacheRegistryWrite_(appId, list);
+  }
+
+  /**
+   * Expands a perf-cache base key into all CacheService keys to remove.
+   * @param {GoogleAppsScript.Cache.Cache|null} cache
+   * @param {string} baseKey
+   * @param {number} maxChunks
+   * @return {string[]}
+   * @private
+   */
+  function _perfCacheExpandBaseKeyForRemoval_(cache, baseKey, maxChunks) {
+    var out = {};
+    out[baseKey] = true;
+    out[baseKey + ':manifest'] = true;
+    var manifestChunks = 0;
+    if (cache) {
+      try {
+        var manifestRaw = cache.get(baseKey + ':manifest');
+        if (manifestRaw) {
+          var manifest = JSON.parse(manifestRaw);
+          if (manifest && manifest.chunks > 0) manifestChunks = manifest.chunks;
+        }
+      } catch (e) {
+        Logger.log('CoreData._perfCacheExpandBaseKeyForRemoval_: manifest read failed for ' + baseKey);
+      }
+    }
+    var limit = Math.max(manifestChunks, maxChunks || 0);
+    for (var i = 0; i < limit; i++) {
+      out[baseKey + ':chunk:' + i] = true;
+    }
+    return Object.keys(out);
+  }
+
+  /**
+   * @param {GoogleAppsScript.Cache.Cache|null} cache
+   * @param {string[]} baseKeys
+   * @param {number} maxChunks
+   * @return {number} batch count
+   * @private
+   */
+  function _perfCacheRemoveBaseKeysFromCache_(cache, baseKeys, maxChunks) {
+    if (!cache || !baseKeys || baseKeys.length === 0) return 0;
+    var all = {};
+    for (var b = 0; b < baseKeys.length; b++) {
+      var expanded = _perfCacheExpandBaseKeyForRemoval_(cache, baseKeys[b], maxChunks);
+      for (var e = 0; e < expanded.length; e++) all[expanded[e]] = true;
+    }
+    var keys = Object.keys(all);
+    var batches = 0;
+    for (var start = 0; start < keys.length; start += 100) {
+      cache.removeAll(keys.slice(start, start + 100));
+      batches++;
+    }
+    return batches;
+  }
+
+  /**
+   * Clears tier-1 in-memory caches for the current execution (no tier-2).
+   * @param {AppConfig=} cfg
+   * @return {string[]}
+   * @private
+   */
+  function _flushAppCachesTier1_(cfg) {
+    var cleared = ['CoreData._cache'];
+    _cache.sfdcRows = null;
+    _cache.pfRows = null;
+    _cache.effectiveByProduct = {};
+    _cache.countByProduct = {};
+    _cache.historicalPfByProduct = {};
+    _cache.metaMap = null;
+    _cache.overridesMap = null;
+    _cache.goLivesOverridesMap = null;
+    _cache.mdsPglBatchView = {};
+    _cache.overviewSnapshot = null;
+    _cache.pfReaderMeta = null;
+    _cache.dhpRows = null;
+    _cache.dhpMap = null;
+    _cache.wellnessRows = null;
+    _cache.wellnessMap = null;
+    _cache.reportBuildCtx = null;
+    _cache.goLivesExplorerUniverseByKey = {};
+    try { CoreSalesforce._clearEnrichmentSheetCache(); cleared.push('CoreSalesforce.enrichment'); } catch (e1) {}
+    try { CoreSalesforce._clearDdContactsCache(); cleared.push('CoreSalesforce.ddContacts'); } catch (e2) {}
+    try { CoreSalesforce._clearStudentCache_(); cleared.push('CoreSalesforce.student'); } catch (e3) {}
+    return cleared;
+  }
+
+  /**
+   * Known tier-2 logical prefixes (for reporting; keys are built per app/version).
+   * @return {string[]}
+   * @private
+   */
+  function _perfCacheLogicalPrefixes_() {
+    return [
+      'sfdcRows:',
+      'mdsPglBatchView:',
+      'overviewData:',
+      'goLivesExplorerUniverse:',
+      'enrichmentMap:',
+      'ddContacts:',
+      'studentDeploymentIds:',
+      'studentProductFunctions:'
+    ];
+  }
+
+  /**
+   * Builds version-aware and legacy tier-2 base keys for an app config.
+   * @param {AppConfig} cfg
+   * @return {string[]}
+   * @private
+   */
+  function _collectDeterministicPerfCacheBases_(cfg) {
+    var appId = (cfg && cfg.appId) ? cfg.appId : 'default';
+    var dataVer = _sfdcDataVersion_(cfg);
+    var bases = {};
+    var add = function (k) { if (k) bases[k] = true; };
+
+    add(_perfKey_(cfg, 'sfdcRows'));
+    add('sfdcRows:' + appId);
+    if (dataVer) add('sfdcRows:' + appId + ':' + dataVer);
+
+    add(_perfKey_(cfg, 'overviewData:v11:lifecycleDeploymentStage:overrideAware'));
+    add(_perfKey_(cfg, 'overviewData:v13:lifecycleDeploymentStage:overrideAware'));
+    add('overviewData:' + appId);
+
+    add(_perfKey_(cfg, 'mdsPglBatchView') + ':3');
+    add(_perfKey_(cfg, 'mdsPglBatchView') + ':6');
+    add('mdsPglBatchView:' + appId);
+    add('mdsPglBatchView:' + appId + ':3');
+    add('mdsPglBatchView:' + appId + ':6');
+
+    add('enrichmentMap:' + appId);
+    if (dataVer) add('enrichmentMap:' + appId + ':' + dataVer);
+
+    add('ddContacts:' + appId);
+    add('studentDeploymentIds:' + appId);
+    add('studentProductFunctions:' + appId);
+
+    var execKeys = Object.keys(_perfCacheKnownKeys);
+    for (var i = 0; i < execKeys.length; i++) {
+      if (execKeys[i].indexOf(':' + appId) !== -1 || execKeys[i].indexOf(':' + appId + ':') !== -1) {
+        add(execKeys[i]);
+      }
+    }
+
+    return Object.keys(bases);
+  }
+
+  /**
+   * Robustly clears tier-1 and tier-2 CoreLib caches for the supplied app.
+   * Intended to be called from each DM app's flushCache() wrapper.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} options
+   * @param {number=} options.maxChunks Fallback chunk indices to clear per base key (default 200).
+   * @return {Object} Structured flush summary.
+   */
+  function flushAppCaches(config, options) {
+    var summary = {
+      ok: true,
+      appId: 'default',
+      prefixes: _perfCacheLogicalPrefixes_(),
+      deterministicBaseKeys: [],
+      registeredBaseKeys: [],
+      attemptedKeyCount: 0,
+      scriptCacheBatches: 0,
+      documentCacheBatches: 0,
+      tier1Cleared: [],
+      notes: [],
+      errors: []
+    };
+    var cfg;
+    try {
+      cfg = CoreConfig.withDefaults(config);
+    } catch (err) {
+      summary.ok = false;
+      summary.errors.push('CoreConfig.withDefaults failed: ' + err);
+      return summary;
+    }
+    var appId = (cfg && cfg.appId) ? cfg.appId : 'default';
+    summary.appId = appId;
+    var opts = options || {};
+    var maxChunks = (opts.maxChunks > 0) ? opts.maxChunks : 200;
+
+    try {
+      summary.tier1Cleared = _flushAppCachesTier1_();
+    } catch (err) {
+      summary.errors.push('tier-1 clear failed: ' + err);
+    }
+
+    var baseMap = {};
+    var deterministic = _collectDeterministicPerfCacheBases_(cfg);
+    summary.deterministicBaseKeys = deterministic;
+    deterministic.forEach(function (k) { baseMap[k] = true; });
+
+    var registered = _perfCacheRegistryRead_(appId);
+    summary.registeredBaseKeys = registered;
+    registered.forEach(function (k) { baseMap[k] = true; });
+
+    var baseKeys = Object.keys(baseMap);
+    summary.notes.push('Union of ' + baseKeys.length + ' tier-2 base keys before chunk expansion.');
+
+    var scriptCache = null;
+    var documentCache = null;
+    try { scriptCache = CacheService.getScriptCache(); } catch (eSc) {
+      summary.errors.push('ScriptCache unavailable: ' + eSc);
+    }
+    try { documentCache = CacheService.getDocumentCache(); } catch (eDc) {
+      summary.notes.push('DocumentCache unavailable: ' + eDc);
+    }
+
+    if (scriptCache) {
+      try {
+        var expanded = {};
+        for (var b = 0; b < baseKeys.length; b++) {
+          var keysForBase = _perfCacheExpandBaseKeyForRemoval_(scriptCache, baseKeys[b], maxChunks);
+          for (var x = 0; x < keysForBase.length; x++) expanded[keysForBase[x]] = true;
+        }
+        summary.attemptedKeyCount = Object.keys(expanded).length;
+        summary.scriptCacheBatches = _perfCacheRemoveBaseKeysFromCache_(scriptCache, baseKeys, maxChunks);
+      } catch (eRem) {
+        summary.ok = false;
+        summary.errors.push('ScriptCache remove failed: ' + eRem);
+      }
+    }
+
+    if (documentCache) {
+      try {
+        summary.documentCacheBatches = _perfCacheRemoveBaseKeysFromCache_(documentCache, baseKeys, maxChunks);
+      } catch (eDoc) {
+        summary.errors.push('DocumentCache remove failed: ' + eDoc);
+      }
+    }
+
+    try {
+      _perfCacheClearAll_();
+    } catch (ePc) {
+      summary.errors.push('_perfCacheClearAll_ failed: ' + ePc);
+    }
+
+    try {
+      _perfCacheRegistryClear_(appId);
+    } catch (eReg) {
+      summary.errors.push('registry clear failed: ' + eReg);
+    }
+
+    if (summary.errors.length > 0) summary.ok = false;
+    Logger.log('CoreData.flushAppCaches(' + appId + '): attemptedKeyCount=' + summary.attemptedKeyCount +
+               ', scriptCacheBatches=' + summary.scriptCacheBatches +
+               ', documentCacheBatches=' + summary.documentCacheBatches);
+    return summary;
   }
 
   // ===========================================================================
@@ -437,6 +765,7 @@ var CoreData = (function () {
     var idxUser      = headers.indexOf('LastEditedBy');
     var idxTime      = headers.indexOf('LastEditedAt');
     var idxClass     = headers.indexOf('Classification'); // Phase 2
+    var idxReason    = headers.indexOf('Reason');
 
     values.slice(1).forEach(function (row) {
       var id = String(row[idxId] || '').trim();
@@ -451,7 +780,8 @@ var CoreData = (function () {
         exclude:               idxExclude  >= 0 ? _boolFromSheetCell_(row[idxExclude]) : false,
         lastEditedBy:          idxUser     >= 0 ? (row[idxUser] || '') : '',
         lastEditedAt:          (idxTime    >= 0 && row[idxTime]) ? CoreUtils.formatDateToIsoString(row[idxTime]) : '',
-        classification:        normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
+        classification:        normalizeClassification_(idxClass >= 0 ? row[idxClass] : ''),
+        reason:                idxReason   >= 0 ? (row[idxReason] || '') : ''
       };
     });
 
@@ -508,6 +838,7 @@ var CoreData = (function () {
     var idxUser    = headers.indexOf('LastEditedBy');
     var idxTime    = headers.indexOf('LastEditedAt');
     var idxClass   = headers.indexOf('Classification'); // Phase 2
+    var idxReason  = headers.indexOf('Reason');
 
     values.slice(1).forEach(function (row) {
       var acct = String(row[idxAcct] || '').trim();
@@ -518,7 +849,8 @@ var CoreData = (function () {
         overridePartner: idxPartner >= 0 ? (row[idxPartner] || '') : '',
         lastEditedBy:    idxUser    >= 0 ? (row[idxUser] || '') : '',
         lastEditedAt:    (idxTime   >= 0 && row[idxTime]) ? CoreUtils.formatDateToIsoString(row[idxTime]) : '',
-        classification:  normalizeClassification_(idxClass >= 0 ? row[idxClass] : '')
+        classification:  normalizeClassification_(idxClass >= 0 ? row[idxClass] : ''),
+        reason:          idxReason  >= 0 ? (row[idxReason] || '') : ''
       };
     });
     _cache.goLivesOverridesMap = map;
@@ -549,7 +881,8 @@ var CoreData = (function () {
     'Exclude_From_Report',
     'LastEditedBy',
     'LastEditedAt',
-    'Classification'
+    'Classification',
+    'Reason'
   ];
 
   /** @const {Array<string>} GoLivesOverrides sheet column headers (write order). */
@@ -560,7 +893,8 @@ var CoreData = (function () {
     'Override_Partner',
     'LastEditedBy',
     'LastEditedAt',
-    'Classification'
+    'Classification',
+    'Reason'
   ];
 
   /**
@@ -624,6 +958,49 @@ var CoreData = (function () {
   }
 
   /**
+   * Builds override visibility metadata for a Go Lives explorer row.
+   * @param {Object} row
+   * @param {Object} depOv
+   * @param {Object} glOv
+   * @return {Object}
+   * @private
+   */
+  function _buildGoLiveOverrideMeta_(row, depOv, glOv) {
+    depOv = depOv || {};
+    glOv = glOv || {};
+    var meta = {};
+    var operationalFields = 0;
+
+    var dateMeta = _buildFieldOverrideMeta_(
+      row.goLiveDate || row.mtpDate || '',
+      glOv.overrideDate,
+      function (v) { return CoreUtils.formatDateToIsoString(v); }
+    );
+    if (dateMeta) { meta.goLiveDate = dateMeta; operationalFields++; }
+
+    var partnerMeta = _buildFieldOverrideMeta_(row.partner || '', glOv.overridePartner);
+    if (partnerMeta) { meta.partner = partnerMeta; operationalFields++; }
+
+    var hasReportExclusion = !!(row.excludeFromReport || depOv.exclude || glOv.exclude);
+    var hasOperationalOverride = operationalFields > 0;
+    var hasAnyOverride = hasOperationalOverride || hasReportExclusion;
+    if (!hasAnyOverride) return {};
+
+    var primaryOv = glOv.lastEditedAt ? glOv : depOv;
+    return {
+      overrideMeta: meta,
+      hasOperationalOverride: hasOperationalOverride,
+      hasReportExclusion: hasReportExclusion,
+      hasAnyOverride: hasAnyOverride,
+      overrideFieldCount: operationalFields + (hasReportExclusion ? 1 : 0),
+      overrideClassification: glOv.classification || depOv.classification || 'Monthly',
+      overrideLastEditedBy: primaryOv.lastEditedBy || '',
+      overrideLastEditedAt: primaryOv.lastEditedAt || '',
+      overrideReason: glOv.reason || depOv.reason || ''
+    };
+  }
+
+  /**
    * Merges deployment + Go-Lives override fields onto go-live rows for report/UI parity.
    * Option B precedence: excluded when row, deployment override, or go-live override is flagged.
    *
@@ -652,8 +1029,11 @@ var CoreData = (function () {
       return Object.assign({}, row, {
         partner:           glOv.overridePartner || row.partner || '',
         currentUpdate:     depOv.overrideCurrentUpdate || row.currentUpdate || '',
-        excludeFromReport: excluded
-      });
+        excludeFromReport: excluded,
+        goLiveDate:        glOv.overrideDate
+          ? CoreUtils.formatDateToIsoString(glOv.overrideDate)
+          : (row.goLiveDate || row.mtpDate || '')
+      }, _buildGoLiveOverrideMeta_(row, depOv, glOv));
     });
   }
 
@@ -1442,6 +1822,20 @@ var CoreData = (function () {
       row.health = _rollupParentDeploymentHealth_(childHealths);
     }
 
+    // Re-attach override metadata so parent health overrides surface correct indicators.
+    var metaBase = {
+      deploymentId: parentId,
+      parentDeploymentId: parentId,
+      health: pf.health || '',
+      mtpDate: pf.mtpDate || '',
+      stage: pf.stage || '',
+      currentUpdate: pf.currentUpdate || ''
+    };
+    _attachDeploymentOverrideMeta_(row, metaBase, overridesMap, {
+      ov: parentOv,
+      lookupId: parentId
+    });
+
     var productFunctions = groupItems.map(function (item) {
       return _buildPfDetailObject_(item.pf);
     });
@@ -2014,6 +2408,32 @@ var CoreData = (function () {
   }
 
   /**
+   * Builds additive KPI footnote metadata for rows with operational overrides.
+   * Report-exclusion-only rows are excluded from the count.
+   *
+   * @param {Array<Object>} rows
+   * @return {{ overrideAffectedCount: number, message?: string, detail?: string }}
+   */
+  function buildOverrideFootnote_(rows) {
+    if (!Array.isArray(rows) || !rows.length) {
+      return { overrideAffectedCount: 0 };
+    }
+    var n = rows.filter(function (r) {
+      return r && r.hasOperationalOverride;
+    }).length;
+    if (n <= 0) {
+      return { overrideAffectedCount: 0 };
+    }
+    return {
+      overrideAffectedCount: n,
+      message: 'Counts reflect approved overrides.',
+      detail: n === 1
+        ? '1 operational override affects this view.'
+        : (n + ' operational overrides affect this view.')
+    };
+  }
+
+  /**
    * Resolves a deployment id to its canonical 18-char form from SFDC rows when available.
    * @param {AppConfig} cfg
    * @param {any} deploymentId
@@ -2040,9 +2460,132 @@ var CoreData = (function () {
     return target;
   }
 
+  /**
+   * Resolves override map entry for a deployment row (parent-keyed for ProductMode).
+   * @param {Object} rawRow
+   * @param {Object} overridesMap
+   * @return {{ ov: Object, lookupId: string }}
+   * @private
+   */
+  function _resolveDeploymentOverrideEntry_(rawRow, overridesMap) {
+    var map = overridesMap || {};
+    var lookupId = _parentDeploymentLookupId_(rawRow);
+    var ov = map[lookupId] || {};
+    if (!ov.overrideHealth && !ov.exclude && lookupId !== rawRow.deploymentId) {
+      var direct = map[rawRow.deploymentId];
+      if (direct) {
+        ov = direct;
+        lookupId = rawRow.deploymentId;
+      }
+    }
+    return { ov: ov, lookupId: lookupId };
+  }
+
+  /**
+   * True when a non-empty override cell value is present.
+   * @param {*} v
+   * @return {boolean}
+   * @private
+   */
+  function _hasOverrideCellValue_(v) {
+    if (v === null || v === undefined) return false;
+    if (v instanceof Date) return !isNaN(v.getTime());
+    return String(v).trim() !== '';
+  }
+
+  /**
+   * Builds per-field override metadata for display.
+   * @param {*} sourceVal
+   * @param {*} overrideVal
+   * @param {function(*): string=} formatEffective
+   * @return {Object|null}
+   * @private
+   */
+  function _buildFieldOverrideMeta_(sourceVal, overrideVal, formatEffective) {
+    if (!_hasOverrideCellValue_(overrideVal)) return null;
+    var effective = formatEffective ? formatEffective(overrideVal) : overrideVal;
+    return {
+      source:          sourceVal || '',
+      effective:       effective,
+      isOverridden:    true,
+      overrideValue:   overrideVal instanceof Date
+        ? CoreUtils.formatDateToIsoString(overrideVal)
+        : overrideVal
+    };
+  }
+
+  /**
+   * Attaches override visibility metadata to an effective deployment row when overrides exist.
+   * @param {Object} row
+   * @param {Object} rawRow
+   * @param {Object} overridesMap
+   * @param {Object=} resolved  Optional pre-resolved { ov, lookupId }
+   * @return {Object}
+   * @private
+   */
+  function _attachDeploymentOverrideMeta_(row, rawRow, overridesMap, resolved) {
+    resolved = resolved || _resolveDeploymentOverrideEntry_(rawRow, overridesMap);
+    var ov = resolved.ov || {};
+    var lookupId = resolved.lookupId || '';
+
+    var operationalFields = 0;
+    var meta = {};
+
+    var healthMeta = _buildFieldOverrideMeta_(rawRow.health, ov.overrideHealth);
+    if (healthMeta) { meta.health = healthMeta; operationalFields++; }
+
+    var mtpMeta = _buildFieldOverrideMeta_(rawRow.mtpDate, ov.overrideMtp, function (v) {
+      return CoreUtils.formatDateToIsoString(v);
+    });
+    if (mtpMeta) { meta.mtpDate = mtpMeta; operationalFields++; }
+
+    var stageMeta = _buildFieldOverrideMeta_(rawRow.stage, ov.overrideStage);
+    if (stageMeta) { meta.stage = stageMeta; operationalFields++; }
+
+    var updateMeta = _buildFieldOverrideMeta_(rawRow.currentUpdate, ov.overrideCurrentUpdate);
+    if (updateMeta) { meta.currentUpdate = updateMeta; operationalFields++; }
+
+    var hasReportExclusion = !!ov.exclude;
+    var hasOperationalOverride = operationalFields > 0;
+    var hasAnyOverride = hasOperationalOverride || hasReportExclusion;
+
+    if (!hasAnyOverride) return row;
+
+    row.overrideMeta = meta;
+    row.hasOperationalOverride = hasOperationalOverride;
+    row.hasReportExclusion = hasReportExclusion;
+    row.hasAnyOverride = hasAnyOverride;
+    row.overrideFieldCount = operationalFields + (hasReportExclusion ? 1 : 0);
+    row.overrideClassification = ov.classification || 'Monthly';
+    row.overrideLastEditedBy = ov.lastEditedBy || '';
+    row.overrideLastEditedAt = ov.lastEditedAt || '';
+    row.overrideReason = ov.reason || '';
+    row.overrideLookupId = lookupId;
+    if (lookupId && lookupId !== _canonicalId_(rawRow.deploymentId)) {
+      row.overrideCascadeNote = 'Operational overrides apply from parent deployment ' + lookupId + '.';
+    }
+    return row;
+  }
+
+  /**
+   * True when a Monthly override was last edited before the current calendar month.
+   * @param {string} classification
+   * @param {string|Date} lastEditedAt
+   * @return {boolean}
+   * @private
+   */
+  function isStaleMonthlyOverride_(classification, lastEditedAt) {
+    if (normalizeClassification_(classification) !== 'Monthly') return false;
+    if (!lastEditedAt) return false;
+    var d = (lastEditedAt instanceof Date) ? lastEditedAt : new Date(lastEditedAt);
+    if (isNaN(d.getTime())) return false;
+    return formatYearMonth_(d) < formatYearMonth_(new Date());
+  }
+
   function buildEffectiveDeploymentRow_(rawRow, overridesMap) {
-    var ov = overridesMap[rawRow.deploymentId] || {};
-    return Object.assign({}, rawRow, {
+    var resolved = _resolveDeploymentOverrideEntry_(rawRow, overridesMap);
+    var ov = resolved.ov;
+    var derived = Object.assign({}, rawRow, {
       accountName:       ov.overrideAccount || rawRow.accountName,
       deploymentName:    ov.overrideName || rawRow.deploymentName,
       health:            ov.overrideHealth || rawRow.health,
@@ -2053,6 +2596,7 @@ var CoreData = (function () {
       reviewUsername:    ov.lastEditedBy || rawRow.metaUsername || '',
       reviewTimestamp:   ov.lastEditedAt || rawRow.metaTimestamp || ''
     });
+    return _attachDeploymentOverrideMeta_(derived, rawRow, overridesMap, resolved);
   }
 
   /**
@@ -4600,7 +5144,659 @@ var CoreData = (function () {
     Logger.log('=== end _debugDeploymentHealthPlan ===');
     return result;
   }
-  
+
+  /**
+   * True when two Salesforce deployment ids refer to the same record (18-char or 15-char prefix).
+   * @param {any} a
+   * @param {any} b
+   * @return {boolean}
+   * @private
+   */
+  function _deploymentIdEquals_(a, b) {
+    var left = String(a || '').trim();
+    var right = String(b || '').trim();
+    if (!left || !right) return false;
+    if (left === right) return true;
+    if (left.toLowerCase() === right.toLowerCase()) return true;
+    var lp = left.length >= 15 ? left.slice(0, 15) : left;
+    var rp = right.length >= 15 ? right.slice(0, 15) : right;
+    return lp.toLowerCase() === rp.toLowerCase();
+  }
+
+  /**
+   * Normalizes a deployment id for trace comparisons (trim + lower case).
+   * @param {any} id
+   * @return {string}
+   * @private
+   */
+  function _normalizeDeploymentIdForTrace_(id) {
+    return String(id || '').trim().toLowerCase();
+  }
+
+  /**
+   * 15- and 18-character Salesforce id forms for trace output.
+   * @param {any} id
+   * @return {{ raw: string, id15: string, id18: string|null }}
+   * @private
+   */
+  function _salesforceIdFormsForTrace_(id) {
+    var raw = String(id || '').trim();
+    var id15 = raw.length >= 15 ? raw.slice(0, 15) : raw;
+    var id18 = raw.length >= 18 ? raw.slice(0, 18) : null;
+    return { raw: raw, id15: id15, id18: id18 };
+  }
+
+  /** @const {Array<string>} Row property names checked for deployment id matches in traces. */
+  var _TRACE_DEPLOYMENT_ID_KEYS_ = [
+    'deploymentId', 'id', 'Id', 'DeploymentID', 'DEPLOYMENT_ID',
+    'salesforceId', 'sfId', 'parentDeploymentId'
+  ];
+
+  /**
+   * Collects non-empty id-like values from a deployment row object.
+   * @param {Object} row
+   * @return {Array<string>}
+   * @private
+   */
+  function _collectDeploymentIdCandidatesFromRow_(row) {
+    if (!row) return [];
+    var out = [];
+    var seen = {};
+    _TRACE_DEPLOYMENT_ID_KEYS_.forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(row, key)) return;
+      var val = String(row[key] || '').trim();
+      if (!val || seen[val]) return;
+      seen[val] = true;
+      out.push(val);
+    });
+    return out;
+  }
+
+  /**
+   * True when any id-like field on the row matches the target deployment id.
+   * @param {Object} row
+   * @param {string} deploymentId
+   * @return {boolean}
+   * @private
+   */
+  function _rowMatchesTargetDeploymentId_(row, deploymentId) {
+    if (!row || !deploymentId) return false;
+    var candidates = _collectDeploymentIdCandidatesFromRow_(row);
+    for (var i = 0; i < candidates.length; i++) {
+      if (_deploymentIdEquals_(candidates[i], deploymentId)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Name-based row match for trace fallback (exact trim, case-insensitive).
+   * @param {Object} row
+   * @param {string} accountName
+   * @param {string} deploymentName
+   * @return {boolean}
+   * @private
+   */
+  function _rowMatchesTraceNames_(row, accountName, deploymentName) {
+    if (!row) return false;
+    var wantAccount = String(accountName || '').trim().toLowerCase();
+    var wantDeploy = String(deploymentName || '').trim().toLowerCase();
+    if (!wantAccount || !wantDeploy) return false;
+    var gotAccount = String(row.accountName || '').trim().toLowerCase();
+    var gotDeploy = String(row.deploymentName || '').trim().toLowerCase();
+    return gotAccount === wantAccount && gotDeploy === wantDeploy;
+  }
+
+  /**
+   * @param {Array<Object>} rows
+   * @param {string} accountName
+   * @param {string} deploymentName
+   * @return {Array<Object>}
+   * @private
+   */
+  function _rowsMatchingByNameForTrace_(rows, accountName, deploymentName) {
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(function (r) {
+      return _rowMatchesTraceNames_(r, accountName, deploymentName);
+    });
+  }
+
+  /**
+   * Compact preview object for deployment trace output.
+   * @param {Object|null} row
+   * @return {Object|null}
+   * @private
+   */
+  function _deploymentTracePreview_(row) {
+    if (!row) return null;
+    return {
+      deploymentId: row.deploymentId || '',
+      accountName: row.accountName || '',
+      deploymentName: row.deploymentName || '',
+      health: row.health || '',
+      phase: row.phase || '',
+      stage: row.stage || '',
+      status: row.status || row.overallStatus || '',
+      partner: row.partner || '',
+      industry: row.industry || '',
+      region: row.region || '',
+      excludeFromReport: !!row.excludeFromReport,
+      deploymentRowSource: row.deploymentRowSource || ''
+    };
+  }
+
+  /**
+   * Finds the first row whose deploymentId matches (15/18-char tolerant).
+   * @param {Array<Object>} rows
+   * @param {string} deploymentId
+   * @return {Object|null}
+   * @private
+   */
+  function _findDeploymentInRows_(rows, deploymentId) {
+    if (!Array.isArray(rows) || !deploymentId) return null;
+    for (var i = 0; i < rows.length; i++) {
+      var candidate = rows[i];
+      if (!candidate) continue;
+      if (_rowMatchesTargetDeploymentId_(candidate, deploymentId)) return candidate;
+    }
+    return null;
+  }
+
+  /**
+   * Reads SFDC_Deployments sheet row + cfg.columns parse for one deployment id.
+   * @param {AppConfig} cfg
+   * @param {string} deploymentId
+   * @return {{ sourceRowNumber: number, rawByHeader: Object, parsedFromConfigColumns: Object, headers: Array<string> }|null}
+   * @private
+   */
+  function _readSfdcDeploymentsSourceMatch_(cfg, deploymentId) {
+    var target = String(deploymentId || '').trim();
+    if (!target) return null;
+
+    var sheetName = cfg.sheets.deployments || 'SFDC_Deployments';
+    var ss = getSpreadsheet_();
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() < 2) return null;
+
+    var lastCol = sheet.getLastColumn();
+    var allValues = sheet.getRange(1, 1, sheet.getLastRow(), lastCol).getValues();
+    var headers = allValues[0].map(function (h) { return String(h || '').trim(); });
+    var lowerH = headers.map(function (h) { return h.toLowerCase(); });
+
+    var colId = -1;
+    for (var hi = 0; hi < lowerH.length; hi++) {
+      if (lowerH[hi] === 'id' || lowerH[hi].indexOf('id') === 0) {
+        colId = hi;
+        break;
+      }
+    }
+    if (colId < 0) colId = 0;
+
+    var cols = cfg.columns || {};
+    function cellAt_(row, colNum) {
+      if (!colNum || colNum < 1) return '';
+      var idx = colNum - 1;
+      if (idx >= row.length) return '';
+      var raw = row[idx];
+      if (raw instanceof Date) {
+        return Utilities.formatDate(raw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      return String(raw || '').trim();
+    }
+
+    for (var r = 1; r < allValues.length; r++) {
+      var dataRow = allValues[r];
+      var rowId = String(dataRow[colId] || '').trim();
+      if (!_deploymentIdEquals_(rowId, target)) continue;
+
+      var rawByHeader = {};
+      for (var c = 0; c < headers.length; c++) {
+        if (!headers[c]) continue;
+        var val = dataRow[c];
+        if (val instanceof Date) {
+          rawByHeader[headers[c]] = Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        } else {
+          rawByHeader[headers[c]] = val;
+        }
+      }
+
+      var parsedFromConfigColumns = {
+        deploymentId: cellAt_(dataRow, cols.DEPLOYMENT_ID),
+        deploymentName: cellAt_(dataRow, cols.DEPLOYMENT_NAME),
+        accountId: cellAt_(dataRow, cols.ACCOUNT_ID),
+        accountName: cellAt_(dataRow, cols.ACCOUNT_NAME),
+        industry: cellAt_(dataRow, cols.INDUSTRY),
+        region: cellAt_(dataRow, cols.REGION),
+        subRegion: cellAt_(dataRow, cols.SUB_REGION),
+        status: cellAt_(dataRow, cols.OVERALL_STATUS),
+        phase: cellAt_(dataRow, cols.DEPLOYMENT_PHASE),
+        stage: cellAt_(dataRow, cols.DEPLOYMENT_STAGE),
+        health: cellAt_(dataRow, cols.DEPLOYMENT_HEALTH),
+        startDate: cellAt_(dataRow, cols.DEPLOYMENT_START_DATE),
+        currentMtpDate: cellAt_(dataRow, cols.CURRENT_MTP_DATE),
+        firstMtpDate: cellAt_(dataRow, cols.FIRST_MTP_DATE),
+        completionDate: cellAt_(dataRow, cols.COMPLETION_DATE),
+        partner: cellAt_(dataRow, cols.PARTNER),
+        currentDeploymentUpdate: cellAt_(dataRow, cols.CURRENT_DEPLOYMENT_UPDATE)
+      };
+
+      return {
+        sourceRowNumber: r + 1,
+        rawByHeader: rawByHeader,
+        parsedFromConfigColumns: parsedFromConfigColumns,
+        headers: headers
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Temporary diagnostic: trace one deployment id through IndustryMode (and ProductMode)
+   * SFDC → effective → getAllDeploymentsForUI pipeline and report exclusion stage.
+   *
+   * @param {AppConfig} config
+   * @param {string} deploymentId
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function debugTraceDeploymentInUiPipeline(config, deploymentId, viewModeOpts, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var targetId = String(deploymentId || '').trim();
+    var vmOpts = viewModeOpts || { viewMode: 'all', ddDisplayName: '' };
+    var prodOpts = productOpts || { product: 'all' };
+    var possibleExclusionReasons = [];
+    var pipelineCounts = {};
+
+    var sourceSheetName = cfg.sheets.deployments || 'SFDC_Deployments';
+    var sourceMatch = _readSfdcDeploymentsSourceMatch_(cfg, targetId);
+    var foundInSfdcDeployments = !!sourceMatch;
+
+    var parsedKeyFields = null;
+    if (sourceMatch) {
+      parsedKeyFields = Object.assign({}, sourceMatch.parsedFromConfigColumns);
+    }
+
+    var rawRowEmission = null;
+    if (sourceMatch && sourceMatch.sourceRowNumber) {
+      try {
+        var ssDiag = getSpreadsheet_();
+        var shDiag = ssDiag.getSheetByName(sourceSheetName);
+        if (shDiag && shDiag.getLastRow() >= 2) {
+          var diagValues = shDiag.getRange(1, 1, shDiag.getLastRow(), shDiag.getLastColumn()).getValues();
+          var diagHeaders = diagValues[0].map(function (h) { return String(h || '').trim(); });
+          rawRowEmission = _diagnoseSfdcRawRowEmission_(
+            cfg, sourceMatch.sourceRowNumber, diagValues, diagHeaders);
+        }
+      } catch (eDiag) {
+        rawRowEmission = { error: String(eDiag) };
+      }
+    }
+
+    // Authoritative raw read: bypass tier-1/tier-2 cache and instrument the target row in-loop.
+    _cache.sfdcRows = null;
+    var rawReaderInstrumentation = {};
+    var sfdcParsedRows = [];
+    try {
+      sfdcParsedRows = readSfdcDeploymentsRaw_(cfg, {
+        bypassCache: true,
+        targetDeploymentId: targetId,
+        sourceRowNumber: sourceMatch ? sourceMatch.sourceRowNumber : null,
+        instrumentation: rawReaderInstrumentation
+      }) || [];
+    } catch (e) {
+      possibleExclusionReasons.push('readSfdcDeploymentsRaw_ threw: ' + e);
+    }
+    pipelineCounts.readSfdcDeploymentsRaw = sfdcParsedRows.length;
+
+    var rawParsedRow = _findDeploymentInRows_(sfdcParsedRows, targetId);
+    var idMatchFailedDespiteEmit =
+      !!rawReaderInstrumentation.emitted && !rawParsedRow;
+    if (idMatchFailedDespiteEmit) {
+      possibleExclusionReasons.push(
+        'emitted_raw_but_id_match_failed: row pushed in readSfdcDeploymentsRaw_ but trace id match missed — ' +
+        'emitted deploymentId "' + (rawReaderInstrumentation.emittedRowPreview &&
+          rawReaderInstrumentation.emittedRowPreview.deploymentId || '') + '"; ' +
+        'candidates ' + JSON.stringify(rawReaderInstrumentation.emittedRowIdCandidates || []) + '.');
+    }
+    if (rawReaderInstrumentation.readPath === 'tier2_sheet_tab') {
+      possibleExclusionReasons.push(
+        'unexpected: bypassCache read still used tier2_sheet_tab (instrumentation bug).');
+    }
+
+    var traceAccountName = (parsedKeyFields && parsedKeyFields.accountName) ||
+      'The Ohio State University';
+    var traceDeploymentName = (parsedKeyFields && parsedKeyFields.deploymentName) ||
+      'Subsequent - Adhoc - Evisort/CLM';
+    var rawRowsMatchingByName = _rowsMatchingByNameForTrace_(
+      sfdcParsedRows, traceAccountName, traceDeploymentName).map(_deploymentTracePreview_);
+    var effectiveRowsMatchingByName = [];
+    var finalRowsMatchingByName = [];
+    if (foundInSfdcDeployments && !rawParsedRow && !rawReaderInstrumentation.emitted) {
+      if (rawReaderInstrumentation.skipReason) {
+        possibleExclusionReasons.push(
+          'readSfdcDeploymentsRaw_ (in-loop): ' + rawReaderInstrumentation.skipReason +
+          ' at sheet row ' + (rawReaderInstrumentation.physicalSheetRowNumber || sourceMatch.sourceRowNumber) + '.');
+      } else if (rawRowEmission && rawRowEmission.wouldSkipEmptyReaderId) {
+        possibleExclusionReasons.push(
+          'readSfdcDeploymentsRaw_: skipped row ' + sourceMatch.sourceRowNumber +
+          ' — deploymentId empty at reader colId index ' + rawRowEmission.readerColumnIndices.colId +
+          ' (header "' + (rawRowEmission.readerColumnHeaders.colId || '') + '"); cfg DEPLOYMENT_ID col has "' +
+          (rawRowEmission.deploymentIdFromCfgCol || '') + '".');
+      } else if (rawRowEmission && rawRowEmission.deploymentIdFromReaderCol &&
+          !_deploymentIdEquals_(rawRowEmission.deploymentIdFromReaderCol, targetId)) {
+        possibleExclusionReasons.push(
+          'readSfdcDeploymentsRaw_: row ' + sourceMatch.sourceRowNumber +
+          ' emitted under different id "' + rawRowEmission.deploymentIdFromReaderCol +
+          '" (reader colId) than sheet target "' + targetId + '".');
+      } else {
+        possibleExclusionReasons.push(
+          'Row exists on sheet but readSfdcDeploymentsRaw_ did not emit it (see readSfdcDeploymentsRawTargetInstrumentation).');
+      }
+    }
+
+    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
+    var activeStatus = statusValues.active || 'Active';
+    var gateDiagnostics = {
+      passesOverallStatusGate: null,
+      passesLegacyStatusGate: null,
+      passesIdentityGate: null,
+      overallStatusValue: '',
+      legacyStatusValue: '',
+      activeStatusExpected: activeStatus,
+      rawRowEmission: rawRowEmission,
+      readSfdcDeploymentsRawTargetInstrumentation: rawReaderInstrumentation,
+      includedInRawEmittedRows: !!(rawParsedRow || rawReaderInstrumentation.emitted)
+    };
+
+    if (rawParsedRow) {
+      gateDiagnostics.overallStatusValue = rawParsedRow.overallStatus || '';
+      gateDiagnostics.legacyStatusValue = rawParsedRow.status || '';
+      gateDiagnostics.passesOverallStatusGate =
+        !rawParsedRow.overallStatus || rawParsedRow.overallStatus === 'Active';
+      if (!gateDiagnostics.passesOverallStatusGate) {
+        possibleExclusionReasons.push(
+          'buildEffectiveDeploymentsFromSfdc_: overallStatus "' + rawParsedRow.overallStatus +
+          '" is not Active (Overall_Status__c gate).');
+      }
+      gateDiagnostics.passesLegacyStatusGate =
+        !rawParsedRow.status || rawParsedRow.status === activeStatus;
+      if (rawParsedRow.status && rawParsedRow.status !== activeStatus) {
+        possibleExclusionReasons.push(
+          'buildEffectiveDeploymentsFromSfdc_: status "' + rawParsedRow.status +
+          '" !== "' + activeStatus + '".');
+      }
+      gateDiagnostics.passesIdentityGate =
+        !!(rawParsedRow.deploymentId && (rawParsedRow.accountName || rawParsedRow.deploymentName));
+      if (!rawParsedRow.deploymentId) {
+        possibleExclusionReasons.push('parse_failed: empty deploymentId after readSfdcDeploymentsRaw_.');
+      }
+      if (!rawParsedRow.accountName && !rawParsedRow.deploymentName) {
+        possibleExclusionReasons.push(
+          'buildEffectiveDeploymentsFromSfdc_: missing both accountName and deploymentName after parse.');
+      }
+    } else if (rawRowEmission && !rawRowEmission.error) {
+      gateDiagnostics.overallStatusValue = rawRowEmission.overallStatusFromReaderCol || '';
+      gateDiagnostics.legacyStatusValue = rawRowEmission.overallStatusFromReaderCol || '';
+      gateDiagnostics.passesOverallStatusGate = rawRowEmission.passesBuildEffectiveOverallGate;
+      gateDiagnostics.passesLegacyStatusGate = rawRowEmission.passesBuildEffectiveLegacyStatusGate;
+      if (gateDiagnostics.passesOverallStatusGate === false) {
+        possibleExclusionReasons.push(
+          'buildEffectiveDeploymentsFromSfdc_: overallStatus "' + gateDiagnostics.overallStatusValue +
+          '" is not Active (Overall_Status__c gate).');
+      }
+      var emittedReaderId = rawRowEmission.deploymentIdFromReaderCol || '';
+      var cfgParsed = sourceMatch && sourceMatch.parsedFromConfigColumns;
+      var cfgAccountName = cfgParsed ? (cfgParsed.accountName || '') : '';
+      var cfgDeploymentName = cfgParsed ? (cfgParsed.deploymentName || '') : '';
+      if (!emittedReaderId) {
+        possibleExclusionReasons.push('parse_failed: empty deploymentId after readSfdcDeploymentsRaw_.');
+      }
+      if (!cfgAccountName && !cfgDeploymentName) {
+        possibleExclusionReasons.push(
+          'buildEffectiveDeploymentsFromSfdc_: missing both accountName and deploymentName after parse.');
+      }
+      gateDiagnostics.passesIdentityGate =
+        !!(emittedReaderId && (cfgAccountName || cfgDeploymentName));
+    }
+
+    var effectiveFromSfdc = [];
+    try {
+      effectiveFromSfdc = buildEffectiveDeploymentsFromSfdc_(cfg) || [];
+    } catch (e2) {
+      possibleExclusionReasons.push('buildEffectiveDeploymentsFromSfdc_ threw: ' + e2);
+    }
+    pipelineCounts.buildEffectiveDeploymentsFromSfdc = effectiveFromSfdc.length;
+
+    var effectiveRow = _findDeploymentInRows_(effectiveFromSfdc, targetId);
+    var includedInEffectiveRows = !!effectiveRow;
+    effectiveRowsMatchingByName = _rowsMatchingByNameForTrace_(
+      effectiveFromSfdc, traceAccountName, traceDeploymentName).map(_deploymentTracePreview_);
+
+    if (rawParsedRow && !includedInEffectiveRows) {
+      if (gateDiagnostics.passesOverallStatusGate === false ||
+          gateDiagnostics.passesLegacyStatusGate === false ||
+          gateDiagnostics.passesIdentityGate === false) {
+        /* reasons already pushed */
+      } else {
+        possibleExclusionReasons.push(
+          'excluded_before_effective: passed visible gates but absent from buildEffectiveDeploymentsFromSfdc_ output ' +
+          '(check overrides/meta transform or id mismatch).');
+      }
+    }
+
+    var allEffective = [];
+    try {
+      allEffective = getAllEffectiveDeployments(cfg, prodOpts) || [];
+    } catch (e3) {
+      possibleExclusionReasons.push('getAllEffectiveDeployments threw: ' + e3);
+    }
+    pipelineCounts.getAllEffectiveDeployments = allEffective.length;
+
+    var inAllEffective = _findDeploymentInRows_(allEffective, targetId);
+    if (includedInEffectiveRows && !inAllEffective) {
+      var pa = (prodOpts && prodOpts.product) || 'all';
+      if (cfg.ui && cfg.ui.productFilter && cfg.ui.productFilter.enabled === true &&
+          pa && pa !== 'all') {
+        possibleExclusionReasons.push('filterDeploymentsByProduct_: product="' + pa + '".');
+      } else {
+        possibleExclusionReasons.push(
+          'getAllEffectiveDeployments: row dropped after buildEffectiveDeploymentsFromSfdc_ ' +
+          '(unexpected — compare product filter / ProductMode union path).');
+      }
+    }
+
+    var postEffectiveSteps = [];
+    var rowForPost = inAllEffective || effectiveRow;
+    if (rowForPost) {
+      var afterStudent = filterDeploymentsByStudent_([rowForPost], 'exclude', cfg);
+      var studentIds = {};
+      if (cfg.student && cfg.student.enabled === true) {
+        try {
+          studentIds = CoreSalesforce.getStudentDeploymentIds_(cfg) || {};
+        } catch (eSt) {
+          possibleExclusionReasons.push('getStudentDeploymentIds_ failed: ' + eSt);
+        }
+      }
+      var studentExact = !!(studentIds[rowForPost.deploymentId]);
+      var studentByPrefix = false;
+      if (!studentExact && rowForPost.deploymentId) {
+        var depPrefix = String(rowForPost.deploymentId).trim();
+        depPrefix = depPrefix.length >= 15 ? depPrefix.slice(0, 15) : depPrefix;
+        Object.keys(studentIds).forEach(function (sid) {
+          if (studentByPrefix) return;
+          var sp = sid.length >= 15 ? sid.slice(0, 15) : sid;
+          if (sp === depPrefix) studentByPrefix = true;
+        });
+      }
+      postEffectiveSteps.push({
+        step: 'filterDeploymentsByStudent_(exclude)',
+        passed: afterStudent.length > 0,
+        studentFeatureEnabled: !!(cfg.student && cfg.student.enabled === true),
+        studentIdExactMatch: studentExact,
+        studentIdPrefixMatch: studentByPrefix
+      });
+      if (!afterStudent.length) {
+        possibleExclusionReasons.push(
+          'filterDeploymentsByStudent_: deployment linked to Product_Area Student on SFDC_DeploymentProductFunctions.');
+      }
+
+      var afterView = applyViewModeFilter_(cfg, afterStudent.length ? afterStudent : [rowForPost], vmOpts);
+      postEffectiveSteps.push({
+        step: 'applyViewModeFilter_',
+        passed: afterView.length > 0,
+        viewMode: vmOpts.viewMode || 'all',
+        ddDisplayName: vmOpts.ddDisplayName || ''
+      });
+      if (afterStudent.length && !afterView.length) {
+        possibleExclusionReasons.push(
+          'applyViewModeFilter_: viewMode "' + (vmOpts.viewMode || 'all') +
+          '" / DD "' + (vmOpts.ddDisplayName || '') + '".');
+      }
+    }
+
+    var allDeploymentsRows = [];
+    try {
+      allDeploymentsRows = getAllDeployments(cfg, vmOpts, prodOpts) || [];
+    } catch (e4) {
+      possibleExclusionReasons.push('getAllDeployments threw: ' + e4);
+    }
+    pipelineCounts.getAllDeployments = allDeploymentsRows.length;
+
+    var uiPayload = null;
+    var uiRows = [];
+    try {
+      uiPayload = getAllDeploymentsForUI(cfg, vmOpts, prodOpts);
+      uiRows = Array.isArray(uiPayload) ? uiPayload : (uiPayload && uiPayload.rows) || [];
+    } catch (e5) {
+      possibleExclusionReasons.push('getAllDeploymentsForUI threw: ' + e5);
+    }
+    pipelineCounts.getAllDeploymentsForUI = uiRows.length;
+
+    var finalUiRow = _findDeploymentInRows_(uiRows, targetId);
+    var includedInFinalUiRows = !!finalUiRow;
+    finalRowsMatchingByName = _rowsMatchingByNameForTrace_(
+      uiRows, traceAccountName, traceDeploymentName).map(_deploymentTracePreview_);
+
+    if (rowForPost && !includedInFinalUiRows && includedInEffectiveRows) {
+      possibleExclusionReasons.push(
+        'excluded_after_effective: present in effective rows but absent from getAllDeployments / UI payload.');
+    }
+
+    var clientSideNotes = [];
+    var defaultHealth = (cfg.ui && cfg.ui.deploymentsTable && cfg.ui.deploymentsTable.defaultHealthFilter);
+    if (!Array.isArray(defaultHealth)) defaultHealth = ['Red', 'Yellow'];
+    var rowForClient = finalUiRow || rowForPost;
+    if (rowForClient && defaultHealth.length && defaultHealth.indexOf(rowForClient.health) === -1) {
+      clientSideNotes.push(
+        'client defaultHealthFilter would hide row: health "' + (rowForClient.health || '') +
+        '" not in ' + JSON.stringify(defaultHealth));
+    }
+    if (includedInFinalUiRows && clientSideNotes.length) {
+      possibleExclusionReasons = possibleExclusionReasons.concat(clientSideNotes);
+    }
+
+    if (rowForPost && String(rowForPost.phase || '').trim().toLowerCase() === 'adhoc') {
+      possibleExclusionReasons.push(
+        'note: phase Adhoc is not filtered server-side in IndustryMode getAllDeployments; ' +
+        'SOQL connector may omit Adhoc before sheet ingest.');
+    }
+
+    var includedInRawEmittedRows = !!(rawParsedRow || rawReaderInstrumentation.emitted);
+    var exclusionStage = 'included';
+    if (!foundInSfdcDeployments) {
+      exclusionStage = 'source_not_found';
+    } else if (!includedInRawEmittedRows) {
+      exclusionStage = 'excluded_in_raw_reader';
+    } else if (idMatchFailedDespiteEmit) {
+      exclusionStage = 'emitted_raw_but_id_match_failed';
+    } else if (!includedInEffectiveRows) {
+      exclusionStage = 'excluded_during_effective_build';
+    } else if (!includedInFinalUiRows) {
+      exclusionStage = 'excluded_after_effective';
+    } else if (clientSideNotes.length) {
+      exclusionStage = 'included';
+    }
+
+    var studentDeploymentFlag = null;
+    if (rowForPost && cfg.student && cfg.student.enabled === true) {
+      try {
+        var sidMapTop = CoreSalesforce.getStudentDeploymentIds_(cfg) || {};
+        studentDeploymentFlag = !!sidMapTop[rowForPost.deploymentId];
+        if (!studentDeploymentFlag && rowForPost.deploymentId) {
+          var dpTop = String(rowForPost.deploymentId).trim();
+          dpTop = dpTop.length >= 15 ? dpTop.slice(0, 15) : dpTop;
+          Object.keys(sidMapTop).forEach(function (k) {
+            if (studentDeploymentFlag) return;
+            var kpTop = k.length >= 15 ? k.slice(0, 15) : k;
+            if (kpTop === dpTop) studentDeploymentFlag = true;
+          });
+        }
+      } catch (eSidTop) { /* ignore */ }
+    }
+
+    var result = {
+      deploymentId: targetId,
+      appId: cfg.appId || '',
+      sourceSheetName: sourceSheetName,
+      foundInSfdcDeployments: foundInSfdcDeployments,
+      sourceRowNumber: sourceMatch ? sourceMatch.sourceRowNumber : null,
+      rawByHeader: sourceMatch ? sourceMatch.rawByHeader : null,
+      parsedFromConfigColumns: sourceMatch ? sourceMatch.parsedFromConfigColumns : null,
+      parsedKeyFields: parsedKeyFields || (rawParsedRow ? {
+        deploymentId: rawParsedRow.deploymentId,
+        deploymentName: rawParsedRow.deploymentName,
+        accountId: rawParsedRow.accountId,
+        accountName: rawParsedRow.accountName,
+        industry: rawParsedRow.industry,
+        region: rawParsedRow.region,
+        subRegion: rawParsedRow.subRegion,
+        status: rawParsedRow.status || rawParsedRow.overallStatus,
+        phase: rawParsedRow.phase,
+        stage: rawParsedRow.stage,
+        health: rawParsedRow.health,
+        startDate: rawParsedRow.deploymentStartDate,
+        currentMtpDate: rawParsedRow.mtpDate,
+        firstMtpDate: rawParsedRow.firstMtpDate,
+        completionDate: rawParsedRow.completionDate,
+        partner: rawParsedRow.partner,
+        currentDeploymentUpdate: rawParsedRow.currentUpdate
+      } : null),
+      gateDiagnostics: gateDiagnostics,
+      pipelineCounts: pipelineCounts,
+      includedInRawEmittedRows: includedInRawEmittedRows,
+      idMatchDiagnostics: {
+        targetIdForms: _salesforceIdFormsForTrace_(targetId),
+        idMatchFailedDespiteEmit: idMatchFailedDespiteEmit,
+        rawRowsMatchingByName: rawRowsMatchingByName,
+        effectiveRowsMatchingByName: effectiveRowsMatchingByName,
+        finalRowsMatchingByName: finalRowsMatchingByName,
+        traceAccountName: traceAccountName,
+        traceDeploymentName: traceDeploymentName
+      },
+      duplicateSuppression: {
+        inRawReader: false,
+        duplicateKey: rawReaderInstrumentation.duplicateKey || null,
+        firstRowKeptPreview: rawReaderInstrumentation.firstRowKeptPreview || null,
+        skippedRowPreview: rawReaderInstrumentation.skippedRowPreview || null,
+        reason: rawReaderInstrumentation.duplicatePreferReason || ''
+      },
+      includedInEffectiveRows: includedInEffectiveRows,
+      effectiveRowPreview: _deploymentTracePreview_(effectiveRow),
+      includedInFinalUiRows: includedInFinalUiRows,
+      finalUiRowPreview: _deploymentTracePreview_(finalUiRow),
+      postEffectiveSteps: postEffectiveSteps,
+      isStudentDeployment: studentDeploymentFlag,
+      clientSideWouldHideWithDefaultFilters: clientSideNotes.length > 0,
+      exclusionStage: exclusionStage,
+      possibleExclusionReasons: possibleExclusionReasons
+    };
+
+    Logger.log('=== debugTraceDeploymentInUiPipeline(' + (cfg.appId || '?') + ', ' + targetId + ') ===');
+    Logger.log(JSON.stringify(result, null, 2));
+    Logger.log('=== end debugTraceDeploymentInUiPipeline ===');
+    return result;
+  }
+
 /**
  * N2: Returns a "data version" token = the latest 'Refresh Time' in the
  * 'Auto Refresh Execution Log' tab for the SFDC_Deployments sheet. Folded into
@@ -4652,6 +5848,181 @@ function _sfdcDataVersion_(cfg) {
   // ===========================================================================
 
   /**
+   * Resolves 0-based column indices for SFDC_Deployments.
+   * When cfg.columns defines DEPLOYMENT_ID and OVERALL_STATUS (IndustryMode 24-col
+   * layout), uses those 1-based positions — same contract as APP_CONFIG trace
+   * parsing. Otherwise falls back to header keyword detection.
+   *
+   * @param {AppConfig} cfg
+   * @param {Array<string>} headers  Trimmed header row.
+   * @return {{ indices: Object, source: string, headerByKey: Object }}
+   * @private
+   */
+  function _resolveSfdcDeploymentsColumnIndices_(cfg, headers) {
+    var lowerH = headers.map(function (h) { return String(h || '').trim().toLowerCase(); });
+
+    function findExact_(headerName) {
+      var target = String(headerName || '').trim().toLowerCase();
+      for (var ei = 0; ei < lowerH.length; ei++) {
+        if (lowerH[ei] === target) return ei;
+      }
+      return -1;
+    }
+
+    function detect_(keywords, positionalFallback) {
+      for (var ki = 0; ki < keywords.length; ki++) {
+        var kw = keywords[ki].toLowerCase();
+        for (var i = 0; i < lowerH.length; i++) {
+          if (lowerH[i].indexOf(kw) !== -1) return i;
+        }
+      }
+      if (positionalFallback >= 0 && positionalFallback < headers.length) return positionalFallback;
+      return -1;
+    }
+
+    function resolveCol_(exactHeader, keywordFallbacks, positionalFallback) {
+      var exact = findExact_(exactHeader);
+      if (exact >= 0) return exact;
+      return detect_(keywordFallbacks || [], positionalFallback);
+    }
+
+    function idxFromCfg_(colNum) {
+      if (!colNum || colNum < 1) return -1;
+      var idx = colNum - 1;
+      return idx < headers.length ? idx : -1;
+    }
+
+    var cols = cfg.columns || {};
+    var cfgId = idxFromCfg_(cols.DEPLOYMENT_ID);
+    var cfgStatus = idxFromCfg_(cols.OVERALL_STATUS);
+    var useCfg = cfgId >= 0 && cfgStatus >= 0;
+
+    var indices;
+    if (useCfg) {
+      indices = {
+        colId:             cfgId,
+        colName:           idxFromCfg_(cols.DEPLOYMENT_NAME),
+        colAccountId:      idxFromCfg_(cols.ACCOUNT_ID),
+        colCustomerRId:    resolveCol_('Customer__r.Id', ['customer__r.id'], -1),
+        colAccountName:    idxFromCfg_(cols.ACCOUNT_NAME),
+        colIndustry:       idxFromCfg_(cols.INDUSTRY),
+        colRegion:         idxFromCfg_(cols.REGION),
+        colSubRegion:      idxFromCfg_(cols.SUB_REGION),
+        colSubRegionAlt:   idxFromCfg_(cols.SUB_REGION_ALT),
+        colCustomerObject: findExact_('Customer__r'),
+        colBillingState:   idxFromCfg_(cols.BILLING_STATE),
+        colBillingCity:    idxFromCfg_(cols.BILLING_CITY),
+        colStartDate:      idxFromCfg_(cols.DEPLOYMENT_START_DATE),
+        colMtpDate:        idxFromCfg_(cols.CURRENT_MTP_DATE),
+        colFirstMtpActual: detect_(['first_move_to_production_date_actual',
+          'move_to_production_date_actual', 'first_mtp_date_actual'], -1),
+        colFirstMtp:       idxFromCfg_(cols.FIRST_MTP_DATE),
+        colStatus:         cfgStatus,
+        colPhase:          idxFromCfg_(cols.DEPLOYMENT_PHASE),
+        colStage:          idxFromCfg_(cols.DEPLOYMENT_STAGE),
+        colHealth:         idxFromCfg_(cols.DEPLOYMENT_HEALTH),
+        colCompletionDate: idxFromCfg_(cols.COMPLETION_DATE),
+        colEM:             idxFromCfg_(cols.WD_ENG_MANAGER),
+        colDAM:            idxFromCfg_(cols.DAM_FULL_NAME),
+        colPrimingPartner: idxFromCfg_(cols.PRIMING_PARTNER),
+        colImplPartner:    idxFromCfg_(cols.IMPL_PARTNER),
+        colPartner:        idxFromCfg_(cols.PARTNER),
+        colSummary:        idxFromCfg_(cols.CURRENT_DEPLOYMENT_UPDATE)
+      };
+    } else {
+      var colIdDetected = findExact_('Id');
+      if (colIdDetected < 0) colIdDetected = detect_(['id'], 0);
+      indices = {
+        colId:             colIdDetected,
+        colName:           detect_(['name'], 1),
+        colAccountId:      resolveCol_('Customer__c', ['customer__c'], 2),
+        colCustomerRId:    resolveCol_('Customer__r.Id', ['customer__r.id'], -1),
+        colAccountName:    resolveCol_('Customer__r.Name', ['customer__r.name'], 3),
+        colIndustry:       resolveCol_('Customer__r.Industry', ['customer__r.industry', 'industry'], 4),
+        colRegion:         resolveCol_('Customer__r.PS_Region_New__c',
+          ['ps_region_new__c', 'ps_region_new', 'region_new'], 5),
+        colSubRegion:      resolveCol_('Customer__r.PS_Sub_Region__c',
+          ['ps_sub_region__c', 'ps_sub_region', 'sub_region'], 6),
+        colSubRegionAlt:   resolveCol_('Customer__r.SubRegion__c', ['subregion__c', 'subregion'], 7),
+        colCustomerObject: findExact_('Customer__r'),
+        colBillingState:   detect_(['billingstate', 'billing_state'], 8),
+        colBillingCity:    detect_(['billingcity', 'billing_city'], 9),
+        colStartDate:      detect_(['deployment_start_date'], 10),
+        colMtpDate:        detect_(['current_mtp_date'], 11),
+        colFirstMtpActual: detect_(['first_move_to_production_date_actual',
+          'move_to_production_date_actual', 'first_mtp_date_actual'], -1),
+        colFirstMtp:       detect_(['first_move_to_production', 'first_mtp'], 12),
+        colStatus:         detect_(['overall_status'], 13),
+        colPhase:          detect_(['deployment_phase'], 14),
+        colStage:          detect_(['deployment_stage'], 15),
+        colHealth:         detect_(['overall_health'], 16),
+        colCompletionDate: detect_(['deployment_completion_date', 'completion_date'], 17),
+        colEM:             detect_(['workday_engagement_manager__r.full_name__c',
+          'workday_engagement_manager__r', 'engagement_manager', 'wdengmanager'], 18),
+        colDAM:            detect_(['delivery_assurance_manager__r.full_name__c',
+          'delivery_assurance_manager__r', 'delivery_assurance', 'dam'], 19),
+        colPrimingPartner: detect_(['priming_partner'], 20),
+        colImplPartner:    detect_(['implementation_partner'], 21),
+        colPartner:        detect_(['deployment_partner_name', 'partner'], 22),
+        colSummary:        detect_(['deployment_summary'], 23)
+      };
+    }
+
+    var headerByKey = {};
+    Object.keys(indices).forEach(function (key) {
+      var idx = indices[key];
+      headerByKey[key] = idx >= 0 ? (headers[idx] || '') : '';
+    });
+
+    return {
+      indices: indices,
+      source: useCfg ? 'cfg.columns' : 'header_keywords',
+      headerByKey: headerByKey
+    };
+  }
+
+  /**
+   * For diagnostics: how readSfdcDeploymentsRaw_ would treat one sheet row.
+   *
+   * @param {AppConfig} cfg
+   * @param {number} sourceRowNumber  1-based sheet row (header = 1).
+   * @param {Array<Array>} allValues  Full sheet values including header.
+   * @param {Array<string>} headers
+   * @return {Object}
+   * @private
+   */
+  function _diagnoseSfdcRawRowEmission_(cfg, sourceRowNumber, allValues, headers) {
+    var resolved = _resolveSfdcDeploymentsColumnIndices_(cfg, headers);
+    var idx = resolved.indices;
+    var dataRowIndex = sourceRowNumber - 1;
+    if (dataRowIndex < 1 || dataRowIndex >= allValues.length) {
+      return { error: 'sourceRowNumber out of range' };
+    }
+    var row = allValues[dataRowIndex];
+    var colId = idx.colId;
+    var deploymentIdFromReaderCol = colId >= 0 ? String(row[colId] || '').trim() : '';
+    var deploymentIdFromCfgCol = '';
+    var cols = cfg.columns || {};
+    if (cols.DEPLOYMENT_ID >= 1) {
+      var cfgIdx = cols.DEPLOYMENT_ID - 1;
+      if (cfgIdx < row.length) deploymentIdFromCfgCol = String(row[cfgIdx] || '').trim();
+    }
+    var overallFromReader = idx.colStatus >= 0 ? String(row[idx.colStatus] || '').trim() : '';
+    return {
+      columnSource: resolved.source,
+      readerColumnIndices: resolved.indices,
+      readerColumnHeaders: resolved.headerByKey,
+      deploymentIdFromReaderCol: deploymentIdFromReaderCol,
+      deploymentIdFromCfgCol: deploymentIdFromCfgCol,
+      wouldSkipEmptyReaderId: !deploymentIdFromReaderCol,
+      overallStatusFromReaderCol: overallFromReader,
+      passesBuildEffectiveOverallGate:
+        !overallFromReader || overallFromReader === 'Active',
+      passesBuildEffectiveLegacyStatusGate: true
+    };
+  }
+
+  /**
    * Reads the unified SFDC_Deployments sheet using header-based column detection.
    * Returns ALL rows (Active + Complete) with a `status` field. The caller
    * is responsible for filtering to the desired status.
@@ -4661,18 +6032,49 @@ function _sfdcDataVersion_(cfg) {
    * are silently skipped; only critical fields (Id, status) log a warning.
    *
    * @param {AppConfig} cfg  Already-defaulted config.
+   * @param {Object=} readOpts  Optional diagnostics: { bypassCache, targetDeploymentId,
+   *   sourceRowNumber, instrumentation }.
    * @return {Array<Object>}  Raw deployment rows; may be empty if sheet missing.
    * @private
    */
-  function readSfdcDeploymentsRaw_(cfg) {
+  function readSfdcDeploymentsRaw_(cfg, readOpts) {
+    readOpts = readOpts || {};
+    var traceTargetId = readOpts.targetDeploymentId
+      ? String(readOpts.targetDeploymentId).trim() : '';
+    var bypassCache = !!readOpts.bypassCache || !!traceTargetId;
+    var instr = readOpts.instrumentation || null;
+    if (instr) {
+      instr.bypassCache = bypassCache;
+      instr.targetDeploymentId = traceTargetId;
+      instr.sourceRowNumberHint = readOpts.sourceRowNumber || null;
+      instr.readPath = '';
+      instr.duplicateSuppressionInReader = false;
+      instr.duplicateKey = null;
+      instr.firstRowKeptPreview = null;
+      instr.skippedRowPreview = null;
+      instr.duplicatePreferReason = 'readSfdcDeploymentsRaw_ does not de-duplicate rows; only skip is empty Id at reader colId.';
+      instr.gatesChecked = [];
+      instr.emitted = null;
+      instr.skipReason = null;
+      instr.emittedRowPreview = null;
+    }
+
     // Performance Layer 1: tier 1 (in-memory).
-    if (_cache.sfdcRows !== null) return _cache.sfdcRows;
+    if (!bypassCache && _cache.sfdcRows !== null) {
+      if (instr) instr.readPath = 'tier1_memory';
+      return _cache.sfdcRows;
+    }
     // Performance Layer 2: tier 2 (sheet-tab cache).
     var cacheKey = _perfKey_(cfg, 'sfdcRows');
-    var cached = _perfCacheRead_(cacheKey);
-    if (cached !== null) {
-      _cache.sfdcRows = cached; // hoist to tier 1 for the rest of this execution
-      return cached;
+    if (!bypassCache) {
+      var cached = _perfCacheRead_(cacheKey);
+      if (cached !== null) {
+        if (instr) instr.readPath = 'tier2_sheet_tab';
+        _cache.sfdcRows = cached; // hoist to tier 1 for the rest of this execution
+        return cached;
+      }
+    } else if (instr) {
+      instr.readPath = 'sheet_fresh';
     }
     var sheetName = cfg.sheets.deployments || 'SFDC_Deployments';
     var ss = getSpreadsheet_();
@@ -4688,73 +6090,39 @@ function _sfdcDataVersion_(cfg) {
     var lastCol  = sheet.getLastColumn();
     var allValues = sheet.getRange(1, 1, lastRow, lastCol).getValues();
     var headers   = allValues[0].map(function (h) { return String(h || '').trim(); });
-    var lowerH    = headers.map(function (h) { return h.toLowerCase(); });
+    var colResolved = _resolveSfdcDeploymentsColumnIndices_(cfg, headers);
+    var colId             = colResolved.indices.colId;
+    var colName           = colResolved.indices.colName;
+    var colAccountId      = colResolved.indices.colAccountId;
+    var colCustomerRId    = colResolved.indices.colCustomerRId;
+    var colAccountName    = colResolved.indices.colAccountName;
+    var colIndustry       = colResolved.indices.colIndustry;
+    var colRegion         = colResolved.indices.colRegion;
+    var colSubRegion      = colResolved.indices.colSubRegion;
+    var colSubRegionAlt   = colResolved.indices.colSubRegionAlt;
+    var colCustomerObject = colResolved.indices.colCustomerObject;
+    var colBillingState   = colResolved.indices.colBillingState;
+    var colBillingCity    = colResolved.indices.colBillingCity;
+    var colStartDate      = colResolved.indices.colStartDate;
+    var colMtpDate        = colResolved.indices.colMtpDate;
+    var colFirstMtpActual = colResolved.indices.colFirstMtpActual;
+    var colFirstMtp       = colResolved.indices.colFirstMtp;
+    var colStatus         = colResolved.indices.colStatus;
+    var colPhase          = colResolved.indices.colPhase;
+    var colStage          = colResolved.indices.colStage;
+    var colHealth         = colResolved.indices.colHealth;
+    var colCompletionDate = colResolved.indices.colCompletionDate;
+    var colEM             = colResolved.indices.colEM;
+    var colDAM            = colResolved.indices.colDAM;
+    var colPrimingPartner = colResolved.indices.colPrimingPartner;
+    var colImplPartner    = colResolved.indices.colImplPartner;
+    var colPartner        = colResolved.indices.colPartner;
+    var colSummary        = colResolved.indices.colSummary;
 
-    // -----------------------------------------------------------------------
-    // Column index detection — keyword-based, case-insensitive.
-    // For each field, we try multiple keyword patterns in priority order.
-    // -----------------------------------------------------------------------
-    function detect_(keywords, positionalFallback) {
-      for (var ki = 0; ki < keywords.length; ki++) {
-        var kw = keywords[ki].toLowerCase();
-        for (var i = 0; i < lowerH.length; i++) {
-          if (lowerH[i].indexOf(kw) !== -1) return i;
-        }
-      }
-      if (positionalFallback >= 0 && positionalFallback < headers.length) return positionalFallback;
-      return -1;
+    if (colResolved.source === 'cfg.columns') {
+      Logger.log('CoreData.readSfdcDeploymentsRaw_: using cfg.columns layout for "' +
+                 sheetName + '".');
     }
-
-    function findExact_(headerName) {
-      var target = String(headerName || '').trim().toLowerCase();
-      for (var ei = 0; ei < lowerH.length; ei++) {
-        if (lowerH[ei] === target) return ei;
-      }
-      return -1;
-    }
-
-    function resolveCol_(exactHeader, keywordFallbacks, positionalFallback) {
-      var exact = findExact_(exactHeader);
-      if (exact >= 0) return exact;
-      return detect_(keywordFallbacks || [], positionalFallback);
-    }
-
-    // ── Column detection — 24-col standard layout (confirmed 2026-06-24) ──────
-    var colId             = detect_(['id'],                                                    0);
-    var colName           = detect_(['name'],                                                  1);
-    var colAccountId      = resolveCol_('Customer__c', ['customer__c'],                        2);
-    var colCustomerRId    = resolveCol_('Customer__r.Id', ['customer__r.id'],                  -1);
-    var colAccountName    = resolveCol_('Customer__r.Name', ['customer__r.name'],              3);
-    var colIndustry       = resolveCol_('Customer__r.Industry', ['customer__r.industry', 'industry'], 4);
-    var colRegion         = resolveCol_('Customer__r.PS_Region_New__c',
-      ['ps_region_new__c', 'ps_region_new', 'region_new'],                                   5);
-    var colSubRegion      = resolveCol_('Customer__r.PS_Sub_Region__c',
-      ['ps_sub_region__c', 'ps_sub_region', 'sub_region'],                                     6);
-    var colSubRegionAlt   = resolveCol_('Customer__r.SubRegion__c', ['subregion__c', 'subregion'], 7);
-    var colCustomerObject = findExact_('Customer__r');
-    var colBillingState   = detect_(['billingstate', 'billing_state'],                         8);
-    var colBillingCity    = detect_(['billingcity', 'billing_city'],                           9);
-    var colStartDate      = detect_(['deployment_start_date'],                                10);
-    var colMtpDate        = detect_(['current_mtp_date'],                                     11);
-    var colFirstMtpActual = detect_(['first_move_to_production_date_actual',
-                                     'move_to_production_date_actual',
-                                     'first_mtp_date_actual'],                               -1);
-    var colFirstMtp       = detect_(['first_move_to_production', 'first_mtp'],                12);
-    var colStatus         = detect_(['overall_status'],                                       13);
-    var colPhase          = detect_(['deployment_phase'],                                     14);
-    var colStage          = detect_(['deployment_stage'],                                     15);
-    var colHealth         = detect_(['overall_health'],                                       16);
-    var colCompletionDate = detect_(['deployment_completion_date', 'completion_date'],        17);
-    var colEM             = detect_(['workday_engagement_manager__r.full_name__c',
-                                     'workday_engagement_manager__r',
-                                     'engagement_manager', 'wdengmanager'],                   18);
-    var colDAM            = detect_(['delivery_assurance_manager__r.full_name__c',
-                                     'delivery_assurance_manager__r',
-                                     'delivery_assurance', 'dam'],                            19);
-    var colPrimingPartner = detect_(['priming_partner'],                                      20);
-    var colImplPartner    = detect_(['implementation_partner'],                               21);
-    var colPartner        = detect_(['deployment_partner_name', 'partner'],                   22);
-    var colSummary        = detect_(['deployment_summary'],                                   23);
 
     if (colStatus < 0) {
       Logger.log('CoreData.readSfdcDeploymentsRaw_: WARNING — Overall_Status__c column not ' +
@@ -4769,8 +6137,16 @@ function _sfdcDataVersion_(cfg) {
     var _wellnessMap = buildWellnessMap_(cfg);
 
     var rows = [];
+    var emittedIdIndex = {};
     for (var r = 1; r < allValues.length; r++) {
       var row = allValues[r];
+      var physicalRowNumber = r + 1;
+      var isTraceRow = false;
+      if (traceTargetId || readOpts.sourceRowNumber) {
+        if (readOpts.sourceRowNumber && physicalRowNumber === readOpts.sourceRowNumber) {
+          isTraceRow = true;
+        }
+      }
 
       function cellStr_(col) { return col >= 0 ? String(row[col] || '').trim() : ''; }
       function cellDate_(col) {
@@ -4803,7 +6179,49 @@ function _sfdcDataVersion_(cfg) {
       }
 
       var deploymentId = cellStr_(colId);
-      if (!deploymentId) continue; // skip rows with no SF Id
+      if (traceTargetId && _deploymentIdEquals_(deploymentId, traceTargetId)) {
+        isTraceRow = true;
+      }
+      if (isTraceRow && instr && !instr.physicalSheetRowNumber) {
+        instr.physicalSheetRowNumber = physicalRowNumber;
+        instr.resolvedColumnIndices = colResolved.indices;
+        instr.resolvedColumnHeaders = colResolved.headerByKey;
+        instr.columnResolutionSource = colResolved.source;
+        instr.rawDeploymentIdFromReaderCol = deploymentId;
+        instr.normalizedDeploymentId = _normalizeDeploymentIdForTrace_(deploymentId);
+        var idForms = _salesforceIdFormsForTrace_(deploymentId);
+        instr.deploymentId15 = idForms.id15;
+        instr.deploymentId18 = idForms.id18;
+        instr.deploymentName = cellStr_(colName);
+        instr.accountId = resolveAccountId_();
+        instr.accountName = resolveField_(colAccountName, colCustomerObject, 'Name');
+        instr.industry = resolveField_(colIndustry, colCustomerObject, 'Industry');
+        instr.region = resolveField_(colRegion, colCustomerObject, 'PS_Region_New__c');
+        instr.subRegion = resolveField_(colSubRegion, colCustomerObject, 'PS_Sub_Region__c');
+        instr.overallStatus = cellStr_(colStatus);
+        instr.status = cellStr_(colStatus);
+        instr.phase = cellStr_(colPhase);
+        instr.stage = cellStr_(colStage);
+        instr.health = cellStr_(colHealth);
+        instr.mtpDate = cellStr_(colMtpDate);
+        instr.currentUpdate = cellStr_(colSummary);
+        instr.gatesChecked = [];
+      }
+      if (isTraceRow && instr) {
+        instr.gatesChecked.push({
+          gate: 'deploymentId_non_empty_at_reader_colId',
+          passed: !!deploymentId,
+          readerColIndex: colId,
+          readerColHeader: colResolved.headerByKey.colId || ''
+        });
+      }
+      if (!deploymentId) {
+        if (isTraceRow && instr) {
+          instr.emitted = false;
+          instr.skipReason = 'empty_deployment_id_at_reader_colId';
+        }
+        continue; // skip rows with no SF Id
+      }
 
       var rowObj = {
         deploymentId:        deploymentId,
@@ -4821,6 +6239,7 @@ function _sfdcDataVersion_(cfg) {
         firstMtpDate:        cellStr_(colFirstMtp),
         firstMtpDateActual:  cellDate_(colFirstMtpActual),
         overallStatus:       cellStr_(colStatus),
+        status:              cellStr_(colStatus),
         phase:               cellStr_(colPhase),
         stage:               cellStr_(colStage),
         health:              cellStr_(colHealth),
@@ -4835,15 +6254,42 @@ function _sfdcDataVersion_(cfg) {
       var _wKey = (rowObj.accountId || '').slice(0, 15);
       var _wellness = _wellnessMap[_wKey] || null;
       _attachWellnessFieldsToRow_(rowObj, _wellness, cfg);
+      if (isTraceRow && instr) {
+        var dupKey = _normalizeDeploymentIdForTrace_(rowObj.deploymentId);
+        if (dupKey && emittedIdIndex[dupKey] !== undefined) {
+          instr.duplicateKey = dupKey;
+          instr.firstRowKeptPreview = _deploymentTracePreview_(rows[emittedIdIndex[dupKey]]);
+          instr.skippedRowPreview = _deploymentTracePreview_(rowObj);
+          instr.duplicatePreferReason =
+            'Not suppressed — readSfdcDeploymentsRaw_ emits all rows with non-empty Id; earlier row index ' +
+            emittedIdIndex[dupKey] + ' and this row both present in output.';
+        } else if (dupKey) {
+          emittedIdIndex[dupKey] = rows.length;
+        }
+        instr.emitted = true;
+        instr.skipReason = null;
+        instr.emittedRowPreview = _deploymentTracePreview_(rowObj);
+        instr.emittedRowIdCandidates = _collectDeploymentIdCandidatesFromRow_(rowObj);
+        instr.emittedRowIdForms = _salesforceIdFormsForTrace_(rowObj.deploymentId);
+      }
       rows.push(rowObj);
+    }
+
+    if (instr && traceTargetId && instr.physicalSheetRowNumber == null) {
+      instr.emitted = false;
+      instr.skipReason = instr.skipReason || 'target_row_not_seen_in_sheet_loop';
     }
 
     Logger.log('CoreData.readSfdcDeploymentsRaw_: read ' + rows.length +
                ' rows from "' + sheetName + '".');
+    if (instr && traceTargetId) {
+      Logger.log('CoreData.readSfdcDeploymentsRaw_: target instrumentation ' +
+        JSON.stringify(instr));
+    }
     // Performance Layer 1: tier 1 (in-memory).
     _cache.sfdcRows = rows;
     // Performance Layer 2: tier 2 (sheet-tab cache).
-    _perfCacheWrite_(cacheKey, rows);
+    _perfCacheWrite_(cacheKey, rows, cfg.appId);
     return rows;
   }
 
@@ -4932,7 +6378,8 @@ function _sfdcDataVersion_(cfg) {
       Override_Deployment:    row.overrideName || '',
       Override_CurrentUpdate: row.overrideCurrentUpdate || '',
       Exclude_From_Report:    !!row.exclude,
-      Classification:         row.classification || 'Monthly'
+      Classification:         row.classification || 'Monthly',
+      Reason:                 row.reason || ''
     };
   }
 
@@ -4945,7 +6392,8 @@ function _sfdcDataVersion_(cfg) {
       Override_GoLiveDate: row.overrideDate ? CoreUtils.formatDateToIsoString(row.overrideDate) : '',
       Override_Partner:    row.overridePartner || '',
       Exclude_From_Report: !!row.exclude,
-      Classification:      row.classification || 'Monthly'
+      Classification:      row.classification || 'Monthly',
+      Reason:              row.reason || ''
     };
   }
 
@@ -5001,23 +6449,31 @@ function _sfdcDataVersion_(cfg) {
    * automatically flows through to the WebApp Deployments tab.
    */
   function getAllDeployments(config, viewModeOpts, productOpts) {
+    var perfStart = Date.now();
     var cfg = CoreConfig.withDefaults(config);
 
     // Base effective view — includes SFDC-vs-legacy fallback, Active-only filter,
     // meta application, overrides application, and D1 ddContacts/ddFromContacts.
+    var tEffective = Date.now();
     var allEffective = getAllEffectiveDeployments(cfg, productOpts);
+    var effectiveMs = Date.now() - tEffective;
+    var tDhp = Date.now();
     allEffective = applyDeploymentHealthPlansToRows_(allEffective, cfg);
+    var dhpMs = Date.now() - tDhp;
 
     // Phase 3a: enrich with isPhased, upcomingDates, nextGoLiveDate.
     // Degrade gracefully when the enrichment sheet is absent.
     var enrichmentMap = {};
+    var tEnrichRead = Date.now();
     try {
       enrichmentMap = CoreSalesforce.getDeploymentEnrichmentMap(cfg);
     } catch (err) {
       Logger.log('CoreData.getAllDeployments: CoreSalesforce enrichment failed — ' +
                  'isPhased will default to false. Error: ' + err);
     }
+    var enrichReadMs = Date.now() - tEnrichRead;
 
+    var tEnrichMerge = Date.now();
     var enriched = allEffective.map(function (row) {
       var lookupId = row.parentDeploymentId || row.deploymentId;
       var enrichment = enrichmentMap[row.deploymentId] || enrichmentMap[lookupId];
@@ -5027,11 +6483,13 @@ function _sfdcDataVersion_(cfg) {
         nextGoLiveDate: enrichment ? (enrichment.nextGoLiveDate || null) : null
       });
     });
+    var enrichMergeMs = Date.now() - tEnrichMerge;
 
     // S1: exclude Student deployments from the Deployments tab view (HENP only).
     enriched = filterDeploymentsByStudent_(enriched, 'exclude', cfg);
 
     // Health-rank sort: Red -> Yellow -> Green -> other; tiebreak by accountName.
+    var tSort = Date.now();
     var sorted = enriched.sort(function (a, b) {
       var rank = { 'Red': 0, 'Yellow': 1, 'Green': 2 };
       var ar = rank[a.health] !== undefined ? rank[a.health] : 99;
@@ -5039,8 +6497,19 @@ function _sfdcDataVersion_(cfg) {
       if (ar !== br) return ar - br;
       return String(a.accountName || '').localeCompare(String(b.accountName || ''));
     });
-
-    return applyViewModeFilter_(cfg, sorted, viewModeOpts);
+    var sortMs = Date.now() - tSort;
+    var tView = Date.now();
+    var result = applyViewModeFilter_(cfg, sorted, viewModeOpts);
+    var viewMs = Date.now() - tView;
+    var totalMs = Date.now() - perfStart;
+    if (totalMs >= 3000 || (cfg.ui && cfg.ui.logServerTimings)) {
+      Logger.log('CoreData.getAllDeployments(' + (cfg.appId || '?') + '): rows=' + result.length +
+        ' effective=' + (effectiveMs / 1000).toFixed(1) + 's dhp=' + (dhpMs / 1000).toFixed(1) +
+        's enrichRead=' + (enrichReadMs / 1000).toFixed(1) + 's enrichMerge=' + (enrichMergeMs / 1000).toFixed(1) +
+        's sort=' + (sortMs / 1000).toFixed(1) + 's viewFilter=' + (viewMs / 1000).toFixed(1) +
+        's total=' + (totalMs / 1000).toFixed(1) + 's');
+    }
+    return result;
   }
 
   /**
@@ -5065,16 +6534,30 @@ function _sfdcDataVersion_(cfg) {
    * @return {Array<Object>|{rows: Array<Object>, countRows: Array<Object>, useCountGrainForKpis: boolean}}
    */
   function getAllDeploymentsForUI(config, viewModeOpts, productOpts) {
+    var totalStart = Date.now();
     var cfg = CoreConfig.withDefaults(config);
     var displayRows = getAllDeployments(cfg, viewModeOpts, productOpts);
 
     if (!_productModeUsesSeparateCountGrain_(cfg)) {
+      var simpleMs = Date.now() - totalStart;
+      if (simpleMs >= 3000 || (cfg.ui && cfg.ui.logServerTimings)) {
+        Logger.log('CoreData.getAllDeploymentsForUI(' + (cfg.appId || '?') + '): displayRows=' +
+          (displayRows ? displayRows.length : 0) + ' total=' + (simpleMs / 1000).toFixed(1) + 's');
+      }
       return displayRows;
     }
 
+    var tCount = Date.now();
     var countRows = getActiveCountDeployments(cfg, productOpts) || [];
     countRows = filterDeploymentsByStudent_(countRows, 'exclude', cfg);
     countRows = applyViewModeFilter_(cfg, countRows, viewModeOpts);
+    var countMs = Date.now() - tCount;
+    var totalMs = Date.now() - totalStart;
+    if (totalMs >= 3000 || (cfg.ui && cfg.ui.logServerTimings)) {
+      Logger.log('CoreData.getAllDeploymentsForUI(' + (cfg.appId || '?') + '): displayRows=' +
+        (displayRows ? displayRows.length : 0) + ' countRows=' + countRows.length +
+        ' countGrain=' + (countMs / 1000).toFixed(1) + 's total=' + (totalMs / 1000).toFixed(1) + 's');
+    }
 
     return {
       rows: displayRows,
@@ -6646,13 +8129,20 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     setCell('Override_Health', overrideData.overrideHealth);
     setCell('Override_MTPDate', overrideData.overrideMtpDate ? new Date(overrideData.overrideMtpDate) : '');
     setCell('Override_Stage', overrideData.overrideStage);
-    setCell('Override_Account', overrideData.overrideAccount);
-    setCell('Override_Deployment', overrideData.overrideDeployment);
+    if (overrideData.overrideAccount !== undefined) {
+      setCell('Override_Account', overrideData.overrideAccount);
+    }
+    if (overrideData.overrideDeployment !== undefined) {
+      setCell('Override_Deployment', overrideData.overrideDeployment);
+    }
     setCell('Override_CurrentUpdate', overrideData.overrideCurrentUpdate);
     setCell('Exclude_From_Report', overrideData.excludeFromReport);
     // Phase 2: classification
     if (overrideData.classification !== undefined) {
       setCell('Classification', normalizeClassification_(overrideData.classification));
+    }
+    if (notes !== undefined && notes !== null) {
+      setCell('Reason', String(notes || ''));
     }
 
     var user = getCurrentUserEmail_();
@@ -6736,6 +8226,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     if (overrideData.classification !== undefined) {
       setCell('Classification', normalizeClassification_(overrideData.classification));
     }
+    if (notes !== undefined && notes !== null) {
+      setCell('Reason', String(notes || ''));
+    }
 
     var user = getCurrentUserEmail_();
     setCell('LastEditedBy', user);
@@ -6763,6 +8256,89 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   // ===========================================================================
 
   /**
+   * Builds lookup sets for orphan detection in getAllActiveOverrides.
+   * @param {AppConfig} cfg
+   * @return {{ deploymentIds: Object, accountNames: Object }}
+   * @private
+   */
+  function _buildOverrideUniverseLookups_(cfg) {
+    var deploymentIds = {};
+    var accountNames = {};
+
+    try {
+      var sfdcRows = readSfdcDeploymentsRaw_(cfg) || [];
+      sfdcRows.forEach(function (r) {
+        var id = _canonicalId_(r.deploymentId);
+        if (id) deploymentIds[id] = true;
+        if (r.accountName) accountNames[String(r.accountName).trim()] = true;
+      });
+    } catch (err) {
+      Logger.log('_buildOverrideUniverseLookups_: readSfdcDeploymentsRaw_ failed: ' + err);
+    }
+
+    try {
+      var pfRows = readSfdcProductFunctionsRaw_(cfg) || [];
+      pfRows.forEach(function (pf) {
+        var parentId = _canonicalId_(pf.parentDeploymentId || pf.deploymentFk);
+        if (parentId) deploymentIds[parentId] = true;
+        if (pf.accountName) accountNames[String(pf.accountName).trim()] = true;
+      });
+    } catch (err) {
+      Logger.log('_buildOverrideUniverseLookups_: readSfdcProductFunctionsRaw_ failed: ' + err);
+    }
+
+    return { deploymentIds: deploymentIds, accountNames: accountNames };
+  }
+
+  /**
+   * True when an override key no longer exists in the current deployment/go-live universe.
+   * @param {string} type
+   * @param {string} key
+   * @param {Object} universe
+   * @return {boolean}
+   * @private
+   */
+  function _isOrphanedOverride_(type, key, universe) {
+    var k = String(key || '').trim();
+    if (!k) return true;
+    if (type === 'golives') {
+      return !universe.accountNames[k];
+    }
+    var canon = _canonicalId_(k);
+    if (universe.deploymentIds[canon]) return false;
+    var prefix = canon.length >= 15 ? canon.slice(0, 15) : canon;
+    return !Object.keys(universe.deploymentIds).some(function (id) {
+      return id === canon || (id.length >= 15 && id.slice(0, 15) === prefix);
+    });
+  }
+
+  /**
+   * Resolves a display deployment name for an override row.
+   * @param {AppConfig} cfg
+   * @param {string} deploymentId
+   * @param {Object} ovRow
+   * @return {string}
+   * @private
+   */
+  function _lookupDeploymentNameForOverride_(cfg, deploymentId, ovRow) {
+    if (ovRow && ovRow.overrideName) return ovRow.overrideName;
+    try {
+      var rows = readSfdcDeploymentsRaw_(cfg) || [];
+      var target = String(deploymentId || '').trim();
+      var prefix = target.length >= 15 ? target.slice(0, 15) : target;
+      for (var i = 0; i < rows.length; i++) {
+        var id = _canonicalId_(rows[i].deploymentId);
+        if (id === target || (id.length >= 15 && id.slice(0, 15) === prefix)) {
+          return String(rows[i].deploymentName || '');
+        }
+      }
+    } catch (err) {
+      Logger.log('_lookupDeploymentNameForOverride_: read failed: ' + err);
+    }
+    return '';
+  }
+
+  /**
    * Returns a unified list of all active overrides from DeploymentOverrides
    * and GoLivesOverrides. One row per override (not per source row).
    * Honors viewMode personalization filtering.
@@ -6772,35 +8348,85 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    *     type: 'deployment' | 'golives',
    *     accountName: string,
    *     deploymentId: string,  // for deployment; accountName for golives
+   *     deploymentName: string,
    *     fieldsSet: Array<string>,  // names of override fields that are non-empty
    *     currentValues: Object,  // the override values
+   *     sourceValues: Object,
+   *     effectiveValues: Object,
    *     setBy: string,
    *     setAt: string (ISO),
-   *     classification: 'Monthly' | 'Structural'
+   *     classification: 'Monthly' | 'Structural',
+   *     reason: string,
+   *     hasOperationalOverride: boolean,
+   *     hasReportExclusion: boolean,
+   *     isStaleMonthly: boolean,
+   *     isOrphaned: boolean,
+   *     category: 'operational' | 'report' | 'mixed'
    *   }
    */
   function getAllActiveOverrides(config, viewModeOpts, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var out = [];
+    var universe = _buildOverrideUniverseLookups_(cfg);
 
     var depMap = getDeploymentOverridesMap_(cfg);
     Object.keys(depMap).forEach(function (id) {
       var row = depMap[id];
       var fieldsSet = [];
-      if (row.overrideHealth)        fieldsSet.push('Override_Health');
-      if (row.overrideMtp)           fieldsSet.push('Override_MTPDate');
-      if (row.overrideStage)         fieldsSet.push('Override_Stage');
-      if (row.overrideAccount)       fieldsSet.push('Override_Account');
-      if (row.overrideName)          fieldsSet.push('Override_Deployment');
-      if (row.overrideCurrentUpdate) fieldsSet.push('Override_CurrentUpdate');
+      var hasOperational = false;
+      if (row.overrideHealth)        { fieldsSet.push('Override_Health'); hasOperational = true; }
+      if (row.overrideMtp)           { fieldsSet.push('Override_MTPDate'); hasOperational = true; }
+      if (row.overrideStage)         { fieldsSet.push('Override_Stage'); hasOperational = true; }
+      if (row.overrideAccount)       { fieldsSet.push('Override_Account'); hasOperational = true; }
+      if (row.overrideName)          { fieldsSet.push('Override_Deployment'); hasOperational = true; }
+      if (row.overrideCurrentUpdate) { fieldsSet.push('Override_CurrentUpdate'); hasOperational = true; }
       if (row.exclude)               fieldsSet.push('Exclude_From_Report');
       if (fieldsSet.length === 0) return;
 
+      var accountName = lookupAccountForDeployment_(cfg, id);
+      var deploymentName = _lookupDeploymentNameForOverride_(cfg, id, row);
+      var sourceRow = null;
+      try {
+        var sfdcRows = readSfdcDeploymentsRaw_(cfg) || [];
+        var target = String(id).trim();
+        var prefix = target.length >= 15 ? target.slice(0, 15) : target;
+        for (var si = 0; si < sfdcRows.length; si++) {
+          var sid = _canonicalId_(sfdcRows[si].deploymentId);
+          if (sid === target || (sid.length >= 15 && sid.slice(0, 15) === prefix)) {
+            sourceRow = sfdcRows[si];
+            break;
+          }
+        }
+      } catch (ignore) { /* best effort */ }
+
+      var sourceValues = {
+        health:        sourceRow ? (sourceRow.health || '') : '',
+        mtpDate:       sourceRow && sourceRow.mtpDate ? CoreUtils.formatDateToIsoString(sourceRow.mtpDate) : '',
+        stage:         sourceRow ? (sourceRow.stage || '') : '',
+        account:       sourceRow ? (sourceRow.accountName || '') : accountName,
+        deployment:    sourceRow ? (sourceRow.deploymentName || '') : deploymentName,
+        currentUpdate: sourceRow ? (sourceRow.currentUpdate || '') : ''
+      };
+      var effectiveValues = {
+        health:            row.overrideHealth || sourceValues.health,
+        mtpDate:           row.overrideMtp ? CoreUtils.formatDateToIsoString(row.overrideMtp) : sourceValues.mtpDate,
+        stage:             row.overrideStage || sourceValues.stage,
+        account:           row.overrideAccount || sourceValues.account,
+        deployment:        row.overrideName || sourceValues.deployment,
+        currentUpdate:     row.overrideCurrentUpdate || sourceValues.currentUpdate,
+        excludeFromReport: !!row.exclude
+      };
+
+      var category = 'operational';
+      if (row.exclude && !hasOperational) category = 'report';
+      else if (row.exclude && hasOperational) category = 'mixed';
+
       out.push({
-        type:           'deployment',
-        accountName:    lookupAccountForDeployment_(cfg, id),
-        deploymentId:   id,
-        fieldsSet:      fieldsSet,
+        type:                   'deployment',
+        accountName:            accountName,
+        deploymentId:           id,
+        deploymentName:         deploymentName,
+        fieldsSet:              fieldsSet,
         currentValues: {
           health:            row.overrideHealth || '',
           mtpDate:           row.overrideMtp ? CoreUtils.formatDateToIsoString(row.overrideMtp) : '',
@@ -6810,9 +8436,17 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           currentUpdate:     row.overrideCurrentUpdate || '',
           excludeFromReport: !!row.exclude
         },
-        setBy:          row.lastEditedBy || '',
-        setAt:          row.lastEditedAt || '',
-        classification: row.classification || 'Monthly'
+        sourceValues:           sourceValues,
+        effectiveValues:        effectiveValues,
+        setBy:                  row.lastEditedBy || '',
+        setAt:                  row.lastEditedAt || '',
+        classification:         row.classification || 'Monthly',
+        reason:                 row.reason || '',
+        hasOperationalOverride: hasOperational,
+        hasReportExclusion:     !!row.exclude,
+        isStaleMonthly:         isStaleMonthlyOverride_(row.classification, row.lastEditedAt),
+        isOrphaned:             _isOrphanedOverride_('deployment', id, universe),
+        category:               category
       });
     });
 
@@ -6820,24 +8454,42 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     Object.keys(golivesMap).forEach(function (acct) {
       var row = golivesMap[acct];
       var fieldsSet = [];
-      if (row.overrideDate)    fieldsSet.push('Override_GoLiveDate');
-      if (row.overridePartner) fieldsSet.push('Override_Partner');
+      var hasOperational = false;
+      if (row.overrideDate)    { fieldsSet.push('Override_GoLiveDate'); hasOperational = true; }
+      if (row.overridePartner) { fieldsSet.push('Override_Partner'); hasOperational = true; }
       if (row.exclude)         fieldsSet.push('Exclude_From_Report');
       if (fieldsSet.length === 0) return;
 
+      var category = 'operational';
+      if (row.exclude && !hasOperational) category = 'report';
+      else if (row.exclude && hasOperational) category = 'mixed';
+
       out.push({
-        type:           'golives',
-        accountName:    acct,
-        deploymentId:   acct,
-        fieldsSet:      fieldsSet,
+        type:                   'golives',
+        accountName:            acct,
+        deploymentId:           acct,
+        deploymentName:         '',
+        fieldsSet:              fieldsSet,
         currentValues: {
           goLiveDate:        row.overrideDate ? CoreUtils.formatDateToIsoString(row.overrideDate) : '',
           partner:           row.overridePartner || '',
           excludeFromReport: !!row.exclude
         },
-        setBy:          row.lastEditedBy || '',
-        setAt:          row.lastEditedAt || '',
-        classification: row.classification || 'Monthly'
+        sourceValues:           {},
+        effectiveValues: {
+          goLiveDate:        row.overrideDate ? CoreUtils.formatDateToIsoString(row.overrideDate) : '',
+          partner:           row.overridePartner || '',
+          excludeFromReport: !!row.exclude
+        },
+        setBy:                  row.lastEditedBy || '',
+        setAt:                  row.lastEditedAt || '',
+        classification:         row.classification || 'Monthly',
+        reason:                 row.reason || '',
+        hasOperationalOverride: hasOperational,
+        hasReportExclusion:     !!row.exclude,
+        isStaleMonthly:         isStaleMonthlyOverride_(row.classification, row.lastEditedAt),
+        isOrphaned:             _isOrphanedOverride_('golives', acct, universe),
+        category:               category
       });
     });
 
@@ -6848,7 +8500,11 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       return tb - ta;
     });
 
-    return applyViewModeFilter_(cfg, out, viewModeOpts);
+    out = applyViewModeFilter_(cfg, out, viewModeOpts);
+    if (productOpts && productOpts.product) {
+      out = filterDeploymentsByProduct_(out, productOpts.product, cfg);
+    }
+    return out;
   }
 
   /**
@@ -7083,6 +8739,48 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       deploymentCount: depCleared,
       golivesCount:    golivesCleared
     };
+  }
+
+  /**
+   * Clears a single override row (deployment or go lives) and writes an audit entry.
+   * Power-user gated; uses the same audit pattern as bulk clear.
+   *
+   * @param {AppConfig} config
+   * @param {string} type  'deployment' | 'golives'
+   * @param {string} idOrAccount  DeploymentID or AccountName
+   * @return {{ success: boolean, cleared: number }}
+   */
+  function clearSingleOverride(config, type, idOrAccount) {
+    var cfg = CoreConfig.withDefaults(config);
+    CoreUsers.requirePowerUser_(cfg);
+    if (!type || !idOrAccount) throw new Error('type and idOrAccount required');
+
+    var target = String(idOrAccount).trim();
+    var sheetName = type === 'deployment'
+      ? cfg.sheets.deploymentOverrides
+      : cfg.sheets.goLivesOverrides;
+    var keyHeader = type === 'deployment' ? 'DeploymentID' : 'AccountName';
+
+    var cleared = clearOverrideRowsByPredicate_(
+      cfg,
+      sheetName,
+      type,
+      function (row, headers) {
+        var idxKey = headers.indexOf(keyHeader);
+        if (idxKey < 0) return false;
+        var rowKey = String(row[idxKey] || '').trim();
+        if (type === 'deployment') {
+          if (rowKey === target) return true;
+          var targetPrefix = target.length >= 15 ? target.slice(0, 15) : target;
+          var rowPrefix = rowKey.length >= 15 ? rowKey.slice(0, 15) : rowKey;
+          return rowPrefix === targetPrefix;
+        }
+        return rowKey === target;
+      }
+    );
+
+    _clearCache(cfg);
+    return { success: cleared > 0, cleared: cleared };
   }
 
   // ===========================================================================
@@ -8198,7 +9896,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     // Cache the un-filtered payload.
     _cache.mdsPglBatchView[t1Key] = payload;
-    _perfCacheWrite_(t2Key, payload);
+    _perfCacheWrite_(t2Key, payload, cfg.appId);
 
     Logger.log('CoreData.getMdsPglBatchView: built ' + groups.length + ' month groups, ' +
                allRows.length + ' total rows, ' + exceptions.length + ' exceptions.');
@@ -9523,18 +11221,11 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   function _computeOverviewSnapshot_(cfg, viewModeOpts, productOpts) {
     var tz = Session.getScriptTimeZone();
     var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
-    var pa = (productOpts && productOpts.product) || 'all';
 
-    var activeRows;
-    if (usesProductModePfDataSource_(cfg) || usesProductModeParentAndPfUnion_(cfg)) {
-      activeRows = getProductModeCanonicalDeployments(cfg, productOpts, { surface: 'default' }) || [];
-      activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
-    } else {
-      var allRows = readSfdcDeploymentsRaw_(cfg);
-      allRows = filterDeploymentsByStudent_(allRows, 'exclude', cfg);
-      allRows = filterDeploymentsByProduct_(allRows, pa, cfg);
-      activeRows = allRows.filter(function (r) { return r.overallStatus === 'Active'; });
-    }
+    // Override-aware active rows: ProductMode canonical grain or IndustryMode effective view.
+    var activeRows = getActiveCountDeployments(cfg, productOpts) || [];
+    activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+    var overrideFootnote = buildOverrideFootnote_(activeRows);
 
     // TOTALS
     var totalActive    = activeRows.length;
@@ -9661,6 +11352,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         green:          greenCount,
         executiveWatch: ewCount
       },
+      overrideFootnote: overrideFootnote,
       topHighRisk:      topHighRisk,
       upcomingGoLives:  upcomingGoLivesBlock,
       lifecycleBuckets: lifecycleBuckets,
@@ -9681,8 +11373,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
     var overviewCacheBase = usesProductModeParentAndPfUnion_(cfg)
-      ? 'overviewData:v12:lifecycleDeploymentStage'
-      : 'overviewData:v10:lifecycleDeploymentStage';
+      ? 'overviewData:v13:lifecycleDeploymentStage:overrideAware'
+      : 'overviewData:v11:lifecycleDeploymentStage:overrideAware';
     var cacheKey = _perfKey_(cfg, overviewCacheBase);
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
@@ -9698,7 +11390,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var payload = _computeOverviewSnapshot_(cfg, viewModeOpts, productOpts);
     if (useCache) {
       _cache.overviewSnapshot = payload;
-      _perfCacheWrite_(cacheKey, payload);
+      _perfCacheWrite_(cacheKey, payload, cfg.appId);
     }
     Logger.log('CoreData.getOverviewSnapshot(' + cfg.appId + '): computed fresh snapshot. totalActive=' +
                (payload.totals && payload.totals.totalActive));
@@ -11209,7 +12901,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       windowEnd: win.endKey
     };
     _cache.goLivesExplorerUniverseByKey[cacheKey] = universe;
-    _perfCacheWrite_(cacheKey, universe);
+    _perfCacheWrite_(cacheKey, universe, cfg.appId);
     return universe;
   }
 
@@ -11582,6 +13274,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
     getActiveCountDeployments:           getActiveCountDeployments,
+    buildOverrideFootnote_:                buildOverrideFootnote_,
     getProductModeCanonicalDeployments:  getProductModeCanonicalDeployments,
     getProductModeTrendsDeployments:     getProductModeTrendsDeployments,
     _debugProductModeCanonicalUnionCounts: _debugProductModeCanonicalUnionCounts,
@@ -11615,6 +13308,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     setOverrideClassification:   setOverrideClassification,
     bulkClearMonthlyOverrides:   bulkClearMonthlyOverrides,
     bulkClearAllOverrides:       bulkClearAllOverrides,
+    clearSingleOverride:         clearSingleOverride,
 
     // Phase 3f addition
     getDeploymentAuditSummary:   getDeploymentAuditSummary,
@@ -11641,6 +13335,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     _debugOverviewSnapshot:      _debugOverviewSnapshot_,
 
     // Performance Layer 2 additions
+    flushAppCaches:              flushAppCaches,
     _warmSfdcRows:               _warmSfdcRows,
     _getCachedSfdcRowCount:      _getCachedSfdcRowCount,
     _dataVersion:                _dataVersion,
@@ -11650,6 +13345,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // D1 diagnostic
     _debugDdFromContacts_:       _debugDdFromContacts_,
     _debugDeploymentHealthPlan:  _debugDeploymentHealthPlan,
+    debugTraceDeploymentInUiPipeline: debugTraceDeploymentInUiPipeline,
     _debugWellnessData:          _debugWellnessData,
 
     // S1: Student data layer

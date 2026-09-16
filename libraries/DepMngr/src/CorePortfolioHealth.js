@@ -177,7 +177,8 @@ var CorePortfolioHealth = (function () {
       industryDisplayMode:  industryDisplayMode,
       industrySplit:        industrySplit,
       history:         history,
-      phasedDeployments: phasedDeployments
+      phasedDeployments: phasedDeployments,
+      overrideFootnote: CoreData.buildOverrideFootnote_(countRows)
     };
 
     // vNext builder (if enabled)
@@ -1310,6 +1311,7 @@ var CorePortfolioHealth = (function () {
       monthLabel:   baseSnapshot.monthLabel,
       generatedLabel: baseSnapshot.generatedLabel,
       generatedAt:  baseSnapshot.generatedAt,
+      overrideFootnote: baseSnapshot.overrideFootnote,
 
       portfolioStatus: {
         totalActive:   totalActive,

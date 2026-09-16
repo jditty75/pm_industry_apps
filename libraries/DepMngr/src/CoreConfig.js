@@ -217,6 +217,7 @@
 
 /**
  * @typedef {Object} UIGoLivesTabConfig  (Phase 2)
+ * @property {string}  mode                  'legacy' | 'classic' (alias) | 'explorer' — Go Lives tab UI
  * @property {string}  defaultView           Legacy toggle default ('recent'|'upcoming'|'all'); explorer uses defaultTimePeriod/defaultGoLiveType
  * @property {number}  recentWindowDays
  * @property {number}  upcomingWindowDays
@@ -789,6 +790,18 @@ var CoreConfig = (function () {
     if (!cfg.ui.goLivesTab.maxRenderRows)      cfg.ui.goLivesTab.maxRenderRows = 400;
     if (!cfg.ui.goLivesTab.searchResultCap)    cfg.ui.goLivesTab.searchResultCap = 250;
     if (!cfg.ui.goLivesTab.customRangeMaxMonths) cfg.ui.goLivesTab.customRangeMaxMonths = 12;
+    if (!cfg.ui.goLivesTab.mode) {
+      cfg.ui.goLivesTab.mode = 'legacy';
+    } else {
+      var goLivesTabMode = String(cfg.ui.goLivesTab.mode).toLowerCase();
+      if (goLivesTabMode === 'classic') goLivesTabMode = 'legacy';
+      if (goLivesTabMode !== 'legacy' && goLivesTabMode !== 'explorer') {
+        Logger.log('applyConfigDefaults: invalid ui.goLivesTab.mode "' +
+          cfg.ui.goLivesTab.mode + '", using legacy');
+        goLivesTabMode = 'legacy';
+      }
+      cfg.ui.goLivesTab.mode = goLivesTabMode;
+    }
 
     // MDS/PGL tab defaults (MDS-PGL Redesign 2026-06) — retained as csatTab alias (V2.8)
     cfg.ui.mgmPglTab = cfg.ui.mgmPglTab || {};

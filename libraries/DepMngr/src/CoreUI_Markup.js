@@ -147,6 +147,15 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   }
   parts.push(_CoreUI_Markup_buildDeploymentHealthPlanModal_());
 
+  // Override detail + impact summary modals — viewable by all roles when deployments/overrides are enabled.
+  if (tabIds.indexOf('overrides') !== -1 || tabIds.indexOf('deployments') !== -1) {
+    parts.push(_CoreUI_Markup_buildOverrideDetailModal_(filteredUi));
+  }
+  if (tabIds.indexOf('overview') !== -1 || tabIds.indexOf('deployments') !== -1 ||
+      tabIds.indexOf('portfolio') !== -1) {
+    parts.push(_CoreUI_Markup_buildOverrideImpactSummaryModal_(filteredUi));
+  }
+
   // Modals — only included for power users (read-only never opens them).
   if (!isReadOnly) {
     parts.push(_CoreUI_Markup_buildMetaModal_(filteredUi));
@@ -296,7 +305,7 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
     '  </div>',
     // Dynamic KPI cards — populated by JS based on current filter state.
     '  <div class="stats-grid" id="deployments-stats-grid"></div>',
-    '  <div class="deployments-metrics-note" id="deployments-metrics-note" style="display:none;"></div>',
+    '  <div class="kpi-override-callout" id="deployments-metrics-note" style="display:none;"></div>',
     // Filter shell — primary row, active chips, and advanced panel
     '  <div class="control-bar deployments-filter-shell">',
     '    <div class="deployments-filter-primary control-row">',
@@ -387,7 +396,74 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
 // TAB: GO LIVES (Phase 2 — consolidated Recent/Upcoming/All with toggle)
 // ---------------------------------------------------------------------------
 
-function _CoreUI_Markup_buildGoLivesTab_(ui) {
+/**
+ * Classic Go Lives tab: Recent / Upcoming / All segmented control and simple table.
+ * @param {Object} ui  cfg.ui
+ * @return {string}
+ */
+function _CoreUI_Markup_buildGoLivesTabLegacy_(ui) {
+  var gt = ui.goLivesTable || {};
+  var glt = ui.goLivesTab || {};
+  var showIndustry = !!gt.showIndustry;
+  var searchPh = gt.searchPlaceholder || 'Search by account name...';
+  var defaultView = glt.defaultView || 'recent';
+  var recentDays = glt.recentWindowDays || 60;
+  var upcomingDays = glt.upcomingWindowDays || 90;
+
+  function segBtn(id, label, isActive) {
+    return '<button class="seg-control-btn' + (isActive ? ' active' : '') +
+           '" data-golives-view="' + id + '" onclick="switchGoLivesView(\'' + id + '\')">' +
+           _CoreUI_Markup_esc_(label) + '</button>';
+  }
+
+  var headers = [
+    '<th id="golives-date-header">Date</th>',
+    '<th>Account Name</th>'
+  ];
+  if (showIndustry) headers.push('<th>Industry</th>');
+  headers.push('<th id="golives-product-header">Product / Deployment</th>');
+  headers.push('<th>Partner</th>');
+  if (!ui._isReadOnly) {
+    headers.push('<th>Actions</th>');
+  }
+
+  return [
+    '<div id="golives-tab" class="tab-content">',
+    '  <div class="info-banner">',
+    '    \uD83D\uDCC5 Go Lives &mdash; recent past and upcoming, in one place.',
+    '  </div>',
+    '  <div class="seg-control" style="margin-bottom: var(--space-3);">',
+    '    ' + segBtn('recent', 'Recent (' + recentDays + ' days)', defaultView === 'recent'),
+    '    ' + segBtn('upcoming', 'Upcoming (' + upcomingDays + ' days)', defaultView === 'upcoming'),
+    '    ' + segBtn('all', 'All', defaultView === 'all'),
+    '  </div>',
+    '  <div class="control-bar">',
+    '    <div class="control-row">',
+    '      <div class="search-box">',
+    '        <span class="search-icon">\uD83D\uDD0D</span>',
+    '        <input type="text" id="golives-search" placeholder="' + _CoreUI_Markup_attr_(searchPh) + '" onkeyup="searchGoLives()">',
+    '      </div>',
+    '      <button class="btn btn-secondary" onclick="clearGoLivesSearch()">Clear</button>',
+    '    </div>',
+    '  </div>',
+    '  <div class="table-container">',
+    '    <div class="table-wrapper">',
+    '      <table id="golives-table">',
+    '        <thead><tr>' + headers.join('') + '</tr></thead>',
+    '        <tbody id="golives-tbody"></tbody>',
+    '      </table>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+/**
+ * Go-Live Explorer tab: KPI strip, timeline, period/type filters, advanced filters.
+ * @param {Object} ui  cfg.ui
+ * @return {string}
+ */
+function _CoreUI_Markup_buildGoLivesTabExplorer_(ui) {
   var gt = ui.goLivesTable || {};
   var glt = ui.goLivesTab || {};
   var isPM = !!ui.isProductModeApp;
@@ -571,6 +647,19 @@ function _CoreUI_Markup_buildGoLivesTab_(ui) {
   );
 
   return parts.join('\n');
+}
+
+/**
+ * Go Lives tab markup — legacy (Recent/Upcoming/All) or Explorer per ui.goLivesTab.mode.
+ * @param {Object} ui  cfg.ui
+ * @return {string}
+ */
+function _CoreUI_Markup_buildGoLivesTab_(ui) {
+  var glt = ui.goLivesTab || {};
+  var mode = String(glt.mode || 'legacy').toLowerCase();
+  if (mode === 'classic') mode = 'legacy';
+  if (mode === 'explorer') return _CoreUI_Markup_buildGoLivesTabExplorer_(ui);
+  return _CoreUI_Markup_buildGoLivesTabLegacy_(ui);
 }
 
 // ---------------------------------------------------------------------------
@@ -808,6 +897,7 @@ function _CoreUI_Markup_buildOverviewTab_() {
 
     '    <!-- BAND 1: KPI strip -->',
     '    <div class="overview-kpi-strip" id="overview-kpi-strip"></div>',
+    '    <div class="kpi-override-callout" id="overview-kpi-footnote" style="display:none;"></div>',
 
     '    <!-- BAND 2: two side-by-side cards -->',
     '    <div class="overview-band-2">',
@@ -1152,6 +1242,7 @@ function _CoreUI_Markup_buildPortfolioTab_(ui, cfg) {
     '            <div class="ph-kpi-sub">Upcoming (' + (((ui || {}).goLivesTab || {}).upcomingWindowDays || 90) + ' days)</div>',
     '          </div>',
     '        </div>',
+    '        <div class="kpi-override-callout" id="ph-kpi-footnote" style="display:none;"></div>',
     '        <div class="ph-grid">',
     '          <div class="ph-col">',
     '            <div class="ph-card">',
@@ -1212,45 +1303,47 @@ function _CoreUI_Markup_buildOverridesTab_(ui) {
   var mo = ui.manageOverrides || {};
   var showAuditTrail = mo.showAuditTrail !== false;  // default true
 
-  // Active Overrides section: filters above, table below. JS populates both.
-  var activeOverridesSection = [
-    '<div class="overrides-section">',
-    '  <div class="overrides-section-title">Active Overrides</div>',
-    '  <div class="control-row" style="margin-bottom: var(--space-3);">',
-    '    <span class="filter-label">Type:</span>',
-    '    <select id="overrides-type-filter" class="filter-select" onchange="onOverridesFilterChange()">',
-    '      <option value="all">All</option>',
-    '      <option value="deployment">Deployment</option>',
-    '      <option value="golives">Go Lives</option>',
-    '    </select>',
-    '    <span class="filter-label">Classification:</span>',
-    '    <select id="overrides-classification-filter" class="filter-select" onchange="onOverridesFilterChange()">',
-    '      <option value="all">All</option>',
-    '      <option value="Monthly">Monthly</option>',
-    '      <option value="Structural">Structural</option>',
-    '    </select>',
-    '    <button class="btn btn-secondary" onclick="refreshOverridesTab()" style="margin-left: auto;">🔄 Refresh</button>',
-    '  </div>',
-    '  <div class="table-wrapper">',
-    '    <table>',
-    '      <thead><tr>',
-    '        <th>Type</th>',
-    '        <th>Account</th>',
-    '        <th>Field</th>',
-    '        <th>Current Value</th>',
-    '        <th>Set By</th>',
-    '        <th>Set At</th>',
-    '        <th>Classification</th>',
-    '      </tr></thead>',
-    '      <tbody id="active-overrides-tbody"></tbody>',
-    '    </table>',
-    '  </div>',
+  function buildOverrideSection_(sectionId, title, tbodyId) {
+    return [
+      '<div class="overrides-section" id="' + sectionId + '-section">',
+      '  <div class="overrides-section-title">' + _CoreUI_Markup_esc_(title) + '</div>',
+      '  <div class="table-wrapper">',
+      '    <table>',
+      '      <thead><tr>',
+      '        <th>Type</th>',
+      '        <th>Account / Deployment</th>',
+      '        <th>Values</th>',
+      '        <th>Classification</th>',
+      '        <th>Edited</th>',
+      '        <th>Actions</th>',
+      '      </tr></thead>',
+      '      <tbody id="' + tbodyId + '"></tbody>',
+      '    </table>',
+      '  </div>',
+      '</div>'
+    ].join('\n');
+  }
+
+  var filterRow = [
+    '<div class="control-row" style="margin-bottom: var(--space-3);">',
+    '  <span class="filter-label">Type:</span>',
+    '  <select id="overrides-type-filter" class="filter-select" onchange="onOverridesFilterChange()">',
+    '    <option value="all">All</option>',
+    '    <option value="deployment">Deployment</option>',
+    '    <option value="golives">Go Lives</option>',
+    '  </select>',
+    '  <span class="filter-label">Classification:</span>',
+    '  <select id="overrides-classification-filter" class="filter-select" onchange="onOverridesFilterChange()">',
+    '    <option value="all">All</option>',
+    '    <option value="Monthly">Monthly</option>',
+    '    <option value="Structural">Structural</option>',
+    '  </select>',
+    '  <button class="btn btn-secondary" onclick="refreshOverridesTab()" style="margin-left: auto;">🔄 Refresh</button>',
     '</div>'
   ].join('\n');
 
-  // Bulk Actions section: two destructive buttons + warning
   var bulkActionsSection = [
-    '<div class="overrides-section">',
+    '<div class="overrides-section pm-only-controls" id="overrides-bulk-section">',
     '  <div class="overrides-section-title">Bulk Actions</div>',
     '  <div class="bulk-actions">',
     '    <button class="btn btn-destructive" onclick="confirmBulkClearMonthly()" id="bulk-clear-monthly-btn">',
@@ -1266,7 +1359,6 @@ function _CoreUI_Markup_buildOverridesTab_(ui) {
     '</div>'
   ].join('\n');
 
-  // Audit Trail section: 30-day rolling window with "show all" expansion
   var auditTrailSection = !showAuditTrail ? '' : [
     '<div class="overrides-section">',
     '  <div class="overrides-section-title">Audit Trail <span id="audit-trail-window-label" style="font-weight: 400; font-size: 11px; color: var(--color-text-subtle); margin-left: var(--space-2); text-transform: none; letter-spacing: 0;">(last 30 days)</span></div>',
@@ -1295,7 +1387,11 @@ function _CoreUI_Markup_buildOverridesTab_(ui) {
     '  <div class="info-banner">',
     '    ⚙️ Manage active overrides on deployments and go lives. Bulk actions are PM-only.',
     '  </div>',
-    activeOverridesSection,
+    filterRow,
+    buildOverrideSection_('overrides-operational', 'Operational Overrides', 'overrides-operational-tbody'),
+    buildOverrideSection_('overrides-report', 'Report Exclusions', 'overrides-report-tbody'),
+    buildOverrideSection_('overrides-review', 'Needs Review / Stale', 'overrides-review-tbody'),
+    buildOverrideSection_('overrides-prior-month', 'Prior-Month Monthly Overrides', 'overrides-prior-month-tbody'),
     bulkActionsSection,
     auditTrailSection,
     '</div>'
@@ -1465,12 +1561,15 @@ function _CoreUI_Markup_buildEditModal_(ui) {
     '        <div class="form-group"><label class="form-label">Stage (override)</label><input type="text" id="edit-stage" class="form-input" placeholder="Leave blank to use source stage"></div>',
     '        <div class="form-group"><label class="form-label">Override MTP Date</label><input type="date" id="edit-mtp" class="form-input"></div>',
     '        <div class="form-group full-width"><label class="form-label">Current Deployment Update (override)</label><textarea id="edit-update" class="form-textarea" placeholder="Override current update used in report..."></textarea></div>',
-    '        <div class="form-group full-width"><label class="form-label"><input type="checkbox" id="edit-exclude-report" /> Exclude from HTML Report</label></div>',
-    // Phase 2: classification selector
     '        <div class="form-group full-width">',
-    '          <label class="form-label">Override applies:</label>',
-    '          <div class="classification-selector">',
-    '            <label><input type="radio" name="edit-classification" value="Monthly" checked> Monthly (clears at month-end)</label>',
+    '          <label class="form-label"><input type="checkbox" id="edit-exclude-report" /> Exclude from Monthly Report</label>',
+    '          <div class="form-hint" style="font-size:12px;color:var(--color-text-muted);margin-top:4px;">This deployment remains visible in the app but is hidden from Monthly Report outputs.</div>',
+    '        </div>',
+    // Phase 2: classification selector — explicit choice required on save
+    '        <div class="form-group full-width">',
+    '          <label class="form-label">Override applies: <span style="color:var(--color-status-red-fg);">*</span></label>',
+    '          <div class="classification-selector required-hint" id="edit-classification-group">',
+    '            <label><input type="radio" name="edit-classification" value="Monthly"> Monthly (clears at month-end)</label>',
     '            <label><input type="radio" name="edit-classification" value="Structural"> Structural (persists)</label>',
     '          </div>',
     '        </div>',
@@ -1512,12 +1611,15 @@ function _CoreUI_Markup_buildGoLivesModal_(ui) {
     '        <div class="form-group"><label class="form-label" id="golives-date-label">Override Date</label><input type="date" id="golives-date" class="form-input"></div>',
     '        <div class="form-group full-width"><label class="form-label" id="golives-product-label">Product / Deployment (source)</label><textarea id="golives-product" class="form-textarea" readonly></textarea></div>',
     '        <div class="form-group"><label class="form-label">Override Partner</label><input type="text" id="golives-partner" class="form-input"></div>',
-    '        <div class="form-group full-width"><label class="form-label"><input type="checkbox" id="golives-exclude-report" /> Exclude from HTML Report</label></div>',
+    '        <div class="form-group full-width">',
+    '          <label class="form-label"><input type="checkbox" id="golives-exclude-report" /> Exclude from Monthly Report</label>',
+    '          <div class="form-hint" style="font-size:12px;color:var(--color-text-muted);margin-top:4px;">This account remains visible in the app but is hidden from Monthly Report outputs.</div>',
+    '        </div>',
     // Phase 2: classification selector
     '        <div class="form-group full-width">',
-    '          <label class="form-label">Override applies:</label>',
-    '          <div class="classification-selector">',
-    '            <label><input type="radio" name="golives-classification" value="Monthly" checked> Monthly (clears at month-end)</label>',
+    '          <label class="form-label">Override applies: <span style="color:var(--color-status-red-fg);">*</span></label>',
+    '          <div class="classification-selector required-hint" id="golives-classification-group">',
+    '            <label><input type="radio" name="golives-classification" value="Monthly"> Monthly (clears at month-end)</label>',
     '            <label><input type="radio" name="golives-classification" value="Structural"> Structural (persists)</label>',
     '          </div>',
     '        </div>',
@@ -1745,6 +1847,56 @@ function _CoreUI_Markup_buildAuditDetailModal_(ui) {
     '    </div>',
     '    <div class="modal-footer">',
     '      <button class="btn btn-secondary" onclick="closeAuditDetailModal()">Close</button>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// MODAL: OVERRIDE DETAILS (read-only detail + edit/clear for power users)
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildOverrideDetailModal_(ui) {
+  return [
+    '<div id="override-detail-modal" class="modal-overlay">',
+    '  <div class="modal modal-lg">',
+    '    <div class="modal-header">',
+    '      <h2 id="override-detail-title">Override Details</h2>',
+    '      <button class="modal-close" onclick="closeOverrideDetailModal()">&times;</button>',
+    '    </div>',
+    '    <div class="modal-body" id="override-detail-body"></div>',
+    '    <div class="modal-footer" id="override-detail-footer">',
+    '      <button class="btn btn-secondary" onclick="closeOverrideDetailModal()">Close</button>',
+    '      <button class="btn btn-primary hidden" id="override-detail-edit-btn" onclick="editFromOverrideDetailModal()">Edit override</button>',
+    '      <button class="btn btn-destructive hidden" id="override-detail-clear-btn" onclick="clearFromOverrideDetailModal()">Clear override</button>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// MODAL: OVERRIDE IMPACT SUMMARY (KPI context drill-down)
+// ---------------------------------------------------------------------------
+
+function _CoreUI_Markup_buildOverrideImpactSummaryModal_(ui) {
+  var showManageBtn = true;
+  return [
+    '<div id="override-impact-summary-modal" class="modal-overlay">',
+    '  <div class="modal modal-lg">',
+    '    <div class="modal-header">',
+    '      <h2>Override Impact Summary</h2>',
+    '      <button class="modal-close" onclick="closeOverrideImpactSummaryModal()">&times;</button>',
+    '    </div>',
+    '    <div class="modal-body" id="override-impact-summary-body">',
+    '      <p class="override-impact-subtitle">These KPIs reflect approved operational overrides in the current view.</p>',
+    '    </div>',
+    '    <div class="modal-footer">',
+    '      <button class="btn btn-secondary" onclick="closeOverrideImpactSummaryModal()">Close</button>',
+    showManageBtn
+      ? '      <button class="btn btn-primary" id="override-impact-manage-btn" onclick="openManageOverridesFromImpactSummary_()">Open Manage Overrides</button>'
+      : '',
     '    </div>',
     '  </div>',
     '</div>'

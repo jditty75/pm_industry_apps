@@ -1,0 +1,354 @@
+/**
+ * PDX App configuration for CoreLib (Paradox ProductMode).
+ *
+ * Phase history:
+ *   Phase 0 (v8): introduced cfg.ui block with header, tabs, table config, etc.
+ *   Phase 1 (v9): tab labels harmonized to canonical Phase 1 forms.
+ *   Phase 2 (v10): tab structure restructured (Deployments rename, Go Lives
+ *                  consolidation, Manage Overrides added); personalization
+ *                  enabled; new goLivesTab, manageOverrides blocks; deployments
+ *                  table gains expandable rows and default Health filter preset.
+ *   Phase 3a (v11): salesforce block added; SFDC_DeploymentProductFunctions
+ *                   sheet registered; isPhased / upcomingDates enrichment
+ *                   flows through CoreData → UI.
+ *   Phase 3i:       SFDC_Deployments unified sheet registered; salesforce block
+ *                   gains statusValues and recentWindowDays; getRecentGoLives()
+ *                   supersedes legacy getGoLives() for the Recent Go Lives view.
+ *
+ * NOTE:
+ *   - Assumes the Core library is added as "CoreLib" in Project → Libraries.
+ *   - Reuses PDX_DM TABLES and BAR_CONFIG constants from Code.js.
+ *   - Raw SFDC connector sheets may include out-of-scope product rows; Paradox-only
+ *     surfaces are enforced via activeDeployments.productMode* scoping.
+ */
+
+/** @type {AppConfig} */
+var APP_CONFIG = {
+  appId: 'PDX_DM',
+
+  activeDeployments: {
+    productModeUnionEnabled: true,
+    productModeSourceMode: 'parentAndProductFunctionUnion',
+    productModeStructuredProductAreas: [
+      'Workday Paradox'
+    ],
+    productModeDeploymentNameIncludes: [
+      'Paradox'
+    ],
+    productModeDeploymentNameExcludes: [],
+    productModeNameMatch: {
+      field: 'deploymentName',
+      caseInsensitive: true
+    },
+    productModeDisplayGrain: 'parentDeployment',
+    productModeCountGrain: 'parentDeployment',
+    productModeGoLiveGrain: 'accountDate',
+    productModeDataSource: 'parentAndProductFunctionUnion',
+    productModeHistoricalSource: 'productFunction',
+    productModeGoLiveSource: 'productFunction',
+    productModeUnionStatuses: ['Active', 'Complete'],
+    productModeDefaultSurfaceStatuses: ['Active'],
+    productModeTrendsStatuses: ['Active', 'Complete'],
+    allowPfRowsWithoutParentStatus: false,
+    productModeExcludePhases: [],
+    productModeExcludeCustomer360: false
+  },
+
+  deploymentHealthPlan: {
+    enabled: true,
+    sheetName: 'SFDC_DHP',
+    chipEnabled: true,
+    expandedDetailsEnabled: true,
+    metricsEnabled: false,
+    issueCategoryDelimiter: ';'
+  },
+
+  sheets: {
+    activeDeployments:     'ActiveDeployments',
+    goLives:               'Go Lives',
+    deploymentOverrides:   'DeploymentOverrides',
+    goLivesOverrides:      'GoLivesOverrides',
+    deploymentsMeta:       'DeploymentsMeta',
+    changeLog:             'ChangeLog',
+    execSummary:           'ExecSummary',
+    healthReportSnapshots: 'HealthReportSnapshots',
+    healthMonthlySummary:  'HealthMonthlySummary',
+    healthYtdSummary:      'HealthYtdSummary',
+    dashboard:             'Dashboard',
+    appUsers:              'AppUsers',
+    ddAssignment:          'DD Assignment',
+    sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions',
+    deployments: 'SFDC_Deployments',
+    deploymentContacts: 'SFDC_DeploymentContacts',
+    sfdcContacts: 'SFDC_DeploymentContacts',
+    deploymentHistory: 'SFDC_DeploymentHistory'
+  },
+
+  namedRanges: {
+    healthTotal: 'HealthTotal'
+  },
+
+  columns: {
+    DEPLOYMENT_ID:              1,
+    DEPLOYMENT_NAME:            2,
+    ACCOUNT_ID:                 3,
+    ACCOUNT_NAME:               4,
+    INDUSTRY:                   5,
+    REGION:                     6,
+    SUB_REGION:                 7,
+    SUB_REGION_ALT:             8,
+    BILLING_STATE:              9,
+    BILLING_CITY:              10,
+    DEPLOYMENT_START_DATE:     11,
+    CURRENT_MTP_DATE:          12,
+    FIRST_MTP_DATE:            13,
+    OVERALL_STATUS:            14,
+    DEPLOYMENT_PHASE:          15,
+    DEPLOYMENT_STAGE:          16,
+    DEPLOYMENT_HEALTH:         17,
+    COMPLETION_DATE:           18,
+    WD_ENG_MANAGER:            19,
+    DAM_FULL_NAME:             20,
+    PRIMING_PARTNER:           21,
+    IMPL_PARTNER:              22,
+    PARTNER:                   23,
+    CURRENT_DEPLOYMENT_UPDATE: 24,
+    goLives: {
+      ACCOUNT_NAME:        1,
+      INDUSTRY:            2,
+      DAM_FULL_NAME:       3,
+      WD_ENG_MANAGER:      4,
+      PARTNER:             5,
+      DEPLOYMENT_NAME:     6,
+      SERVICES_APPROACH:   7,
+      PRODUCT_AREA:        8,
+      GO_LIVE_DATE_ACTUAL: 9,
+      IN_PRODUCTION:      10
+    }
+  },
+
+  report: {
+    inlineFilename:  'PDX_DeploymentHealth_Dashboard.html',
+    outlookFilename: 'PDX_DeploymentHealth_Dashboard_Outlook.html',
+    v2ExportFilename: 'PDX_Paradox_DeploymentHealth_Report_V2.html',
+
+    title: 'Paradox Deployment Health Report',
+    headerLogoUrl: 'https://cdn.brandfetch.io/id0V-YF4nE/w/2048/h/2048/theme/dark/icon.jpeg?c=1bxid64Mup7aczewSAYMX&t=1761286530298',
+    sanaLogoUrl:   'https://emoji.slack-edge.com/T7U335QS3/sana-labs/1746635f6808c56a.png',
+    footerAttribution: 'Generated by the Paradox Program Management team',
+
+    tables:    TABLES,
+    barConfig: BAR_CONFIG,
+
+    goLivesWindowDays: 60,
+    redYellowPartnerFilter: null,
+    includeIndustryRedYellow: false,
+    includeIndustryGoLives:   false,
+    redYellowOwnerLabel: 'Delivery Director',
+
+    productScope: {
+      enabled: true,
+      includeAreas: [
+        'Workday Paradox'
+      ],
+      nameTokens: [
+        'Paradox'
+      ]
+    },
+
+    portfolioHealth: {
+      title: 'Portfolio Health',
+      workdayPartner: 'Workday Professional Services',
+      workdayLabel: 'Workday',
+      otherLabel: 'Partners/Other',
+      recentGoLivesWindowDays: 60,
+      industryMode: 'all',
+      industryDisplayMode: 'topNWithOther',
+      industryTopN: 10,
+      industryBuckets: [],
+      vNextEnabled: true,
+      exportImageEnabled: true,
+      exportSlidesEnabled: true,
+      healthPlanConcentrationDimension: 'partner',
+      slidesExport: {
+        destinationMode: 'root',
+        folderId: '',
+        shareMode: 'inherit',
+        filename: 'PDX Portfolio Health - {userEmail} - {timestamp}'
+      }
+    },
+
+    sections: { approach: true },
+
+    distribution: {
+      enabled: false,
+      fromAlias: '',
+      to: [],
+      cc: [],
+      bcc: 'jeffrey.ditty@workday.com',
+      allowedSenders: ['jeffrey.ditty@workday.com'],
+      subjectTemplate: 'Paradox \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      logSheet: 'ReportDistributionLog'
+    }
+  },
+
+  salesforce: {
+    upcomingWindowDays: 90,
+    recentWindowDays: 60,
+    statusValues: {
+      active:   'Active',
+      complete: 'Complete'
+    }
+  },
+
+  ui: {
+    appTitle:       'Paradox Deployment Health Manager',
+    headerTitle:    'Paradox Deployment Health Manager',
+    headerSubtitle: 'Review and manage Paradox deployment data',
+
+    tabs: [
+      { id: 'deployments', label: 'Deployments' },
+      { id: 'golives',     label: 'Go Lives' },
+      { id: 'execsummary', label: 'Executive Summary' },
+      { id: 'report',      label: 'Monthly Report Preview' },
+      { id: 'portfolio',   label: 'Portfolio Health' },
+      { id: 'trends',      label: 'Trends' },
+      { id: 'notable', label: 'Notable Deployments' },
+      { id: 'overrides',   label: 'Manage Overrides' }
+    ],
+
+    mgmPglTab: {
+      enabled: false
+    },
+    trendsTab: { enabled: true, vNextEnabled: true, defaultWindow: '12m' },
+    notable: { enabled: false },
+    enableAccountLinks: true,
+    deploymentsTable: {
+      showIndustry: false,
+      showEmColumn: false,
+      ownerColumnLabel: 'Delivery Director',
+      showMissingDDHighlight: true,
+      missingDDMessage: 'Delivery Director needs assigned',
+      searchPlaceholder: 'Search by account, deployment name, partner...',
+      defaultHealthFilter: ['Red', 'Yellow'],
+      showStageColumn: false,
+      expandableRows: true,
+      useDdFromContacts: true
+    },
+
+    goLivesTable: {
+      showIndustry: false,
+      showProductAreas: true,
+      showDeploymentName: false,
+      searchPlaceholder: 'Search by account name...'
+    },
+
+    goLivesTab: {
+      mode: 'explorer',
+      defaultView: 'recent',
+      recentWindowDays: 60,
+      upcomingWindowDays: 90
+    },
+
+    manageOverrides: {
+      showAuditTrail: true,
+      bulkClearScopes: ['monthly', 'all']
+    },
+
+    editModal: {
+      ownerFieldLabel: 'Delivery Director',
+      ownerInputType: 'dropdown',
+      ownerOptions: ['Steve Rogers', 'Roman Cortes', 'Lakshmi Visvanathan']
+    },
+
+    productFilter: {
+      enabled: false,
+      hidden: true,
+      areas: [],
+      aliases: {},
+      nameTokens: {}
+    },
+
+    personalization: {
+      enabled: false,
+      defaultViewMode: 'myPortfolio',
+      affectsTabs: ['deployments', 'golives', 'mgmPgl', 'overrides'],
+      welcomeMessageEnabled: true,
+      showFullPortfolioIndicator: true
+    }
+  },
+
+  notable: {
+    notify: {
+      email:               'mariah.maxie@workday.com',
+      testEmail:           'jeffrey.ditty@workday.com',
+      useTestMode:         true,
+      slackWebhookUrl:     '',
+      slackWebhookUrlTest: ''
+    }
+  },
+
+  notify: {
+    enabled: false,
+    allowedFromAliases: ['jeffrey.ditty@workday.com']
+  },
+
+  // ---------------------------------------------------------------------------
+  // N4: Salesforce Connector data freshness monitoring.
+  // ---------------------------------------------------------------------------
+  freshness: {
+    enabled: true,
+    refreshCycleHours: 8,
+    graceHours: 1,
+    warningHours: 12,
+    criticalHours: 24,
+    logSheet: 'Auto Refresh Execution Log',
+    primarySheet: 'SFDC_DeploymentProductFunctions',
+    watchSheet: 'SFDC_DeploymentProductFunctions',
+    expectedSheets: [
+      'SFDC_Deployments',
+      'SFDC_DeploymentProductFunctions',
+      'Contacts1',
+      'Contacts2',
+      'SFDC_Wellness',
+      'SFDC_DeploymentHistory'
+    ],
+    alertRecipient: 'jeffrey.ditty@workday.com'
+  },
+
+  trends: {
+    cacheTtlSeconds:              3600,
+    trendsWindowMonths:           12,
+    timeInStageOutlierMultiple:   2,
+    timeInStageMinSampleSize:     10,
+    byPartnerMinSampleSize:       5,
+    vNextEnabled:                 true,
+    defaultWindow:                '12m'
+  },
+
+  momentum: {
+    enabled: true,
+    productFilter: {
+      Product_Area__c: 'Workday Paradox',
+      Deployment_Name: ['%Paradox%']
+    },
+    dataSource: 'Deployment_Product_Function__c',
+    dateStrategy: 'actualThenTarget',
+    includeStandaloneDeployments: true,
+    periodView: 'previousFyAndCurrentHalves',
+    kpiLabels: {
+      label1: 'Total {FY} Go-Lives',
+      label2: 'Distinct Accounts {FY}',
+      label3: 'Paradox Avg Annual Growth (%)',
+      label4: 'Fastest Growing Industry'
+    },
+    chartLegend: ['Paradox'],
+    timeRange: 'LAST_N_YEARS:5',
+    chart: {
+      colors: {
+        Paradox: '#0F4C81'
+      },
+      inProgressOpacity: 0.55
+    }
+  }
+};

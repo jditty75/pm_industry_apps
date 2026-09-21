@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><?= APP_CONFIG.ui.appTitle ?></title>
+  <style><?!= CoreLib.CoreUI.getStylesheet() ?></style>
+  <?!= CoreLib.CoreUI.getHeadScripts() ?>
+</head>
+<body>
+  <? var __viewAsParam = (typeof viewAs !== 'undefined' && viewAs) ? viewAs : ''; ?>
+  <? var __userAccess = CoreLib.CoreUsers.resolveAccessForShell(APP_CONFIG, __viewAsParam); ?>
+  <? if (!__userAccess.canViewApp) { ?>
+    <?!= CoreLib.CoreUI.getAccessDeniedShell() ?>
+  <? } else { ?>
+    <?!= CoreLib.CoreUI.getAppShell(APP_CONFIG, __userAccess) ?>
+    <script>
+      <? var __cfgN1 = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+         var __uiCfg = JSON.parse(JSON.stringify(__cfgN1.ui || {}));
+         __uiCfg.notable = Object.assign({}, __uiCfg.notable || {}, {
+           enabled: __cfgN1.ui.notable.enabled !== false,
+           restrictedHideEnabled: __cfgN1.notable.restrictedHideEnabled,
+           restrictedLabel: (__cfgN1.notable.validationStatusOptions && __cfgN1.notable.validationStatusOptions[2]) || 'Region Restricted'
+         }); ?>
+      window.APP_UI_CONFIG = <?!= JSON.stringify(__uiCfg) ?>;
+      window.__USER_ACCESS__ = <?!= JSON.stringify(__userAccess) ?>;
+    </script>
+    <script><?!= CoreLib.CoreUI.getJsBundle() ?></script>
+  <? } ?>
+</body>
+</html>

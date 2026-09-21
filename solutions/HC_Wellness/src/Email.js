@@ -136,6 +136,8 @@ function getAgendaKpis_() {
   var csatNeutral = 0;
 
   depRows.forEach(function (r) {
+    if (isWellnessDeploymentExcludedFromSourceList_(r['Deployment_Name__c'])) return;
+
     var id = String(r['Id'] || '');
     var onAgenda = maps.dep[id];
     if (onAgenda && onAgenda.resolved) return;
@@ -304,6 +306,14 @@ function buildAgendaEmailHtml_() {
   );
 
   return t.evaluate().getContent();
+}
+
+/**
+ * Public entry point for the web app Preview Agenda modal (google.script.run).
+ * @return {string}
+ */
+function getAgendaEmailPreviewHtml() {
+  return buildAgendaEmailHtml_();
 }
 
 /**

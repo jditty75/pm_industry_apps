@@ -2716,7 +2716,7 @@ ${existing.futureState || ''}</textarea>
               .withFailureHandler(err => {
                 alert('Error building agenda preview: ' + err.message);
               })
-              .buildAgendaEmailHtml_();
+              .getAgendaEmailPreviewHtml();
           }
 
           function saveAll() {

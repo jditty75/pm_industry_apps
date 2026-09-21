@@ -133,6 +133,32 @@ function stripHtml_(htmlValue) {
   return s.replace(/<[^>]*>/g, '');
 }
 
+/**
+ * Whether a deployment feed row is hidden from the web app source list (Evisort / HiredScore).
+ * @param {string} deploymentNameRaw Value of Deployment_Name__c (may contain HTML).
+ * @return {boolean}
+ */
+function isWellnessDeploymentExcludedFromSourceList_(deploymentNameRaw) {
+  const name = stripHtml_(deploymentNameRaw).toLowerCase();
+  return name.includes('evisort') || name.includes('hiredscore');
+}
+
+/**
+ * Map a Deployments_SOQL row to a summary object for debug / KPI comparison.
+ * @param {Object} r
+ * @return {{id:string,account:string,deploymentName:string,health:string,excluded:boolean}}
+ */
+function wellnessDeploymentRowSummary_(r) {
+  return {
+    id: String(r['Id'] || ''),
+    account: String(r['Customer_name__c'] || ''),
+    deploymentName: stripHtml_(r['Deployment_Name__c']),
+    health: String(r['Overall_Health__c'] || ''),
+    partner: String(r['Deployment_Partner_Name__c'] || ''),
+    excluded: isWellnessDeploymentExcludedFromSourceList_(r['Deployment_Name__c'])
+  };
+}
+
 function parseCsmName_(raw) {
   if (!raw) return '';
   const s = String(raw);
@@ -743,18 +769,20 @@ function getInitialAgendaData() {
   const agendaSelections = getExistingAgendaSelections_();
   const wowBudgetItems = getWowBudgetItems_();
 
-  const deploymentItems = deployments.map(r => {
-    const health = String(r['Overall_Health__c'] || '');
-    return {
-      source: 'DEPLOYMENT',
-      id: r['Id'] || '',
-      account: r['Customer_name__c'] || '',
-      title: stripHtml_(r['Deployment_Name__c']),
-      healthStatus: health,
-      summary: r['Deployment_Summary__c'] || '',
-      partner: r['Deployment_Partner_Name__c'] || ''
-    };
-  });
+  const deploymentItems = deployments
+    .filter(r => !isWellnessDeploymentExcludedFromSourceList_(r['Deployment_Name__c']))
+    .map(r => {
+      const health = String(r['Overall_Health__c'] || '');
+      return {
+        source: 'DEPLOYMENT',
+        id: r['Id'] || '',
+        account: r['Customer_name__c'] || '',
+        title: stripHtml_(r['Deployment_Name__c']),
+        healthStatus: health,
+        summary: r['Deployment_Summary__c'] || '',
+        partner: r['Deployment_Partner_Name__c'] || ''
+      };
+    });
 
   const csatItems = csatsRaw.map(r => {
     const health = String(r['Overall_Health_Status__c'] || '');
@@ -792,6 +820,90 @@ function getInitialAgendaData() {
     wow: wowBudgetItems,
     agendaSelections: agendaSelections
   };
+}
+
+/**
+ * Read-only debug: compare deployment source list vs preview KPI red/yellow counts.
+ * Run from the Apps Script editor (View → Logs) after reproducing the mismatch.
+ * @return {Object}
+ */
+function debugAgendaPortfolioTotalsForUI() {
+  const depRows = getSheetData_('Deployments_SOQL');
+  const maps = getAgendaOverlayMaps_();
+  const filters = {
+    deploymentSourceList:
+      'Deployments_SOQL rows excluding Evisort/HiredScore deployment names (Deployment_Name__c)',
+    previewKpis:
+      'Same SOQL feed + same exclusion; resolved agenda deployments omitted; health from live feed (agenda overlay when on Agenda tab)'
+  };
+
+  const deploymentSourceRedRows = [];
+  const deploymentSourceYellowRows = [];
+  const previewRedRows = [];
+  const previewYellowRows = [];
+  const excludedRedRows = [];
+
+  depRows.forEach(r => {
+    const summary = wellnessDeploymentRowSummary_(r);
+    const excluded = summary.excluded;
+    const id = summary.id;
+    const onAgenda = maps.dep[id];
+    const onAgendaFlag = !!onAgenda;
+    const resolved = !!(onAgenda && onAgenda.resolved);
+
+    let effectiveHealth = String(r['Overall_Health__c'] || '').toLowerCase();
+    if (onAgenda && !resolved) {
+      effectiveHealth = String(onAgenda.healthStatus || '').toLowerCase();
+    }
+
+    const rowDetail = Object.assign({}, summary, {
+      onAgenda: onAgendaFlag,
+      resolved: resolved,
+      effectiveHealth: effectiveHealth,
+      sourceSheet: 'Deployments_SOQL'
+    });
+
+    if (excluded) {
+      if (effectiveHealth === 'red') excludedRedRows.push(rowDetail);
+      return;
+    }
+
+    if (effectiveHealth === 'red') deploymentSourceRedRows.push(rowDetail);
+    else if (effectiveHealth === 'yellow') deploymentSourceYellowRows.push(rowDetail);
+
+    if (resolved) return;
+
+    if (effectiveHealth === 'red') previewRedRows.push(rowDetail);
+    else if (effectiveHealth === 'yellow') previewYellowRows.push(rowDetail);
+  });
+
+  const sourceRedIds = {};
+  deploymentSourceRedRows.forEach(r => { sourceRedIds[r.id] = true; });
+  const previewRedIds = {};
+  previewRedRows.forEach(r => { previewRedIds[r.id] = true; });
+
+  const inPreviewNotSource = previewRedRows.filter(r => !sourceRedIds[r.id]);
+  const inSourceNotPreview = deploymentSourceRedRows.filter(r => !previewRedIds[r.id]);
+
+  const kpis = getAgendaKpis_();
+  const result = {
+    filters: filters,
+    kpiCountsFromGetAgendaKpis_: kpis,
+    deploymentSourceRedCount: deploymentSourceRedRows.length,
+    previewRedCount: previewRedRows.length,
+    deploymentSourceYellowCount: deploymentSourceYellowRows.length,
+    previewYellowCount: previewYellowRows.length,
+    deploymentSourceRedRows: deploymentSourceRedRows,
+    previewRedRows: previewRedRows,
+    excludedFromSourceButRedInFeed: excludedRedRows,
+    inPreviewNotInSourceList: inPreviewNotSource,
+    inSourceListNotInPreview: inSourceNotPreview,
+    note:
+      'Before server-side exclusion alignment, excludedFromSourceButRedInFeed usually explains preview > UI red counts.'
+  };
+
+  Logger.log('debugAgendaPortfolioTotalsForUI: ' + JSON.stringify(result, null, 2));
+  return result;
 }
 
 /**

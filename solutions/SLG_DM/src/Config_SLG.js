@@ -183,6 +183,11 @@ var APP_CONFIG = {
     headerTitle:    'SLG Deployment Health Manager',
     headerSubtitle: 'Review and manage deployment data across all stages',
 
+    webApp: {
+      baseUrl: 'https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA',
+      defaultEndpoint: 'exec'
+    },
+
     // Phase 2 canonical tab structure. Note: 'upcoming' tab removed (merged
     // into 'golives'); 'overrides' tab added at end.
     // MGM/PGL tab added (feature/mgm-pgl).

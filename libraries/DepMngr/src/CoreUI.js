@@ -45,14 +45,24 @@ var CoreUI = (function () {
    * Returns the full <body> shell markup (header, tab bar, tab containers,
    * modals) driven by the supplied AppConfig.
    * @param {AppConfig} config
+   * @param {Object=} userAccess
+   * @param {string=} webAppUrl  Legacy full /exec URL when cfg.ui.webApp.baseUrl is unset
    * @return {string}
    */
-  function getAppShell(config, userAccess) {
+  function getAppShell(config, userAccess, webAppUrl) {
     if (typeof _CoreUI_Markup_getAppShell !== 'function') {
       throw new Error('CoreUI.getAppShell: _CoreUI_Markup_getAppShell not defined. ' +
         'Confirm CoreUI_Markup.gs is present in CoreLib.');
     }
-    var cfg = CoreConfig.withDefaults(config);
+    var input = config || {};
+    if (webAppUrl && !(input.ui && input.ui.webApp && input.ui.webApp.baseUrl)) {
+      input = Object.assign({}, input, {
+        ui: Object.assign({}, input.ui || {}, {
+          webAppUrl: String(webAppUrl).trim()
+        })
+      });
+    }
+    var cfg = CoreConfig.withDefaults(input);
     // Resolve access here if not provided so the template can pass it explicitly.
     var access = userAccess;
     if (!access) {

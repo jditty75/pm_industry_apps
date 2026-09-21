@@ -9840,16 +9840,166 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Whole calendar days between two normalized date keys (non-negative).
+   * @param {string} startKey 'YYYY-MM-DD'
+   * @param {string} endKey   'YYYY-MM-DD'
+   * @return {number}
+   * @private
+   */
+  function _calendarDaysBetweenKeys_(startKey, endKey) {
+    var a = _toDateKey_(startKey);
+    var b = _toDateKey_(endKey);
+    if (!a || !b) return NaN;
+    var pa = a.split('-');
+    var pb = b.split('-');
+    if (pa.length !== 3 || pb.length !== 3) return NaN;
+    var t1 = Date.UTC(parseInt(pa[0], 10), parseInt(pa[1], 10) - 1, parseInt(pa[2], 10));
+    var t2 = Date.UTC(parseInt(pb[0], 10), parseInt(pb[1], 10) - 1, parseInt(pb[2], 10));
+    return Math.round(Math.abs(t2 - t1) / 86400000);
+  }
+
+  /**
+   * Union of calendar date keys, sorted ascending.
+   * @param {Array<string>} a
+   * @param {Array<string>} b
+   * @return {Array<string>}
+   * @private
+   */
+  function _mergeMdsPglSourceEventDateKeys_(a, b) {
+    var seen = {};
+    var out = [];
+    (a || []).concat(b || []).forEach(function (d) {
+      var key = _toDateKey_(d) || String(d || '').trim();
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      out.push(key);
+    });
+    out.sort();
+    return out;
+  }
+
+  /**
+   * Clusters same-kind go-live events when adjacent sorted dates are within thresholdDays.
+   * @param {Array<Object>} events
+   * @param {number} thresholdDays
+   * @param {Object} deploymentRow
+   * @param {string} kind  'MDS'|'PGL'
+   * @return {Array<Object>}
+   * @private
+   */
+  function _clusterMdsPglEventsOfKind_(events, thresholdDays, deploymentRow, kind) {
+    if (!events || events.length === 0) return [];
+
+    var normalized = [];
+    for (var i = 0; i < events.length; i++) {
+      var ev = events[i];
+      var dateKey = _toDateKey_(ev.eventDate) || String(ev.eventDate || '').trim();
+      if (!dateKey) continue;
+      normalized.push({ event: ev, dateKey: dateKey });
+    }
+    normalized.sort(function (a, b) {
+      return a.dateKey.localeCompare(b.dateKey);
+    });
+    if (!normalized.length) return [];
+
+    var clusters = [];
+    var current = null;
+    normalized.forEach(function (item) {
+      if (!current) {
+        current = { dateKeys: [item.dateKey], events: [item.event] };
+        return;
+      }
+      var lastKey = current.dateKeys[current.dateKeys.length - 1];
+      var gap = _calendarDaysBetweenKeys_(lastKey, item.dateKey);
+      if (!isNaN(gap) && gap <= thresholdDays) {
+        current.dateKeys.push(item.dateKey);
+        current.events.push(item.event);
+      } else {
+        clusters.push(current);
+        current = { dateKeys: [item.dateKey], events: [item.event] };
+      }
+    });
+    if (current) clusters.push(current);
+
+    return clusters.map(function (cl) {
+      var sourceDates = cl.dateKeys.slice().sort();
+      var repKey = sourceDates[0];
+      var mergedProducts = [];
+      for (var pi = 0; pi < cl.events.length; pi++) {
+        mergedProducts = _mergeMdsPglProductLabels_(mergedProducts, cl.events[pi].products);
+      }
+      var oneThird = null;
+      if (kind === 'MDS') {
+        oneThird = _computeOneThird_(deploymentRow.deploymentStartDate, repKey);
+        if (!oneThird) {
+          for (var oi = 0; oi < cl.events.length; oi++) {
+            if (cl.events[oi].oneThirdPoint) {
+              oneThird = cl.events[oi].oneThirdPoint;
+              break;
+            }
+          }
+        }
+      }
+      return {
+        kind: kind,
+        eventDate: repKey,
+        oneThirdPoint: oneThird,
+        products: mergedProducts,
+        sourceEventDates: sourceDates,
+        clusteredEventDates: sourceDates,
+        clusteredFromMultipleEventDates: sourceDates.length > 1
+      };
+    });
+  }
+
+  /**
+   * Applies configurable calendar-day clustering to MDS/PGL go-live events for one deployment.
+   * @param {Array<Object>} events
+   * @param {number} clusterDays
+   * @param {Object} deploymentRow
+   * @return {Array<Object>}
+   * @private
+   */
+  function _clusterMdsPglGoLiveEvents_(events, clusterDays, deploymentRow) {
+    var threshold = (clusterDays == null) ? 0 : Math.max(0, parseInt(String(clusterDays), 10) || 0);
+    if (!events || events.length === 0) return [];
+
+    if (threshold <= 0) {
+      return events.map(function (ev) {
+        var key = _toDateKey_(ev.eventDate) || String(ev.eventDate || '').trim();
+        var dates = key ? [key] : [];
+        return Object.assign({}, ev, {
+          eventDate: key || ev.eventDate,
+          sourceEventDates: dates,
+          clusteredEventDates: dates,
+          clusteredFromMultipleEventDates: false
+        });
+      });
+    }
+
+    var byKind = { MDS: [], PGL: [] };
+    events.forEach(function (ev) {
+      if (ev.kind === 'MDS' || ev.kind === 'PGL') byKind[ev.kind].push(ev);
+    });
+
+    var out = [];
+    out = out.concat(_clusterMdsPglEventsOfKind_(byKind.MDS, threshold, deploymentRow, 'MDS'));
+    out = out.concat(_clusterMdsPglEventsOfKind_(byKind.PGL, threshold, deploymentRow, 'PGL'));
+    return out;
+  }
+
+  /**
    * Builds the go-live events for one Active deployment.
    * Returns one MDS event per distinct target date + one PGL event per distinct
    * actual date (falling back to MTP when no actuals exist).
    *
    * @param {Object} deploymentRow  Raw row from readSfdcDeploymentsRaw_.
    * @param {Array}  productRows    Array from readSfdcProductFunctionsRaw_ for this dep (may be undefined/empty).
+   * @param {number=} clusterDays   mgmPglTab.goLiveEventClusterDays (0 = exact dates only).
    * @return {Array<{ kind:'MDS'|'PGL', eventDate:string, oneThirdPoint:string|null, products:string[] }>}
    * @private
    */
-  function _buildGoLiveEvents_(deploymentRow, productRows) {
+  function _buildGoLiveEvents_(deploymentRow, productRows, clusterDays) {
     var events = [];
     var pr = productRows || [];
 
@@ -9913,7 +10063,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       }
     }
 
-    return _dedupeEvents_(events);
+    events = _dedupeEvents_(events);
+    return _clusterMdsPglGoLiveEvents_(events, clusterDays, deploymentRow);
   }
 
   /**
@@ -9935,15 +10086,16 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       if (r.partner !== 'Workday Professional Services') return;
 
       var depId    = r.deploymentId;
+      var canonDep = _canonicalId_(depId);
       var depStart = r.deploymentStartDate || '';
       var depEnd   = r.mtpDate             || '';
-      var products = productRowsByDep[depId] || [];
+      var products = productRowsByDep[canonDep] || productRowsByDep[depId] || [];
 
       function pushException_(missingType, hasProducts) {
-        if (exceptionSeen[depId]) return;
-        exceptionSeen[depId] = true;
+        if (exceptionSeen[canonDep]) return;
+        exceptionSeen[canonDep] = true;
         exceptionRows.push({
-          deploymentId:        depId,
+          deploymentId:        canonDep || depId,
           accountName:         r.accountName,
           deploymentName:      r.deploymentName,
           deploymentStartDate: depStart || null,
@@ -9967,6 +10119,395 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     });
 
     return exceptionRows;
+  }
+
+  /**
+   * Richness score for choosing one Active deployment row per canonical Salesforce Id.
+   * @param {Object} r
+   * @return {number}
+   * @private
+   */
+  function _mdsPglActiveRowRichnessScore_(r) {
+    if (!r) return 0;
+    var score = 0;
+    if (r.deploymentName) score += 4;
+    if (r.accountName) score += 4;
+    if (r.mtpDate) score += 3;
+    if (r.deploymentStartDate) score += 2;
+    if (r.partner) score += 2;
+    if (r.overallStatus) score += 1;
+    if (r.phase) score += 1;
+    if (r.stage) score += 1;
+    if (r.health) score += 1;
+    if (String(r.deploymentId || '').length >= 18) score += 2;
+    return score;
+  }
+
+  /**
+   * Collapses Active deployment rows to one row per canonical deployment Id.
+   * @param {Array<Object>} rows
+   * @return {{ rows: Array<Object>, sourceActiveCount: number, canonicalActiveCount: number, duplicateCanonicalIds: Array<Object> }}
+   * @private
+   */
+  function _collapseMdsPglActiveRowsByCanonicalId_(rows) {
+    var sourceActiveCount = Array.isArray(rows) ? rows.length : 0;
+    if (!sourceActiveCount) {
+      return {
+        rows: [],
+        sourceActiveCount: 0,
+        canonicalActiveCount: 0,
+        duplicateCanonicalIds: []
+      };
+    }
+
+    var canonCounts = {};
+    var byCanon = {};
+    var order = [];
+
+    rows.forEach(function (r) {
+      var canon = _canonicalId_(r.deploymentId);
+      if (!canon) return;
+      canonCounts[canon] = (canonCounts[canon] || 0) + 1;
+      if (!byCanon[canon]) {
+        byCanon[canon] = r;
+        order.push(canon);
+        return;
+      }
+      var prevScore = _mdsPglActiveRowRichnessScore_(byCanon[canon]);
+      var nextScore = _mdsPglActiveRowRichnessScore_(r);
+      if (nextScore > prevScore) {
+        byCanon[canon] = r;
+      }
+    });
+
+    var duplicateCanonicalIds = [];
+    Object.keys(canonCounts).forEach(function (canon) {
+      if (canonCounts[canon] > 1) {
+        duplicateCanonicalIds.push({
+          canonicalDeploymentId: canon,
+          sourceRowCount: canonCounts[canon]
+        });
+      }
+    });
+
+    var collapsed = order.map(function (canon) {
+      var row = byCanon[canon];
+      if (_canonicalId_(row.deploymentId) !== canon) {
+        return Object.assign({}, row, { deploymentId: canon });
+      }
+      if (row.deploymentId !== canon && String(row.deploymentId || '').length < 18) {
+        return Object.assign({}, row, { deploymentId: canon });
+      }
+      return row;
+    });
+
+    return {
+      rows: collapsed,
+      sourceActiveCount: sourceActiveCount,
+      canonicalActiveCount: collapsed.length,
+      duplicateCanonicalIds: duplicateCanonicalIds
+    };
+  }
+
+  /**
+   * Merges product-function arrays under canonical deployment FK keys.
+   * @param {Object} productRowsByDep
+   * @return {Object}
+   * @private
+   */
+  function _canonicalizeProductRowsByDep_(productRowsByDep) {
+    var out = {};
+    if (!productRowsByDep) return out;
+    Object.keys(productRowsByDep).forEach(function (fk) {
+      var canon = _canonicalId_(fk);
+      if (!canon) return;
+      if (!out[canon]) out[canon] = [];
+      var chunk = productRowsByDep[fk] || [];
+      for (var i = 0; i < chunk.length; i++) {
+        out[canon].push(chunk[i]);
+      }
+    });
+    return out;
+  }
+
+  /**
+   * Merges deployment contact buckets under canonical deployment Id keys.
+   * @param {Object} contactsMap
+   * @return {Object}
+   * @private
+   */
+  function _canonicalizeContactsMapForMdsPgl_(contactsMap) {
+    var out = {};
+    if (!contactsMap) return out;
+    Object.keys(contactsMap).forEach(function (depId) {
+      var canon = _canonicalId_(depId);
+      if (!canon) return;
+      if (!out[canon]) {
+        out[canon] = contactsMap[depId];
+        return;
+      }
+      out[canon] = _mergeMdsPglContactsObjects_(out[canon], contactsMap[depId]);
+    });
+    return out;
+  }
+
+  /**
+   * @param {Object|null} a
+   * @param {Object|null} b
+   * @return {Object|null}
+   * @private
+   */
+  function _mergeMdsPglContactsObjects_(a, b) {
+    if (!a) return b || null;
+    if (!b) return a || null;
+
+    function mergeList_(la, lb) {
+      var seen = {};
+      var out = [];
+      (la || []).concat(lb || []).forEach(function (c) {
+        if (!c) return;
+        var k = String(c.email || '').toLowerCase() + '|' + String(c.name || '').toLowerCase();
+        if (seen[k]) return;
+        seen[k] = true;
+        out.push(c);
+      });
+      return out;
+    }
+
+    var wd = a.wdSponsor;
+    if (b.wdSponsor) {
+      if (!wd || (!wd.email && b.wdSponsor.email)) wd = b.wdSponsor;
+    }
+
+    return {
+      projectManagers:    mergeList_(a.projectManagers, b.projectManagers),
+      execSponsors:       mergeList_(a.execSponsors, b.execSponsors),
+      wdSponsor:          wd,
+      engagementManagers: mergeList_(a.engagementManagers, b.engagementManagers)
+    };
+  }
+
+  /**
+   * Emit-time dedupe key for one MDS/PGL survey row (includes batch month).
+   * @param {Object} row
+   * @return {string}
+   * @private
+   */
+  function _mdsPglSurveyRowEmitKey_(row) {
+    var canonDep = _canonicalId_(row.deploymentId);
+    var surveyType = String(row.surveyType || '');
+    var eventKey = _toDateKey_(row.eventDate) || String(row.eventDate || '').trim();
+    var batchYm = String(row._batchYearMonth || '');
+    return canonDep + '|' + surveyType + '|' + eventKey + '|' + batchYm;
+  }
+
+  /**
+   * @param {Array<string>} a
+   * @param {Array<string>} b
+   * @return {Array<string>}
+   * @private
+   */
+  function _mergeMdsPglProductLabels_(a, b) {
+    var seen = {};
+    var out = [];
+    (a || []).concat(b || []).forEach(function (p) {
+      var label = String(p || '').trim();
+      if (!label || seen[label]) return;
+      seen[label] = true;
+      out.push(label);
+    });
+    return out.sort();
+  }
+
+  /**
+   * Merges duplicate MDS/PGL survey rows sharing the same emit key.
+   * @param {Object} base
+   * @param {Object} extra
+   * @return {Object}
+   * @private
+   */
+  function _mergeMdsPglSurveyRow_(base, extra) {
+    base.products = _mergeMdsPglProductLabels_(base.products, extra.products);
+    base.isMultipleGoLives = !!(base.isMultipleGoLives || extra.isMultipleGoLives);
+    base.sourceEventDates = _mergeMdsPglSourceEventDateKeys_(
+      base.sourceEventDates, extra.sourceEventDates);
+    base.clusteredEventDates = _mergeMdsPglSourceEventDateKeys_(
+      base.clusteredEventDates, extra.clusteredEventDates);
+    if (!base.sourceEventDates || !base.sourceEventDates.length) {
+      base.sourceEventDates = _mergeMdsPglSourceEventDateKeys_(
+        [], [_toDateKey_(base.eventDate) || base.eventDate]);
+    }
+    base.clusteredEventDates = base.sourceEventDates.slice();
+    base.clusteredFromMultipleEventDates = (base.sourceEventDates || []).length > 1;
+    if (base.clusteredFromMultipleEventDates) base.isMultipleGoLives = true;
+    if (!base.contacts && extra.contacts) base.contacts = extra.contacts;
+    else if (base.contacts && extra.contacts) {
+      base.contacts = _mergeMdsPglContactsObjects_(base.contacts, extra.contacts);
+    }
+    var fields = [
+      'accountName', 'deploymentName', 'deliveryDirector', 'partner',
+      'eventDate', 'oneThirdPoint', 'startDate', 'currentMtp'
+    ];
+    fields.forEach(function (field) {
+      if ((!base[field] || base[field] === '\u2014') && extra[field]) {
+        base[field] = extra[field];
+      }
+    });
+    base.isExecutiveWatch = !!(base.isExecutiveWatch || extra.isExecutiveWatch);
+    return base;
+  }
+
+  /**
+   * Dedupes emitted MDS/PGL rows by canonical deployment + survey type + event date + batch month.
+   * @param {Array<Object>} rows
+   * @return {{ rows: Array<Object>, beforeCount: number, afterCount: number, duplicateRowKeys: Array<string> }}
+   * @private
+   */
+  function _dedupeMdsPglSurveyRows_(rows) {
+    var beforeCount = Array.isArray(rows) ? rows.length : 0;
+    if (!beforeCount) {
+      return { rows: [], beforeCount: 0, afterCount: 0, duplicateRowKeys: [] };
+    }
+
+    var seen = {};
+    var order = [];
+    var duplicateRowKeys = [];
+
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var key = _mdsPglSurveyRowEmitKey_(row);
+      if (seen[key]) {
+        seen[key] = _mergeMdsPglSurveyRow_(seen[key], row);
+        if (duplicateRowKeys.indexOf(key) === -1) duplicateRowKeys.push(key);
+      } else {
+        seen[key] = row;
+        order.push(key);
+      }
+    }
+
+    var deduped = order.map(function (k) { return seen[k]; });
+    return {
+      rows: deduped,
+      beforeCount: beforeCount,
+      afterCount: deduped.length,
+      duplicateRowKeys: duplicateRowKeys
+    };
+  }
+
+  /**
+   * Loads Active deployment rows for MDS/PGL (standard + product-mode paths).
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function _resolveMdsPglActiveRows_(cfg) {
+    var activeRows = [];
+    try {
+      if (usesProductModeParentAndPfUnion_(cfg)) {
+        activeRows = getActiveCountDeployments(cfg) || [];
+        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+      } else if (usesProductModePfDataSource_(cfg)) {
+        var effectivePf = getAllEffectiveDeployments(cfg) || [];
+        var byParent = {};
+        effectivePf.forEach(function (r) {
+          var pid = _canonicalId_(r.parentDeploymentId || r.deploymentFk || r.deploymentId);
+          if (!pid) return;
+          if (!byParent[pid]) {
+            byParent[pid] = Object.assign({}, r, {
+              deploymentId: pid,
+              parentDeploymentId: pid,
+              deploymentFk: pid
+            });
+          }
+        });
+        activeRows = Object.keys(byParent).map(function (k) { return byParent[k]; });
+        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+      } else {
+        var rawRows = readSfdcDeploymentsRaw_(cfg);
+        activeRows = rawRows.filter(function (r) {
+          return r.overallStatus === 'Active';
+        });
+        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+      }
+    } catch (e) {
+      Logger.log('CoreData._resolveMdsPglActiveRows_: failed: ' + e);
+    }
+    return activeRows;
+  }
+
+  /**
+   * Builds flat MDS/PGL survey rows for collapsed Active deployments.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} activeRows
+   * @param {Object} productRowsByDep
+   * @param {Object} contactsMap
+   * @param {Array<Object>} scheduleByMonth
+   * @return {Array<Object>}
+   * @private
+   */
+  function _buildMdsPglSurveyRowsFromActive_(cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth) {
+    var clusterDays = CoreConfig.getMgmPglGoLiveEventClusterDays(cfg);
+    var allRows = [];
+    activeRows.forEach(function (r) {
+      var canonDep = _canonicalId_(r.deploymentId);
+      if (!canonDep) return;
+      var prRows = productRowsByDep[canonDep] || [];
+      var events = _buildGoLiveEvents_(r, prRows, clusterDays);
+
+      var mdsCount = 0;
+      var pglCount = 0;
+      for (var ei = 0; ei < events.length; ei++) {
+        if (events[ei].kind === 'MDS') mdsCount++;
+        else pglCount++;
+      }
+      var deploymentMultipleGoLives = (mdsCount > 1) || (pglCount > 1);
+
+      for (var evi = 0; evi < events.length; evi++) {
+        var ev = events[evi];
+        var targetDate = (ev.kind === 'MDS') ? ev.oneThirdPoint : ev.eventDate;
+        if (!targetDate) continue;
+
+        var scheduleEntry = null;
+        for (var si = 0; si < scheduleByMonth.length; si++) {
+          var s = scheduleByMonth[si];
+          var win = (ev.kind === 'MDS') ? s.mdsOneThirdWindow : s.pglFirstMtpWindow;
+          if (targetDate >= win.start && targetDate <= win.end) {
+            scheduleEntry = s;
+            break;
+          }
+        }
+        if (!scheduleEntry) continue;
+
+        var sourceDates = ev.sourceEventDates ||
+          _mergeMdsPglSourceEventDateKeys_([], [_toDateKey_(ev.eventDate) || ev.eventDate]);
+        var rowMultipleGoLives = deploymentMultipleGoLives ||
+          !!ev.clusteredFromMultipleEventDates ||
+          sourceDates.length > 1 ||
+          ((ev.products || []).length > 1);
+
+        allRows.push({
+          deploymentId:      canonDep,
+          accountName:       r.accountName,
+          deploymentName:    r.deploymentName,
+          deliveryDirector:  r.damFullName || '',
+          partner:           r.partner || '',
+          isExecutiveWatch:  CoreConfig.isExecutiveWatchEnabled(cfg) && !!r.isExecutiveWatch,
+          surveyType:        ev.kind,
+          eventDate:         _coerceUiDateField_(ev.eventDate),
+          sourceEventDates:  sourceDates,
+          clusteredEventDates: ev.clusteredEventDates || sourceDates,
+          clusteredFromMultipleEventDates: !!ev.clusteredFromMultipleEventDates,
+          products:          ev.products,
+          isMultipleGoLives: rowMultipleGoLives,
+          oneThirdPoint:     _coerceUiDateField_(ev.oneThirdPoint, null),
+          startDate:         _coerceUiDateField_(r.deploymentStartDate, null),
+          currentMtp:        _coerceUiDateField_(r.mtpDate, null),
+          contacts:          contactsMap[canonDep] || null,
+          _batchYearMonth:   scheduleEntry.yearMonth
+        });
+      }
+    });
+    return allRows;
   }
 
   /**
@@ -10033,55 +10574,35 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     });
 
     // Active deployments (raw, Active-only).
-    var activeRows = [];
-    try {
-      if (usesProductModeParentAndPfUnion_(cfg)) {
-        activeRows = getActiveCountDeployments(cfg) || [];
-        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
-      } else if (usesProductModePfDataSource_(cfg)) {
-        var effectivePf = getAllEffectiveDeployments(cfg) || [];
-        var byParent = {};
-        effectivePf.forEach(function (r) {
-          var pid = _canonicalId_(r.parentDeploymentId || r.deploymentFk || r.deploymentId);
-          if (!pid) return;
-          if (!byParent[pid]) {
-            byParent[pid] = Object.assign({}, r, {
-              deploymentId: pid,
-              parentDeploymentId: pid,
-              deploymentFk: pid
-            });
-          }
-        });
-        activeRows = Object.keys(byParent).map(function (k) { return byParent[k]; });
-        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
-      } else {
-        var rawRows = readSfdcDeploymentsRaw_(cfg);
-        activeRows = rawRows.filter(function (r) {
-          return r.overallStatus === 'Active';
-        });
-        activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
-      }
-    } catch (e) {
-      Logger.log('CoreData.getMdsPglBatchView: active deployment read failed: ' + e);
+    var activeRows = _resolveMdsPglActiveRows_(cfg);
+    var collapsedActive = _collapseMdsPglActiveRowsByCanonicalId_(activeRows);
+    activeRows = collapsedActive.rows;
+    if (collapsedActive.duplicateCanonicalIds.length > 0) {
+      Logger.log('CoreData.getMdsPglBatchView: collapsed ' +
+                 collapsedActive.sourceActiveCount + ' Active rows to ' +
+                 collapsedActive.canonicalActiveCount + ' canonical deployments (' +
+                 collapsedActive.duplicateCanonicalIds.length + ' duplicate id groups).');
     }
 
-    // Product-function rows grouped by deploymentFk.
+    // Product-function rows grouped by canonical deploymentFk.
     var productRowsByDep = {};
     try {
       var pfRows = readSfdcProductFunctionsRaw_(cfg);
+      var rawProductRowsByDep = {};
       pfRows.forEach(function (pf) {
         if (!pf.deploymentFk) return;
-        if (!productRowsByDep[pf.deploymentFk]) productRowsByDep[pf.deploymentFk] = [];
-        productRowsByDep[pf.deploymentFk].push(pf);
+        if (!rawProductRowsByDep[pf.deploymentFk]) rawProductRowsByDep[pf.deploymentFk] = [];
+        rawProductRowsByDep[pf.deploymentFk].push(pf);
       });
+      productRowsByDep = _canonicalizeProductRowsByDep_(rawProductRowsByDep);
     } catch (e) {
       Logger.log('CoreData.getMdsPglBatchView: readSfdcProductFunctionsRaw_ failed: ' + e);
     }
 
-    // Contacts map.
+    // Contacts map (canonical deployment Id keys).
     var contactsMap = {};
     try {
-      contactsMap = getDeploymentContactsMap_(cfg);
+      contactsMap = _canonicalizeContactsMapForMdsPgl_(getDeploymentContactsMap_(cfg));
     } catch (e) {
       Logger.log('CoreData.getMdsPglBatchView: getDeploymentContactsMap_ failed: ' + e);
     }
@@ -10089,59 +10610,16 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Exceptions list (verbatim logic from prior getUpcomingSurveys).
     var exceptions = _buildMgmPglExceptions_(cfg, activeRows, productRowsByDep);
 
-    // Build all rows.
-    var allRows = [];
-    activeRows.forEach(function (r) {
-      var depId    = r.deploymentId;
-      var prRows   = productRowsByDep[depId];
-      var events   = _buildGoLiveEvents_(r, prRows);
-
-      var mdsCount         = 0;
-      var pglCount         = 0;
-      for (var ei = 0; ei < events.length; ei++) {
-        if (events[ei].kind === 'MDS') mdsCount++;
-        else pglCount++;
-      }
-      var isMultipleGoLives = (mdsCount > 1) || (pglCount > 1);
-
-      for (var evi = 0; evi < events.length; evi++) {
-        var ev = events[evi];
-
-        // Determine the date that drives batch-month assignment.
-        var targetDate = (ev.kind === 'MDS') ? ev.oneThirdPoint : ev.eventDate;
-        if (!targetDate) continue;
-
-        // Find the matching schedule entry.
-        var scheduleEntry = null;
-        for (var si = 0; si < scheduleByMonth.length; si++) {
-          var s   = scheduleByMonth[si];
-          var win = (ev.kind === 'MDS') ? s.mdsOneThirdWindow : s.pglFirstMtpWindow;
-          if (targetDate >= win.start && targetDate <= win.end) {
-            scheduleEntry = s;
-            break;
-          }
-        }
-        if (!scheduleEntry) continue; // outside horizon — skip silently
-
-        allRows.push({
-          deploymentId:     depId,
-          accountName:      r.accountName,
-          deploymentName:   r.deploymentName,
-          deliveryDirector: r.damFullName || '',
-          partner:          r.partner     || '',
-          isExecutiveWatch: CoreConfig.isExecutiveWatchEnabled(cfg) && !!r.isExecutiveWatch,
-          surveyType:       ev.kind,
-          eventDate:        _coerceUiDateField_(ev.eventDate),
-          products:         ev.products,
-          isMultipleGoLives: isMultipleGoLives,
-          oneThirdPoint:    _coerceUiDateField_(ev.oneThirdPoint, null),
-          startDate:        _coerceUiDateField_(r.deploymentStartDate, null),
-          currentMtp:       _coerceUiDateField_(r.mtpDate, null),
-          contacts:         contactsMap[depId]    || null,
-          _batchYearMonth:  scheduleEntry.yearMonth
-        });
-      }
-    });
+    // Build all rows, then emit-time dedupe.
+    var builtRows = _buildMdsPglSurveyRowsFromActive_(
+      cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth);
+    var dedupeResult = _dedupeMdsPglSurveyRows_(builtRows);
+    var allRows = dedupeResult.rows;
+    if (dedupeResult.beforeCount !== dedupeResult.afterCount) {
+      Logger.log('CoreData.getMdsPglBatchView: emit dedupe ' +
+                 dedupeResult.beforeCount + ' -> ' + dedupeResult.afterCount + ' rows (' +
+                 dedupeResult.duplicateRowKeys.length + ' duplicate keys).');
+    }
 
     // ── Group by month ────────────────────────────────────────────────────
     function byAccountName_(a, b) {
@@ -10245,7 +10723,14 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    */
   function _debugMdsPglBatchView_(cfg) {
     Logger.log('=== _debugMdsPglBatchView ===');
-    var payload = getMdsPglBatchView(cfg, null, 3);
+    var cfgD = CoreConfig.withDefaults(cfg);
+    var sourceActive = _resolveMdsPglActiveRows_(cfgD);
+    var collapsed = _collapseMdsPglActiveRowsByCanonicalId_(sourceActive);
+    Logger.log('Active rows: source=' + collapsed.sourceActiveCount +
+               ', canonical=' + collapsed.canonicalActiveCount +
+               ', duplicateIdGroups=' + collapsed.duplicateCanonicalIds.length);
+
+    var payload = getMdsPglBatchView(cfgD, null, 3);
     Logger.log('horizonMonths=' + payload.horizonMonths + ', today=' + payload.today);
     Logger.log('groups: ' + payload.groups.length);
     payload.groups.forEach(function (g) {
@@ -10262,6 +10747,135 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     });
     Logger.log('exceptions: ' + payload.exceptions.length);
     Logger.log('=== END ===');
+  }
+
+  /**
+   * Diagnostic for duplicate MDS/PGL rows — token matches account or deployment name.
+   *
+   * @param {AppConfig} config
+   * @param {string=} token  e.g. "Tenet Business Services Corporation"
+   * @param {number=} windowMonths  3 or 6
+   * @return {Object}
+   */
+  function debugMdsPglRowsForUI(config, token, windowMonths) {
+    var cfg = CoreConfig.withDefaults(config);
+    var horizonMonths = (windowMonths === 6) ? 6 : 3;
+    var goLiveEventClusterDays = CoreConfig.getMgmPglGoLiveEventClusterDays(cfg);
+    var needle = String(token || '').trim().toLowerCase();
+
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var monthKeys = [];
+    for (var mi = 0; mi < horizonMonths; mi++) {
+      var md = new Date(now.getFullYear(), now.getMonth() + mi, 1);
+      monthKeys.push(Utilities.formatDate(md, tz, 'yyyy-MM'));
+    }
+    var scheduleByMonth = monthKeys.map(function (ym) {
+      return CoreSurveySchedule.resolve(ym);
+    });
+
+    var sourceActive = _resolveMdsPglActiveRows_(cfg);
+    var collapsed = _collapseMdsPglActiveRowsByCanonicalId_(sourceActive);
+    var activeRows = collapsed.rows;
+
+    var productRowsByDep = {};
+    try {
+      var pfRows = readSfdcProductFunctionsRaw_(cfg);
+      var rawProductRowsByDep = {};
+      pfRows.forEach(function (pf) {
+        if (!pf.deploymentFk) return;
+        if (!rawProductRowsByDep[pf.deploymentFk]) rawProductRowsByDep[pf.deploymentFk] = [];
+        rawProductRowsByDep[pf.deploymentFk].push(pf);
+      });
+      productRowsByDep = _canonicalizeProductRowsByDep_(rawProductRowsByDep);
+    } catch (e) {
+      Logger.log('CoreData.debugMdsPglRowsForUI: pf read failed: ' + e);
+    }
+
+    var contactsMap = {};
+    try {
+      contactsMap = _canonicalizeContactsMapForMdsPgl_(getDeploymentContactsMap_(cfg));
+    } catch (e) {
+      Logger.log('CoreData.debugMdsPglRowsForUI: contacts read failed: ' + e);
+    }
+
+    var beforeRows = _buildMdsPglSurveyRowsFromActive_(
+      cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth);
+    var dedupeResult = _dedupeMdsPglSurveyRows_(beforeRows);
+
+    function rowMatches_(row) {
+      if (!needle) return true;
+      var hay = ((row.accountName || '') + ' ' + (row.deploymentName || '')).toLowerCase();
+      return hay.indexOf(needle) !== -1;
+    }
+
+    function summarizeRow_(row, index) {
+      var contacts = row.contacts;
+      var contactCount = 0;
+      if (contacts) {
+        contactCount = (contacts.projectManagers || []).length +
+          (contacts.execSponsors || []).length +
+          (contacts.engagementManagers || []).length +
+          (contacts.wdSponsor ? 1 : 0);
+      }
+      return {
+        rowIndex: index,
+        surveyType: row.surveyType,
+        canonicalDeploymentId: _canonicalId_(row.deploymentId),
+        deploymentId: row.deploymentId,
+        accountName: row.accountName,
+        deploymentName: row.deploymentName,
+        eventDate: row.eventDate,
+        eventDateKey: _toDateKey_(row.eventDate),
+        sourceEventDates: row.sourceEventDates || [],
+        clusteredEventDates: row.clusteredEventDates || row.sourceEventDates || [],
+        clusteredFromMultipleEventDates: !!row.clusteredFromMultipleEventDates,
+        currentMtp: row.currentMtp,
+        batchYearMonth: row._batchYearMonth,
+        dedupeKey: _mdsPglSurveyRowEmitKey_(row),
+        productCount: (row.products || []).length,
+        contactCount: contactCount,
+        isMultipleGoLives: !!row.isMultipleGoLives
+      };
+    }
+
+    var matchingBefore = [];
+    for (var bi = 0; bi < beforeRows.length; bi++) {
+      if (rowMatches_(beforeRows[bi])) matchingBefore.push(summarizeRow_(beforeRows[bi], bi));
+    }
+    var matchingAfter = [];
+    for (var ai = 0; ai < dedupeResult.rows.length; ai++) {
+      if (rowMatches_(dedupeResult.rows[ai])) {
+        matchingAfter.push(summarizeRow_(dedupeResult.rows[ai], ai));
+      }
+    }
+
+    var keyCounts = {};
+    matchingAfter.forEach(function (m) {
+      keyCounts[m.dedupeKey] = (keyCounts[m.dedupeKey] || 0) + 1;
+    });
+    var duplicateFinalRowKeys = Object.keys(keyCounts).filter(function (k) {
+      return keyCounts[k] > 1;
+    });
+
+    Logger.log('CoreData.debugMdsPglRowsForUI: token="' + (token || '') + '" before=' +
+               dedupeResult.beforeCount + ' after=' + dedupeResult.afterCount);
+
+    return {
+      token: token || '',
+      horizonMonths: horizonMonths,
+      goLiveEventClusterDays: goLiveEventClusterDays,
+      sourceActiveCount: collapsed.sourceActiveCount,
+      canonicalActiveCount: collapsed.canonicalActiveCount,
+      duplicateActiveDeploymentIds: collapsed.duplicateCanonicalIds,
+      finalAllRowsBeforeDedupe: dedupeResult.beforeCount,
+      finalAllRowsAfterDedupe: dedupeResult.afterCount,
+      duplicateFinalRowKeys: dedupeResult.duplicateRowKeys,
+      duplicateMatchingFinalRowKeys: duplicateFinalRowKeys,
+      matchingRowsBeforeDedupe: matchingBefore,
+      matchingRowsAfterDedupe: matchingAfter
+    };
   }
 
   /**
@@ -13875,6 +14489,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     getMdsPglBatchView:          getMdsPglBatchView,
     _debugMdsPglBatchView:       _debugMdsPglBatchView_,
     _debugMdsPglExceptions:      _debugMdsPglExceptions_,
+    debugMdsPglRowsForUI:        debugMdsPglRowsForUI,
 
     // V2.8: CSAT in-flight surveys + unified tab payload
     uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,

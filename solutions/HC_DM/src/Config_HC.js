@@ -150,6 +150,11 @@ var APP_CONFIG = {
     headerTitle:    'Healthcare Deployment Health Manager',
     headerSubtitle: 'Review and manage deployment data across all stages',
 
+    webApp: {
+      baseUrl: 'https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA',
+      defaultEndpoint: 'exec'
+    },
+
     // v2 consolidated tab structure (matches HENP/SLG).
     tabs: [
       { id: 'deployments', label: 'Deployments' },
@@ -163,7 +168,7 @@ var APP_CONFIG = {
       { id: 'trends',      label: 'Trends' }
     ],
     enableAccountLinks: true,
-    mgmPglTab: { enabled: true },
+    mgmPglTab: { enabled: true, goLiveEventClusterDays: 2 },
     // T1: Trends tab.
     trendsTab: { enabled: false },
 

@@ -51,7 +51,14 @@
  * @property {{ allowedRoles: Array<string>, notesMaxChars: number }} editModal
  * @property {{ enabled: boolean, copy: string, showOnTabs: Array<string>,
  *              linkToken: string }} banner
- * @property {{ enabled: boolean, copy: string }} reportDisclosure
+ * @property {{ enabled: boolean, copy: string }} [reportDisclosure]  Deprecated; use report.topMessage.
+ */
+
+/**
+ * @typedef {Object} ReportTopMessageConfig
+ * @property {string} [text]      Escaped plain text; blank/absent = no banner.
+ * @property {string} [linkText]  Link label (requires linkUrl).
+ * @property {string} [linkUrl]   Must begin with https:// to render a link.
  */
 
 /**
@@ -134,6 +141,7 @@
  * @property {boolean} includeIndustryRedYellow
  * @property {boolean} includeIndustryGoLives
  * @property {Object}  portfolioHealth
+ * @property {ReportTopMessageConfig} [topMessage]  Monthly report banner (opt-in per app).
  */
 
 /**
@@ -533,6 +541,11 @@ var CoreConfig = (function () {
       cfg.report.portfolioHealth.recentGoLivesWindowDays = cfg.report.goLivesWindowDays || 60;
     if (cfg.report.portfolioHealth.historyWindowMonths === undefined)
       cfg.report.portfolioHealth.historyWindowMonths = 6;
+    cfg.report.portfolioHealth.partnerAnalysis =
+      cfg.report.portfolioHealth.partnerAnalysis || {};
+    if (!Array.isArray(cfg.report.portfolioHealth.partnerAnalysis.excludePartners)) {
+      cfg.report.portfolioHealth.partnerAnalysis.excludePartners = [];
+    }
     if (cfg.report.portfolioHealth.slideExportEnabled === undefined)
       cfg.report.portfolioHealth.slideExportEnabled = true;
     cfg.report.portfolioHealth.slidesExport = cfg.report.portfolioHealth.slidesExport || {};
@@ -809,6 +822,8 @@ var CoreConfig = (function () {
     if (!cfg.ui.mgmPglTab.defaultHorizon) cfg.ui.mgmPglTab.defaultHorizon = 3;
     if (!Array.isArray(cfg.ui.mgmPglTab.horizonOptions))
       cfg.ui.mgmPglTab.horizonOptions = [3, 6];
+    cfg.ui.mgmPglTab.goLiveEventClusterDays =
+      normalizeMgmPglGoLiveEventClusterDays_(cfg.ui.mgmPglTab.goLiveEventClusterDays);
     cfg.ui.csatTab = cfg.ui.csatTab || cfg.ui.mgmPglTab;
     if (cfg.ui.csatTab.enabled === undefined) cfg.ui.csatTab.enabled = true;
     if (!cfg.ui.csatTab.defaultHorizon) cfg.ui.csatTab.defaultHorizon = 3;
@@ -820,6 +835,14 @@ var CoreConfig = (function () {
     // CoreUI_Markup uses this to render only allowed tabs server-side.
     // Apps may override this in their APP_CONFIG.ui.roleVisibility block.
     cfg.ui.roleVisibility = cfg.ui.roleVisibility || {};
+    cfg.ui.viewAsReadOnly = cfg.ui.viewAsReadOnly || {};
+    if (cfg.ui.viewAsReadOnly.enabled === undefined) {
+      cfg.ui.viewAsReadOnly.enabled = true;
+    }
+
+    cfg.ui.webApp = cfg.ui.webApp || {};
+    normalizeUiWebApp_(cfg);
+
     if (!Array.isArray(cfg.ui.roleVisibility.READ_ONLY)) {
       cfg.ui.roleVisibility.READ_ONLY = ['deployments', 'golives', 'portfolio'];
     }
@@ -1018,12 +1041,207 @@ var CoreConfig = (function () {
     return isProductModeApp(cfg) ? 'PS Region' : 'Industry';
   }
 
+  /**
+   * Normalizes mgmPglTab.goLiveEventClusterDays (non-negative integer; default 0).
+   * @param {*} raw
+   * @return {number}
+   */
+  function normalizeMgmPglGoLiveEventClusterDays_(raw) {
+    if (raw === undefined || raw === null || raw === '') return 0;
+    var n = parseInt(String(raw), 10);
+    if (isNaN(n) || n < 0) return 0;
+    return n;
+  }
+
+  /**
+   * Resolved go-live event cluster window for MDS/PGL (calendar days).
+   * @param {AppConfig} appConfig
+   * @return {number}
+   */
+  function getMgmPglGoLiveEventClusterDays(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    var tab = (cfg.ui && cfg.ui.mgmPglTab) || (cfg.ui && cfg.ui.csatTab) || {};
+    return normalizeMgmPglGoLiveEventClusterDays_(tab.goLiveEventClusterDays);
+  }
+
+  /**
+   * Parses a web app URL or base URL; strips /exec or /dev suffix when present.
+   * @param {*} raw
+   * @return {{ baseUrl: string, endpoint: string }}
+   * @private
+   */
+  function parseWebAppUrlInput_(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return { baseUrl: '', endpoint: '' };
+    var q = s.indexOf('?');
+    if (q >= 0) s = s.substring(0, q);
+    s = s.replace(/\/+$/, '');
+    var endpoint = '';
+    if (s.length > 5 && s.slice(-5) === '/exec') {
+      endpoint = 'exec';
+      s = s.substring(0, s.length - 5);
+    } else if (s.length > 4 && s.slice(-4) === '/dev') {
+      endpoint = 'dev';
+      s = s.substring(0, s.length - 4);
+    }
+    return { baseUrl: s.replace(/\/+$/, ''), endpoint: endpoint };
+  }
+
+  /**
+   * Normalizes cfg.ui.webApp (baseUrl + defaultEndpoint). Does not invent baseUrl.
+   * @param {AppConfig} cfg
+   * @private
+   */
+  function normalizeUiWebApp_(cfg) {
+    var wa = cfg.ui.webApp || {};
+    cfg.ui.webApp = wa;
+
+    if (wa.baseUrl) {
+      var fromBase = parseWebAppUrlInput_(wa.baseUrl);
+      wa.baseUrl = fromBase.baseUrl;
+      if (fromBase.endpoint && !wa.defaultEndpoint) {
+        wa.defaultEndpoint = fromBase.endpoint;
+      }
+    }
+
+    if (!wa.baseUrl) {
+      var legacySources = [
+        cfg.ui.webAppUrl,
+        cfg.webAppUrl,
+        cfg.ui.webAppBaseUrl,
+        cfg.webAppBaseUrl
+      ];
+      for (var i = 0; i < legacySources.length; i++) {
+        if (!legacySources[i]) continue;
+        var parsed = parseWebAppUrlInput_(legacySources[i]);
+        if (parsed.baseUrl) {
+          wa.baseUrl = parsed.baseUrl;
+          if (parsed.endpoint && !wa.defaultEndpoint) {
+            wa.defaultEndpoint = parsed.endpoint;
+          }
+          break;
+        }
+      }
+    }
+
+    wa.baseUrl = String(wa.baseUrl || '').trim().replace(/\/+$/, '');
+    var ep = String(wa.defaultEndpoint || 'exec').trim().toLowerCase();
+    if (ep !== 'exec' && ep !== 'dev') ep = 'exec';
+    wa.defaultEndpoint = ep;
+  }
+
+  /**
+   * Deployed web app entry URL: baseUrl + '/' + defaultEndpoint (no query).
+   * @param {AppConfig} appConfig
+   * @return {string}
+   */
+  function getWebAppEntryUrl(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    var wa = cfg.ui.webApp || {};
+    if (!wa.baseUrl) return '';
+    return wa.baseUrl + '/' + wa.defaultEndpoint;
+  }
+
+  /**
+   * Href for view-as-read-only anchor links (target="_top").
+   * @param {AppConfig} appConfig
+   * @param {boolean} withReadOnlyPreview
+   * @return {string}
+   */
+  function buildWebAppViewAsHref(appConfig, withReadOnlyPreview) {
+    var entry = getWebAppEntryUrl(appConfig);
+    if (!entry) return '';
+    return withReadOnlyPreview ? entry + '?viewAs=READ_ONLY' : entry;
+  }
+
+  /**
+   * Partner names excluded from Partner Analysis widgets only (trimmed config values).
+   * @param {AppConfig} appConfig
+   * @return {string[]}
+   */
+  function getPartnerAnalysisExcludePartners(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    var list = cfg.report.portfolioHealth.partnerAnalysis.excludePartners || [];
+    if (!Array.isArray(list) || !list.length) return [];
+    var out = [];
+    list.forEach(function (name) {
+      var trimmed = String(name || '').trim();
+      if (trimmed) out.push(trimmed);
+    });
+    return out;
+  }
+
+  /**
+   * Case-insensitive exclude lookup for partner field values.
+   * @param {string} partnerName
+   * @param {Object<string, boolean>} excludeLowerSet
+   * @return {boolean}
+   * @private
+   */
+  function isPartnerExcludedForAnalysis_(partnerName, excludeLowerSet) {
+    if (!excludeLowerSet || !Object.keys(excludeLowerSet).length) return false;
+    var key = String(partnerName || '').trim().toLowerCase();
+    if (!key) return false;
+    return !!excludeLowerSet[key];
+  }
+
+  /**
+   * Builds lowercase-key set for partner-analysis exclusion matching.
+   * @param {AppConfig} appConfig
+   * @return {Object<string, boolean>}
+   * @private
+   */
+  function getPartnerAnalysisExcludeLowerSet_(appConfig) {
+    var list = getPartnerAnalysisExcludePartners(appConfig);
+    var set = {};
+    list.forEach(function (name) {
+      set[String(name).toLowerCase()] = true;
+    });
+    return set;
+  }
+
+  /**
+   * Filters deployment rows for Partner Analysis calculations only.
+   * @param {Array<Object>} rows
+   * @param {AppConfig} appConfig
+   * @return {Array<Object>}
+   */
+  function filterRowsForPartnerAnalysis_(rows, appConfig) {
+    var excludeSet = getPartnerAnalysisExcludeLowerSet_(appConfig);
+    if (!Object.keys(excludeSet).length) return rows || [];
+    return (rows || []).filter(function (row) {
+      return !isPartnerExcludedForAnalysis_(row && row.partner, excludeSet);
+    });
+  }
+
+  /**
+   * HTML note shown when Partner Analysis exclusions are configured.
+   * @param {AppConfig} appConfig
+   * @return {string}
+   */
+  function buildPartnerAnalysisExcludeNoteHtml_(appConfig) {
+    var list = getPartnerAnalysisExcludePartners(appConfig);
+    if (!list.length) return '';
+    var escaped = list.map(function (name) {
+      return CoreUtils.escapeHtml(name);
+    }).join(', ');
+    return '<p style="font-size:10px;color:#64748b;margin:6px 0 0 0;font-family:Arial,sans-serif;">' +
+      'Excludes: ' + escaped + '</p>';
+  }
+
   return {
     withDefaults: withDefaults,
     isExecutiveWatchEnabled: isExecutiveWatchEnabled,
     isNotableEnabled: isNotableEnabled,
     isProductModeApp: isProductModeApp,
     getPortfolioGroupingField: getPortfolioGroupingField,
-    getPortfolioGroupingLabel: getPortfolioGroupingLabel
+    getPortfolioGroupingLabel: getPortfolioGroupingLabel,
+    getMgmPglGoLiveEventClusterDays: getMgmPglGoLiveEventClusterDays,
+    normalizeMgmPglGoLiveEventClusterDays_: normalizeMgmPglGoLiveEventClusterDays_,
+    getWebAppEntryUrl: getWebAppEntryUrl,
+    buildWebAppViewAsHref: buildWebAppViewAsHref,
+    getPartnerAnalysisExcludePartners: getPartnerAnalysisExcludePartners,
+    filterRowsForPartnerAnalysis_: filterRowsForPartnerAnalysis_,
+    buildPartnerAnalysisExcludeNoteHtml_: buildPartnerAnalysisExcludeNoteHtml_
   };
 })();

@@ -447,6 +447,56 @@ var CoreUsers = (function () {
   }
 
   /**
+   * Resolves shell/UI access, optionally applying view-as-read-only for
+   * ADMIN/POWER_USER preview. Server mutations must use getCurrentUserAccess
+   * (actual role only).
+   *
+   * @param {AppConfig} config
+   * @param {string=} viewAsParam  URL query value (e.g. viewAs=READ_ONLY)
+   * @return {{
+   *   email:string,
+   *   role:('ADMIN'|'POWER_USER'|'READ_ONLY'),
+   *   actualRole:('ADMIN'|'POWER_USER'|'READ_ONLY'),
+   *   effectiveRole:('ADMIN'|'POWER_USER'|'READ_ONLY'),
+   *   isViewAsReadOnly:boolean,
+   *   viewAsRole:(string|null),
+   *   canViewApp:boolean
+   * }}
+   */
+  function resolveAccessForShell(config, viewAsParam) {
+    var base = getCurrentUserAccess(config);
+    var cfg = CoreConfig.withDefaults(config);
+    var actualRole = base.role;
+    var effectiveRole = actualRole;
+    var viewAsRole = null;
+    var isViewAsReadOnly = false;
+
+    var viewAsBlock = (cfg.ui && cfg.ui.viewAsReadOnly) || {};
+    var viewAsEnabled = viewAsBlock.enabled !== false;
+    var normalizedViewAs = String(viewAsParam || '').trim().toUpperCase();
+
+    if (
+      viewAsEnabled &&
+      (actualRole === 'ADMIN' || actualRole === 'POWER_USER') &&
+      normalizedViewAs === 'READ_ONLY'
+    ) {
+      effectiveRole = 'READ_ONLY';
+      viewAsRole = 'READ_ONLY';
+      isViewAsReadOnly = true;
+    }
+
+    return {
+      email: base.email,
+      canViewApp: base.canViewApp,
+      role: effectiveRole,
+      actualRole: actualRole,
+      effectiveRole: effectiveRole,
+      isViewAsReadOnly: isViewAsReadOnly,
+      viewAsRole: viewAsRole
+    };
+  }
+
+  /**
    * Convenience: returns true if the caller is ADMIN or POWER_USER.
    *
    * @param {AppConfig} config
@@ -511,6 +561,7 @@ var CoreUsers = (function () {
     findAccountDDMismatchRows:    findAccountDDMismatchRows,
     // Stage 1: Access Control
     getCurrentUserAccess:         getCurrentUserAccess,
+    resolveAccessForShell:        resolveAccessForShell,
     isPowerUser:                  isPowerUser,
     requirePowerUser_:            requirePowerUser_
   };

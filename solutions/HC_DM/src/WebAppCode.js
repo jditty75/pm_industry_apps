@@ -14,6 +14,7 @@
 
 function doGet(e) {
   var t = HtmlService.createTemplateFromFile('WebApp');
+  t.viewAs = (e && e.parameter && e.parameter.viewAs) ? String(e.parameter.viewAs) : '';
   return t.evaluate()
     .setTitle(APP_CONFIG.ui.appTitle)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -94,6 +95,20 @@ function getCsatTabDataForUI(viewModeOpts, windowMonths, productOpts) {
     viewModeOpts,
     (windowMonths === 6) ? 6 : 3,
     productOpts
+  );
+}
+
+/**
+ * Debug helper: MDS/PGL duplicate-row diagnostics for a search token.
+ * @param {string=} token  Account or deployment name substring.
+ * @param {number=} windowMonths  3 or 6
+ * @return {Object}
+ */
+function debugMdsPglRowsForUI(token, windowMonths) {
+  return CoreLib.CoreData.debugMdsPglRowsForUI(
+    APP_CONFIG,
+    token,
+    (windowMonths === 6) ? 6 : 3
   );
 }
 

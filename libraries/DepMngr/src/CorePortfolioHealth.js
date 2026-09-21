@@ -1264,8 +1264,12 @@ var CorePortfolioHealth = (function () {
       : 0;
     var executiveWatchPct = (ewEnabled && totalActive > 0) ? executiveWatch / totalActive : 0;
 
-    // Partner + industry concentration
-    var partnerDist = buildRankedDistribution_(healthRows, partnerNameForRow_, totalActive, topN);
+    // Partner + industry concentration (Partner Analysis may exclude configured partners)
+    var partnerRowsForAnalysis = CoreConfig.filterRowsForPartnerAnalysis_(healthRows, cfg);
+    var partnerDenominator = partnerRowsForAnalysis.length;
+    var partnerDist = buildRankedDistribution_(
+      partnerRowsForAnalysis, partnerNameForRow_, partnerDenominator, topN
+    );
     var industryDist = buildRankedDistribution_(healthRows, function (r) {
       return industryNameForRow_(r, cfg);
     }, totalActive, topN);
@@ -1326,6 +1330,10 @@ var CorePortfolioHealth = (function () {
         executiveWatchPct: executiveWatchPct,
         openHealthPlans: dhpMetrics.activeRowsWithHealthPlans,
         upcomingGoLives30: goLiveReadiness.upcoming30
+      },
+
+      partnerAnalysis: {
+        excludePartners: CoreConfig.getPartnerAnalysisExcludePartners(cfg)
       },
 
       portfolioConcentration: {

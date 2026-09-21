@@ -106,6 +106,11 @@ var APP_CONFIG = {
 
     sections: { approach: true },
 
+    topMessage: {
+      text:
+        'This report covers HENP Platform deployments only. Student deployments are tracked and reported separately.'
+    },
+
     // N9 — monthly report distribution (Jeff fills these per app):
     // enabled:        true when ready to send from this app
     // to:             ['<app-google-group>@workday.com']   // the app's leadership distribution group
@@ -124,6 +129,7 @@ var APP_CONFIG = {
       logSheet: 'ReportDistributionLog'
     }
   },
+
   salesforce: {
     upcomingWindowDays: 90,
     recentWindowDays: 60,
@@ -136,6 +142,12 @@ var APP_CONFIG = {
     appTitle: 'HENP Deployment Health Manager',
     headerTitle: 'HENP Deployment Health Manager',
     headerSubtitle: 'Review and manage deployment data across all stages',
+
+    webApp: {
+      baseUrl: 'https://script.google.com/a/macros/workday.com/s/AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ',
+      defaultEndpoint: 'exec'
+    },
+
     tabs: [
       { id: 'deployments', label: 'Deployments' },
       { id: 'golives', label: 'Go Lives' },
@@ -228,10 +240,6 @@ var APP_CONFIG = {
       copy: 'Student deployments are not included on this view. See the {Student} tab for all Student deployments and metrics.',
       showOnTabs: ['overview', 'deployments', 'golives', 'reporting', 'portfolio', 'notable'],
       linkToken: '{Student}'
-    },
-    reportDisclosure: {
-      enabled: true,
-      copy: 'This report covers HENP Platform deployments only. Student deployments are tracked and reported separately.'
     }
   },
 

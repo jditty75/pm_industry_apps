@@ -14,6 +14,7 @@
 
 function doGet(e) {
   var t = HtmlService.createTemplateFromFile('WebApp');
+  t.viewAs = (e && e.parameter && e.parameter.viewAs) ? String(e.parameter.viewAs) : '';
   return t.evaluate()
     .setTitle(APP_CONFIG.ui.appTitle)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);

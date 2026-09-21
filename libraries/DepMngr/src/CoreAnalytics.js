@@ -498,6 +498,7 @@ var CoreAnalytics = (function () {
     if (opts && opts.applyReportExclusions === true) {
       rows = CoreData.filterRowsExcludedFromReport_(rows);
     }
+    rows = CoreConfig.filterRowsForPartnerAnalysis_(rows, cfg);
     var totalDeployments = rows.length;
 
     var partnerCounts = {};
@@ -530,6 +531,7 @@ var CoreAnalytics = (function () {
     return {
       rows:             resultRows,
       totalDeployments: totalDeployments,
+      partnerAnalysisExcludePartners: CoreConfig.getPartnerAnalysisExcludePartners(cfg),
       dataIntegrity: {
         unassignedCount: unassignedCount,
         showDisclaimer:  unassignedCount > 0

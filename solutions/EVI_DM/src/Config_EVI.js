@@ -151,6 +151,11 @@ var APP_CONFIG = {
     portfolioHealth: {
       title: 'Portfolio Health',
       workdayPartner: 'Workday Professional Services',
+      partnerAnalysis: {
+        excludePartners: [
+          'Workday Professional Services'
+        ]
+      },
       workdayLabel: 'Workday',
       otherLabel: 'Partners/Other',
       recentGoLivesWindowDays: 60,
@@ -200,6 +205,11 @@ var APP_CONFIG = {
     appTitle:       'Evisort Deployment Health Manager',
     headerTitle:    'Evisort Deployment Health Manager',
     headerSubtitle: 'Review and manage Evisort deployment data',
+
+    webApp: {
+      baseUrl: 'https://script.google.com/a/macros/workday.com/s/AKfycbw1I6aXuRrWblrCnyMOMvpTULaDs_Ib_gPVwxiP4slmddTGXflY5BWqgMoZhaC3ltUfeA',
+      defaultEndpoint: 'exec'
+    },
 
     tabs: [
       { id: 'deployments', label: 'Deployments' },

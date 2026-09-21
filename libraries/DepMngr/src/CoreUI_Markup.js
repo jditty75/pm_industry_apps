@@ -49,6 +49,7 @@ function _CoreUI_Markup_getHeadScripts() {
 // ---------------------------------------------------------------------------
 
 function _CoreUI_Markup_getAppShell(cfg, userAccess) {
+  cfg = cfg || {};
   var ui = cfg.ui || {};
   var access = userAccess || { role: 'READ_ONLY', canViewApp: true, email: '' };
   var role = access.role || 'READ_ONLY';
@@ -110,8 +111,12 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 
   var parts = [];
 
-  parts.push(_CoreUI_Markup_buildHeader_(filteredUi));
+  parts.push(_CoreUI_Markup_buildHeader_(filteredUi, access, cfg));
   parts.push('<div class="container">');
+
+  if (access.isViewAsReadOnly) {
+    parts.push(_CoreUI_Markup_buildViewAsReadOnlyBanner_(access, cfg));
+  }
 
   // Welcome banner placeholder — JS populates and shows/hides based on user role.
   parts.push(_CoreUI_Markup_buildWelcomeBannerPlaceholder_());
@@ -177,7 +182,10 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
 // HEADER (Phase 1 + Phase 2 right-region for toggle/dropdown)
 // ---------------------------------------------------------------------------
 
-function _CoreUI_Markup_buildHeader_(ui) {
+function _CoreUI_Markup_buildHeader_(ui, userAccess, cfg) {
+  var viewAsLinkHtml = _CoreUI_Markup_buildViewAsReadOnlyLinkHtml_(cfg, userAccess);
+  var headerRightHidden = viewAsLinkHtml ? '' : ' hidden';
+  var viewAsControlClass = 'header-view-as-control' + (viewAsLinkHtml ? '' : ' hidden');
   var lines = [
     '<div class="header">',
     '  <div class="header-strip">',
@@ -192,13 +200,72 @@ function _CoreUI_Markup_buildHeader_(ui) {
     lines.push('  <span id="data-freshness-badge" class="freshness-badge"></span>');
   }
   lines.push(
-    '  <div class="header-right hidden" id="header-right">',
+    '  <div class="header-right' + headerRightHidden + '" id="header-right">',
+    '    <div id="header-view-as-control" class="' + viewAsControlClass + '">' + viewAsLinkHtml + '</div>',
     '    <div id="header-mode-control"></div>',
     '    <div class="header-product hidden" id="header-product-control"></div>',
     '  </div>',
     '</div>'
   );
   return lines.join('\n');
+}
+
+/**
+ * Native top-frame anchor for view-as navigation (no client-side URL logic).
+ * @param {AppConfig} cfg
+ * @param {boolean} withReadOnlyPreview  true → ?viewAs=READ_ONLY; false → base entry URL only
+ * @param {string} className
+ * @param {string} label
+ * @return {string} Empty when web app URL is not configured.
+ * @private
+ */
+function _CoreUI_Markup_buildViewAsTopLink_(cfg, withReadOnlyPreview, className, label) {
+  var href = CoreConfig.buildWebAppViewAsHref(cfg, withReadOnlyPreview);
+  if (!href) return '';
+  return '<a href="' + _CoreUI_Markup_attr_(href) + '" target="_top" class="' +
+    _CoreUI_Markup_attr_(className) + '">' + _CoreUI_Markup_esc_(label) + '</a>';
+}
+
+/**
+ * Server-rendered "View as Read Only" link for ADMIN/POWER_USER header.
+ * @param {AppConfig} cfg
+ * @param {Object} access
+ * @return {string}
+ * @private
+ */
+function _CoreUI_Markup_buildViewAsReadOnlyLinkHtml_(cfg, access) {
+  var viewAsBlock = (cfg && cfg.ui && cfg.ui.viewAsReadOnly) || {};
+  if (viewAsBlock.enabled === false) return '';
+  if (!access || access.isViewAsReadOnly) return '';
+  var actualRole = access.actualRole || access.role || 'READ_ONLY';
+  if (actualRole !== 'ADMIN' && actualRole !== 'POWER_USER') return '';
+  return _CoreUI_Markup_buildViewAsTopLink_(cfg, true, 'view-as-readonly-toggle', 'View as Read Only');
+}
+
+/**
+ * Prominent banner when an ADMIN/POWER_USER is previewing READ_ONLY UI.
+ * @param {Object} access
+ * @param {AppConfig} cfg
+ * @return {string}
+ * @private
+ */
+function _CoreUI_Markup_buildViewAsReadOnlyBanner_(access, cfg) {
+  var actual = access.actualRole || access.role || 'READ_ONLY';
+  var returnLabel = actual === 'ADMIN' ? 'Return to Admin View' : 'Return to Power User View';
+  var returnControl = _CoreUI_Markup_buildViewAsTopLink_(
+    cfg, false, 'view-as-readonly-return', returnLabel
+  );
+  if (!returnControl) {
+    returnControl = '<span class="view-as-readonly-return view-as-readonly-return--disabled">' +
+      _CoreUI_Markup_esc_(returnLabel) + '</span>';
+  }
+  return [
+    '<div id="view-as-readonly-banner" class="view-as-readonly-banner" role="status">',
+    '  <span class="view-as-readonly-pill">Viewing as READ_ONLY</span>',
+    '  <span class="view-as-readonly-text">You are previewing the read-only experience.</span>',
+    '  ' + returnControl,
+    '</div>'
+  ].join('\n');
 }
 
 function _CoreUI_Markup_workdayWMarkSvg_() {

@@ -854,6 +854,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     if (result.dataIntegrity.showDisclaimer) {
       html += _renderDisclaimerParagraph_(cfg.report.disclaimers.partnerBreakdown);
     }
+    html += CoreConfig.buildPartnerAnalysisExcludeNoteHtml_(cfg);
     return html;
   }
 
@@ -1473,6 +1474,56 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     }
   }
 
+  /** @const {string} Shared inline styles for monthly report top message. */
+  var MONTHLY_REPORT_TOP_MSG_STYLE_ =
+    'font-family:Arial,sans-serif; font-size:11px; color:#4a628f; ' +
+    'padding:4px 12px; font-style:italic;';
+
+  /**
+   * Config-driven monthly report top message (escaped text + optional https link).
+   * Returns empty string when cfg.report.topMessage.text is missing or blank.
+   *
+   * @param {AppConfig} config
+   * @return {string} HTML div fragment or ''
+   * @private
+   */
+  function buildMonthlyReportTopMessageInner_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var topMsg = cfg.report && cfg.report.topMessage;
+    if (!topMsg || typeof topMsg !== 'object') return '';
+
+    var msg = String(topMsg.text || '').trim();
+    if (!msg) return '';
+
+    var content = CoreUtils.escapeHtml(msg);
+
+    var linkUrl = String(topMsg.linkUrl || '').trim();
+    var linkText = String(topMsg.linkText || '').trim();
+    if (linkUrl && linkText && linkUrl.indexOf('https://') === 0) {
+      content +=
+        ' <a href="' + CoreUtils.escapeHtml(linkUrl) + '" target="_blank" ' +
+        'rel="noopener noreferrer" style="color:#0f4c81; text-decoration:underline;">' +
+        CoreUtils.escapeHtml(linkText) + '</a>';
+    }
+
+    return (
+      '<div style="' + MONTHLY_REPORT_TOP_MSG_STYLE_ + '">' + content + '</div>'
+    );
+  }
+
+  /**
+   * Outlook shell row wrapper for the monthly report top message.
+   *
+   * @param {AppConfig} config
+   * @return {string} HTML table row fragment or ''
+   * @private
+   */
+  function buildMonthlyReportTopMessageOutlookRow_(config) {
+    var inner = buildMonthlyReportTopMessageInner_(config);
+    if (!inner) return '';
+    return '<tr><td style="padding:4px 18px;">' + inner + '</td></tr>';
+  }
+
   /**
    * Inline (pure HTML) shell: used for preview + inline export.
    *
@@ -1570,12 +1621,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<body style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
       'max-width:1000px; margin:0 auto; padding:20px;">' +
       headerHtml +
-      (cfg.student && cfg.student.reportDisclosure && cfg.student.reportDisclosure.enabled === true
-        ? '<div style="font-family:Arial,sans-serif; font-size:11px; color:#4a628f; ' +
-          'padding:4px 12px; font-style:italic;">' +
-          CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') +
-          '</div>'
-        : '') +
+      buildMonthlyReportTopMessageInner_(cfg) +
       freshnessBanner +
       bodyContent +
       footerHtml +
@@ -1688,12 +1734,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<table width="640" cellpadding="0" cellspacing="0" border="0" ' +
       'style="background-color:#ffffff; border-collapse:collapse; max-width:100%;">' +
       '<tr><td>' + headerInner + '</td></tr>' +
-      (cfg.student && cfg.student.reportDisclosure && cfg.student.reportDisclosure.enabled === true
-        ? '<tr><td style="padding:4px 18px;"><div style="font-family:Arial,sans-serif; ' +
-          'font-size:11px; color:#4a628f; font-style:italic;">' +
-          CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') +
-          '</div></td></tr>'
-        : '') +
+      buildMonthlyReportTopMessageOutlookRow_(cfg) +
       (freshnessBanner
         ? '<tr><td style="padding:8px 18px 0 18px;">' + freshnessBanner + '</td></tr>'
         : '') +
@@ -2544,6 +2585,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
     if (result.dataIntegrity.showDisclaimer) {
       innerHtml += _renderDisclaimerParagraph_(cfg.report.disclaimers.partnerBreakdown);
     }
+    innerHtml += CoreConfig.buildPartnerAnalysisExcludeNoteHtml_(cfg);
     return innerHtml;
   }
 
@@ -2765,10 +2807,7 @@ function buildHtmlTableAsBars_(config, tableCfg, range) {
       '<body style="font-family:Arial,sans-serif; font-size:12px; color:#333333; ' +
       'max-width:680px; margin:0 auto; padding:20px;">' +
       headerHtml +
-      (cfg.student && cfg.student.reportDisclosure && cfg.student.reportDisclosure.enabled === true
-        ? '<div style="font-size:11px; color:#4a628f; padding:4px 12px; font-style:italic;">' +
-          CoreUtils.escapeHtml(cfg.student.reportDisclosure.copy || '') + '</div>'
-        : '') +
+      buildMonthlyReportTopMessageInner_(cfg) +
       freshnessBanner +
       bodyContent +
       footerHtml +

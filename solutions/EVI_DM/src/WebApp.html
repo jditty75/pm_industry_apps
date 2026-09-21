@@ -8,7 +8,8 @@
   <?!= CoreLib.CoreUI.getHeadScripts() ?>
 </head>
 <body>
-  <? var __userAccess = CoreLib.CoreUsers.getCurrentUserAccess(APP_CONFIG); ?>
+  <? var __viewAsParam = (typeof viewAs !== 'undefined' && viewAs) ? viewAs : ''; ?>
+  <? var __userAccess = CoreLib.CoreUsers.resolveAccessForShell(APP_CONFIG, __viewAsParam); ?>
   <? if (!__userAccess.canViewApp) { ?>
     <?!= CoreLib.CoreUI.getAccessDeniedShell() ?>
   <? } else { ?>

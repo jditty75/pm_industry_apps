@@ -1,7 +1,7 @@
 // DHM WebAppCode.js - CoreLib CSAT Overhaul v1.0.3 Status Pill & Date Fix
 // v1.0.3 csat-cache-bust
 /**
- * SLG Deployment Health Web App — Server-side wiring layer.
+ * HS_DM (HiredScore) Deployment Health Web App — Server-side wiring layer.
  *
  * Includes:
  *   - doGet (templated HTML so scriptlets resolve)
@@ -1353,15 +1353,11 @@ function listSendAsAliases() {
   return out;
 }
 /**
- * DEBUG: Portfolio Momentum source data for AI / EVI product-mode apps.
+ * DEBUG: Portfolio Momentum source data for ProductMode apps (e.g. HS_DM, EVI_DM).
  *
  * Run from the app project, not CoreLib.
  *
- * For AI_DM:
- *   debugPortfolioMomentumSourceData_();
- *
- * For EVI_DM:
- *   debugPortfolioMomentumSourceData_();
+ *   debugPortfolioMomentumSourceData();
  *
  * This does not modify data.
  */
@@ -1770,7 +1766,7 @@ function debugPortfolioMomentumSourceData() {
 /**
  * DEBUG: Portfolio Momentum fastest-growing-industry inputs.
  *
- * Run from AI_DM or EVI_DM Apps Script project.
+ * Run from HS_DM or EVI_DM Apps Script project.
  * Does not modify data.
  */
 function debugPortfolioMomentumIndustryGrowth() {

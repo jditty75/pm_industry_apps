@@ -1,13 +1,13 @@
 /**
- * AI Deployment Health – Top-level code wired to CoreLib.
+ * HiredScore Deployment Health – Top-level code wired to CoreLib.
  *
  * Responsibilities:
  * - UI menu and "Open Web App" entry.
- * - AI_DM-specific TABLES + BAR_CONFIG configuration.
+ * - HS_DM-specific TABLES + BAR_CONFIG configuration.
  * - Thin wrappers to CoreLib for analytics, report preview, and export.
  *
  * NOTE:
- * - Requires APP_CONFIG from Config_AI.js
+ * - Requires APP_CONFIG from Config_HS.js
  * - Requires CoreLib library added to project.
  */
 
@@ -15,7 +15,7 @@
 // 1. CONFIG-LIKE CONSTANTS (TABLES, BAR_CONFIG, WEB_APP_URL)
 // ============================================================================
 
-// TODO: Set to deployed AI_DM Web App URL after Jeff deploys the web app.
+// TODO: Set to deployed HS_DM Web App URL after Jeff deploys the web app.
 var WEB_APP_URL = '';
 
 /**
@@ -107,7 +107,7 @@ var BAR_CONFIG = {
 
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
-  var menu = ui.createMenu('📊 AI Deployment Health Tools')
+  var menu = ui.createMenu('📊 HiredScore Deployment Health Tools')
     .addItem('🌐 Open Web App', 'openWebApp')
     .addSeparator()
     .addItem('▶ Preview HTML report', 'previewHtml')
@@ -204,7 +204,7 @@ function openWebApp() {
 
   var html =
     '<html><body style="font-family:Arial,sans-serif; font-size:12px; padding:16px;">' +
-    '<p>The AI Deployment Health Web App will open in a new tab.</p>' +
+    '<p>The HiredScore Deployment Health Web App will open in a new tab.</p>' +
     '<p><a href="' + url + '" target="_blank">Open Web App</a></p>' +
     '<script>' +
     'try { window.open("' + url + '", "_blank"); } catch (e) {}' +

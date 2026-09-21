@@ -42,6 +42,7 @@
 /**
  * @typedef {Object} StudentConfig  S1
  * @property {boolean}  enabled           true activates all Student behavior; absent = off
+ * @property {string}   [mode]            S2: 'separate'|'integrated'; absent = 'separate' when enabled
  * @property {string}   productAreaMatch  Exact Product_Area__c value (e.g. 'Student')
  * @property {{ studentData: string }}   sheets
  * @property {{ id: string, label: string, insertAfter: string }} tab
@@ -650,6 +651,27 @@ var CoreConfig = (function () {
       cfg.notify.allowedFromAliases = [
         'jeffrey.ditty@workday.com'
       ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Student (S1/S2) — default mode when enabled; absent cfg.student = off
+    // -------------------------------------------------------------------------
+    if (cfg.student && cfg.student.enabled === true && !cfg.student.mode) {
+      cfg.student.mode = 'separate';
+    }
+    if (cfg.student && cfg.student.enabled === true) {
+      cfg.ui = cfg.ui || {};
+      cfg.ui.student = Object.assign(
+        {
+          enabled: true,
+          mode: cfg.student.mode || 'separate'
+        },
+        cfg.ui.student || {},
+        {
+          enabled: cfg.student.enabled,
+          mode: cfg.student.mode || 'separate'
+        }
+      );
     }
 
     // -------------------------------------------------------------------------

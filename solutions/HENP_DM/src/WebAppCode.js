@@ -846,6 +846,21 @@ function debugTraceDeploymentInUiPipelineForUI(deploymentId) {
 }
 
 /**
+ * Compares Overview KPI totals with Deployments tab KPI counts (Student integrated parity).
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function debugOverviewVsDeploymentsCountsForUI(viewModeOpts, productOpts) {
+  if (!CoreLib || !CoreLib.CoreData ||
+      typeof CoreLib.CoreData.debugOverviewVsDeploymentsCountsForUI !== 'function') {
+    throw new Error(
+      'CoreData.debugOverviewVsDeploymentsCountsForUI is not available. Push DepMngr HEAD and reload.');
+  }
+  return CoreLib.CoreData.debugOverviewVsDeploymentsCountsForUI(APP_CONFIG, viewModeOpts, productOpts);
+}
+
+/**
  * Bundled Trends v1 dashboard payload (single server execution).
  * @param {Object=} viewModeOpts
  * @param {Object=} productOpts

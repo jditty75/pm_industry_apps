@@ -106,10 +106,7 @@ var APP_CONFIG = {
 
     sections: { approach: true },
 
-    topMessage: {
-      text:
-        'This report covers HENP Platform deployments only. Student deployments are tracked and reported separately.'
-    },
+    topMessage: {},
 
     // N9 — monthly report distribution (Jeff fills these per app):
     // enabled:        true when ready to send from this app
@@ -215,6 +212,7 @@ var APP_CONFIG = {
 
   student: {
     enabled: true,
+    mode: 'integrated',
     productAreaMatch: 'Student',
     sheets: {
       studentData: 'StudentDeploymentData'
@@ -236,7 +234,7 @@ var APP_CONFIG = {
       notesMaxChars: 2000
     },
     banner: {
-      enabled: true,
+      enabled: false,
       copy: 'Student deployments are not included on this view. See the {Student} tab for all Student deployments and metrics.',
       showOnTabs: ['overview', 'deployments', 'golives', 'reporting', 'portfolio', 'notable'],
       linkToken: '{Student}'

@@ -48,9 +48,26 @@ function _CoreUI_Markup_getHeadScripts() {
 // APP SHELL ORCHESTRATOR
 // ---------------------------------------------------------------------------
 
+/**
+ * True when Student deployments are integrated into general HENP surfaces (S2).
+ * @param {AppConfig} cfg
+ * @return {boolean}
+ */
+function _CoreUI_Markup_isStudentIntegrated_(cfg) {
+  if (!cfg) return false;
+  var c = CoreConfig.withDefaults(cfg);
+  return !!(
+    c.student &&
+    c.student.enabled === true &&
+    String(c.student.mode || 'separate') === 'integrated'
+  );
+}
+
 function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   cfg = cfg || {};
+  cfg = CoreConfig.withDefaults(cfg);
   var ui = cfg.ui || {};
+  var studentIntegrated = _CoreUI_Markup_isStudentIntegrated_(cfg);
   var access = userAccess || { role: 'READ_ONLY', canViewApp: true, email: '' };
   var role = access.role || 'READ_ONLY';
   var isReadOnly = (role === 'READ_ONLY');
@@ -80,7 +97,8 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     _isReadOnly: isReadOnly,
     overviewTab: cfg.overviewTab || {},
     freshness: cfg.freshness || {},
-    executiveWatch: cfg.executiveWatch || { enabled: true }
+    executiveWatch: cfg.executiveWatch || { enabled: true },
+    studentIntegrated: studentIntegrated
   });
 
   // S1: splice the Student tab into filteredUi.tabs dynamically based on
@@ -112,7 +130,10 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   var parts = [];
 
   parts.push(_CoreUI_Markup_buildHeader_(filteredUi, access, cfg));
-  parts.push('<div class="container">');
+  parts.push(
+    '<div class="container" id="coreui-app-shell" data-student-integrated="' +
+      (studentIntegrated ? 'true' : 'false') + '">'
+  );
 
   if (access.isViewAsReadOnly) {
     parts.push(_CoreUI_Markup_buildViewAsReadOnlyBanner_(access, cfg));
@@ -131,8 +152,8 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   var tabIds = filteredUi.tabs.map(function (t) { return t.id; });
 
   if (filteredUi.overviewTab && filteredUi.overviewTab.enabled !== false) parts.push(_CoreUI_Markup_buildOverviewTab_());
-  if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(filteredUi));
-  if (tabIds.indexOf('golives') !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(filteredUi));
+  if (tabIds.indexOf('deployments') !== -1) parts.push(_CoreUI_Markup_buildDeploymentsTab_(filteredUi, cfg));
+  if (tabIds.indexOf('golives') !== -1) parts.push(_CoreUI_Markup_buildGoLivesTab_(filteredUi, cfg));
   if ((tabIds.indexOf('csat') !== -1 || tabIds.indexOf('mgmPgl') !== -1) &&
       ui.csatTab && ui.csatTab.enabled !== false) {
     parts.push(_CoreUI_Markup_buildCsatTab_(filteredUi));
@@ -330,7 +351,8 @@ function _CoreUI_Markup_buildTabBar_(ui) {
 // TAB: DEPLOYMENTS (Phase 2 — full portfolio with filter chips + expandable rows)
 // ---------------------------------------------------------------------------
 
-function _CoreUI_Markup_buildDeploymentsTab_(ui) {
+function _CoreUI_Markup_buildDeploymentsTab_(ui, cfg) {
+  var studentIntegrated = _CoreUI_Markup_isStudentIntegrated_(cfg) || !!ui.studentIntegrated;
   var dt = ui.deploymentsTable || {};
   var isPM = !!ui.isProductModeApp;
   var showIndustry = !!dt.showIndustry && !isPM;
@@ -390,6 +412,14 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
     '      <span class="filter-label">' + _CoreUI_Markup_esc_(ownerFilterLabel) + ':</span>',
     '      <select id="owner-filter" class="filter-select" aria-label="' +
       _CoreUI_Markup_attr_(ownerFilterLabel + ' filter') + '" onchange="onDeploymentFilterChange()"></select>',
+    studentIntegrated
+      ? '      <span class="filter-label">Student:</span>' +
+        '      <select id="deployments-student-filter" class="filter-select" aria-label="Student deployment filter" onchange="onDeploymentFilterChange()">' +
+        '        <option value="All" selected>All</option>' +
+        '        <option value="Student">Student</option>' +
+        '        <option value="Non-Student">Non-Student</option>' +
+        '      </select>'
+      : '',
     '      <div class="deployments-filter-popover-wrap" id="deployments-filter-popover-wrap">',
     '        <button class="filter-drawer-toggle" id="filter-drawer-toggle" type="button" onclick="toggleFilterDrawer()" aria-expanded="false" aria-controls="filter-drawer" aria-haspopup="dialog">',
     '          <span id="filter-drawer-toggle-icon">⊕</span>',
@@ -468,7 +498,8 @@ function _CoreUI_Markup_buildDeploymentsTab_(ui) {
  * @param {Object} ui  cfg.ui
  * @return {string}
  */
-function _CoreUI_Markup_buildGoLivesTabLegacy_(ui) {
+function _CoreUI_Markup_buildGoLivesTabLegacy_(ui, cfg) {
+  var studentIntegrated = _CoreUI_Markup_isStudentIntegrated_(cfg) || !!ui.studentIntegrated;
   var gt = ui.goLivesTable || {};
   var glt = ui.goLivesTab || {};
   var showIndustry = !!gt.showIndustry;
@@ -494,6 +525,17 @@ function _CoreUI_Markup_buildGoLivesTabLegacy_(ui) {
     headers.push('<th>Actions</th>');
   }
 
+  var studentFilterSeg = '';
+  if (studentIntegrated) {
+    studentFilterSeg = [
+      '  <div class="seg-control golives-student-filter-seg" style="margin-bottom: var(--space-3);">',
+      '    <button class="seg-control-btn active" type="button" data-golives-student-filter="All" onclick="setGoLivesStudentFilter(\'All\')">All</button>',
+      '    <button class="seg-control-btn" type="button" data-golives-student-filter="Student" onclick="setGoLivesStudentFilter(\'Student\')">Student</button>',
+      '    <button class="seg-control-btn" type="button" data-golives-student-filter="Non-Student" onclick="setGoLivesStudentFilter(\'Non-Student\')">Non-Student</button>',
+      '  </div>'
+    ].join('\n');
+  }
+
   return [
     '<div id="golives-tab" class="tab-content">',
     '  <div class="info-banner">',
@@ -504,6 +546,7 @@ function _CoreUI_Markup_buildGoLivesTabLegacy_(ui) {
     '    ' + segBtn('upcoming', 'Upcoming (' + upcomingDays + ' days)', defaultView === 'upcoming'),
     '    ' + segBtn('all', 'All', defaultView === 'all'),
     '  </div>',
+    studentFilterSeg,
     '  <div class="control-bar">',
     '    <div class="control-row">',
     '      <div class="search-box">',
@@ -721,12 +764,12 @@ function _CoreUI_Markup_buildGoLivesTabExplorer_(ui) {
  * @param {Object} ui  cfg.ui
  * @return {string}
  */
-function _CoreUI_Markup_buildGoLivesTab_(ui) {
+function _CoreUI_Markup_buildGoLivesTab_(ui, cfg) {
   var glt = ui.goLivesTab || {};
   var mode = String(glt.mode || 'legacy').toLowerCase();
   if (mode === 'classic') mode = 'legacy';
   if (mode === 'explorer') return _CoreUI_Markup_buildGoLivesTabExplorer_(ui);
-  return _CoreUI_Markup_buildGoLivesTabLegacy_(ui);
+  return _CoreUI_Markup_buildGoLivesTabLegacy_(ui, cfg);
 }
 
 // ---------------------------------------------------------------------------

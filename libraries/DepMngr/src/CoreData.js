@@ -567,6 +567,8 @@ var CoreData = (function () {
 
     add(_perfKey_(cfg, 'overviewData:v11:lifecycleDeploymentStage:overrideAware'));
     add(_perfKey_(cfg, 'overviewData:v13:lifecycleDeploymentStage:overrideAware'));
+    add(_perfKey_(cfg, 'overviewData:v14:deploymentsKpiParity:lifecycleDeploymentStage:overrideAware'));
+    add(_perfKey_(cfg, 'overviewData:v15:fullActiveKpiCounts:lifecycleDeploymentStage:overrideAware'));
     add('overviewData:' + appId);
 
     add(_perfKey_(cfg, 'mdsPglBatchView') + ':3');
@@ -12118,6 +12120,39 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Deployments tab KPI row source (same payload as getAllDeploymentsForUI, before client filters).
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   * @private
+   */
+  function _resolveDeploymentsTabKpiRows_(cfg, viewModeOpts, productOpts) {
+    var payload = getAllDeploymentsForUI(cfg, viewModeOpts, productOpts);
+    if (Array.isArray(payload)) return payload;
+    if (payload && payload.useCountGrainForKpis && payload.countRows && payload.countRows.length) {
+      return payload.countRows;
+    }
+    return (payload && payload.rows) ? payload.rows : [];
+  }
+
+  /**
+   * Mirrors Deployments tab default health chips (client deploymentRowMatchesFilters_).
+   * @param {Array<Object>} rows
+   * @param {AppConfig} cfg
+   * @return {Array<Object>}
+   * @private
+   */
+  function _applyDeploymentsTableDefaultHealthFilter_(rows, cfg) {
+    if (!Array.isArray(rows)) return [];
+    var healthList = cfg.ui && cfg.ui.deploymentsTable && cfg.ui.deploymentsTable.defaultHealthFilter;
+    if (!Array.isArray(healthList) || healthList.length === 0) return rows;
+    return rows.filter(function (r) {
+      return healthList.indexOf(r.health) >= 0;
+    });
+  }
+
+  /**
    * Computes the overview snapshot payload from live SFDC rows.
    * @param {AppConfig} cfg
    * @return {Object}
@@ -12127,9 +12162,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var tz = Session.getScriptTimeZone();
     var todayKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
 
-    // Override-aware active rows: ProductMode canonical grain or IndustryMode effective view.
-    var activeRows = getActiveCountDeployments(cfg, productOpts) || [];
-    activeRows = filterDeploymentsByStudent_(activeRows, 'exclude', cfg);
+    // KPI totals: full active portfolio (override-aware, Student-integrated via getAllDeployments pipeline).
+    // Do not apply Deployments tab defaultHealthFilter — Overview "Total Active" is all Red+Yellow+Green.
+    var activeRows = _resolveDeploymentsTabKpiRows_(cfg, viewModeOpts, productOpts);
     var overrideFootnote = buildOverrideFootnote_(activeRows);
 
     // TOTALS
@@ -12277,9 +12312,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa       = (productOpts && productOpts.product) || 'all';
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
-    var overviewCacheBase = usesProductModeParentAndPfUnion_(cfg)
-      ? 'overviewData:v13:lifecycleDeploymentStage:overrideAware'
-      : 'overviewData:v11:lifecycleDeploymentStage:overrideAware';
+    var overviewCacheBase = 'overviewData:v15:fullActiveKpiCounts:lifecycleDeploymentStage:overrideAware';
     var cacheKey = _perfKey_(cfg, overviewCacheBase);
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
@@ -12409,9 +12442,78 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Compares Overview KPI totals (full active) vs Deployments tab default-filtered KPIs.
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function debugOverviewVsDeploymentsCountsForUI(config, viewModeOpts, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var vm = viewModeOpts || { viewMode: 'all', ddDisplayName: '' };
+    var po = productOpts || { product: 'all' };
+
+    var fullActiveRows = _resolveDeploymentsTabKpiRows_(cfg, vm, po);
+    var defaultFilteredRows = _applyDeploymentsTableDefaultHealthFilter_(fullActiveRows, cfg);
+    var snap = _computeOverviewSnapshot_(cfg, vm, po);
+    var ot = (snap && snap.totals) ? snap.totals : {};
+
+    function healthCounts(rows) {
+      var out = { total: rows.length, red: 0, yellow: 0, green: 0 };
+      (rows || []).forEach(function (r) {
+        var h = r && r.health;
+        if (h === 'Red') out.red++;
+        else if (h === 'Yellow') out.yellow++;
+        else if (h === 'Green') out.green++;
+      });
+      return out;
+    }
+
+    function countStudent(rows) {
+      var n = 0;
+      (rows || []).forEach(function (r) {
+        if (r && r.isStudentDeployment) n++;
+      });
+      return n;
+    }
+
+    var overviewAllActiveCounts = {
+      total: ot.totalActive || 0,
+      red: ot.red || 0,
+      yellow: ot.yellow || 0,
+      green: ot.green || 0
+    };
+    var deploymentsDefaultFilteredCounts = healthCounts(defaultFilteredRows);
+    var fullCounts = healthCounts(fullActiveRows);
+
+    var report = {
+      appId: cfg.appId || '',
+      studentMode: (cfg.student && cfg.student.mode) || null,
+      note: 'Overview KPIs intentionally count all active deployments (Red+Yellow+Green). ' +
+        'Deployments tab KPI cards apply cfg.ui.deploymentsTable.defaultHealthFilter client-side.',
+      overviewAllActiveCounts: overviewAllActiveCounts,
+      deploymentsDefaultFilteredCounts: deploymentsDefaultFilteredCounts,
+      fullActiveRowCount: fullActiveRows.length,
+      defaultFilteredRowCount: defaultFilteredRows.length,
+      studentRowsInOverview: countStudent(fullActiveRows),
+      studentRowsInDeployments: countStudent(defaultFilteredRows),
+      overviewTotalsMatchFullActivePipeline: overviewAllActiveCounts.total === fullCounts.total &&
+        overviewAllActiveCounts.red === fullCounts.red &&
+        overviewAllActiveCounts.yellow === fullCounts.yellow &&
+        overviewAllActiveCounts.green === fullCounts.green,
+      overviewTotalEqualsRedYellowGreen: overviewAllActiveCounts.total ===
+        (overviewAllActiveCounts.red + overviewAllActiveCounts.yellow + overviewAllActiveCounts.green)
+    };
+
+    Logger.log('debugOverviewVsDeploymentsCountsForUI: ' + JSON.stringify(report));
+    return report;
+  }
+
+  /**
    * Diagnostic: logs the overview snapshot payload shape.
    * @param {AppConfig} config
    */
+
   function _debugOverviewSnapshot_(config) {
     var cfg     = CoreConfig.withDefaults(config);
     var payload = getOverviewSnapshot(cfg);
@@ -12518,9 +12620,17 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     if (!Array.isArray(rows) || rows.length === 0) return rows;
     var studentIds = CoreSalesforce.getStudentDeploymentIds_(cfg) || {};
     if (mode === 'only') {
-      return rows.filter(function (r) { return !!studentIds[r.deploymentId]; });
+      return rows.filter(function (r) { return !!studentIds[r.deploymentId]; })
+        .map(function (r) {
+          return Object.assign({}, r, { isStudentDeployment: true });
+        });
     }
-    return rows.filter(function (r) { return !studentIds[r.deploymentId]; });
+    var studentMode = cfg.student.mode || 'separate';
+    var tagged = rows.map(function (r) {
+      return Object.assign({}, r, { isStudentDeployment: !!studentIds[r.deploymentId] });
+    });
+    if (studentMode === 'integrated') return tagged;
+    return tagged.filter(function (r) { return !r.isStudentDeployment; });
   }
 
   /**
@@ -14498,6 +14608,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     // Overview Snapshot (C11b)
     getOverviewSnapshot:         getOverviewSnapshot,
+    debugOverviewVsDeploymentsCountsForUI: debugOverviewVsDeploymentsCountsForUI,
     _debugOverviewSnapshot:      _debugOverviewSnapshot_,
 
     // Performance Layer 2 additions

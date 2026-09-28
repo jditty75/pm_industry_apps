@@ -194,6 +194,8 @@
  * @property {string|number}                timeRange           e.g. "LAST_N_YEARS:5" or numeric years.
  * @property {string}                       growthMetricSeries  Series code for KPI 3 in platform mode.
  * @property {number}                       historicalYears     FYs of history (fallback when timeRange unset).
+ * @property {string}                       periodView          historicalFyAndCurrentRunningTotal (platform) | previousFyAndCurrentHalves (product).
+ * @property {string}                       dateStrategy        actualOnly | actualThenTarget | targetOnly (product mode).
  * @property {MomentumChartConfig}          chart               Chart appearance config.
  */
 
@@ -983,7 +985,9 @@ var CoreConfig = (function () {
     if (!cfg.momentum.productFilter || typeof cfg.momentum.productFilter !== 'object') {
       cfg.momentum.productFilter = {};
     }
-    if (!Array.isArray(cfg.momentum.chartLegend)) cfg.momentum.chartLegend = [];
+    if (cfg.momentum.chartLegend != null && !Array.isArray(cfg.momentum.chartLegend)) {
+      cfg.momentum.chartLegend = [];
+    }
     if (!cfg.momentum.kpiLabels || typeof cfg.momentum.kpiLabels !== 'object') {
       cfg.momentum.kpiLabels = null;
     }

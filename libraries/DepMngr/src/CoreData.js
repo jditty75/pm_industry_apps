@@ -80,6 +80,39 @@ var CoreData = (function () {
    * @param {AppConfig=} cfg Currently unused; kept for symmetry with Layer 2
    *                        (sheet-tab cache) which will use cfg.appId.
    */
+  /**
+   * Removes tier-2 CacheService entries for an app (overview snapshot, SFDC rows, etc.).
+   * Mutations call this so pre-warmed overview payloads cannot outlive override clears.
+   * @param {AppConfig} cfg
+   * @private
+   */
+  function _invalidatePerfCacheTier2ForApp_(cfg) {
+    if (!cfg) return;
+    var appId = (cfg.appId) ? cfg.appId : 'default';
+    var maxChunks = 200;
+    var baseMap = {};
+    _collectDeterministicPerfCacheBases_(cfg).forEach(function (k) { baseMap[k] = true; });
+    _perfCacheRegistryRead_(appId).forEach(function (k) { baseMap[k] = true; });
+    var baseKeys = Object.keys(baseMap);
+    if (baseKeys.length === 0) return;
+
+    var scriptCache = null;
+    var documentCache = null;
+    try { scriptCache = CacheService.getScriptCache(); } catch (eSc) {
+      Logger.log('CoreData._invalidatePerfCacheTier2ForApp_: ScriptCache unavailable: ' + eSc);
+    }
+    try { documentCache = CacheService.getDocumentCache(); } catch (eDc) {
+      Logger.log('CoreData._invalidatePerfCacheTier2ForApp_: DocumentCache unavailable: ' + eDc);
+    }
+    if (scriptCache) {
+      _perfCacheRemoveBaseKeysFromCache_(scriptCache, baseKeys, maxChunks);
+    }
+    if (documentCache) {
+      _perfCacheRemoveBaseKeysFromCache_(documentCache, baseKeys, maxChunks);
+    }
+    _perfCacheRegistryClear_(appId);
+  }
+
   function _clearCache(cfg) {
     // Tier 1: in-memory.
     _cache.sfdcRows = null;
@@ -99,8 +132,13 @@ var CoreData = (function () {
     _cache.wellnessMap = null;
     _cache.reportBuildCtx = null;
     _cache.goLivesExplorerUniverseByKey = {};
-    // Tier 2: sheet-tab cache. Layer 2. Clears all rows including mdsPglBatchView:* and overviewData:* keys.
+    // Tier 2: keys written in this execution plus registered/deterministic app keys.
     _perfCacheClearAll_();
+    try {
+      _invalidatePerfCacheTier2ForApp_(cfg);
+    } catch (err) {
+      Logger.log('CoreData._clearCache: tier-2 invalidation failed: ' + err);
+    }
     // Cross-module cache clears.
     try { CoreSalesforce._clearEnrichmentSheetCache(); } catch (e) {}
     try { CoreSalesforce._clearDdContactsCache(); } catch (e) {}
@@ -569,6 +607,7 @@ var CoreData = (function () {
     add(_perfKey_(cfg, 'overviewData:v13:lifecycleDeploymentStage:overrideAware'));
     add(_perfKey_(cfg, 'overviewData:v14:deploymentsKpiParity:lifecycleDeploymentStage:overrideAware'));
     add(_perfKey_(cfg, 'overviewData:v15:fullActiveKpiCounts:lifecycleDeploymentStage:overrideAware'));
+    add(_perfKey_(cfg, 'overviewData:v16:overrideImpactContextParity:lifecycleDeploymentStage:overrideAware'));
     add('overviewData:' + appId);
 
     add(_perfKey_(cfg, 'mdsPglBatchView') + ':3');
@@ -2433,6 +2472,64 @@ var CoreData = (function () {
   }
 
   /**
+   * True when a deployment row has at least one effective operational override field
+   * (same rules as KPI impact summary / overrideMeta).
+   * @param {Object} row
+   * @return {boolean}
+   */
+  function rowHasEffectiveOperationalOverride_(row) {
+    if (!row) return false;
+    var meta = row.overrideMeta;
+    if (meta) {
+      return !!(
+        (meta.health && meta.health.isOverridden) ||
+        (meta.mtpDate && meta.mtpDate.isOverridden) ||
+        (meta.stage && meta.stage.isOverridden) ||
+        (meta.currentUpdate && meta.currentUpdate.isOverridden)
+      );
+    }
+    return !!row.hasOperationalOverride;
+  }
+
+  /**
+   * Canonical override impact summary for KPI footnotes and drill-down (server-side).
+   * @param {Array<Object>} rows
+   * @return {{ footnote: Object, summary: Object, affectedRows: Array<Object> }}
+   */
+  function buildOverrideImpactContext_(rows) {
+    var affected = (Array.isArray(rows) ? rows : []).filter(rowHasEffectiveOperationalOverride_);
+    var fieldCounts = { health: 0, mtpDate: 0, stage: 0, currentUpdate: 0 };
+    affected.forEach(function (r) {
+      var meta = r.overrideMeta || {};
+      if (meta.health && meta.health.isOverridden) fieldCounts.health++;
+      if (meta.mtpDate && meta.mtpDate.isOverridden) fieldCounts.mtpDate++;
+      if (meta.stage && meta.stage.isOverridden) fieldCounts.stage++;
+      if (meta.currentUpdate && meta.currentUpdate.isOverridden) fieldCounts.currentUpdate++;
+    });
+    var totalOverriddenFields = fieldCounts.health + fieldCounts.mtpDate +
+      fieldCounts.stage + fieldCounts.currentUpdate;
+    var n = affected.length;
+    var footnote = (n <= 0 || totalOverriddenFields <= 0)
+      ? { overrideAffectedCount: 0 }
+      : {
+        overrideAffectedCount: n,
+        message: 'Counts reflect approved overrides.',
+        detail: n === 1
+          ? '1 operational override affects this view.'
+          : (n + ' operational overrides affect this view.')
+      };
+    return {
+      footnote: footnote,
+      affectedRows: affected,
+      summary: {
+        totalDeployments: n,
+        totalOverriddenFields: totalOverriddenFields,
+        fieldCounts: fieldCounts
+      }
+    };
+  }
+
+  /**
    * Builds additive KPI footnote metadata for rows with operational overrides.
    * Report-exclusion-only rows are excluded from the count.
    *
@@ -2440,22 +2537,7 @@ var CoreData = (function () {
    * @return {{ overrideAffectedCount: number, message?: string, detail?: string }}
    */
   function buildOverrideFootnote_(rows) {
-    if (!Array.isArray(rows) || !rows.length) {
-      return { overrideAffectedCount: 0 };
-    }
-    var n = rows.filter(function (r) {
-      return r && r.hasOperationalOverride;
-    }).length;
-    if (n <= 0) {
-      return { overrideAffectedCount: 0 };
-    }
-    return {
-      overrideAffectedCount: n,
-      message: 'Counts reflect approved overrides.',
-      detail: n === 1
-        ? '1 operational override affects this view.'
-        : (n + ' operational overrides affect this view.')
-    };
+    return buildOverrideImpactContext_(rows).footnote;
   }
 
   /**
@@ -12165,7 +12247,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // KPI totals: full active portfolio (override-aware, Student-integrated via getAllDeployments pipeline).
     // Do not apply Deployments tab defaultHealthFilter — Overview "Total Active" is all Red+Yellow+Green.
     var activeRows = _resolveDeploymentsTabKpiRows_(cfg, viewModeOpts, productOpts);
-    var overrideFootnote = buildOverrideFootnote_(activeRows);
+    var overrideFootnote = buildOverrideImpactContext_(activeRows).footnote;
 
     // TOTALS
     var totalActive    = activeRows.length;
@@ -12312,7 +12394,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var pa       = (productOpts && productOpts.product) || 'all';
     var useCache = (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') &&
       (pa === 'all' || !cfg.ui.productFilter || cfg.ui.productFilter.enabled !== true);
-    var overviewCacheBase = 'overviewData:v15:fullActiveKpiCounts:lifecycleDeploymentStage:overrideAware';
+    var overviewCacheBase = 'overviewData:v16:overrideImpactContextParity:lifecycleDeploymentStage:overrideAware';
     var cacheKey = _perfKey_(cfg, overviewCacheBase);
 
     if (useCache && _cache.overviewSnapshot !== null) return _cache.overviewSnapshot;
@@ -12513,6 +12595,87 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * Diagnostic: logs the overview snapshot payload shape.
    * @param {AppConfig} config
    */
+
+  /**
+   * Diagnostic: Overview KPI override banner vs impact summary parity.
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function debugOverviewOverrideContextForUI(config, viewModeOpts, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var vm = viewModeOpts || { viewMode: 'all', ddDisplayName: '' };
+    var po = productOpts || { product: 'all' };
+    var pa = (po && po.product) || 'all';
+    var overviewCacheBase = 'overviewData:v16:overrideImpactContextParity:lifecycleDeploymentStage:overrideAware';
+    var cacheKey = _perfKey_(cfg, overviewCacheBase);
+
+    var kpiRows = _resolveDeploymentsTabKpiRows_(cfg, vm, po);
+    var impactCtx = buildOverrideImpactContext_(kpiRows);
+    var snap = getOverviewSnapshot(cfg, vm, po);
+    var bannerFootnote = (snap && snap.overrideFootnote) ? snap.overrideFootnote : {};
+    var overviewBannerCount = bannerFootnote.overrideAffectedCount || 0;
+    var summaryCount = impactCtx.summary.totalDeployments || 0;
+
+    var depMap = getDeploymentOverridesMap_(cfg);
+    var glMap = getGoLivesOverridesMap_(cfg);
+    var rawDeploymentOverrideRowCount = Object.keys(depMap).length;
+    var rawGoLivesOverrideRowCount = Object.keys(glMap).length;
+
+    var clearedBlankOverrideRowCount = 0;
+    Object.keys(depMap).forEach(function (id) {
+      var row = depMap[id];
+      var hasOp = !!(row.overrideHealth || row.overrideMtp || row.overrideStage ||
+        row.overrideCurrentUpdate || row.overrideAccount || row.overrideName);
+      if (!hasOp && !row.exclude) clearedBlankOverrideRowCount++;
+    });
+    Object.keys(glMap).forEach(function (acct) {
+      var row = glMap[acct];
+      var hasOp = !!(row.overrideDate || row.overridePartner);
+      if (!hasOp && !row.exclude) clearedBlankOverrideRowCount++;
+    });
+
+    var mismatchReason = '';
+    if (overviewBannerCount !== summaryCount) {
+      mismatchReason = 'Cached or snapshot overrideFootnote (' + overviewBannerCount +
+        ') differs from live KPI row impact summary (' + summaryCount + ').';
+    }
+
+    var sampleBannerRows = (kpiRows || []).filter(function (r) {
+      return r && r.hasOperationalOverride;
+    }).slice(0, 5).map(function (r) {
+      return {
+        deploymentId: r.deploymentId,
+        accountName: r.accountName,
+        hasOperationalOverride: !!r.hasOperationalOverride,
+        effective: rowHasEffectiveOperationalOverride_(r)
+      };
+    });
+    var sampleSummaryRows = (impactCtx.affectedRows || []).slice(0, 5).map(function (r) {
+      return {
+        deploymentId: r.deploymentId,
+        accountName: r.accountName,
+        overrideMeta: r.overrideMeta || null
+      };
+    });
+
+    return {
+      appId: cfg.appId || '',
+      overviewBannerCount: overviewBannerCount,
+      summaryCount: summaryCount,
+      summaryDetails: impactCtx.summary,
+      rawDeploymentOverrideRowCount: rawDeploymentOverrideRowCount,
+      rawGoLivesOverrideRowCount: rawGoLivesOverrideRowCount,
+      effectiveOverrideCount: summaryCount,
+      clearedBlankOverrideRowCount: clearedBlankOverrideRowCount,
+      cacheKey: cacheKey,
+      cacheVersion: overviewCacheBase,
+      sampleRowsCountedByBanner: sampleBannerRows,
+      sampleRowsShownInSummary: sampleSummaryRows,
+      mismatchReason: mismatchReason
+    };
+  }
 
   function _debugOverviewSnapshot_(config) {
     var cfg     = CoreConfig.withDefaults(config);
@@ -14547,6 +14710,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
     getActiveCountDeployments:           getActiveCountDeployments,
     buildOverrideFootnote_:                buildOverrideFootnote_,
+    buildOverrideImpactContext_:           buildOverrideImpactContext_,
+    rowHasEffectiveOperationalOverride_:   rowHasEffectiveOperationalOverride_,
     getProductModeCanonicalDeployments:  getProductModeCanonicalDeployments,
     getProductModeTrendsDeployments:     getProductModeTrendsDeployments,
     _debugProductModeCanonicalUnionCounts: _debugProductModeCanonicalUnionCounts,
@@ -14609,6 +14774,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Overview Snapshot (C11b)
     getOverviewSnapshot:         getOverviewSnapshot,
     debugOverviewVsDeploymentsCountsForUI: debugOverviewVsDeploymentsCountsForUI,
+    debugOverviewOverrideContextForUI:   debugOverviewOverrideContextForUI,
     _debugOverviewSnapshot:      _debugOverviewSnapshot_,
 
     // Performance Layer 2 additions

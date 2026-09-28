@@ -423,6 +423,100 @@ var CoreNotify = (function () {
   }
 
   /**
+   * @param {Object} row
+   * @return {number|null}  Midnight-local ms for sort, or null if unparseable/missing
+   * @private
+   */
+  function _digestEventSortTime_(row) {
+    if (!row || !row.eventDate) return null;
+    var d = new Date(row.eventDate);
+    if (isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  /**
+   * @param {Object} a
+   * @param {Object} b
+   * @return {number}
+   * @private
+   */
+  function _compareDigestEventsByDate_(a, b) {
+    var ta = _digestEventSortTime_(a);
+    var tb = _digestEventSortTime_(b);
+    if (ta == null && tb == null) {
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    }
+    if (ta == null) return 1;
+    if (tb == null) return -1;
+    if (ta !== tb) return ta - tb;
+    var byAccount = String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    if (byAccount !== 0) return byAccount;
+    return String(a.deploymentName || '').localeCompare(String(b.deploymentName || ''));
+  }
+
+  /**
+   * @param {Array<Object>} rows
+   * @return {Array<Object>}
+   * @private
+   */
+  function _sortDigestEvents_(rows) {
+    return rows.slice().sort(_compareDigestEventsByDate_);
+  }
+
+  /**
+   * Account label for digest list items: bold customer name; partner parenthetical unbolded.
+   * @param {Object} row
+   * @return {string}
+   * @private
+   */
+  function _digestAccountLabelHtml_(row) {
+    var account = String(row.accountName || '').trim();
+    var partner = String(row.partner || '').trim();
+
+    if (!account) {
+      return '<strong></strong>';
+    }
+
+    if (partner) {
+      var parenPartner = '(' + partner + ')';
+      var idx = account.indexOf(parenPartner);
+      if (idx > 0) {
+        return '<strong>' + _escapeHtml_(account.substring(0, idx).trim()) + '</strong> ' +
+          _escapeHtml_(account.substring(idx));
+      }
+      if (account.indexOf(partner) < 0) {
+        return '<strong>' + _escapeHtml_(account) + '</strong> (' + _escapeHtml_(partner) + ')';
+      }
+    }
+
+    var trailing = account.match(/^(.+?)\s+(\([^)]+\))\s*$/);
+    if (trailing) {
+      return '<strong>' + _escapeHtml_(trailing[1].trim()) + '</strong> ' +
+        _escapeHtml_(trailing[2]);
+    }
+
+    return '<strong>' + _escapeHtml_(account) + '</strong>';
+  }
+
+  /**
+   * @param {Object} row
+   * @param {string} tz
+   * @return {string}
+   * @private
+   */
+  function _formatDigestEventLineHtml_(row, tz) {
+    var hasDate = !!row.eventDate;
+    var dateStr = hasDate ?
+      Utilities.formatDate(new Date(row.eventDate), tz, 'yyyy-MM-dd') : 'n/a';
+    var dateHtml = hasDate ?
+      '<strong>' + _escapeHtml_(dateStr) + '</strong>' : _escapeHtml_(dateStr);
+    return _digestAccountLabelHtml_(row) + ' — ' +
+      _escapeHtml_(row.deploymentName || '') + ' (' +
+      _escapeHtml_(row.surveyType || '') + ', ' + dateHtml + ')';
+  }
+
+  /**
    * @param {Array<Object>} rows
    * @param {string} tz
    * @return {string}
@@ -444,14 +538,8 @@ var CoreNotify = (function () {
     var parts = ['<ul>'];
     ddNames.forEach(function (dd) {
       parts.push('<li><strong>' + _escapeHtml_(dd) + '</strong><ul>');
-      byDd[dd].sort(function (a, b) {
-        return String(a.accountName || '').localeCompare(String(b.accountName || ''));
-      }).forEach(function (row) {
-        var dateStr = row.eventDate ?
-          Utilities.formatDate(new Date(row.eventDate), tz, 'yyyy-MM-dd') : 'n/a';
-        parts.push('<li>' + _escapeHtml_(row.accountName || '') + ' — ' +
-          _escapeHtml_(row.deploymentName || '') + ' (' +
-          _escapeHtml_(row.surveyType || '') + ', ' + dateStr + ')</li>');
+      _sortDigestEvents_(byDd[dd]).forEach(function (row) {
+        parts.push('<li>' + _formatDigestEventLineHtml_(row, tz) + '</li>');
       });
       parts.push('</ul></li>');
     });

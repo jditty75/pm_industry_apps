@@ -77,6 +77,263 @@ var CorePortfolioMomentum = (function () {
   }
 
   /**
+   * Workday FY half boundaries for the given FY year (Feb 1 – Jan 31).
+   * @param {number} currentFyYear  e.g. 2027 for FY27
+   * @return {{ fyStart: string, fyEnd: string, h1Start: string, h1End: string, h2Start: string, h2End: string }}
+   */
+  function _currentFyHalfBounds_(currentFyYear) {
+    return {
+      fyStart: _isoDate_(new Date(currentFyYear - 1, 1, 1)),
+      fyEnd: _isoDate_(new Date(currentFyYear, 0, 31)),
+      h1Start: _isoDate_(new Date(currentFyYear - 1, 1, 1)),
+      h1End: _isoDate_(new Date(currentFyYear - 1, 6, 31)),
+      h2Start: _isoDate_(new Date(currentFyYear - 1, 7, 1)),
+      h2End: _isoDate_(new Date(currentFyYear, 0, 31))
+    };
+  }
+
+  /**
+   * @param {string} dateStr
+   * @param {string} startStr
+   * @param {string} endStr
+   * @return {boolean}
+   */
+  function _dateInInclusiveRange_(dateStr, startStr, endStr) {
+    if (!dateStr || !startStr || !endStr) return false;
+    return dateStr >= startStr && dateStr <= endStr;
+  }
+
+  /**
+   * @param {Object} countsBySeries
+   * @param {Array<string>} series
+   * @return {number}
+   */
+  function _sumSeriesCounts_(countsBySeries, series) {
+    var total = 0;
+    (series || []).forEach(function (s) {
+      total += (countsBySeries && countsBySeries[s]) || 0;
+    });
+    return total;
+  }
+
+  /**
+   * Merges platform-mode PF rows into one deployment|series group (actual + projected dates).
+   * @param {Object} groups
+   * @param {string} groupKey
+   * @param {Object} candidate
+   */
+  function _upsertPlatformMomentumGroup_(groups, groupKey, candidate) {
+    var existing = groups[groupKey];
+    if (!existing) {
+      groups[groupKey] = candidate;
+      return;
+    }
+    if (candidate.actualDate && (!existing.actualDate || candidate.actualDate < existing.actualDate)) {
+      existing.actualDate = candidate.actualDate;
+      existing.earliestDate = candidate.actualDate;
+    }
+    if (candidate.projectedDate) {
+      if (!existing.projectedDate || candidate.projectedDate > existing.projectedDate) {
+        existing.projectedDate = candidate.projectedDate;
+      }
+    }
+    if (!existing.industry && candidate.industry) existing.industry = candidate.industry;
+    if (!existing.accountKey && candidate.accountKey) existing.accountKey = candidate.accountKey;
+    if (!existing.deploymentName && candidate.deploymentName) {
+      existing.deploymentName = candidate.deploymentName;
+    }
+  }
+
+  /**
+   * Builds H1 actual / H2 projected split for platform-mode historicalFyAndCurrentRunningTotal.
+   * @param {Object} dataset
+   * @param {Array<{label:string,counts:Object,totalGoLives:number}>} historicalFys
+   * @param {number} currentFyYear
+   * @param {string} currentFyLabel
+   * @param {Array<string>} series
+   * @param {boolean} pfTargetColumnPresent
+   * @return {Object}
+   */
+  function _buildCurrentFySplit_(dataset, historicalFys, currentFyYear, currentFyLabel, series, pfTargetColumnPresent) {
+    var bounds = _currentFyHalfBounds_(currentFyYear);
+    var h1Counts = {};
+    var h2Counts = {};
+    var totalCounts = {};
+    var h1AccountKeys = {};
+    var h2AccountKeys = {};
+    series.forEach(function (s) {
+      h1Counts[s] = 0;
+      h2Counts[s] = 0;
+      totalCounts[s] = 0;
+      h1AccountKeys[s] = {};
+      h2AccountKeys[s] = {};
+    });
+
+    var splitStats = {
+      h1ActualRowCount: 0,
+      h2ProjectedRowCount: 0,
+      h2ActualInHalfCount: 0,
+      rowsSkippedMissingProjectedDate: 0,
+      rowsSkippedMissingActualDate: 0
+    };
+    var warnings = [];
+    var projectionSourceFieldsUsed = ['Current_MTP_Date__c (SFDC_Deployments)'];
+    if (pfTargetColumnPresent) {
+      projectionSourceFieldsUsed.unshift('Production move date target (Deployment Product Functions)');
+    }
+
+    Object.keys(dataset.groups || {}).forEach(function (groupKey) {
+      var g = dataset.groups[groupKey];
+      if (!g || !g.series) return;
+      var actual = g.actualDate || g.earliestDate || null;
+      var projected = g.projectedDate || null;
+
+      if (actual && _dateInInclusiveRange_(actual, bounds.h1Start, bounds.h1End)) {
+        h1Counts[g.series] = (h1Counts[g.series] || 0) + 1;
+        splitStats.h1ActualRowCount++;
+        if (g.accountKey) h1AccountKeys[g.series][g.accountKey] = true;
+      }
+
+      if (actual && _dateInInclusiveRange_(actual, bounds.h2Start, bounds.h2End)) {
+        h2Counts[g.series] = (h2Counts[g.series] || 0) + 1;
+        splitStats.h2ActualInHalfCount++;
+        if (g.accountKey) h2AccountKeys[g.series][g.accountKey] = true;
+      } else if (projected && _dateInInclusiveRange_(projected, bounds.h2Start, bounds.h2End)) {
+        h2Counts[g.series] = (h2Counts[g.series] || 0) + 1;
+        splitStats.h2ProjectedRowCount++;
+        if (g.accountKey) h2AccountKeys[g.series][g.accountKey] = true;
+      }
+    });
+
+    series.forEach(function (s) {
+      totalCounts[s] = (h1Counts[s] || 0) + (h2Counts[s] || 0);
+    });
+
+    var distinctH1 = {};
+    var distinctH2 = {};
+    series.forEach(function (s) {
+      Object.keys(h1AccountKeys[s] || {}).forEach(function (k) { distinctH1[k] = true; });
+      Object.keys(h2AccountKeys[s] || {}).forEach(function (k) { distinctH2[k] = true; });
+    });
+
+    if (splitStats.h2ProjectedRowCount === 0 && splitStats.h2ActualInHalfCount === 0) {
+      warnings.push(
+        'FY H2 projected go-lives could not be computed: no product-function target dates in ' +
+        bounds.h2Start + '–' + bounds.h2End + ' and no H2 actual go-lives in that range.'
+      );
+    }
+
+    var h1Label = currentFyLabel + ' H1 Actual';
+    var h2Label = currentFyLabel + ' H2 Projected';
+    var h1Total = _sumSeriesCounts_(h1Counts, series);
+    var h2Total = _sumSeriesCounts_(h2Counts, series);
+    var projectedTotal = _sumSeriesCounts_(totalCounts, series);
+
+    var chartPeriods = (historicalFys || []).map(function (fy) {
+      return {
+        label: fy.label,
+        sublabel: 'Actual',
+        periodType: 'historicalActual',
+        fy: fy.label,
+        half: null,
+        startDate: null,
+        endDate: null,
+        counts: fy.counts,
+        totalGoLives: fy.totalGoLives,
+        isCurrentFy: false,
+        isActual: true,
+        isProjected: false,
+        isInProgress: false,
+        isCurrent: false
+      };
+    });
+
+    chartPeriods.push({
+      label: h1Label,
+      sublabel: 'Actuals through ' + bounds.h1End,
+      periodType: 'currentActual',
+      fy: currentFyLabel,
+      half: 'H1',
+      startDate: bounds.h1Start,
+      endDate: bounds.h1End,
+      counts: h1Counts,
+      totalGoLives: h1Total,
+      distinctAccounts: Object.keys(distinctH1).length,
+      isCurrentFy: true,
+      isActual: true,
+      isProjected: false,
+      isInProgress: false,
+      isCurrent: true
+    });
+
+    chartPeriods.push({
+      label: h2Label,
+      sublabel: 'Projected ' + bounds.h2Start + ' to ' + bounds.h2End,
+      periodType: 'projected',
+      fy: currentFyLabel,
+      half: 'H2',
+      startDate: bounds.h2Start,
+      endDate: bounds.h2End,
+      counts: h2Counts,
+      totalGoLives: h2Total,
+      isCurrentFy: true,
+      isActual: false,
+      isProjected: true,
+      isInProgress: true,
+      isCurrent: true
+    });
+
+    return {
+      bounds: bounds,
+      h1Label: h1Label,
+      h2Label: h2Label,
+      currentFyH1Actual: {
+        label: h1Label,
+        fy: currentFyLabel,
+        half: 'H1',
+        startDate: bounds.h1Start,
+        endDate: bounds.h1End,
+        counts: h1Counts,
+        totalGoLives: h1Total,
+        distinctAccounts: Object.keys(distinctH1).length,
+        isActual: true,
+        isProjected: false
+      },
+      currentFyH2Projected: {
+        label: h2Label,
+        fy: currentFyLabel,
+        half: 'H2',
+        startDate: bounds.h2Start,
+        endDate: bounds.h2End,
+        counts: h2Counts,
+        totalGoLives: h2Total,
+        distinctAccounts: Object.keys(distinctH2).length,
+        isActual: false,
+        isProjected: true
+      },
+      currentFyProjectedTotal: {
+        label: currentFyLabel + ' Projected Total',
+        fy: currentFyLabel,
+        counts: totalCounts,
+        totalGoLives: projectedTotal,
+        distinctAccounts: (function () {
+          var all = {};
+          Object.keys(distinctH1).forEach(function (k) { all[k] = true; });
+          Object.keys(distinctH2).forEach(function (k) { all[k] = true; });
+          return Object.keys(all).length;
+        }()),
+        subtitle: 'H1 actual + H2 projected'
+      },
+      chartPeriods: chartPeriods,
+      currentFySplitSummary:
+        currentFyLabel + ' H1 actuals + ' + currentFyLabel + ' H2 projected',
+      projectionSourceFieldsUsed: projectionSourceFieldsUsed,
+      dataLimitations: warnings,
+      splitStats: splitStats
+    };
+  }
+
+  /**
    * Classifies a resolved momentum date into a chart/KPI period label.
    * @param {string} dateStr
    * @param {number} currentFyYear
@@ -276,6 +533,19 @@ var CorePortfolioMomentum = (function () {
     var match = s.match(/^LAST_N_YEARS:(\d+)$/i);
     if (match) return parseInt(match[1], 10);
     return fallbackYears;
+  }
+
+  /**
+   * Non-empty chartLegend from config, else fallback (platform series).
+   * Empty arrays from withDefaults must not shadow platforms.
+   * @param {Object} momentum
+   * @param {Array<string>} fallback
+   * @return {Array<string>}
+   */
+  function _effectiveChartLegend_(momentum, fallback) {
+    var legend = momentum && momentum.chartLegend;
+    if (Array.isArray(legend) && legend.length > 0) return legend;
+    return fallback || [];
   }
 
   /**
@@ -851,6 +1121,7 @@ var CorePortfolioMomentum = (function () {
     var periodView = momentum.periodView || 'historicalFyAndCurrentRunningTotal';
     var industryGrowthStrategy = momentum.industryGrowthStrategy || 'cagr';
     var previousFyLabel = 'FY' + String(fyInfo.fyYear - 1).slice(-2);
+    var emptySplit = null;
     var chartPeriods = _buildChartPeriods_(
       { groups: {}, series: series },
       fyInfo.fyYear,
@@ -858,8 +1129,19 @@ var CorePortfolioMomentum = (function () {
       series,
       half
     );
+    if (mode === 'platform' && periodView === 'historicalFyAndCurrentRunningTotal') {
+      emptySplit = _buildCurrentFySplit_(
+        { groups: {}, pfTargetColumnPresent: false },
+        [],
+        fyInfo.fyYear,
+        fyLabel || fyInfo.label,
+        series,
+        false
+      );
+      chartPeriods = emptySplit.chartPeriods;
+    }
 
-    return {
+    var emptySnap = {
       appId: cfg.appId || '',
       mode: mode || 'platform',
       generatedAt: now.toISOString(),
@@ -889,7 +1171,7 @@ var CorePortfolioMomentum = (function () {
       portfolioGrowthRate: { avgYoyPct: 0, sampleFys: 0 },
       growthMetricSeries: series[0] || null,
       platforms: series,
-      chartLegend: momentum.chartLegend || series,
+      chartLegend: _effectiveChartLegend_(momentum, series),
       kpiLabels: _resolveKpiLabels_(momentum.kpiLabels, fyLabel || fyInfo.label),
       chartColors: (momentum.chart && momentum.chart.colors) || {},
       inProgressOpacity: (momentum.chart && momentum.chart.inProgressOpacity != null)
@@ -900,6 +1182,22 @@ var CorePortfolioMomentum = (function () {
         rowsSkippedNoDeploymentId: 0, rawRowsInGroupBeforeDedup: 0, dedupedGoLiveCount: 0
       }
     };
+
+    if (mode === 'platform' && periodView === 'historicalFyAndCurrentRunningTotal') {
+      emptySnap.currentFiscalYear = fyLabel || fyInfo.label;
+      emptySnap.asOfDate = genLabel;
+      emptySnap.currentFyH1Actual = emptySplit.currentFyH1Actual;
+      emptySnap.currentFyH2Projected = emptySplit.currentFyH2Projected;
+      emptySnap.currentFyProjectedTotal = emptySplit.currentFyProjectedTotal;
+      emptySnap.currentFySplitSummary = emptySplit.currentFySplitSummary;
+      emptySnap.projectionSourceFieldsUsed = emptySplit.projectionSourceFieldsUsed;
+      emptySnap.dataLimitations = emptySplit.dataLimitations;
+      emptySnap.currentFyHalfBounds = emptySplit.bounds;
+      emptySnap.currentFy.inProgressBadge =
+        emptySplit.currentFySplitSummary + ' as of ' + genLabel;
+    }
+
+    return emptySnap;
   }
 
   /**
@@ -955,7 +1253,8 @@ var CorePortfolioMomentum = (function () {
         mode: 'platform',
         series: seriesList,
         groups: {},
-        stats: _finalizeStats_(stats)
+        stats: _finalizeStats_(stats),
+        pfTargetColumnPresent: false
       };
     }
 
@@ -966,6 +1265,7 @@ var CorePortfolioMomentum = (function () {
 
     var colProductArea = _findCol_(headers, ['product area'], 1);
     var colDateActual = _findCol_(headers, ['production move date actual', 'move date actual', 'actual'], 4);
+    var colDateTarget = _findCol_(headers, ['production move date target', 'move date target'], 3);
     var colDeploymentFk = _findDeploymentFkCol_(headers, 5);
     var colDeploymentName = _findCol_(headers, ['deployment__r.name', 'deployment name'], -1);
     var colAccount = _findCol_(headers, ['account name', 'account c', 'accountname'], -1);
@@ -985,8 +1285,8 @@ var CorePortfolioMomentum = (function () {
     });
 
     var groups = {};
-    var r, row, actualStr, deploymentId, depCtx, productAreaRaw, deploymentName;
-    var industry, accountKey, series, groupKey;
+    var r, row, actualStr, targetStr, projectedStr, deploymentId, depCtx, productAreaRaw, deploymentName;
+    var industry, accountKey, series, groupKey, candidate;
 
     for (r = 1; r < allValues.length; r++) {
       stats.productFunctionRowsScanned++;
@@ -1029,19 +1329,28 @@ var CorePortfolioMomentum = (function () {
       stats.rowsCounted++;
       stats.productFunctionRowsCounted++;
       stats.rowsUsingActualDate++;
-      groupKey = deploymentId + '|' + series;
-      if (!groups[groupKey] || actualStr < groups[groupKey].earliestDate) {
-        groups[groupKey] = {
-          series: series,
-          earliestDate: actualStr,
-          dateSource: 'actual',
-          source: 'productFunction',
-          deploymentId: deploymentId,
-          accountKey: accountKey,
-          industry: industry,
-          deploymentName: deploymentName
-        };
+      targetStr = _normalizeDate_((colDateTarget >= 0) ? row[colDateTarget] : null);
+      projectedStr = targetStr || depCtx.currentMtpDate || null;
+      if (projectedStr && !targetStr && depCtx.currentMtpDate) {
+        stats.rowsUsingTargetDate++;
+      } else if (targetStr) {
+        stats.rowsUsingTargetDate++;
       }
+
+      groupKey = deploymentId + '|' + series;
+      candidate = {
+        series: series,
+        actualDate: actualStr,
+        projectedDate: projectedStr,
+        earliestDate: actualStr,
+        dateSource: 'actual',
+        source: 'productFunction',
+        deploymentId: deploymentId,
+        accountKey: accountKey,
+        industry: industry,
+        deploymentName: deploymentName
+      };
+      _upsertPlatformMomentumGroup_(groups, groupKey, candidate);
     }
 
     Logger.log(
@@ -1051,14 +1360,16 @@ var CorePortfolioMomentum = (function () {
       ', counted=' + stats.rowsCounted +
       ', skippedNoDate=' + stats.rowsSkippedNoDate +
       ', skippedUnmapped=' + stats.rowsSkippedUnmappedProductArea +
-      ', skippedNoDeployId=' + stats.rowsSkippedNoDeploymentId
+      ', skippedNoDeployId=' + stats.rowsSkippedNoDeploymentId +
+      ', pfTargetCol=' + colDateTarget
     );
 
     return {
       mode: 'platform',
       series: seriesList,
       groups: groups,
-      stats: _finalizeStats_(stats)
+      stats: _finalizeStats_(stats),
+      pfTargetColumnPresent: colDateTarget >= 0
     };
   }
 
@@ -1307,7 +1618,7 @@ var CorePortfolioMomentum = (function () {
 
     var seriesList = mode === 'platform'
       ? (momentum.platforms || [])
-      : (momentum.chartLegend || []);
+      : _effectiveChartLegend_(momentum, []);
 
     if (mode === 'platform') {
       return _queryPlatformMomentumDataset_(cfg, momentum, seriesList);
@@ -1646,8 +1957,33 @@ var CorePortfolioMomentum = (function () {
     var generatedDateLabel = _dateLabel_(now);
     var inProgressBadge = currentFyLabel + ' ' + half +
                           ' running total as of ' + generatedDateLabel;
-    var chartPeriods = _buildChartPeriods_(
-      dataset, currentFyYear, periodView, series, half);
+    var chartPeriods = null;
+    var currentFySplit = null;
+    if (periodView === 'previousFyAndCurrentHalves') {
+      chartPeriods = _buildChartPeriods_(
+        dataset, currentFyYear, periodView, series, half);
+    } else if (mode === 'platform' &&
+               periodView === 'historicalFyAndCurrentRunningTotal') {
+      currentFySplit = _buildCurrentFySplit_(
+        dataset,
+        ctx.historicalFys,
+        currentFyYear,
+        currentFyLabel,
+        series,
+        !!dataset.pfTargetColumnPresent
+      );
+      chartPeriods = currentFySplit.chartPeriods;
+      inProgressBadge = currentFySplit.currentFySplitSummary + ' as of ' + generatedDateLabel;
+    }
+
+    var currentFyCountsOut = ctx.currentFyCounts;
+    var currentFyTotalOut = calculateGoLives(ctx, null);
+    var currentFyDistinctOut = calculateDistinctAccounts(ctx, null);
+    if (currentFySplit) {
+      currentFyCountsOut = currentFySplit.currentFyProjectedTotal.counts;
+      currentFyTotalOut = currentFySplit.currentFyProjectedTotal.totalGoLives;
+      currentFyDistinctOut = currentFySplit.currentFyProjectedTotal.distinctAccounts || 0;
+    }
 
     var snapshot = {
       appId: cfg.appId || '',
@@ -1657,6 +1993,8 @@ var CorePortfolioMomentum = (function () {
       previousFyLabel: previousFyLabel,
       generatedAt: generatedAt,
       generatedDateLabel: generatedDateLabel,
+      asOfDate: generatedDateLabel,
+      currentFiscalYear: currentFyLabel,
       currentFy: {
         label: currentFyLabel,
         isInProgress: true,
@@ -1665,9 +2003,9 @@ var CorePortfolioMomentum = (function () {
         startDate: _isoDate_(fyStartDate),
         endDate: _isoDate_(fyEndDate),
         periodEndDate: _isoDate_(periodEndDate),
-        counts: ctx.currentFyCounts,
-        distinctAccounts: calculateDistinctAccounts(ctx, null),
-        totalGoLives: calculateGoLives(ctx, null)
+        counts: currentFyCountsOut,
+        distinctAccounts: currentFyDistinctOut,
+        totalGoLives: currentFyTotalOut
       },
       historicalFys: ctx.historicalFys,
       chartPeriods: chartPeriods,
@@ -1677,13 +2015,24 @@ var CorePortfolioMomentum = (function () {
       portfolioGrowthRate: portfolioGrowthRate,
       growthMetricSeries: growthMetricSeries,
       platforms: series,
-      chartLegend: momentum.chartLegend || series,
+      chartLegend: _effectiveChartLegend_(momentum, series),
       kpiLabels: _resolveKpiLabels_(momentum.kpiLabels, currentFyLabel),
       chartColors: (momentum.chart && momentum.chart.colors) || {},
       inProgressOpacity: (momentum.chart && momentum.chart.inProgressOpacity != null)
         ? momentum.chart.inProgressOpacity : 0.55,
       dataIntegrity: _buildDataIntegrity_(dataset.stats, ctx.dedupedGoLiveCount)
     };
+
+    if (currentFySplit) {
+      snapshot.currentFyH1Actual = currentFySplit.currentFyH1Actual;
+      snapshot.currentFyH2Projected = currentFySplit.currentFyH2Projected;
+      snapshot.currentFyProjectedTotal = currentFySplit.currentFyProjectedTotal;
+      snapshot.currentFySplitSummary = currentFySplit.currentFySplitSummary;
+      snapshot.projectionSourceFieldsUsed = currentFySplit.projectionSourceFieldsUsed;
+      snapshot.dataLimitations = currentFySplit.dataLimitations;
+      snapshot.currentFySplitStats = currentFySplit.splitStats;
+      snapshot.currentFyHalfBounds = currentFySplit.bounds;
+    }
 
     var elapsed = Date.now() - startMs;
     var chartPeriodLabels = (chartPeriods || []).map(function (p) { return p.label; }).join(',');
@@ -1701,6 +2050,123 @@ var CorePortfolioMomentum = (function () {
     return snapshot;
   }
 
+  /**
+   * Diagnostic summary for Portfolio Momentum UI troubleshooting (Apps Script editor).
+   * @param {AppConfig} config
+   * @return {Object}
+   */
+  function getMomentumDebugSummary(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var momentum = cfg.momentum || {};
+    var mode = (Array.isArray(momentum.platforms) && momentum.platforms.length)
+      ? 'platform'
+      : 'product';
+    var series = mode === 'platform'
+      ? (momentum.platforms || [])
+      : _effectiveChartLegend_(momentum, []);
+    var now = new Date();
+    var currentFyInfo = _wyFyFromDate_(now);
+    var half = _getHalf_(now);
+    var periodView = momentum.periodView || 'historicalFyAndCurrentRunningTotal';
+    var historicalYears = _parseHistoricalYears_(
+      momentum.timeRange,
+      momentum.historicalYears != null ? momentum.historicalYears : 5
+    );
+
+    var dataset = queryMomentumDataset(cfg);
+    var snapshot = getMomentumSnapshot(config);
+    var chartSeries = snapshot
+      ? _effectiveChartLegend_(momentum, snapshot.platforms || series)
+      : series;
+
+    var chartPeriods = snapshot && snapshot.chartPeriods;
+    var historicalFys = (snapshot && snapshot.historicalFys) || [];
+    var chartPointCount = 0;
+    var chartRenderable = false;
+    var chartNoDataReason = '';
+
+    if (!momentum.enabled) {
+      chartNoDataReason = 'momentum.enabled is false';
+    } else if (!chartSeries.length) {
+      chartNoDataReason = 'no chart series (empty chartLegend shadowing platforms)';
+    } else if (chartPeriods && chartPeriods.length) {
+      chartPointCount = chartPeriods.length;
+      chartRenderable = true;
+    } else if (historicalFys.length || (snapshot && snapshot.currentFy)) {
+      chartPointCount = historicalFys.length + (snapshot && snapshot.currentFy ? 1 : 0);
+      chartRenderable = chartPointCount > 0;
+      if (!chartRenderable) {
+        chartNoDataReason = 'no historical FY buckets and no current FY';
+      }
+    } else {
+      chartNoDataReason = 'empty snapshot';
+    }
+
+    var stats = (dataset && dataset.stats) || {};
+    var groupKeys = dataset && dataset.groups ? Object.keys(dataset.groups) : [];
+    var bounds = _currentFyHalfBounds_(currentFyInfo.fyYear);
+    var splitStats = snapshot && snapshot.currentFySplitStats;
+    var h1 = snapshot && snapshot.currentFyH1Actual;
+    var h2 = snapshot && snapshot.currentFyH2Projected;
+    var chartPeriodLabels = (chartPeriods || []).map(function (p) { return p.label; });
+
+    return {
+      appId: cfg.appId || '',
+      momentumEnabled: !!momentum.enabled,
+      mode: mode,
+      platforms: momentum.platforms || [],
+      productFilter: momentum.productFilter || null,
+      dataSource: momentum.dataSource || _resolveDataSheetName_(cfg),
+      timeRange: momentum.timeRange || null,
+      historicalYears: historicalYears,
+      currentFiscalYear: currentFyInfo.label,
+      asOfDate: snapshot ? snapshot.generatedDateLabel : _dateLabel_(now),
+      periodView: periodView,
+      currentHalf: half,
+      h1StartDate: bounds.h1Start,
+      h1EndDate: bounds.h1End,
+      h2StartDate: bounds.h2Start,
+      h2EndDate: bounds.h2End,
+      rawConfigChartLegend: momentum.chartLegend,
+      effectiveChartLegend: _effectiveChartLegend_(momentum, series),
+      rawSourceRowCount: stats.productFunctionRowsScanned || stats.totalRowsScanned || 0,
+      filteredSourceRowCount: stats.rowsCounted || 0,
+      dedupedGroupCount: groupKeys.length,
+      groupedSeriesNames: series,
+      historicalFyLabels: historicalFys.map(function (fy) { return fy.label; }),
+      historicalFyCountsBySeries: historicalFys.map(function (fy) {
+        return { label: fy.label, counts: fy.counts, total: fy.totalGoLives };
+      }),
+      h1ActualRowCount: splitStats ? splitStats.h1ActualRowCount : null,
+      h2ProjectedRowCount: splitStats ? splitStats.h2ProjectedRowCount : null,
+      h2ActualInHalfCount: splitStats ? splitStats.h2ActualInHalfCount : null,
+      h1ActualCountsBySeries: h1 ? h1.counts : null,
+      h2ProjectedCountsBySeries: h2 ? h2.counts : null,
+      currentFyProjectedTotalBySeries: snapshot && snapshot.currentFyProjectedTotal
+        ? snapshot.currentFyProjectedTotal.counts : null,
+      chartPeriodsLabels: chartPeriodLabels,
+      kpiTotalGoLives: snapshot && snapshot.currentFy ? snapshot.currentFy.totalGoLives : null,
+      kpiDistinctAccounts: snapshot && snapshot.currentFy ? snapshot.currentFy.distinctAccounts : null,
+      kpiFyH1Actual: h1 ? h1.totalGoLives : null,
+      kpiFyH2Projected: h2 ? h2.totalGoLives : null,
+      kpiFyProjectedTotal: snapshot && snapshot.currentFyProjectedTotal
+        ? snapshot.currentFyProjectedTotal.totalGoLives : null,
+      chartSeriesPayload: chartSeries,
+      chartDataPointCount: chartPointCount,
+      chartRenderable: chartRenderable,
+      chartNoDataReason: chartNoDataReason,
+      payloadShapeOk: !!(snapshot && snapshot.platforms && snapshot.platforms.length),
+      snapshotChartLegend: snapshot ? snapshot.chartLegend : null,
+      projectionSourceFieldsUsed: snapshot ? snapshot.projectionSourceFieldsUsed : null,
+      rowsSkippedMissingActualDate: stats.rowsSkippedNoDate || 0,
+      rowsSkippedMissingProjectedDate: splitStats ? splitStats.rowsSkippedMissingProjectedDate : null,
+      rowsSkippedUnmappedProductArea: stats.rowsSkippedUnmappedProductArea || 0,
+      pfTargetColumnPresent: dataset ? !!dataset.pfTargetColumnPresent : null,
+      warnings: snapshot && snapshot.dataLimitations ? snapshot.dataLimitations : [],
+      dataLimitations: snapshot && snapshot.dataLimitations ? snapshot.dataLimitations : []
+    };
+  }
+
   // --------------------------------------------------------------------------
   // EXPORTS
   // --------------------------------------------------------------------------
@@ -1710,7 +2176,8 @@ var CorePortfolioMomentum = (function () {
     calculateGoLives: calculateGoLives,
     calculateDistinctAccounts: calculateDistinctAccounts,
     calculateAnnualGrowthRate: calculateAnnualGrowthRate,
-    calculateFastestGrowingIndustry: calculateFastestGrowingIndustry
+    calculateFastestGrowingIndustry: calculateFastestGrowingIndustry,
+    getMomentumDebugSummary: getMomentumDebugSummary
   };
 
 })();

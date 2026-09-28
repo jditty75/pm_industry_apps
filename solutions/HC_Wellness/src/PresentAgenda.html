@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HC Wellness Leadership Agenda — Presentation</title>
+  <style>
+    :root {
+      --wd-blue-deep: #005cb9;
+      --wd-blue-header: #0066cc;
+      --wd-blue-bar: #1d4ed8;
+      --wd-blue-accent: #1d4ed8;
+      --bg-page: #f0f2f5;
+      --bg-card: #ffffff;
+      --bg-card-muted: #f9fafb;
+      --border: #e5e7eb;
+      --text-primary: #111827;
+      --text-secondary: #4b5563;
+      --text-muted: #6b7280;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+      --radius: 10px;
+      --font: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Tahoma, Geneva, Verdana, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      color: var(--text-primary);
+      background: var(--bg-page);
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+    .present-header {
+      background: linear-gradient(135deg, var(--wd-blue-deep) 0%, var(--wd-blue-header) 55%, #0077e6 100%);
+      color: #fff;
+      padding: 1rem 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      box-shadow: var(--shadow-md);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .present-header__brand {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      flex: 1 1 280px;
+      min-width: 0;
+    }
+    .presentation-logo-tile {
+      flex: 0 0 auto;
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.14),
+        0 1px 2px rgba(0, 0, 0, 0.08);
+    }
+    .presentation-logo-tile svg {
+      display: block;
+      max-width: 42px;
+      max-height: 42px;
+      width: auto;
+      height: auto;
+    }
+    .present-header__main { flex: 1 1 200px; min-width: 0; }
+    .present-header__title-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.35rem;
+    }
+    .present-header h1 {
+      margin: 0;
+      font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .pill {
+      display: inline-block;
+      padding: 0.2rem 0.65rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      color: #fff;
+    }
+    .present-header__subtitle {
+      margin: 0;
+      font-size: clamp(0.9rem, 1.4vw, 1.05rem);
+      opacity: 0.92;
+      font-weight: 400;
+    }
+    .present-header__actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .btn {
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 0.55rem 1.15rem;
+      border-radius: 8px;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn--ghost {
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+    }
+    .btn--ghost:hover { background: rgba(255, 255, 255, 0.22); }
+    .btn--exit {
+      background: #fff;
+      color: var(--wd-blue-deep);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn--exit:hover { background: #f8fafc; }
+    .present-shell {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 1.5rem 2rem 2.5rem;
+    }
+    .watchlist-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 0.85rem 1rem 0.75rem;
+      margin-bottom: 0.85rem;
+    }
+    .watchlist-panel__title {
+      margin: 0 0 0.5rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .watchlist-panel__note {
+      margin: 0 0 0.6rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      line-height: 1.35;
+    }
+    .watchlist-panel__title::before {
+      content: "";
+      width: 4px;
+      height: 1.1em;
+      background: var(--wd-blue-bar);
+      border-radius: 2px;
+    }
+    .watchlist-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem 1rem;
+    }
+    @media (max-width: 900px) {
+      .watchlist-grid { grid-template-columns: 1fr; }
+    }
+    .watchlist-col__heading {
+      margin: 0 0 0.35rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    .watchlist-scroll {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-card-muted);
+    }
+    .watchlist-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.45rem;
+      padding: 0.35rem 0.55rem;
+      font-size: 0.8rem;
+      line-height: 1.35;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border);
+    }
+    .watchlist-row:last-child { border-bottom: none; }
+    .watchlist-row__text {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      word-break: break-word;
+    }
+    .watchlist-row__text .meta {
+      color: var(--text-secondary);
+    }
+    .watchlist-empty {
+      margin: 0;
+      padding: 0.4rem 0.55rem;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+    .badge {
+      display: inline-block;
+      flex-shrink: 0;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      line-height: 1.35;
+      white-space: nowrap;
+      text-align: center;
+    }
+    .badge--compact {
+      padding: 0.1rem 0.4rem;
+      font-size: 0.65rem;
+      font-weight: 700;
+      line-height: 1.25;
+      margin-top: 0.1rem;
+    }
+    .badge--red {
+      background-color: #fef2f2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
+    }
+    .badge--yellow {
+      background-color: #fefce8;
+      color: #92400e;
+      border: 1px solid #facc15;
+    }
+    .badge--green {
+      background-color: #ecfdf3;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+    .badge--unfavorable {
+      background-color: #fff7ed;
+      color: #c2410c;
+      border: 1px solid #fdba74;
+    }
+    .badge--neutral {
+      background-color: #f3f4f6;
+      color: #374151;
+      border: 1px solid #d1d5db;
+    }
+    .summary-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 1.15rem;
+      box-shadow: var(--shadow-sm);
+    }
+    @media (max-width: 720px) {
+      .summary-strip { grid-template-columns: repeat(2, 1fr); }
+    }
+    .summary-strip__cell {
+      padding: 0.65rem 0.5rem;
+      text-align: center;
+      border-right: 1px solid var(--border);
+    }
+    .summary-strip__cell:last-child { border-right: none; }
+    @media (max-width: 720px) {
+      .summary-strip__cell:nth-child(2) { border-right: none; }
+      .summary-strip__cell:nth-child(1),
+      .summary-strip__cell:nth-child(2) { border-bottom: 1px solid var(--border); }
+    }
+    .summary-strip__value {
+      font-size: clamp(1.5rem, 2.5vw, 1.85rem);
+      font-weight: 700;
+      color: var(--wd-blue-accent);
+      line-height: 1.2;
+    }
+    .summary-strip__label {
+      margin-top: 0.25rem;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    .agenda-section { margin-bottom: 1.5rem; }
+    .section-bar {
+      background: var(--wd-blue-bar);
+      color: #fff;
+      padding: 0.75rem 1.15rem;
+      font-size: 1rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+    .section-body {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 var(--radius) var(--radius);
+      padding: 1rem 1.15rem 1.25rem;
+    }
+    .agenda-card {
+      background: var(--bg-card-muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.15rem 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: var(--shadow-sm);
+    }
+    .agenda-card:last-child { margin-bottom: 0; }
+    .agenda-card__title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+    }
+    .agenda-card__title {
+      margin: 0;
+      font-size: clamp(1.05rem, 1.6vw, 1.2rem);
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.4;
+      flex: 1;
+      min-width: 0;
+    }
+    .agenda-card__lead {
+      margin: 0 0 0.85rem;
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+    }
+    .agenda-card__lead strong { color: #374151; }
+    .field-block {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.85rem 1rem;
+      margin-bottom: 0.55rem;
+    }
+    .field-block:last-child { margin-bottom: 0; }
+    .field-block__label {
+      margin: 0 0 0.35rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+    .field-block__text {
+      margin: 0;
+      font-size: clamp(0.95rem, 1.25vw, 1.05rem);
+      color: #374151;
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }
+    .agenda-empty {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--text-muted);
+      font-size: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <header class="present-header" role="banner">
+    <div class="present-header__brand">
+      <div class="presentation-logo-tile" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 1540 2000" role="img" aria-label="Workday">
+          <defs>
+            <style>
+              .wd-logo-0 { fill: #ffffff; }
+              .wd-logo-1 { fill: #0f2e66; }
+              .wd-logo-2 { fill: #fc5b05; }
+            </style>
+          </defs>
+          <g>
+            <rect class="wd-logo-0" x="0" y="0" width="1540" height="2000" />
+            <path class="wd-logo-1"
+              d="M1221.5,1999.8h-179.3c-26.9,0-49-12.3-56.3-41.9l-216-760.4-216,760.6
+                 c-7.3,29.6-29.4,41.9-56.3,41.9h-179.3c-29.4,0-46.7-12.3-56.3-41.9
+                 C146.5,1637.3,68.1,1318.5,1.8,997.7c-7.3-32.3,7.3-54.4,41.5-54.4h159.7
+                 c29.4,0,49,14.8,54.2,41.9c41.5,227.3,90.9,461.5,157.2,691.5l191.4-691.5
+                 c7.3-27.1,26.9-41.9,56.3-41.9h216c29.4,0,49,14.8,56.3,41.9l191.4,691.5
+                 c66.3-229.4,115.7-464.2,157.2-691.5c4.8-27.1,24.6-41.9,54.2-41.9h159.7
+                 c34.2,0,49,22.3,41.5,54.4c-66.3,320.9-144.7,639.6-260.1,960.4
+                 c-10,29.6-27.1,41.7-56.5,41.7Z"/>
+            <path class="wd-logo-2"
+              d="M375.1,408.1c105.5-105.7,245.7-163.7,395-163.9c149.1,0,289.2,58,394.4,163.3
+                 c54.8,54.8,96.6,118.9,124.3,188.7c6.3,16.1,22.1,26.7,39.4,26.7h168.7
+                 c28.2,0,49-27.1,40.9-54c-37.7-124.9-105.7-239.2-200.4-334.1
+                 C1185.9,83.6,984.5,0,770.3,0S354.2,83.6,202.6,235.4
+                 C107.7,330.3,39.8,444.6,2.4,569.1c-8.1,26.9,12.7,54,40.9,54h168.7
+                 c17.3,0,33-10.6,39.4-26.7C302.7,526.7,344.4,462.7,398.9,408.1Z"/>
+          </g>
+        </svg>
+      </div>
+      <div class="present-header__main">
+        <div class="present-header__title-row">
+          <h1>HC Wellness Leadership Agenda</h1>
+          <span class="pill" aria-label="View mode">Presentation Mode</span>
+        </div>
+        <p class="present-header__subtitle"><?= subtitle ?></p>
+      </div>
+    </div>
+    <div class="present-header__actions">
+      <button type="button" class="btn btn--ghost" id="btn-fullscreen" title="Enter browser fullscreen">Fullscreen</button>
+      <button type="button" class="btn btn--exit" id="btn-exit">Exit View</button>
+    </div>
+  </header>
+
+  <main class="present-shell">
+
+    <section class="watchlist-panel" aria-labelledby="watchlist-heading">
+      <h2 class="watchlist-panel__title" id="watchlist-heading">Discussion Watchlist</h2>
+      <p class="watchlist-panel__note">Watchlist includes current source items, not only selected agenda items.</p>
+      <div class="watchlist-grid">
+        <div class="watchlist-col">
+          <h3 class="watchlist-col__heading">Red Deployments (<?= watchlist.redDeployments ? watchlist.redDeployments.length : 0 ?>)</h3>
+          <div class="watchlist-scroll">
+          <? if (watchlist.redDeployments && watchlist.redDeployments.length) {
+               for (var ri = 0; ri < watchlist.redDeployments.length; ri++) {
+                 var redItem = watchlist.redDeployments[ri];
+          ?>
+          <div class="watchlist-row">
+            <span class="badge badge--compact badge--<?= redItem.badgeMod ?>"><?= redItem.badgeText ?></span>
+            <p class="watchlist-row__text">
+              <strong><?= redItem.accountName ?></strong>
+              <? if (redItem.partnerName) { ?>
+              <span class="meta"> — <?= redItem.partnerName ?></span>
+              <? } ?>
+              <? if (redItem.lead) { ?>
+              <span class="meta"> · Lead: <?= redItem.lead ?></span>
+              <? } ?>
+            </p>
+          </div>
+          <?   }
+             } else { ?>
+          <p class="watchlist-empty">No red deployments.</p>
+          <? } ?>
+          </div>
+        </div>
+        <div class="watchlist-col">
+          <h3 class="watchlist-col__heading">Unfavorable CSAT Accounts (<?= watchlist.unfavorableCsat ? watchlist.unfavorableCsat.length : 0 ?>)</h3>
+          <div class="watchlist-scroll">
+          <? if (watchlist.unfavorableCsat && watchlist.unfavorableCsat.length) {
+               for (var ui = 0; ui < watchlist.unfavorableCsat.length; ui++) {
+                 var unfavItem = watchlist.unfavorableCsat[ui];
+          ?>
+          <div class="watchlist-row">
+            <span class="badge badge--compact badge--<?= unfavItem.badgeMod ?>"><?= unfavItem.badgeText ?></span>
+            <p class="watchlist-row__text">
+              <strong><?= unfavItem.accountName ?></strong>
+              <? if (unfavItem.lead) { ?>
+              <span class="meta"> — CSM: <?= unfavItem.lead ?></span>
+              <? } ?>
+              <? if (unfavItem.sourceLabel) { ?>
+              <span class="meta"> · <?= unfavItem.sourceLabel ?></span>
+              <? } ?>
+            </p>
+          </div>
+          <?   }
+             } else { ?>
+          <p class="watchlist-empty">No unfavorable CSAT accounts.</p>
+          <? } ?>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-strip" aria-label="Agenda summary counts">
+      <div class="summary-strip__cell">
+        <div class="summary-strip__value"><?= summary.totalItems ?></div>
+        <div class="summary-strip__label">Total Agenda Items</div>
+      </div>
+      <div class="summary-strip__cell">
+        <div class="summary-strip__value"><?= summary.deploymentReviews ?></div>
+        <div class="summary-strip__label">Deployment Reviews</div>
+      </div>
+      <div class="summary-strip__cell">
+        <div class="summary-strip__value"><?= summary.redDeployments ?></div>
+        <div class="summary-strip__label">Red Deployments</div>
+      </div>
+      <div class="summary-strip__cell">
+        <div class="summary-strip__value"><?= summary.unfavorableCsat ?></div>
+        <div class="summary-strip__label">Unfavorable CSAT</div>
+      </div>
+    </section>
+
+    <? if (hasGroups) {
+         for (var g = 0; g < groups.length; g++) {
+           var group = groups[g];
+    ?>
+    <section class="agenda-section" aria-labelledby="group-<?= g ?>">
+      <div class="section-bar" id="group-<?= g ?>"><?= group.label ?> (<?= group.items.length ?>)</div>
+      <div class="section-body">
+        <? for (var i = 0; i < group.items.length; i++) {
+             var item = group.items[i];
+             var hsLower = String(item.healthStatus || '').toLowerCase();
+             var badgeMod = hsLower.indexOf('unfavorable') !== -1 ? 'unfavorable'
+               : (item.healthClass === 'red' ? 'red'
+               : (item.healthClass === 'yellow' ? 'yellow'
+               : (item.healthClass === 'green' ? 'green' : 'neutral')));
+        ?>
+        <article class="agenda-card">
+          <div class="agenda-card__title-row">
+            <h3 class="agenda-card__title"><?= item.titleText || item.account || 'Agenda Item' ?></h3>
+            <? if (item.healthStatus) { ?>
+            <span class="badge badge--<?= badgeMod ?>"><?= item.healthStatus ?></span>
+            <? } ?>
+          </div>
+          <? if (item.lead) { ?>
+          <p class="agenda-card__lead"><strong>Lead:</strong> <?= item.lead ?></p>
+          <? } ?>
+          <? if (item.currentState) { ?>
+          <div class="field-block">
+            <p class="field-block__label">Current State</p>
+            <p class="field-block__text"><?= item.currentState ?></p>
+          </div>
+          <? } ?>
+          <? if (item.desiredOutcome) { ?>
+          <div class="field-block">
+            <p class="field-block__label">Desired Outcome</p>
+            <p class="field-block__text"><?= item.desiredOutcome ?></p>
+          </div>
+          <? } ?>
+          <? if (item.futureState) { ?>
+          <div class="field-block">
+            <p class="field-block__label">Future State</p>
+            <p class="field-block__text"><?= item.futureState ?></p>
+          </div>
+          <? } ?>
+        </article>
+        <? } ?>
+      </div>
+    </section>
+    <?   }
+       } else { ?>
+    <section class="agenda-section">
+      <div class="section-bar">Agenda</div>
+      <div class="section-body">
+        <p class="agenda-empty"><strong>No agenda items</strong><br>Add items to the agenda in the HC Wellness app.</p>
+      </div>
+    </section>
+    <? } ?>
+
+  </main>
+
+  <script>
+    (function () {
+      var exitBtn = document.getElementById('btn-exit');
+      if (exitBtn) {
+        exitBtn.addEventListener('click', function () {
+          if (window.opener) {
+            window.close();
+            return;
+          }
+          window.close();
+          setTimeout(function () {
+            if (window.history.length > 1) {
+              window.history.back();
+            } else {
+              window.alert('You can close this tab to return to the HC Wellness app.');
+            }
+          }, 200);
+        });
+      }
+
+      var fsBtn = document.getElementById('btn-fullscreen');
+      if (fsBtn) {
+        fsBtn.addEventListener('click', function () {
+          var el = document.documentElement;
+          if (!document.fullscreenElement && el.requestFullscreen) {
+            el.requestFullscreen().catch(function () {});
+          } else if (document.exitFullscreen) {
+            document.exitFullscreen();
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

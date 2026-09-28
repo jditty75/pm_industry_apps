@@ -246,6 +246,7 @@ function applyLiveOverlayToAgendaItems_(items) {
       agendaOrder: item.agendaOrder,
       source: item.source,
       account: item.account,
+      partner: item.partner || '',
       id: item.id,
       lead: item.lead,
       currentState: item.currentState,
@@ -1325,13 +1326,53 @@ function renumberAgenda_() {
 
 
 /**
- * Simple HTML escaper.
+ * Decode common HTML entities in trusted sheet / Salesforce source text to plain text.
+ * Use before HtmlService template binding (<?= ?> escapes once at render) or before
+ * a single manual escapeHtml_ pass for string-built HTML.
+ * @param {*} value
+ * @return {string}
+ */
+function normalizeSourceText_(value) {
+  if (value == null) return '';
+  var s = String(value);
+  var prev;
+  var i;
+
+  for (i = 0; i < 3; i++) {
+    prev = s;
+    s = s.replace(/&#(\d+);/g, function (_, num) {
+      var code = parseInt(num, 10);
+      if (code >= 0 && code <= 0x10FFFF) {
+        return String.fromCharCode(code);
+      }
+      return '&#'.concat(num, ';');
+    });
+    s = s.replace(/&#x([0-9a-fA-F]+);/gi, function (_, hex) {
+      var code = parseInt(hex, 16);
+      if (code >= 0 && code <= 0x10FFFF) {
+        return String.fromCharCode(code);
+      }
+      return '&#x'.concat(hex, ';');
+    });
+    s = s.replace(/&quot;/gi, '"');
+    s = s.replace(/&apos;/gi, "'");
+    s = s.replace(/&lt;/gi, '<');
+    s = s.replace(/&gt;/gi, '>');
+    s = s.replace(/&amp;/gi, '&');
+    if (s === prev) break;
+  }
+  return s;
+}
+
+/**
+ * Simple HTML escaper (normalizes source entities, then escapes once).
+ * Do not pass the result into HtmlService <?= ?> — that tag escapes again.
  * @param {*} value
  * @return {string}
  */
 function escapeHtml_(value) {
   if (value == null) return '';
-  return String(value)
+  return String(normalizeSourceText_(value))
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

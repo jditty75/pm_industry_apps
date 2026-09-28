@@ -436,6 +436,9 @@
         z-index: 1000;
         padding: 12px;
       }
+      #emailReviewModalBackdrop {
+        z-index: 1100;
+      }
       .modal {
         background: #ffffff;
         padding: 14px;
@@ -470,6 +473,169 @@
         border-radius: var(--radius-md);
         border: 1px solid #e5e7eb;
         background: #ffffff;
+      }
+      .modal.email-review-modal {
+        max-width: 960px;
+        max-height: 92vh;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .email-review-header {
+        flex-shrink: 0;
+        padding: 16px 18px 6px;
+        border-bottom: 1px solid #f3f4f6;
+      }
+      .email-review-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 18px 4px;
+      }
+      .email-review-modal .modal-footer {
+        flex-shrink: 0;
+        margin-top: 0;
+        padding: 12px 18px 14px;
+        border-top: 1px solid #e5e7eb;
+        background: #fafafa;
+        border-radius: 0 0 16px 16px;
+      }
+      .email-review-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .email-meta-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+      }
+      .email-meta-card {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border-subtle);
+        background: #f9fafb;
+        font-size: 0.78rem;
+      }
+      .email-meta-card dt {
+        margin: 0 0 2px;
+        font-size: 0.68rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+      }
+      .email-meta-card dd {
+        margin: 0;
+        font-weight: 500;
+        font-size: 0.8rem;
+        line-height: 1.35;
+      }
+      .email-field label {
+        display: block;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+      .email-field-hint {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+        line-height: 1.35;
+      }
+      .email-field-error {
+        display: none;
+        margin-top: 6px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #fecaca;
+        background: #fef2f2;
+        color: #b91c1c;
+        font-size: 0.78rem;
+        line-height: 1.45;
+      }
+      .email-field-error.visible {
+        display: block;
+      }
+      .email-to-editor,
+      .email-subject-input,
+      .email-body-editor {
+        width: 100%;
+        box-sizing: border-box;
+        font-family: inherit;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        border-radius: 8px;
+        border: 1px solid #d1d5db;
+        padding: 8px 10px;
+        background: #ffffff;
+      }
+      .email-to-editor {
+        min-height: 88px;
+        resize: vertical;
+      }
+      .email-subject-input {
+        padding: 9px 10px;
+      }
+      .email-body-editor {
+        min-height: 220px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.75rem;
+        resize: vertical;
+      }
+      .email-body-tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+      }
+      .email-body-tab {
+        border: 1px solid #d1d5db;
+        background: #f9fafb;
+        color: #374151;
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .email-body-tab.active {
+        background: #1d4ed8;
+        border-color: #1d4ed8;
+        color: #ffffff;
+      }
+      .email-body-preview {
+        width: 100%;
+        height: min(48vh, 420px);
+        border-radius: var(--radius-md);
+        border: 1px solid #e5e7eb;
+        background: #ffffff;
+      }
+      .email-body-panel {
+        display: none;
+      }
+      .email-body-panel.active {
+        display: block;
+      }
+      .email-review-warnings {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #fde68a;
+        background: #fffbeb;
+        color: #92400e;
+        font-size: 0.78rem;
+        line-height: 1.45;
+      }
+      .email-review-warnings ul {
+        margin: 4px 0 0;
+        padding-left: 18px;
+      }
+      .email-review-loading {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        padding: 16px 18px;
       }
       @media (max-width: 640px) {
         #shell {
@@ -614,6 +780,7 @@
 
       <div class="main-actions">
         <button class="btn btn-primary" onclick="buildPreview()">Preview Agenda</button>
+        <button class="btn btn-secondary" onclick="openPresentAgendaView()">Present Agenda</button>
         <button class="btn btn-secondary" onclick="saveAll()">Save Selections &amp; Agenda</button>
         <button class="btn btn-secondary" onclick="openManualModal()">Add Manual Item</button>
         <button class="btn btn-ghost" onclick="openAdminPanel()">Admin</button>
@@ -789,6 +956,82 @@
               <iframe id="previewFrameModal"></iframe>
               <div class="modal-footer">
                 <button class="btn btn-primary" onclick="closePreviewModal()">Close</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Email send review modal -->
+          <div id="emailReviewModalBackdrop" class="modal-backdrop">
+            <div class="modal email-review-modal">
+              <div class="email-review-header">
+                <h3 id="emailReviewTitle">Review Email</h3>
+                <div id="emailReviewSubtitle" class="modal-subtitle">
+                  Review and edit before sending.
+                </div>
+              </div>
+              <div id="emailReviewLoading" class="email-review-loading" style="display:none;">
+                Building email preview…
+              </div>
+              <div id="emailReviewScroll" class="email-review-scroll" style="display:none;">
+                <div id="emailReviewContent" class="email-review-grid">
+                  <dl class="email-meta-strip">
+                    <div class="email-meta-card">
+                      <dt>Email type</dt>
+                      <dd id="emailReviewType">—</dd>
+                    </div>
+                    <div class="email-meta-card">
+                      <dt>Meeting date</dt>
+                      <dd id="emailReviewMeetingDate">—</dd>
+                    </div>
+                    <div class="email-meta-card">
+                      <dt>Reminder date</dt>
+                      <dd id="emailReviewReminderDate">—</dd>
+                    </div>
+                    <div class="email-meta-card">
+                      <dt>Delivery date</dt>
+                      <dd id="emailReviewDeliveryDate">—</dd>
+                    </div>
+                    <div class="email-meta-card" id="emailReviewDeadlineWrap">
+                      <dt>Submission deadline</dt>
+                      <dd id="emailReviewDeadline">—</dd>
+                    </div>
+                  </dl>
+                  <div class="email-field email-to-field">
+                    <label for="emailReviewToInput">To (<span id="emailReviewRecipientCount">0</span> recipients)</label>
+                    <textarea id="emailReviewToInput" class="email-to-editor" rows="4" spellcheck="false" placeholder="Name &lt;email@domain.com&gt;"></textarea>
+                    <div class="email-field-hint">One recipient per line or comma-separated. Use Name &lt;email@domain.com&gt; when available.</div>
+                    <div id="emailReviewToError" class="email-field-error" role="alert"></div>
+                  </div>
+                  <div class="email-field">
+                    <label for="emailReviewSubjectInput">Subject</label>
+                    <input type="text" id="emailReviewSubjectInput" class="email-subject-input" autocomplete="off">
+                    <div id="emailReviewSubjectError" class="email-field-error" role="alert"></div>
+                  </div>
+                  <div id="emailReviewWarningsWrap" class="email-field" style="display:none;">
+                    <label>Warnings</label>
+                    <div id="emailReviewWarnings" class="email-review-warnings"></div>
+                  </div>
+                  <div class="email-field">
+                    <label>Body</label>
+                    <div class="email-body-tabs">
+                      <button type="button" id="emailBodyTabEdit" class="email-body-tab active" onclick="setEmailBodyTab('edit')">Edit HTML</button>
+                      <button type="button" id="emailBodyTabPreview" class="email-body-tab" onclick="setEmailBodyTab('preview')">Preview</button>
+                    </div>
+                    <div id="emailBodyPanelEdit" class="email-body-panel active">
+                      <textarea id="emailReviewBodyHtml" class="email-body-editor" spellcheck="false"></textarea>
+                    </div>
+                    <div id="emailBodyPanelPreview" class="email-body-panel">
+                      <iframe id="emailReviewFrame" class="email-body-preview" title="Email body preview"></iframe>
+                    </div>
+                    <div id="emailReviewBodyError" class="email-field-error" role="alert"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" onclick="closeEmailReviewModal()">Cancel</button>
+                <button type="button" id="emailReviewSendBtn" class="btn btn-primary" onclick="confirmSendReviewedEmail()" disabled>
+                  Send Email
+                </button>
               </div>
             </div>
           </div>
@@ -2719,6 +2962,43 @@ ${existing.futureState || ''}</textarea>
               .getAgendaEmailPreviewHtml();
           }
 
+          function openPresentAgendaView() {
+            var win = window.open('', '_blank');
+            if (!win) {
+              alert('Unable to open a new tab. Please allow pop-ups for this site and try again.');
+              return;
+            }
+            win.document.open();
+            win.document.write(
+              '<!doctype html><html><head><meta charset="UTF-8"><title>Present Agenda</title></head>' +
+              '<body style="font-family:Segoe UI,sans-serif;padding:2rem;color:#374151;">' +
+              'Building presentation agenda&hellip;</body></html>'
+            );
+            win.document.close();
+
+            google.script.run
+              .withSuccessHandler(function (html) {
+                win.document.open();
+                win.document.write(html);
+                win.document.close();
+              })
+              .withFailureHandler(function (err) {
+                var msg = err && err.message ? err.message : String(err);
+                alert('Error building presentation agenda: ' + msg);
+                win.document.open();
+                win.document.write(
+                  '<!doctype html><html><head><meta charset="UTF-8"><title>Present Agenda — Error</title></head>' +
+                  '<body style="font-family:Segoe UI,sans-serif;padding:2rem;max-width:640px;margin:0 auto;">' +
+                  '<h1 style="color:#b91c1c;">Unable to build presentation</h1>' +
+                  '<p>' + escapeHtmlClient(msg) + '</p>' +
+                  '<p><button type="button" onclick="window.close()">Close tab</button></p>' +
+                  '</body></html>'
+                );
+                win.document.close();
+              })
+              .buildPresentAgendaHtmlForUI();
+          }
+
           function saveAll() {
             const payload = buildPayload();
 
@@ -2738,44 +3018,363 @@ ${existing.futureState || ''}</textarea>
               .saveSelectionsAndAgenda(payload);
           }
 
-          function sendAgenda() {
+          let emailReviewPendingType = null;
+          let emailReviewMetadata = null;
+
+          function escapeHtmlClient(text) {
+            if (text == null) return '';
+            return String(text)
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;');
+          }
+
+          function formatReviewDate(value) {
+            if (!value) return '—';
+            const d = new Date(value);
+            if (!isNaN(d.getTime())) {
+              return d.toLocaleDateString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+              });
+            }
+            return String(value);
+          }
+
+          function sanitizeHtmlForPreviewClient(html) {
+            return String(html || '')
+              .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+              .replace(/\son\w+\s*=\s*(".*?"|'.*?'|[^\s>]+)/gi, '');
+          }
+
+          function splitRecipientTokensClient(toText) {
+            const tokens = [];
+            String(toText || '').split(/\r?\n/).forEach(line => {
+              line = String(line || '').trim();
+              if (!line) return;
+              if (line.indexOf('<') >= 0 && line.indexOf('>') > line.indexOf('<')) {
+                tokens.push(line);
+                return;
+              }
+              line.split(',').forEach(part => {
+                part = String(part || '').trim();
+                if (part) tokens.push(part);
+              });
+            });
+            return tokens;
+          }
+
+          function isValidEmailClient(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+          }
+
+          function parseRecipientTokenClient(token) {
+            const raw = String(token || '').trim();
+            if (!raw) return { error: '(empty entry)' };
+            const angle = raw.match(/^(.+?)\s*<([^>]+)>$/);
+            if (angle) {
+              const name = String(angle[1] || '').trim();
+              const email = String(angle[2] || '').trim();
+              if (!isValidEmailClient(email)) return { error: raw };
+              return {
+                name,
+                email,
+                display: name ? name + ' <' + email + '>' : email
+              };
+            }
+            if (isValidEmailClient(raw)) {
+              return { name: '', email: raw, display: raw };
+            }
+            return { error: raw };
+          }
+
+          function parseRecipientsFromUiTextClient(toText) {
+            const tokens = splitRecipientTokensClient(toText);
+            const errors = [];
+            const warnings = [];
+            const seen = {};
+            const recipients = [];
+
+            if (!tokens.length) {
+              errors.push('Enter at least one recipient.');
+              return { recipients, errors, warnings };
+            }
+
+            tokens.forEach(token => {
+              const parsed = parseRecipientTokenClient(token);
+              if (parsed.error) {
+                errors.push('Invalid recipient: ' + parsed.error);
+                return;
+              }
+              const key = parsed.email.toLowerCase();
+              if (seen[key]) {
+                warnings.push('Duplicate ignored: ' + parsed.email);
+                return;
+              }
+              seen[key] = true;
+              recipients.push(parsed);
+            });
+
+            if (!recipients.length && !errors.length) {
+              errors.push('No valid recipients after parsing.');
+            }
+
+            return { recipients, errors, warnings };
+          }
+
+          function showEmailFieldError(elId, message) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            if (message) {
+              el.textContent = message;
+              el.classList.add('visible');
+            } else {
+              el.textContent = '';
+              el.classList.remove('visible');
+            }
+          }
+
+          function updateEmailReviewRecipientCount() {
+            const parsed = parseRecipientsFromUiTextClient(
+              document.getElementById('emailReviewToInput').value
+            );
+            document.getElementById('emailReviewRecipientCount').textContent =
+              String(parsed.recipients.length);
+            const sendBtn = document.getElementById('emailReviewSendBtn');
+            if (sendBtn && sendBtn.textContent.indexOf('Sending') < 0) {
+              sendBtn.disabled = parsed.recipients.length === 0;
+            }
+          }
+
+          function setEmailBodyTab(mode) {
+            const editTab = document.getElementById('emailBodyTabEdit');
+            const previewTab = document.getElementById('emailBodyTabPreview');
+            const editPanel = document.getElementById('emailBodyPanelEdit');
+            const previewPanel = document.getElementById('emailBodyPanelPreview');
+            const isPreview = mode === 'preview';
+            editTab.classList.toggle('active', !isPreview);
+            previewTab.classList.toggle('active', isPreview);
+            editPanel.classList.toggle('active', !isPreview);
+            previewPanel.classList.toggle('active', isPreview);
+            if (isPreview) {
+              refreshEmailBodyPreview();
+            }
+          }
+
+          function refreshEmailBodyPreview() {
+            const html = document.getElementById('emailReviewBodyHtml').value;
+            const frame = document.getElementById('emailReviewFrame');
+            frame.srcdoc = sanitizeHtmlForPreviewClient(html);
+          }
+
+          function validateEmailReviewForm() {
+            showEmailFieldError('emailReviewToError', '');
+            showEmailFieldError('emailReviewSubjectError', '');
+            showEmailFieldError('emailReviewBodyError', '');
+
+            const parsed = parseRecipientsFromUiTextClient(
+              document.getElementById('emailReviewToInput').value
+            );
+            if (parsed.errors.length) {
+              showEmailFieldError('emailReviewToError', parsed.errors.join('\n'));
+            }
+
+            const subject = document.getElementById('emailReviewSubjectInput').value.trim();
+            if (!subject) {
+              showEmailFieldError('emailReviewSubjectError', 'Subject is required.');
+            }
+
+            const htmlBody = document.getElementById('emailReviewBodyHtml').value.trim();
+            if (!htmlBody) {
+              showEmailFieldError('emailReviewBodyError', 'Email body HTML is required.');
+            }
+
+            const ok =
+              !parsed.errors.length &&
+              parsed.recipients.length > 0 &&
+              !!subject &&
+              !!htmlBody;
+
+            return {
+              ok,
+              recipients: parsed.recipients,
+              subject,
+              htmlBody,
+              warnings: parsed.warnings
+            };
+          }
+
+          function buildEmailReviewSendPayload() {
+            const validation = validateEmailReviewForm();
+            if (!validation.ok) {
+              return null;
+            }
+            return {
+              type: emailReviewPendingType,
+              toText: document.getElementById('emailReviewToInput').value,
+              subject: validation.subject,
+              htmlBody: validation.htmlBody,
+              metadata: emailReviewMetadata || {}
+            };
+          }
+
+          function openEmailReviewModal(type) {
+            emailReviewPendingType = type;
+            emailReviewMetadata = null;
+            const backdrop = document.getElementById('emailReviewModalBackdrop');
+            const title = document.getElementById('emailReviewTitle');
+            const sendBtn = document.getElementById('emailReviewSendBtn');
+            title.textContent = type === 'reminder' ? 'Review Reminder Email' : 'Review Agenda Email';
+            sendBtn.textContent = type === 'reminder' ? 'Send Reminder Email' : 'Send Agenda Email';
+            sendBtn.disabled = true;
+            showEmailFieldError('emailReviewToError', '');
+            showEmailFieldError('emailReviewSubjectError', '');
+            showEmailFieldError('emailReviewBodyError', '');
+            document.getElementById('emailReviewLoading').style.display = 'block';
+            document.getElementById('emailReviewScroll').style.display = 'none';
+            backdrop.style.display = 'flex';
+            setEmailBodyTab('edit');
+
+            const builder =
+              type === 'reminder'
+                ? 'buildReminderEmailPreviewForUI'
+                : 'buildAgendaEmailPreviewForUI';
+
             google.script.run
-              .withSuccessHandler(count => {
-                if (!confirm('Send to ' + count + ' recipients via BCC?')) return;
-                google.script.run
-                  .withSuccessHandler(res => {
-                    alert('Agenda email sent to ' + res.recipientCount + ' recipients.');
-                    loadMeetingState();
-                  })
-                  .withFailureHandler(err => {
-                    alert('Error sending agenda email: ' + err.message);
-                  })
-                  .sendAgendaEmail();
+              .withSuccessHandler(populateEmailReviewModal)
+              .withFailureHandler(err => {
+                closeEmailReviewModal();
+                alert('Error building email preview: ' + err.message);
+              })
+              [builder]();
+          }
+
+          function populateEmailReviewModal(preview) {
+            if (!preview) {
+              closeEmailReviewModal();
+              alert('Email preview was empty.');
+              return;
+            }
+
+            emailReviewPendingType = preview.type || emailReviewPendingType;
+            emailReviewMetadata = preview.metadata || {
+              meetingDate: preview.meetingDate,
+              meetingDateRaw: preview.meetingDateRaw,
+              reminderDate: preview.reminderDate,
+              deliveryDate: preview.deliveryDate,
+              submissionDeadline: preview.deadline
+            };
+
+            const typeLabel =
+              preview.type === 'reminder' ? 'Reminder' : 'Agenda';
+            document.getElementById('emailReviewType').textContent = typeLabel;
+            document.getElementById('emailReviewMeetingDate').textContent =
+              preview.meetingDate || formatReviewDate(preview.meetingDateRaw) || '—';
+            document.getElementById('emailReviewReminderDate').textContent =
+              formatReviewDate(preview.reminderDate);
+            document.getElementById('emailReviewDeliveryDate').textContent =
+              formatReviewDate(preview.deliveryDate);
+
+            const deadlineWrap = document.getElementById('emailReviewDeadlineWrap');
+            const deadlineText = preview.deadline || preview.metadata?.submissionDeadline || '';
+            if (deadlineText) {
+              deadlineWrap.style.display = '';
+              document.getElementById('emailReviewDeadline').textContent = deadlineText;
+            } else {
+              deadlineWrap.style.display = 'none';
+            }
+
+            const toLines = (preview.to || []).map(r => r.display || r.email || '').filter(Boolean);
+            document.getElementById('emailReviewToInput').value = toLines.join('\n');
+            document.getElementById('emailReviewSubjectInput').value = preview.subject || '';
+            document.getElementById('emailReviewBodyHtml').value = preview.htmlBody || '';
+
+            const warnings = preview.warnings || [];
+            const warnWrap = document.getElementById('emailReviewWarningsWrap');
+            if (warnings.length) {
+              warnWrap.style.display = '';
+              document.getElementById('emailReviewWarnings').innerHTML =
+                '<ul><li>' + warnings.map(w => escapeHtmlClient(w)).join('</li><li>') + '</li></ul>';
+            } else {
+              warnWrap.style.display = 'none';
+            }
+
+            document.getElementById('emailReviewFrame').srcdoc = '';
+            updateEmailReviewRecipientCount();
+
+            document.getElementById('emailReviewLoading').style.display = 'none';
+            document.getElementById('emailReviewScroll').style.display = 'block';
+          }
+
+          function closeEmailReviewModal() {
+            document.getElementById('emailReviewModalBackdrop').style.display = 'none';
+            emailReviewPendingType = null;
+            emailReviewMetadata = null;
+            document.getElementById('emailReviewFrame').srcdoc = '';
+            document.getElementById('emailReviewToInput').value = '';
+            document.getElementById('emailReviewSubjectInput').value = '';
+            document.getElementById('emailReviewBodyHtml').value = '';
+            const sendBtn = document.getElementById('emailReviewSendBtn');
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Send Email';
+          }
+
+          function confirmSendReviewedEmail() {
+            const type = emailReviewPendingType;
+            if (!type) return;
+
+            const payload = buildEmailReviewSendPayload();
+            if (!payload) {
+              updateEmailReviewRecipientCount();
+              return;
+            }
+
+            const sendBtn = document.getElementById('emailReviewSendBtn');
+            const originalLabel = sendBtn.textContent;
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending…';
+
+            const sender =
+              type === 'reminder' ? 'sendReminderEmailForUI' : 'sendAgendaEmailForUI';
+
+            google.script.run
+              .withSuccessHandler(res => {
+                closeEmailReviewModal();
+                const n = res && res.recipientCount != null ? res.recipientCount : 0;
+                alert(
+                  (type === 'reminder' ? 'Reminder' : 'Agenda') +
+                  ' email sent to ' + n + ' recipient(s) in To.'
+                );
+                loadMeetingState();
               })
               .withFailureHandler(err => {
-                alert('Error checking recipients: ' + err.message);
+                sendBtn.disabled = false;
+                sendBtn.textContent = originalLabel;
+                alert('Error sending email: ' + err.message);
               })
-              .getRecipientCount();
+              [sender](payload);
+          }
+
+          (function bindEmailReviewComposerInputs() {
+            const toInput = document.getElementById('emailReviewToInput');
+            if (toInput) {
+              toInput.addEventListener('input', updateEmailReviewRecipientCount);
+            }
+          })();
+
+          function openEmailReviewFromAdmin(type) {
+            closeAdminPanel();
+            openEmailReviewModal(type);
+          }
+
+          function sendAgenda() {
+            openEmailReviewFromAdmin('agenda');
           }
 
           function sendReminder() {
-            google.script.run
-              .withSuccessHandler(count => {
-                if (!confirm('Send reminder to ' + count + ' recipients via BCC?')) return;
-                google.script.run
-                  .withSuccessHandler(res => {
-                    alert('Reminder email sent to ' + res.recipientCount + ' recipients.');
-                    loadMeetingState();
-                  })
-                  .withFailureHandler(err => {
-                    alert('Error sending reminder email: ' + err.message);
-                  })
-                  .sendAgendaReminderEmail();
-              })
-              .withFailureHandler(err => {
-                alert('Error checking recipients: ' + err.message);
-              })
-              .getRecipientCount();
+            openEmailReviewFromAdmin('reminder');
           }
 
           function renderReorderList() {

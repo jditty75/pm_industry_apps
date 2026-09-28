@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="300" viewBox="0 0 720 300">
+  <rect x="0" y="0" width="720" height="300" rx="16" fill="#FFFFFF" />
+  <rect x="2" y="2" width="716" height="296" rx="14" fill="none" stroke="#D7E3F3" stroke-width="3" />
+
+  <circle cx="360" cy="92" r="44" fill="#F2F6FC" stroke="#D7E3F3" stroke-width="2" />
+
+  <!-- Civic / government building icon -->
+  <g transform="translate(360,92)" fill="none" stroke="#005CB9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M -24,-4 L 0,-22 L 24,-4" />
+    <line x1="-26" y1="-4" x2="26" y2="-4" />
+    <line x1="-15" y1="-2" x2="-15" y2="14" />
+    <line x1="-5" y1="-2" x2="-5" y2="14" />
+    <line x1="5" y1="-2" x2="5" y2="14" />
+    <line x1="15" y1="-2" x2="15" y2="14" />
+    <line x1="-28" y1="14" x2="28" y2="14" />
+    <line x1="-32" y1="20" x2="32" y2="20" />
+  </g>
+
+  <text x="360" y="196" text-anchor="middle" dominant-baseline="central"
+        font-family="Segoe UI" font-weight="700" font-size="32" fill="#12376D">State &amp; Local Government</text>
+  <rect x="325" y="222" width="70" height="4" rx="2" fill="#FF5C00" />
+</svg>

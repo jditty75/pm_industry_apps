@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="160" viewBox="0 0 1440 160">
+  <rect x="0" y="0" width="1440" height="160" fill="#F7F3E8" />
+  <text x="720" y="78" text-anchor="middle" dominant-baseline="central"
+        font-family="Segoe UI" font-weight="700" font-size="44" fill="#12376D">Product Portfolio Apps</text>
+  <rect x="660" y="108" width="120" height="4" rx="2" ry="2" fill="#FF5C00" />
+</svg>

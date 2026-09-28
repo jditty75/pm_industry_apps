@@ -187,7 +187,7 @@ var APP_CONFIG = {
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
       allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'Paradox \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'Paradox - Monthly Deployment Health Report - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },
@@ -258,7 +258,7 @@ var APP_CONFIG = {
     editModal: {
       ownerFieldLabel: 'Delivery Director',
       ownerInputType: 'dropdown',
-      ownerOptions: ['Steve Rogers', 'Roman Cortes', 'Lakshmi Visvanathan']
+      ownerOptions: ['']
     },
 
     productFilter: {

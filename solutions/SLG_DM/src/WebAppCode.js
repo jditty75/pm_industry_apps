@@ -355,6 +355,58 @@ function getPortfolioMomentumData() {
   return CoreLib.CorePortfolioMomentum.getMomentumSnapshot(APP_CONFIG);
 }
 
+/**
+ * Portfolio Momentum diagnostics for Apps Script editor / UI troubleshooting.
+ * @return {Object}
+ */
+function debugPortfolioMomentumForUI() {
+  return CoreLib.CorePortfolioMomentum.getMomentumDebugSummary(APP_CONFIG);
+}
+
+/**
+ * @return {Object|null} Same payload the web app receives.
+ */
+function debugMomentumSnapshotForUI() {
+  return CoreLib.CorePortfolioMomentum.getMomentumSnapshot(APP_CONFIG);
+}
+
+/**
+ * @return {Object} Chart-relevant fields from the momentum snapshot.
+ */
+function debugMomentumRenderingPayloadForUI() {
+  var snap = CoreLib.CorePortfolioMomentum.getMomentumSnapshot(APP_CONFIG);
+  if (!snap) return { enabled: false };
+  var legend = snap.chartLegend;
+  var series = (legend && legend.length) ? legend : (snap.platforms || []);
+  var allFys = (snap.chartPeriods && snap.chartPeriods.length)
+    ? snap.chartPeriods
+    : (snap.historicalFys || []).concat(snap.currentFy ? [{
+      label: snap.currentFy.label + ' ' + snap.currentFy.inProgressLabel,
+      counts: snap.currentFy.counts,
+      totalGoLives: snap.currentFy.totalGoLives,
+      isCurrent: true
+    }] : []);
+  return {
+    mode: snap.mode,
+    periodView: snap.periodView,
+    chartLegend: snap.chartLegend,
+    platforms: snap.platforms,
+    effectiveChartSeries: series,
+    chartPeriods: snap.chartPeriods,
+    historicalFys: snap.historicalFys,
+    currentFy: snap.currentFy,
+    currentFyH1Actual: snap.currentFyH1Actual || null,
+    currentFyH2Projected: snap.currentFyH2Projected || null,
+    currentFyProjectedTotal: snap.currentFyProjectedTotal || null,
+    currentFySplitSummary: snap.currentFySplitSummary || null,
+    dataLimitations: snap.dataLimitations || [],
+    chartGroupCount: allFys.length,
+    chartDataPointCount: allFys.reduce(function (n, fy) {
+      return n + (fy && fy.counts ? Object.keys(fy.counts).length : 0);
+    }, 0)
+  };
+}
+
 // ============================================================================
 // PHASE 1 — OVERRIDE / META UPDATES (unchanged — audit wiring lives in CoreData)
 // ============================================================================

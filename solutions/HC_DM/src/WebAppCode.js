@@ -308,6 +308,44 @@ function sendTestNotification(notificationKey, recipient) {
 }
 
 /**
+ * Forces Gmail + userinfo OAuth consent in the HC container-bound project.
+ * Run from the Apps Script editor after pushing appsscript.json scope changes.
+ * @return {void}
+ */
+function authorizeNotificationScopes() {
+  Logger.log('authorizeNotificationScopes: activeUser=' + Session.getActiveUser().getEmail());
+  GmailApp.getAliases();
+  Logger.log('authorizeNotificationScopes: Gmail aliases loaded');
+}
+
+/**
+ * Editor-runnable test helper: [TEST] N8 monthly report to Jeff only (same Gmail path as production).
+ * @return {{status: string, error?: string}}
+ */
+function testMonthlyReportNotification() {
+  Logger.log('testMonthlyReportNotification: to=jeffrey.ditty@workday.com');
+  return CoreLib.CoreDistribute.sendMonthlyReportTest(
+    APP_CONFIG,
+    'jeffrey.ditty@workday.com'
+  );
+}
+
+/**
+ * Editor-runnable test helper: [TEST] DD Digest (notification key dd_digest) to Jeff only.
+ * Does not change NotificationConfig production recipients. Prefer this over the sheet-menu
+ * handlers in Code.js when running from the Apps Script editor (no SpreadsheetApp UI prompt).
+ * @return {boolean}
+ */
+function testDdDigestNotification() {
+  Logger.log('testDdDigestNotification: key=dd_digest to=jeffrey.ditty@workday.com');
+  return CoreLib.CoreNotify.sendTestNotification(
+    APP_CONFIG,
+    'dd_digest',
+    'jeffrey.ditty@workday.com'
+  );
+}
+
+/**
  * One-time idempotent setup for the NotificationConfig sheet tab.
  * @return {void}
  */

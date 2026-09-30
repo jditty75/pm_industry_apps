@@ -345,8 +345,9 @@ function getDdAssignmentsFromContacts_(config) {
     if (!deployId) continue;
     if (!email) continue;
 
-    if (!ddMap[deployId]) ddMap[deployId] = [];
-    ddMap[deployId].push({ email: email, name: name });
+    var canonDeployId = deployId.length >= 18 ? deployId.slice(0, 18) : deployId;
+    if (!ddMap[canonDeployId]) ddMap[canonDeployId] = [];
+    ddMap[canonDeployId].push({ email: email, name: name });
   }
 
   Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_(' + appId + '): built DD map for ' +

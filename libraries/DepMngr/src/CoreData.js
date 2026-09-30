@@ -3208,13 +3208,13 @@ var CoreData = (function () {
   function _attachDdContactsToRows_(rows, cfg) {
     var ddMap = {};
     try {
-      ddMap = getDdAssignmentsFromContacts_(cfg) || {};
+      ddMap = _canonicalizeDdAssignmentsMap_(getDdAssignmentsFromContacts_(cfg) || {});
     } catch (e) {
       Logger.log('CoreData._attachDdContactsToRows_: getDdAssignmentsFromContacts_ failed: ' + e);
     }
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-      var lookupId = row.parentDeploymentId || row.deploymentId;
+      var lookupId = _canonicalId_(row.parentDeploymentId || row.deploymentId);
       var contacts = ddMap[lookupId] || [];
       row.ddContacts = contacts;
       row.ddFromContacts = contacts.length === 0 ? null
@@ -10464,6 +10464,28 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Merges DD assignment lists under canonical deployment Id keys (15/18-char safe).
+   * @param {Object} ddMap
+   * @return {Object<string, Array<{email:string,name:string}>>}
+   * @private
+   */
+  function _canonicalizeDdAssignmentsMap_(ddMap) {
+    var out = {};
+    if (!ddMap) return out;
+    Object.keys(ddMap).forEach(function (depId) {
+      var canon = _canonicalId_(depId);
+      if (!canon) return;
+      var chunk = ddMap[depId] || [];
+      if (!out[canon]) {
+        out[canon] = chunk.slice();
+        return;
+      }
+      out[canon] = out[canon].concat(chunk);
+    });
+    return out;
+  }
+
+  /**
    * @param {Object|null} a
    * @param {Object|null} b
    * @return {Object|null}
@@ -10648,16 +10670,71 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Display name for Deployment Sponsor contacts (D1 / DD digest grouping).
+   * @param {Object|null} contactsEntry  getDeploymentContactsMap_ bucket
+   * @param {Array<{email:string,name:string}>|null} ddList  getDdAssignmentsFromContacts_ list
+   * @return {string}
+   * @private
+   */
+  function _deploymentSponsorDisplayName_(contactsEntry, ddList) {
+    var list = (ddList && ddList.length) ? ddList : null;
+    if (!list && contactsEntry && contactsEntry.wdSponsor) {
+      var ws = contactsEntry.wdSponsor;
+      var solo = String(ws.name || '').trim() || String(ws.email || '').trim();
+      return solo;
+    }
+    if (!list || !list.length) return '';
+    if (list.length === 1) {
+      return String(list[0].name || list[0].email || '').trim();
+    }
+    return list.map(function (c) { return c.name || c.email; }).filter(Boolean).join(', ');
+  }
+
+  /**
+   * Resolves Delivery Director label for MDS/PGL rows (matches UI precedence where possible).
+   * Precedence: DeploymentsMeta > row.deliveryDirector > ddFromContacts > Deployment Sponsor
+   * contacts > SFDC DAM (damFullName).
+   *
+   * @param {Object} r  Active deployment row
+   * @param {Object} metaEntry  DeploymentsMeta entry for canonical deployment Id
+   * @param {Object|null} contactsEntry
+   * @param {Array<{email:string,name:string}>|null} ddList
+   * @return {{name: string, source: string}}
+   * @private
+   */
+  function _resolveMdsPglDeliveryDirector_(r, metaEntry, contactsEntry, ddList) {
+    var fromMeta = metaEntry && String(metaEntry.deliveryDirector || '').trim();
+    if (fromMeta) return { name: fromMeta, source: 'meta' };
+
+    var fromRow = String(r.deliveryDirector || '').trim();
+    if (fromRow) return { name: fromRow, source: 'rowDeliveryDirector' };
+
+    if (r.ddFromContacts && String(r.ddFromContacts).trim()) {
+      return { name: String(r.ddFromContacts).trim(), source: 'ddFromContacts' };
+    }
+
+    var sponsor = _deploymentSponsorDisplayName_(contactsEntry, ddList);
+    if (sponsor) return { name: sponsor, source: 'deploymentSponsor' };
+
+    var dam = String(r.damFullName || '').trim();
+    if (dam) return { name: dam, source: 'damFullName' };
+
+    return { name: '', source: 'none' };
+  }
+
+  /**
    * Builds flat MDS/PGL survey rows for collapsed Active deployments.
    * @param {AppConfig} cfg
    * @param {Array<Object>} activeRows
    * @param {Object} productRowsByDep
    * @param {Object} contactsMap
    * @param {Array<Object>} scheduleByMonth
+   * @param {Object} metaMap
+   * @param {Object} ddMap
    * @return {Array<Object>}
    * @private
    */
-  function _buildMdsPglSurveyRowsFromActive_(cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth) {
+  function _buildMdsPglSurveyRowsFromActive_(cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth, metaMap, ddMap) {
     var clusterDays = CoreConfig.getMgmPglGoLiveEventClusterDays(cfg);
     var allRows = [];
     activeRows.forEach(function (r) {
@@ -10697,11 +10774,16 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           sourceDates.length > 1 ||
           ((ev.products || []).length > 1);
 
+        var metaEntry = (metaMap && metaMap[canonDep]) || {};
+        var contactsEntry = contactsMap[canonDep] || null;
+        var ddList = (ddMap && (ddMap[canonDep] || ddMap[r.deploymentId])) || [];
+        var ddResolved = _resolveMdsPglDeliveryDirector_(r, metaEntry, contactsEntry, ddList);
+
         allRows.push({
           deploymentId:      canonDep,
           accountName:       r.accountName,
           deploymentName:    r.deploymentName,
-          deliveryDirector:  r.damFullName || '',
+          deliveryDirector:  ddResolved.name,
           partner:           r.partner || '',
           isExecutiveWatch:  CoreConfig.isExecutiveWatchEnabled(cfg) && !!r.isExecutiveWatch,
           surveyType:        ev.kind,
@@ -10819,12 +10901,20 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       Logger.log('CoreData.getMdsPglBatchView: getDeploymentContactsMap_ failed: ' + e);
     }
 
+    var metaMap = getDeploymentsMetaMap_(cfg) || {};
+    var ddMap = {};
+    try {
+      ddMap = _canonicalizeDdAssignmentsMap_(getDdAssignmentsFromContacts_(cfg) || {});
+    } catch (e) {
+      Logger.log('CoreData.getMdsPglBatchView: getDdAssignmentsFromContacts_ failed: ' + e);
+    }
+
     // Exceptions list (verbatim logic from prior getUpcomingSurveys).
     var exceptions = _buildMgmPglExceptions_(cfg, activeRows, productRowsByDep);
 
     // Build all rows, then emit-time dedupe.
     var builtRows = _buildMdsPglSurveyRowsFromActive_(
-      cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth);
+      cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth, metaMap, ddMap);
     var dedupeResult = _dedupeMdsPglSurveyRows_(builtRows);
     var allRows = dedupeResult.rows;
     if (dedupeResult.beforeCount !== dedupeResult.afterCount) {
@@ -12820,8 +12910,277 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   // ===========================================================================
+  // DD Digest partner filter (IndustryMode apps — config-driven, N7)
+  // ===========================================================================
+
+  /**
+   * Normalizes deployment partner names for DD Digest allow-list matching.
+   * @param {string} raw
+   * @return {string}
+   * @private
+   */
+  function _normalizePartnerNameForFilter_(raw) {
+    var s = String(raw || '').toLowerCase().trim();
+    s = s.replace(/[.,()]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (s.endsWith(' llc')) {
+      s = s.slice(0, -4).trim();
+    }
+    return s;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {{ partnerFilterEnabled: boolean, partnerNames: Array<string> }}
+   * @private
+   */
+  function _ddDigestPartnerFilterConfig_(cfg) {
+    var dd = (cfg.notify && cfg.notify.ddDigest) || {};
+    return {
+      partnerFilterEnabled: !!dd.partnerFilterEnabled,
+      partnerNames: Array.isArray(dd.partnerNames) ? dd.partnerNames : []
+    };
+  }
+
+  /**
+   * True when row partner matches one of notify.ddDigest.partnerNames (normalized).
+   * When partnerFilterEnabled is false, all rows match.
+   *
+   * @param {AppConfig} cfg
+   * @param {string} partnerRaw
+   * @return {boolean}
+   */
+  function matchesDdDigestPartnerFilter(config, partnerRaw) {
+    var cfg = CoreConfig.withDefaults(config);
+    var filterCfg = _ddDigestPartnerFilterConfig_(cfg);
+    if (!filterCfg.partnerFilterEnabled) return true;
+    if (!filterCfg.partnerNames.length) return true;
+
+    var normPartner = _normalizePartnerNameForFilter_(partnerRaw);
+    if (!normPartner) return false;
+
+    for (var i = 0; i < filterCfg.partnerNames.length; i++) {
+      var normFilter = _normalizePartnerNameForFilter_(filterCfg.partnerNames[i]);
+      if (normFilter && normPartner === normFilter) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Filters MDS/PGL batch rows for DD Digest when notify.ddDigest.partnerFilterEnabled.
+   *
+   * @param {AppConfig} config
+   * @param {Array<Object>} rows
+   * @return {Array<Object>}
+   */
+  function filterMdsPglRowsForDdDigestPartner(config, rows) {
+    var cfg = CoreConfig.withDefaults(config);
+    var filterCfg = _ddDigestPartnerFilterConfig_(cfg);
+    if (!filterCfg.partnerFilterEnabled) return rows;
+
+    return (rows || []).filter(function (row) {
+      return matchesDdDigestPartnerFilter(cfg, row.partner);
+    });
+  }
+
+  /**
+   * @param {Array<Object>} rows
+   * @return {Array<string>}
+   * @private
+   */
+  function _distinctPartnerNamesFromMdsPglRows_(rows) {
+    var seen = {};
+    (rows || []).forEach(function (row) {
+      var p = String(row.partner || '').trim();
+      if (p) seen[p] = true;
+    });
+    return Object.keys(seen).sort();
+  }
+
+  // ===========================================================================
   // D1: DIAGNOSTIC HELPER
   // ===========================================================================
+
+  /**
+   * No-send diagnostic for DD Digest grouping: config, DD map size, horizon rows,
+   * assigned vs unassigned counts, and sample unassigned rows with reason hints.
+   *
+   * @param {AppConfig} config
+   * @param {number=} windowDays  Default 30
+   * @return {Object}
+   */
+  function debugDdDigestAssignmentsForUI(config, windowDays) {
+    var cfg = CoreConfig.withDefaults(config);
+    var appId = cfg.appId || 'default';
+    var horizonDays = parseInt(windowDays, 10) || 30;
+    var sheets = cfg.sheets || {};
+
+    var ddMapRaw = {};
+    try { ddMapRaw = getDdAssignmentsFromContacts_(cfg) || {}; }
+    catch (e) {
+      Logger.log('debugDdDigestAssignmentsForUI: getDdAssignmentsFromContacts_ failed: ' + e);
+    }
+    var ddMap = _canonicalizeDdAssignmentsMap_(ddMapRaw);
+
+    var contactsMap = {};
+    try {
+      contactsMap = _canonicalizeContactsMapForMdsPgl_(getDeploymentContactsMap_(cfg));
+    } catch (e) {
+      Logger.log('debugDdDigestAssignmentsForUI: getDeploymentContactsMap_ failed: ' + e);
+    }
+
+    var metaMap = getDeploymentsMetaMap_(cfg) || {};
+    var activeByCanon = {};
+    try {
+      (_resolveMdsPglActiveRows_(cfg) || []).forEach(function (r) {
+        var canon = _canonicalId_(r.deploymentId);
+        if (canon) activeByCanon[canon] = r;
+      });
+    } catch (e) {
+      Logger.log('debugDdDigestAssignmentsForUI: _resolveMdsPglActiveRows_ failed: ' + e);
+    }
+
+    var payload = getMdsPglBatchView(cfg, null, 6);
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var batchRows = [];
+    (payload.groups || []).forEach(function (g) {
+      batchRows = batchRows.concat(g.mdsRows || [], g.pglRows || []);
+    });
+
+    var upcoming = batchRows.filter(function (row) {
+      if (!row.eventDate) return false;
+      var ev = new Date(row.eventDate);
+      ev.setHours(0, 0, 0, 0);
+      var du = Math.round((ev.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+      return du >= 0 && du <= horizonDays;
+    });
+
+    var filterCfg = _ddDigestPartnerFilterConfig_(cfg);
+    var productModeUnion = !!(cfg.activeDeployments &&
+      cfg.activeDeployments.productModeUnionEnabled);
+    var distinctPartnersBefore = _distinctPartnerNamesFromMdsPglRows_(upcoming);
+    var rawMdsPglRowCount = upcoming.length;
+    var excludedByPartnerSamples = [];
+    var upcomingFiltered = filterMdsPglRowsForDdDigestPartner(cfg, upcoming);
+    if (filterCfg.partnerFilterEnabled) {
+      upcoming.forEach(function (row) {
+        if (!matchesDdDigestPartnerFilter(cfg, row.partner) &&
+            excludedByPartnerSamples.length < 8) {
+          excludedByPartnerSamples.push({
+            accountName: row.accountName || '',
+            deploymentName: row.deploymentName || '',
+            partner: row.partner || '',
+            surveyType: row.surveyType || '',
+            eventDate: row.eventDate || null,
+            deliveryDirector: row.deliveryDirector || ''
+          });
+        }
+      });
+    }
+    upcoming = upcomingFiltered;
+
+    var displayMergeKeyCounts = {};
+    upcoming.forEach(function (row) {
+      var canon = _canonicalId_(row.deploymentId);
+      var eventKey = _toDateKey_(row.eventDate) || 'nodate';
+      var depName = String(row.deploymentName || '').trim().toLowerCase();
+      var dd = String(row.deliveryDirector || '(Unassigned)').trim().toLowerCase() || '(unassigned)';
+      var mergeKey = canon ?
+        (canon + '|' + eventKey + '|' + depName + '|' + dd) :
+        ('nodep|' + String(row.accountName || '').trim().toLowerCase() + '|' + depName +
+          '|' + eventKey + '|' + String(row.partner || '').trim().toLowerCase() + '|' + dd);
+      displayMergeKeyCounts[mergeKey] = (displayMergeKeyCounts[mergeKey] || 0) + 1;
+    });
+    var displayMergeExtraRows = 0;
+    Object.keys(displayMergeKeyCounts).forEach(function (mk) {
+      if (displayMergeKeyCounts[mk] > 1) {
+        displayMergeExtraRows += displayMergeKeyCounts[mk] - 1;
+      }
+    });
+
+    var assigned = 0;
+    var unassigned = 0;
+    var distinctDdNames = {};
+    var unassignedReasons = {
+      missingDeploymentId: 0,
+      noResolvableSource: 0,
+      damOnlyWouldAssign: 0
+    };
+    var unassignedSamples = [];
+
+    upcoming.forEach(function (row) {
+      var canon = _canonicalId_(row.deploymentId);
+      var label = String(row.deliveryDirector || '').trim();
+      if (label) {
+        assigned++;
+        distinctDdNames[label] = true;
+        return;
+      }
+      unassigned++;
+      if (!canon) {
+        unassignedReasons.missingDeploymentId++;
+      } else {
+        var active = activeByCanon[canon];
+        var meta = metaMap[canon] || {};
+        var contacts = contactsMap[canon] || null;
+        var ddList = ddMap[canon] || [];
+        var resolved = active ?
+          _resolveMdsPglDeliveryDirector_(active, meta, contacts, ddList) :
+          { name: '', source: 'none' };
+        if (resolved.source === 'none') {
+          unassignedReasons.noResolvableSource++;
+          if (active && String(active.damFullName || '').trim()) {
+            unassignedReasons.damOnlyWouldAssign++;
+          }
+        }
+      }
+      if (unassignedSamples.length < 8) {
+        unassignedSamples.push({
+          accountName: row.accountName || '',
+          deploymentName: row.deploymentName || '',
+          deploymentId: row.deploymentId || '',
+          surveyType: row.surveyType || '',
+          eventDate: row.eventDate || null,
+          deliveryDirectorOnRow: row.deliveryDirector || ''
+        });
+      }
+    });
+
+    var sponsorDeployments = 0;
+    Object.keys(contactsMap).forEach(function (k) {
+      if (contactsMap[k] && contactsMap[k].wdSponsor) sponsorDeployments++;
+    });
+
+    var summary = {
+      appId: appId,
+      productModeUnionEnabled: productModeUnion,
+      partnerFilterEnabled: filterCfg.partnerFilterEnabled,
+      partnerNames: filterCfg.partnerNames,
+      rawMdsPglRowCount: rawMdsPglRowCount,
+      postPartnerFilterRowCount: upcoming.length,
+      excludedByPartnerCount: rawMdsPglRowCount - upcoming.length,
+      mdsPglDisplayMergeExtraRows: displayMergeExtraRows,
+      distinctPartnerNamesBeforeFilter: distinctPartnersBefore,
+      distinctPartnerNamesAfterFilter: _distinctPartnerNamesFromMdsPglRows_(upcoming),
+      sampleExcludedByPartner: excludedByPartnerSamples,
+      deploymentContactsSheet: sheets.deploymentContacts || '',
+      sfdcContactsSheet: sheets.sfdcContacts || '',
+      ddAssignmentMapDeployments: Object.keys(ddMap).length,
+      ddAssignmentMapDeploymentsRaw: Object.keys(ddMapRaw).length,
+      contactsMapDeployments: Object.keys(contactsMap).length,
+      contactsWithDeploymentSponsor: sponsorDeployments,
+      horizonDays: horizonDays,
+      upcomingMdsPglRows: upcoming.length,
+      assignedToDd: assigned,
+      unassigned: unassigned,
+      distinctDeliveryDirectorNames: Object.keys(distinctDdNames).sort(),
+      unassignedReasons: unassignedReasons,
+      unassignedSamples: unassignedSamples
+    };
+
+    Logger.log('debugDdDigestAssignmentsForUI(' + appId + '): ' + JSON.stringify(summary));
+    return summary;
+  }
 
   /**
    * Diagnostic helper. Logs deployments with 0 Deployment Sponsor contacts
@@ -14893,6 +15252,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     _debugMdsPglBatchView:       _debugMdsPglBatchView_,
     _debugMdsPglExceptions:      _debugMdsPglExceptions_,
     debugMdsPglRowsForUI:        debugMdsPglRowsForUI,
+    debugDdDigestAssignmentsForUI: debugDdDigestAssignmentsForUI,
+    filterMdsPglRowsForDdDigestPartner: filterMdsPglRowsForDdDigestPartner,
+    matchesDdDigestPartnerFilter: matchesDdDigestPartnerFilter,
 
     // V2.8: CSAT in-flight surveys + unified tab payload
     uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,

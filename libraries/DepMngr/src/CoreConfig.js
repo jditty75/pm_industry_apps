@@ -656,6 +656,13 @@ var CoreConfig = (function () {
         'jeffrey.ditty@workday.com'
       ];
     }
+    cfg.notify.ddDigest = cfg.notify.ddDigest || {};
+    if (cfg.notify.ddDigest.partnerFilterEnabled === undefined) {
+      cfg.notify.ddDigest.partnerFilterEnabled = false;
+    }
+    if (!Array.isArray(cfg.notify.ddDigest.partnerNames)) {
+      cfg.notify.ddDigest.partnerNames = [];
+    }
 
     // -------------------------------------------------------------------------
     // Student (S1/S2) — default mode when enabled; absent cfg.student = off

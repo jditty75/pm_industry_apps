@@ -325,6 +325,22 @@ var CoreNotify = (function () {
   }
 
   /**
+   * DD Digest only — scopes upcoming rows to notify.ddDigest.partnerNames when enabled.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} rows
+   * @return {Array<Object>}
+   * @private
+   */
+  function _filterDdDigestPartnerRows_(cfg, rows) {
+    var filterCfg = (cfg.notify && cfg.notify.ddDigest) || {};
+    if (!filterCfg.partnerFilterEnabled) return rows;
+    var before = (rows || []).length;
+    var filtered = CoreData.filterMdsPglRowsForDdDigestPartner(cfg, rows);
+    Logger.log('CoreNotify._filterDdDigestPartnerRows_: ' + before + ' -> ' + filtered.length);
+    return filtered;
+  }
+
+  /**
    * @param {AppConfig} cfg
    * @return {Array<Object>}
    * @private
@@ -465,6 +481,141 @@ var CoreNotify = (function () {
   }
 
   /**
+   * @param {string} id
+   * @return {string}
+   * @private
+   */
+  function _canonicalDigestDeploymentId_(id) {
+    var s = String(id || '').trim();
+    return s.length >= 18 ? s.slice(0, 18) : s;
+  }
+
+  /**
+   * @param {string} s
+   * @return {string}
+   * @private
+   */
+  function _normalizeDigestText_(s) {
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  /**
+   * Merge key for DD Digest display: same deployment + event date (+ DD + deployment name).
+   * Does not include survey type so MDS/PGL pairs collapse to one bullet.
+   * @param {Object} row
+   * @return {string}
+   * @private
+   */
+  function _ddDigestMergeRowKey_(row) {
+    var dateMs = _digestEventSortTime_(row);
+    var datePart = dateMs == null ? 'nodate' : String(dateMs);
+    var depName = _normalizeDigestText_(row.deploymentName);
+    var dd = _normalizeDigestText_(row.deliveryDirector || '(Unassigned)') || '(unassigned)';
+    var depId = _canonicalDigestDeploymentId_(row.deploymentId);
+    if (depId) {
+      return depId + '|' + datePart + '|' + depName + '|' + dd;
+    }
+    var account = _normalizeDigestText_(row.accountName);
+    var partner = _normalizeDigestText_(row.partner);
+    return 'nodep|' + account + '|' + depName + '|' + datePart + '|' + partner + '|' + dd;
+  }
+
+  /**
+   * Survey type label for digest bullets (MDS, PGL, or MDS/PGL when merged).
+   * @param {Object} row
+   * @return {string}
+   * @private
+   */
+  function _digestSurveyTypeLabel_(row) {
+    if (row.surveyTypes && row.surveyTypes.length) {
+      return row.surveyTypes.join('/');
+    }
+    return String(row.surveyType || '').trim();
+  }
+
+  /**
+   * DD Digest display-only merge: one bullet per deployment + event date (+ DD).
+   * @param {Array<Object>} rows
+   * @param {number=} sampleLimit
+   * @return {{ rows: Array<Object>, beforeCount: number, afterCount: number,
+   *   duplicateMergedCount: number, sampleMergedDuplicates: Array<Object> }}
+   * @private
+   */
+  function _mergeDdDigestDuplicateEvents_(rows, sampleLimit) {
+    var input = rows || [];
+    var beforeCount = input.length;
+    var limit = parseInt(sampleLimit, 10);
+    if (!limit || limit < 1) limit = 8;
+
+    var groups = {};
+    var order = [];
+    var duplicateMergedCount = 0;
+    var sampleMergedDuplicates = [];
+
+    input.forEach(function (row) {
+      var key = _ddDigestMergeRowKey_(row);
+      var st = String(row.surveyType || '').trim().toUpperCase();
+
+      if (!groups[key]) {
+        var g0 = {
+          base: Object.assign({}, row),
+          types: {},
+          typeOrder: []
+        };
+        if (st === 'MDS' || st === 'PGL') {
+          g0.types[st] = true;
+          g0.typeOrder.push(st);
+        }
+        groups[key] = g0;
+        order.push(key);
+        return;
+      }
+
+      duplicateMergedCount++;
+      var g = groups[key];
+      if ((st === 'MDS' || st === 'PGL') && !g.types[st]) {
+        g.types[st] = true;
+        g.typeOrder.push(st);
+      }
+      if (sampleMergedDuplicates.length < limit) {
+        var typesMerged = [];
+        if (g.types.MDS) typesMerged.push('MDS');
+        if (g.types.PGL) typesMerged.push('PGL');
+        sampleMergedDuplicates.push({
+          accountName: g.base.accountName || row.accountName || '',
+          deploymentName: g.base.deploymentName || row.deploymentName || '',
+          deploymentId: g.base.deploymentId || row.deploymentId || '',
+          eventDate: g.base.eventDate || row.eventDate || null,
+          eventTypesMerged: typesMerged,
+          deliveryDirector: g.base.deliveryDirector || row.deliveryDirector || ''
+        });
+      }
+    });
+
+    var merged = order.map(function (key) {
+      var g = groups[key];
+      var typeList = [];
+      if (g.types.MDS) typeList.push('MDS');
+      if (g.types.PGL) typeList.push('PGL');
+      if (!typeList.length) {
+        var fallback = String(g.base.surveyType || '').trim();
+        if (fallback) typeList.push(fallback);
+      }
+      g.base.surveyTypes = typeList;
+      g.base.surveyType = typeList.join('/');
+      return g.base;
+    });
+
+    return {
+      rows: merged,
+      beforeCount: beforeCount,
+      afterCount: merged.length,
+      duplicateMergedCount: duplicateMergedCount,
+      sampleMergedDuplicates: sampleMergedDuplicates
+    };
+  }
+
+  /**
    * Account label for digest list items: bold customer name; partner parenthetical unbolded.
    * @param {Object} row
    * @return {string}
@@ -513,7 +664,7 @@ var CoreNotify = (function () {
       '<strong>' + _escapeHtml_(dateStr) + '</strong>' : _escapeHtml_(dateStr);
     return _digestAccountLabelHtml_(row) + ' — ' +
       _escapeHtml_(row.deploymentName || '') + ' (' +
-      _escapeHtml_(row.surveyType || '') + ', ' + dateHtml + ')';
+      _escapeHtml_(_digestSurveyTypeLabel_(row)) + ', ' + dateHtml + ')';
   }
 
   /**
@@ -523,6 +674,14 @@ var CoreNotify = (function () {
    * @private
    */
   function _buildUpcomingListHtml_(rows, tz) {
+    var mergeResult = _mergeDdDigestDuplicateEvents_(rows);
+    rows = mergeResult.rows;
+    if (mergeResult.duplicateMergedCount > 0) {
+      Logger.log('CoreNotify._buildUpcomingListHtml_: display merge ' +
+                 mergeResult.beforeCount + ' -> ' + mergeResult.afterCount + ' rows (' +
+                 mergeResult.duplicateMergedCount + ' merged).');
+    }
+
     if (!rows.length) {
       return '<p><em>No upcoming MDS/PGL events in this window.</em></p>';
     }
@@ -1291,6 +1450,7 @@ var CoreNotify = (function () {
           var du = _daysUntil_(dep.eventDate, today);
           return du >= 0 && du <= windowDays;
         });
+        upcoming = _filterDdDigestPartnerRows_(cfg, upcoming);
 
         var periodKey = key + '|' + _periodKey_(today, tz) + '|' + String(row.grouping || 'all');
         if (sent[periodKey]) {
@@ -1419,14 +1579,18 @@ var CoreNotify = (function () {
         if (!dep.eventDate) return false;
         var du = _daysUntil_(dep.eventDate, today);
         return du >= 0 && du <= windowDays;
-      }) : [{
-        accountName: 'Sample Account',
-        deploymentName: 'Sample Deployment',
-        deliveryDirector: 'Sample DD',
-        surveyType: 'PGL',
-        eventDate: today,
-        deploymentId: 'TEST'
-      }];
+      }) : [];
+      upcoming = _filterDdDigestPartnerRows_(cfg, upcoming);
+      if (!upcoming.length) {
+        upcoming = [{
+          accountName: 'Sample Account',
+          deploymentName: 'Sample Deployment',
+          deliveryDirector: 'Sample DD',
+          surveyType: 'PGL',
+          eventDate: today,
+          deploymentId: 'TEST'
+        }];
+      }
 
       var grouping = String(row.grouping || 'all').trim();
       if (grouping === 'perRecipient') {
@@ -1681,6 +1845,52 @@ var CoreNotify = (function () {
     return SEED_KEYS_.slice();
   }
 
+  /**
+   * No-send diagnostic: DD Digest display merge (MDS/PGL same deployment/date).
+   * @param {AppConfig} config
+   * @param {number=} windowDays  Default 30
+   * @return {Object}
+   */
+  function debugDdDigestDedupeForUI(config, windowDays) {
+    var cfg = CoreConfig.withDefaults(config);
+    var appId = cfg.appId || 'default';
+    var horizonDays = parseInt(windowDays, 10) || 30;
+    var tz = Session.getScriptTimeZone();
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    var upcoming = _getUpcomingBatchRows_(cfg, horizonDays);
+    var prePartnerCount = upcoming.length;
+    upcoming = _filterDdDigestPartnerRows_(cfg, upcoming);
+    var postPartnerCount = upcoming.length;
+
+    var mergeResult = _mergeDdDigestDuplicateEvents_(upcoming, 12);
+    var assignmentSummary = {};
+    try {
+      assignmentSummary = CoreData.debugDdDigestAssignmentsForUI(cfg, horizonDays) || {};
+    } catch (e) {
+      Logger.log('CoreNotify.debugDdDigestDedupeForUI: assignments diagnostic failed: ' + e);
+    }
+
+    var summary = {
+      appId: appId,
+      horizonDays: horizonDays,
+      prePartnerFilterRowCount: prePartnerCount,
+      postPartnerFilterRowCount: postPartnerCount,
+      preDedupeRowCount: mergeResult.beforeCount,
+      postDedupeRowCount: mergeResult.afterCount,
+      duplicateMergedCount: mergeResult.duplicateMergedCount,
+      sampleMergedDuplicates: mergeResult.sampleMergedDuplicates,
+      partnerFilterEnabled: !!(assignmentSummary.partnerFilterEnabled),
+      partnerNames: assignmentSummary.partnerNames || [],
+      assignedToDd: assignmentSummary.assignedToDd,
+      unassigned: assignmentSummary.unassigned
+    };
+
+    Logger.log('CoreNotify.debugDdDigestDedupeForUI(' + appId + '): ' + JSON.stringify(summary));
+    return summary;
+  }
+
   return {
     readNotificationConfig_:       readNotificationConfig_,
     validateNotificationConfig:    validateNotificationConfig,
@@ -1689,6 +1899,7 @@ var CoreNotify = (function () {
     initNotificationConfigSheet:   initNotificationConfigSheet,
     getNotificationKeysForMenu:    getNotificationKeysForMenu,
     upsertNotificationRule:        upsertNotificationRule,
+    debugDdDigestDedupeForUI:      debugDdDigestDedupeForUI,
     _resolveRecipients_:           _resolveRecipients_,
     _renderTemplate_:              _renderTemplate_,
     _gmailSend_:                   _gmailSend_,

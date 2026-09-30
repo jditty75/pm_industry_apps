@@ -36,6 +36,7 @@ var APP_CONFIG = {
     sfdcDeploymentProductFunctions:   'SFDC_DeploymentProductFunctions',
     deployments:                      'SFDC_Deployments',
     deploymentContacts:               'SFDC_DeploymentContacts',
+    sfdcContacts:                     'SFDC_DeploymentContacts',
     // T1: Trends history sheet (populated by SOQL)
     deploymentHistory:                'SFDC_DeploymentHistory'
   },
@@ -120,13 +121,15 @@ var APP_CONFIG = {
     // N9 — monthly report distribution (Jeff fills these per app):
     // enabled:        true when ready to send from this app
     // to:             ['<app-google-group>@workday.com']   // the app's leadership distribution group
-    // fromAlias:      '<verified send-as alias>'            // MUST be in cfg.notify.allowedFromAliases
+    // fromAlias:      '<verified send-as alias>'            // MUST be in this app's notify.allowedFromAliases and configured as a Gmail send-as alias for the executing user
+    // fromName:       '<VP display name>'                     // Gmail sender display (optional; falls back to report.title)
     // cc:             []                                    // optional default CC
     // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
     // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
-      enabled: false,
-      fromAlias: '',
+      enabled: true,
+      fromAlias: 'krishna.kuchibhotla@workday.com',
+      fromName: 'Krishna Kuchibhotla',
       to: [],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
@@ -162,7 +165,7 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report',      label: 'Monthly Report Preview' },
       { id: 'portfolio',   label: 'Portfolio Health' },
-      { id: 'mgmPgl',      label: 'MDS / PGL' },
+      { id: 'mgmPgl',      label: 'CSAT' },
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides',   label: 'Manage Overrides' },
       { id: 'trends',      label: 'Trends' }
@@ -226,6 +229,13 @@ var APP_CONFIG = {
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
     }
+  },
+
+  notify: {
+    allowedFromAliases: [
+      'jeffrey.ditty@workday.com',
+      'krishna.kuchibhotla@workday.com'
+    ]
   },
 
   // ---------------------------------------------------------------------------

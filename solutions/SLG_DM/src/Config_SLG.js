@@ -144,13 +144,14 @@ var APP_CONFIG = {
     // N9 — monthly report distribution (Jeff fills these per app):
     // enabled:        true when ready to send from this app
     // to:             ['<app-google-group>@workday.com']   // the app's leadership distribution group
-    // fromAlias:      '<verified send-as alias>'            // MUST be in cfg.notify.allowedFromAliases
+    // fromAlias:      '<verified send-as alias>'            // MUST be in this app's notify.allowedFromAliases and configured as a Gmail send-as alias for the executing user
     // cc:             []                                    // optional default CC
     // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
     // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
       enabled: false,
-      fromAlias: 'jeffrey.ditty@workday.com',
+      fromAlias: 'windsel.mccray@workday.com',
+      fromName: 'Windsel McCray',
       to: [],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
@@ -271,6 +272,13 @@ var APP_CONFIG = {
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
     }
+  },
+
+  notify: {
+    allowedFromAliases: [
+      'jeffrey.ditty@workday.com',
+      'windsel.mccray@workday.com'
+    ]
   },
 
   // ---------------------------------------------------------------------------

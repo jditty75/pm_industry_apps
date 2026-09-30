@@ -34,6 +34,7 @@ var APP_CONFIG = {
     sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions',
     deployments: 'SFDC_Deployments',
     deploymentContacts: 'SFDC_DeploymentContacts',
+    sfdcContacts: 'SFDC_DeploymentContacts',
     // T1: Trends history sheet (populated by SOQL)
     deploymentHistory: 'SFDC_DeploymentHistory'
   },
@@ -111,13 +112,14 @@ var APP_CONFIG = {
     // N9 — monthly report distribution (Jeff fills these per app):
     // enabled:        true when ready to send from this app
     // to:             ['<app-google-group>@workday.com']   // the app's leadership distribution group
-    // fromAlias:      '<verified send-as alias>'            // MUST be in cfg.notify.allowedFromAliases
+    // fromAlias:      '<verified send-as alias>'            // MUST be in this app's notify.allowedFromAliases and configured as a Gmail send-as alias for the executing user
     // cc:             []                                    // optional default CC
     // bcc:            'jeffrey.ditty@workday.com'           // BCC self by default
     // allowedSenders: ['jeffrey.ditty@workday.com']         // emails permitted to send
     distribution: {
       enabled: false,
-      fromAlias: '',
+      fromAlias: 'b.benson@workday.com',
+      fromName: 'B. Benson',
       to: [],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
@@ -208,6 +210,13 @@ var APP_CONFIG = {
       slackWebhookUrl:     '',
       slackWebhookUrlTest: ''
     }
+  },
+
+  notify: {
+    allowedFromAliases: [
+      'jeffrey.ditty@workday.com',
+      'b.benson@workday.com'
+    ]
   },
 
   student: {

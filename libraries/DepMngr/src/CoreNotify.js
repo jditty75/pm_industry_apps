@@ -668,16 +668,34 @@ var CoreNotify = (function () {
   }
 
   /**
+   * RFC 5322 From header with optional display name.
+   *
+   * @param {string} fromEmail
+   * @param {string=} fromName
+   * @return {string}
+   * @private
+   */
+  function _formatFromHeader_(fromEmail, fromName) {
+    var addr = String(fromEmail || '').trim();
+    var name = String(fromName || '').trim();
+    if (!addr) return '';
+    if (!name) return addr;
+    var escaped = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return '"' + escaped + '" <' + addr + '>';
+  }
+
+  /**
    * @param {string} to
    * @param {string} subject
    * @param {string} htmlBody
    * @param {string} fromAlias
    * @param {string} cc
    * @param {Array<string>} allowedAliases
+   * @param {string=} fromName Gmail advanced option `name` (friendly sender display)
    * @return {boolean}
    * @private
    */
-  function _gmailSend_(to, subject, htmlBody, fromAlias, cc, allowedAliases) {
+  function _gmailSend_(to, subject, htmlBody, fromAlias, cc, allowedAliases, fromName) {
     var toStr = String(to || '').trim();
     if (!toStr) {
       Logger.log('CoreNotify._gmailSend_: empty to; skipped.');
@@ -691,16 +709,21 @@ var CoreNotify = (function () {
     }
 
     var opts = { htmlBody: htmlBody, from: from };
+    var displayName = String(fromName || '').trim();
+    if (displayName) opts.name = displayName;
     var ccStr = String(cc || '').trim();
     if (ccStr) opts.cc = ccStr;
 
     var plain = String(htmlBody || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     try {
       GmailApp.sendEmail(toStr, subject, plain, opts);
-      Logger.log('CoreNotify._gmailSend_: sent to ' + toStr + ' from ' + from);
+      Logger.log('CoreNotify._gmailSend_: sent to ' + toStr + ' from ' + from +
+        (displayName ? ' (' + displayName + ')' : ''));
       return true;
     } catch (e) {
-      Logger.log('CoreNotify._gmailSend_: send failed: ' + e);
+      Logger.log('CoreNotify._gmailSend_: send failed fromAlias=' + from +
+        ' (container app needs https://mail.google.com/ oauthScope and a verified Gmail send-as alias): ' +
+        e);
       return false;
     }
   }
@@ -728,12 +751,14 @@ var CoreNotify = (function () {
    * @param {string} cc
    * @param {string} subject
    * @param {string} htmlBody
+   * @param {string=} fromName
    * @return {string}
    * @private
    */
-  function _buildRfc2822Mime_(from, to, cc, bcc, subject, htmlBody) {
+  function _buildRfc2822Mime_(from, to, cc, bcc, subject, htmlBody, fromName) {
+    var fromHeader = _formatFromHeader_(from, fromName);
     var lines = [
-      'From: ' + from,
+      'From: ' + fromHeader,
       'To: ' + to
     ];
     var ccStr = String(cc || '').trim();
@@ -796,11 +821,12 @@ var CoreNotify = (function () {
    * @param {string} cc
    * @param {Array<string>} allowedAliases
    * @param {string=} bcc
+   * @param {string=} fromName Gmail display name (MIME From + GmailApp `name`)
    * @return {{ok: boolean, messageId: string, threadId: string,
    *           captureMethod: 'advanced'|'heuristic'|'none'}}
    * @private
    */
-  function _gmailSendWithIds_(to, subject, htmlBody, fromAlias, cc, allowedAliases, bcc) {
+  function _gmailSendWithIds_(to, subject, htmlBody, fromAlias, cc, allowedAliases, bcc, fromName) {
     var fail = { ok: false, messageId: '', threadId: '', captureMethod: 'none' };
     var toStr = String(to || '').trim();
     if (!toStr) {
@@ -819,13 +845,15 @@ var CoreNotify = (function () {
     var bodyWithToken = _embedTrackingToken_(htmlBody, token);
     var ccStr = String(cc || '').trim();
     var bccStr = String(bcc || '').trim();
+    var displayName = String(fromName || '').trim();
 
     try {
       if (typeof Gmail === 'undefined' || !Gmail || !Gmail.Users || !Gmail.Users.Messages) {
         throw new ReferenceError('Gmail advanced service is not enabled');
       }
 
-      var rawMime = _buildRfc2822Mime_(from, toStr, ccStr, bccStr, subject, bodyWithToken);
+      var rawMime = _buildRfc2822Mime_(from, toStr, ccStr, bccStr, subject, bodyWithToken,
+        displayName);
       var encoded = _base64UrlEncodeMime_(rawMime);
       var response = Gmail.Users.Messages.send({ raw: encoded }, 'me');
       var messageId = response && response.id ? String(response.id) : '';
@@ -836,7 +864,8 @@ var CoreNotify = (function () {
       }
 
       Logger.log('CoreNotify._gmailSendWithIds_: advanced send to ' + toStr +
-                 ' from ' + from + ', messageId=' + messageId);
+                 ' from ' + from + (displayName ? ' (' + displayName + ')' : '') +
+                 ', messageId=' + messageId);
       return {
         ok: true,
         messageId: messageId,
@@ -849,6 +878,7 @@ var CoreNotify = (function () {
     }
 
     var opts = { htmlBody: bodyWithToken, from: from };
+    if (displayName) opts.name = displayName;
     if (ccStr) opts.cc = ccStr;
     if (bccStr) opts.bcc = bccStr;
     var plain = String(bodyWithToken).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -856,7 +886,9 @@ var CoreNotify = (function () {
     try {
       GmailApp.sendEmail(toStr, subject, plain, opts);
     } catch (e) {
-      Logger.log('CoreNotify._gmailSendWithIds_: GmailApp fallback send failed: ' + e);
+      Logger.log('CoreNotify._gmailSendWithIds_: GmailApp fallback send failed fromAlias=' + from +
+        ' (container app needs https://mail.google.com/ oauthScope and a verified Gmail send-as alias): ' +
+        e);
       return fail;
     }
 

@@ -1012,15 +1012,35 @@ var CoreData = (function () {
     var meta = {};
     var operationalFields = 0;
 
+    var sourceGoLiveDate = row.goLiveDate || row.lastGoLiveDate || row.nextGoLiveDate || row.mtpDate || '';
+    var effectiveDateOverride = glOv.overrideDate || depOv.overrideMtp || null;
     var dateMeta = _buildFieldOverrideMeta_(
-      row.goLiveDate || row.mtpDate || '',
-      glOv.overrideDate,
+      sourceGoLiveDate,
+      effectiveDateOverride,
       function (v) { return CoreUtils.formatDateToIsoString(v); }
     );
     if (dateMeta) { meta.goLiveDate = dateMeta; operationalFields++; }
 
     var partnerMeta = _buildFieldOverrideMeta_(row.partner || '', glOv.overridePartner);
     if (partnerMeta) { meta.partner = partnerMeta; operationalFields++; }
+
+    var healthMeta = _buildFieldOverrideMeta_(row.health || '', depOv.overrideHealth);
+    if (healthMeta) { meta.health = healthMeta; operationalFields++; }
+
+    var stageMeta = _buildFieldOverrideMeta_(row.stage || '', depOv.overrideStage);
+    if (stageMeta) { meta.stage = stageMeta; operationalFields++; }
+
+    if (!dateMeta) {
+      var mtpMeta = _buildFieldOverrideMeta_(
+        row.mtpDate || sourceGoLiveDate,
+        depOv.overrideMtp,
+        function (v) { return CoreUtils.formatDateToIsoString(v); }
+      );
+      if (mtpMeta) { meta.mtpDate = mtpMeta; operationalFields++; }
+    }
+
+    var updateMeta = _buildFieldOverrideMeta_(row.currentUpdate || '', depOv.overrideCurrentUpdate);
+    if (updateMeta) { meta.currentUpdate = updateMeta; operationalFields++; }
 
     var hasReportExclusion = !!(row.excludeFromReport || depOv.exclude || glOv.exclude);
     var hasOperationalOverride = operationalFields > 0;
@@ -1060,19 +1080,8 @@ var CoreData = (function () {
    */
   function _goLiveRowDeploymentOverride_(row, depMap) {
     if (!row) return {};
-    depMap = depMap || {};
-    if (row.deploymentId && depMap[row.deploymentId]) {
-      return depMap[row.deploymentId];
-    }
-    var parentId = _canonicalId_(row.parentDeploymentId || row.deploymentFk);
-    if (parentId) {
-      return _deploymentOverrideForParentId_(parentId, depMap);
-    }
-    var parents = row.parentDeploymentIds;
-    if (Array.isArray(parents) && parents.length === 1) {
-      return _deploymentOverrideForParentId_(parents[0], depMap);
-    }
-    return {};
+    var resolved = _resolveDeploymentOverrideEntry_(row, depMap || {});
+    return resolved.ov || {};
   }
 
   function _enrichGoLiveRowsWithOverrides_(rows, deploymentOverridesMap, goLivesOverridesMap) {
@@ -1082,23 +1091,88 @@ var CoreData = (function () {
     var glMap = goLivesOverridesMap || {};
 
     return rows.map(function (row) {
-      var acct = row.accountName || '';
       var depOv = _goLiveRowDeploymentOverride_(row, depMap);
-      var glOv = acct ? (glMap[acct] || {}) : {};
+      var glOv = _lookupGoLivesOverrideForAccount_(row.accountName, glMap);
       var excluded = !!(
         row.excludeFromReport ||
         depOv.exclude ||
         glOv.exclude
       );
+      var effectiveGoLiveDate = glOv.overrideDate
+        ? CoreUtils.formatDateToIsoString(glOv.overrideDate)
+        : (_hasOverrideCellValue_(depOv.overrideMtp)
+          ? CoreUtils.formatDateToIsoString(depOv.overrideMtp)
+          : (row.goLiveDate || row.lastGoLiveDate || row.nextGoLiveDate || row.mtpDate || ''));
       return Object.assign({}, row, {
         partner:           glOv.overridePartner || row.partner || '',
+        health:            depOv.overrideHealth || row.health || '',
+        stage:             depOv.overrideStage || row.stage || '',
         currentUpdate:     depOv.overrideCurrentUpdate || row.currentUpdate || '',
         excludeFromReport: excluded,
-        goLiveDate:        glOv.overrideDate
-          ? CoreUtils.formatDateToIsoString(glOv.overrideDate)
-          : (row.goLiveDate || row.nextGoLiveDate || row.mtpDate || '')
+        goLiveDate:        effectiveGoLiveDate,
+        lastGoLiveDate:    row.lastGoLiveDate || effectiveGoLiveDate
       }, _buildGoLiveOverrideMeta_(row, depOv, glOv));
     });
+  }
+
+  /**
+   * Re-applies go-live + deployment override fields on cached explorer rows.
+   * @param {Object} universe
+   * @param {AppConfig} cfg
+   * @return {Object}
+   * @private
+   */
+  function _applyGoLiveExplorerOverrideLayer_(universe, cfg) {
+    if (!universe || !Array.isArray(universe.rows)) return universe;
+    universe.rows = _enrichGoLiveRowsWithOverrides_(
+      universe.rows,
+      getDeploymentOverridesMap_(cfg),
+      getGoLivesOverridesMap_(cfg)
+    );
+    return universe;
+  }
+
+  /**
+   * After go-live overrides are merged, align lastGoLiveDate with the effective
+   * date and drop rows whose effective recent date falls outside the window.
+   *
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} rows
+   * @param {number=} windowDaysOverride
+   * @return {Array<Object>}
+   * @private
+   */
+  function _finalizeRecentGoLivesAfterOverrides_(cfg, rows, windowDaysOverride) {
+    if (!Array.isArray(rows) || !rows.length) return rows || [];
+
+    var recentWindowDays =
+      (typeof windowDaysOverride === 'number' && windowDaysOverride > 0)
+        ? windowDaysOverride
+        : (cfg.salesforce && cfg.salesforce.recentWindowDays) ||
+          (cfg.ui && cfg.ui.goLivesTab && cfg.ui.goLivesTab.recentWindowDays) || 60;
+
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var tz = Session.getScriptTimeZone();
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var windowStart = new Date(now.getTime() - recentWindowDays * 24 * 60 * 60 * 1000);
+    var windowStartKey = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
+
+    var out = [];
+    rows.forEach(function (row) {
+      var effectiveKey = String(row.goLiveDate || row.lastGoLiveDate || '').trim();
+      if (effectiveKey.length >= 10) effectiveKey = effectiveKey.slice(0, 10);
+      if (!effectiveKey) {
+        out.push(row);
+        return;
+      }
+      var merged = (row.lastGoLiveDate !== effectiveKey)
+        ? Object.assign({}, row, { lastGoLiveDate: effectiveKey })
+        : row;
+      if (effectiveKey < windowStartKey || effectiveKey > todayKey) return;
+      out.push(merged);
+    });
+    return out;
   }
 
   /**
@@ -2574,18 +2648,70 @@ var CoreData = (function () {
    * @return {{ ov: Object, lookupId: string }}
    * @private
    */
-  function _resolveDeploymentOverrideEntry_(rawRow, overridesMap) {
+  /**
+   * Resolves a DeploymentOverrides map entry by id (18-char, 15-char prefix, or direct key).
+   * @param {string} deploymentId
+   * @param {Object} overridesMap
+   * @return {{ ov: Object, lookupId: string }}
+   * @private
+   */
+  function _lookupDeploymentOverrideById_(deploymentId, overridesMap) {
     var map = overridesMap || {};
+    var target = _canonicalId_(deploymentId);
+    if (!target) return { ov: {}, lookupId: '' };
+    if (map[target]) return { ov: map[target], lookupId: target };
+
+    var direct = map[deploymentId];
+    if (direct) return { ov: direct, lookupId: String(deploymentId) };
+
+    var prefix = target.length >= 15 ? target.slice(0, 15) : target;
+    var keys = Object.keys(map);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (k === target) return { ov: map[k], lookupId: k };
+      var kp = k.length >= 15 ? k.slice(0, 15) : k;
+      if (prefix && kp === prefix) return { ov: map[k], lookupId: k };
+    }
+    return { ov: {}, lookupId: target };
+  }
+
+  function _resolveDeploymentOverrideEntry_(rawRow, overridesMap) {
     var lookupId = _parentDeploymentLookupId_(rawRow);
-    var ov = map[lookupId] || {};
-    if (!ov.overrideHealth && !ov.exclude && lookupId !== rawRow.deploymentId) {
-      var direct = map[rawRow.deploymentId];
-      if (direct) {
-        ov = direct;
-        lookupId = rawRow.deploymentId;
+    var resolved = _lookupDeploymentOverrideById_(lookupId, overridesMap);
+    var ov = resolved.ov;
+    lookupId = resolved.lookupId || lookupId;
+
+    if (!ov.overrideHealth && !ov.exclude && !_hasOverrideCellValue_(ov.overrideMtp) &&
+        !ov.overrideStage && !ov.overrideCurrentUpdate && rawRow.deploymentId &&
+        _canonicalId_(rawRow.deploymentId) !== _canonicalId_(lookupId)) {
+      var alt = _lookupDeploymentOverrideById_(rawRow.deploymentId, overridesMap);
+      if (alt.ov && (alt.ov.overrideHealth || alt.ov.exclude || _hasOverrideCellValue_(alt.ov.overrideMtp) ||
+          alt.ov.overrideStage || alt.ov.overrideCurrentUpdate)) {
+        ov = alt.ov;
+        lookupId = alt.lookupId;
       }
     }
     return { ov: ov, lookupId: lookupId };
+  }
+
+  /**
+   * Resolves GoLivesOverrides entry for an account (trim + case-insensitive).
+   * @param {string} accountName
+   * @param {Object} goLivesOverridesMap
+   * @return {Object}
+   * @private
+   */
+  function _lookupGoLivesOverrideForAccount_(accountName, goLivesOverridesMap) {
+    var glMap = goLivesOverridesMap || {};
+    var acct = String(accountName || '').trim();
+    if (!acct) return {};
+    if (glMap[acct]) return glMap[acct];
+    var lower = acct.toLowerCase();
+    var keys = Object.keys(glMap);
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].toLowerCase() === lower) return glMap[keys[i]];
+    }
+    return {};
   }
 
   /**
@@ -6586,8 +6712,8 @@ function _sfdcDataVersion_(cfg) {
 
   function snapshotGoLivesOverride_(cfg, accountName) {
     var map = getGoLivesOverridesMap_(cfg);
-    var row = map[String(accountName).trim()];
-    if (!row) return { isEmpty: true };
+    var row = _lookupGoLivesOverrideForAccount_(accountName, map);
+    if (!row || (!row.overrideDate && !row.overridePartner && !row.exclude)) return { isEmpty: true };
     return {
       isEmpty: false,
       Override_GoLiveDate: row.overrideDate ? CoreUtils.formatDateToIsoString(row.overrideDate) : '',
@@ -7068,6 +7194,7 @@ function _sfdcDataVersion_(cfg) {
       getDeploymentOverridesMap_(cfg),
       getGoLivesOverridesMap_(cfg)
     );
+    results = _finalizeRecentGoLivesAfterOverrides_(cfg, results, windowDaysOverride);
 
     Logger.log('CoreData.getRecentGoLives: ' + results.length +
                ' deployments with in-window go-live dates (last ' +
@@ -8251,6 +8378,7 @@ function _sfdcDataVersion_(cfg) {
       getDeploymentOverridesMap_(cfg),
       getGoLivesOverridesMap_(cfg)
     );
+    results = _finalizeRecentGoLivesAfterOverrides_(cfg, results, windowDaysOverride);
     return applyViewModeFilter_(cfg, results, viewModeOpts);
   }
 
@@ -14314,13 +14442,13 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     if (!_cache.goLivesExplorerUniverseByKey) _cache.goLivesExplorerUniverseByKey = {};
     if (_cache.goLivesExplorerUniverseByKey[cacheKey]) {
-      return _cache.goLivesExplorerUniverseByKey[cacheKey];
+      return _applyGoLiveExplorerOverrideLayer_(_cache.goLivesExplorerUniverseByKey[cacheKey], cfg);
     }
 
     var cached = _perfCacheRead_(cacheKey);
     if (cached !== null) {
       _cache.goLivesExplorerUniverseByKey[cacheKey] = cached;
-      return cached;
+      return _applyGoLiveExplorerOverrideLayer_(cached, cfg);
     }
 
     var win = _goLivesExplorerUniverseWindow_();
@@ -14337,7 +14465,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     };
     _cache.goLivesExplorerUniverseByKey[cacheKey] = universe;
     _perfCacheWrite_(cacheKey, universe, cfg.appId);
-    return universe;
+    return _applyGoLiveExplorerOverrideLayer_(universe, cfg);
   }
 
   function _collectGoLivesExplorerFilterOptions_(rows, isProductMode) {

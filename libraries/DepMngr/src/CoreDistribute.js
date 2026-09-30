@@ -127,6 +127,33 @@ var CoreDistribute = (function () {
   }
 
   /**
+   * Friendly Gmail sender display name for monthly report distribution.
+   *
+   * @param {AppConfig} cfg
+   * @param {Object} dist cfg.report.distribution
+   * @param {Object=} envelope UI/send override envelope
+   * @return {string} empty when no name should be set
+   * @private
+   */
+  function _resolveMonthlyReportFromName_(cfg, dist, envelope) {
+    envelope = envelope || {};
+    if (envelope.fromName !== undefined && envelope.fromName !== null) {
+      return String(envelope.fromName).trim();
+    }
+    if (dist.fromName !== undefined && dist.fromName !== null) {
+      var configured = String(dist.fromName).trim();
+      if (configured) return configured;
+    }
+    var reportTitle = (cfg.report && cfg.report.title) ? String(cfg.report.title).trim() : '';
+    if (reportTitle) return reportTitle;
+    var appTitle = _appTitle_(cfg);
+    if (appTitle) {
+      return appTitle + ' \u2014 Monthly Deployment Health Report';
+    }
+    return '';
+  }
+
+  /**
    * @param {Array<string>|string} value
    * @return {Array<string>}
    * @private
@@ -160,6 +187,7 @@ var CoreDistribute = (function () {
     var fromAlias = envelope.fromAlias
       ? String(envelope.fromAlias).trim()
       : String(dist.fromAlias || '').trim();
+    var fromName = _resolveMonthlyReportFromName_(cfg, dist, envelope);
     var toList = envelope.to !== undefined
       ? _parseRecipientInput_(envelope.to)
       : (Array.isArray(dist.to) ? dist.to.slice() : []);
@@ -232,9 +260,11 @@ var CoreDistribute = (function () {
     }
 
     var sendResult = CoreNotify._gmailSendWithIds_(toStr, subject, htmlBody, fromAlias, ccStr,
-      cfg.notify.allowedFromAliases, bccStr);
+      cfg.notify.allowedFromAliases, bccStr, fromName);
     if (!sendResult.ok) {
-      var sendErr = 'Gmail send failed or was blocked (see Logs)';
+      var sendErr = 'Gmail send failed or was blocked (see Logs); appId=' +
+        (cfg.appId || '') + ', fromAlias=' + fromAlias;
+      Logger.log('CoreDistribute.sendMonthlyReport: ' + sendErr);
       logRow('failed', sendErr, null, 'prod');
       return { status: 'failed', error: sendErr };
     }
@@ -267,6 +297,7 @@ var CoreDistribute = (function () {
     var dist = cfg.report.distribution || {};
     var to = String(testRecipient || cfg.notify.testDefaultRecipient || '').trim();
     var fromAlias = String(dist.fromAlias || '').trim();
+    var fromName = _resolveMonthlyReportFromName_(cfg, dist, {});
     var subject = '[TEST] ' + _buildSubject_(cfg);
 
     if (!to) {
@@ -302,12 +333,15 @@ var CoreDistribute = (function () {
     });
 
     var sent = CoreNotify._gmailSend_(to, subject, htmlBody, fromAlias, '',
-      cfg.notify.allowedFromAliases);
+      cfg.notify.allowedFromAliases, fromName);
     if (!sent) {
+      Logger.log('CoreDistribute.sendMonthlyReportTest: GmailApp send failed appId=' +
+        (cfg.appId || '') + ', fromAlias=' + fromAlias + ' (see CoreNotify logs)');
       return { status: 'failed', error: 'GmailApp send failed (see Logs)' };
     }
 
-    Logger.log('CoreDistribute.sendMonthlyReportTest: sent to ' + to + ' from ' + fromAlias);
+    Logger.log('CoreDistribute.sendMonthlyReportTest: sent to ' + to + ' from ' + fromAlias +
+      (fromName ? ' (' + fromName + ')' : ''));
     return { status: 'sent' };
   }
 

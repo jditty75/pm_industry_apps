@@ -572,6 +572,8 @@ var CoreConfig = (function () {
       cfg.report.distribution.enabled = false;
     if (cfg.report.distribution.fromAlias === undefined)
       cfg.report.distribution.fromAlias = '';
+    if (cfg.report.distribution.fromName === undefined)
+      cfg.report.distribution.fromName = '';
     if (!Array.isArray(cfg.report.distribution.to))
       cfg.report.distribution.to = [];
     if (!Array.isArray(cfg.report.distribution.cc))

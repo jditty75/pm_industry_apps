@@ -83,8 +83,11 @@ var CorePortfolioHealth = (function () {
     // Phase 3i: use getRecentGoLives() (SOQL-backed, Complete deployments) instead
     // of the deprecated getGoLives() which read from the frozen legacy Go Lives sheet.
     var workdayPartner = ph.workdayPartner || 'Workday Professional Services';
-    var goLives = (CoreData.getRecentGoLives(cfg, viewModeOpts, undefined, productOpts) || [])
-      .filter(function (r) { return String(r.partner || '').trim() === workdayPartner; });
+    var goLives = CoreData.getRecentGoLives(cfg, viewModeOpts, undefined, productOpts) || [];
+    goLives = CoreData.filterRowsExcludedFromReport_(goLives);
+    goLives = goLives.filter(function (r) {
+      return String(r.partner || '').trim() === workdayPartner;
+    });
 
     // Sorted ascending by lastGoLiveDate in CoreData.getRecentGoLives.
     var recentGoLivesAccounts = goLives.map(function (r) {
@@ -1059,6 +1062,7 @@ var CorePortfolioHealth = (function () {
     }
     try {
       recentAll = CoreData.getRecentGoLives(cfg, viewModeOpts, 60, productOpts) || [];
+      recentAll = CoreData.filterRowsExcludedFromReport_(recentAll);
     } catch (err) {
       Logger.log('buildGoLiveReadiness_: getRecentGoLives failed — ' + err);
     }

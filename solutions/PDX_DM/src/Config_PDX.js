@@ -182,7 +182,7 @@ var APP_CONFIG = {
 
     distribution: {
       enabled: false,
-      fromAlias: '',
+      fromAlias: 'jeffrey.ditty@workday.com',
       to: [],
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',

@@ -113,6 +113,24 @@ function debugMdsPglRowsForUI(token, windowMonths) {
 }
 
 /**
+ * No-send diagnostic: DD Digest Delivery Director assignment / grouping (HC).
+ * @param {number=} windowDays  Default 30
+ * @return {Object}
+ */
+function debugDdDigestAssignmentsForUI(windowDays) {
+  return CoreLib.CoreData.debugDdDigestAssignmentsForUI(APP_CONFIG, windowDays);
+}
+
+/**
+ * No-send diagnostic: DD Digest MDS/PGL display merge (HC).
+ * @param {number=} windowDays  Default 30
+ * @return {Object}
+ */
+function debugDdDigestDedupeForUI(windowDays) {
+  return CoreLib.CoreNotify.debugDdDigestDedupeForUI(APP_CONFIG, windowDays);
+}
+
+/**
  * UI Endpoint Wrapper: Upload CSAT In-Flight CSV
  */
 function uploadCsatInFlightCsvForUI(viewModeOpts, csvText) {

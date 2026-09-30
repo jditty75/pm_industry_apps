@@ -134,7 +134,7 @@ var APP_CONFIG = {
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
       allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'Healthcare Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'Healthcare Deployment Health Status - {{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },
@@ -235,7 +235,11 @@ var APP_CONFIG = {
     allowedFromAliases: [
       'jeffrey.ditty@workday.com',
       'krishna.kuchibhotla@workday.com'
-    ]
+    ],
+    ddDigest: {
+      partnerFilterEnabled: true,
+      partnerNames: ['Workday Professional Services']
+    }
   },
 
   // ---------------------------------------------------------------------------

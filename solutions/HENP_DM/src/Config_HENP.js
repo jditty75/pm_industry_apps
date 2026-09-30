@@ -124,7 +124,7 @@ var APP_CONFIG = {
       cc: [],
       bcc: 'jeffrey.ditty@workday.com',
       allowedSenders: ['jeffrey.ditty@workday.com'],
-      subjectTemplate: 'HENP Deployment Health Manager \u2014 Monthly Deployment Health Report \u2014 {{monthLabel}}',
+      subjectTemplate: 'Higher Education / Nonprofit Deployment Health Status -{{monthLabel}}',
       logSheet: 'ReportDistributionLog'
     }
   },
@@ -216,7 +216,11 @@ var APP_CONFIG = {
     allowedFromAliases: [
       'jeffrey.ditty@workday.com',
       'b.benson@workday.com'
-    ]
+    ],
+    ddDigest: {
+      partnerFilterEnabled: true,
+      partnerNames: ['Workday Professional Services']
+    }
   },
 
   student: {

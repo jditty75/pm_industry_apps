@@ -14,6 +14,7 @@
  *   Phase 3i:       SFDC_Deployments unified sheet registered; salesforce block
  *                   gains statusValues and recentWindowDays; getRecentGoLives()
  *                   supersedes legacy getGoLives() for the Recent Go Lives view.
+ *   ESC1:           escalations.enabled — executive Escalations tab pilot (CoreLib).
  *
  * NOTE:
  *   - Assumes the Core library is added as "CoreLib" in Project → Libraries.
@@ -61,6 +62,10 @@ var APP_CONFIG = {
     expandedDetailsEnabled: true,
     metricsEnabled: false,
     issueCategoryDelimiter: ';'
+  },
+
+  escalations: {
+    enabled: true
   },
 
   sheets: {

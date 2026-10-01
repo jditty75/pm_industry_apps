@@ -797,6 +797,68 @@ function getGoLivesForNotablePicker() {
 
   return results;
 }
+
+// ============================================================================
+// ESC1 — EXECUTIVE ESCALATIONS (read-only pilot; no UI tab yet)
+// ============================================================================
+
+/**
+ * Bundled Escalations dashboard payload (read-only). For future UI + manual checks.
+ *
+ * @return {Object}
+ */
+function getEscalationsDashboardData() {
+  if (!CoreLib || !CoreLib.CoreEscalations || typeof CoreLib.CoreEscalations.getDashboardData !== 'function') {
+    return {
+      ok: false,
+      status: 'error',
+      code: 'ESCALATIONS_UNAVAILABLE',
+      error: 'CoreEscalations not available — confirm CoreLib was pushed.'
+    };
+  }
+  try {
+    return CoreLib.CoreEscalations.getDashboardData(APP_CONFIG);
+  } catch (err) {
+    Logger.log('getEscalationsDashboardData: error — ' + err);
+    return {
+      ok: false,
+      status: 'error',
+      code: 'ESCALATIONS_FAILED',
+      error: String(err)
+    };
+  }
+}
+
+/**
+ * Escalations sheet schema diagnostic. Run from the Apps Script editor.
+ *
+ * @return {Object}
+ */
+function _debugEscalationsSchema() {
+  if (!CoreLib || !CoreLib.CoreEscalations ||
+      typeof CoreLib.CoreEscalations._debugEscalationsSchema !== 'function') {
+    throw new Error(
+      'CoreEscalations._debugEscalationsSchema is not available. Confirm CoreLib was pushed and app binding is current.'
+    );
+  }
+  return CoreLib.CoreEscalations._debugEscalationsSchema(APP_CONFIG);
+}
+
+/**
+ * Escalations dashboard KPI diagnostic. Run from the Apps Script editor.
+ *
+ * @return {Object}
+ */
+function _debugEscalationsDashboard() {
+  if (!CoreLib || !CoreLib.CoreEscalations ||
+      typeof CoreLib.CoreEscalations._debugEscalationsDashboard !== 'function') {
+    throw new Error(
+      'CoreEscalations._debugEscalationsDashboard is not available. Confirm CoreLib was pushed and app binding is current.'
+    );
+  }
+  return CoreLib.CoreEscalations._debugEscalationsDashboard(APP_CONFIG);
+}
+
 // ============================================================================
 // OVERVIEW TAB DATA
 // ============================================================================

@@ -29,6 +29,8 @@
  *                   form), and add-picker modal. Modals rendered inside
  *                   buildNotableTab_ and gated by roleVisibility (POWER_USER
  *                   only). Registered in getAppShell after portfolio tab.
+ *   ESC1:            Escalations tab — dynamic splice when escalations.enabled;
+ *                   KPI shell + lazy load (CoreUI_Js); watchlist in Phase 4.
  *
  * Approved by Jeff in Phase 2 Design Brief 7joemhuqDkrv on 2026-06-09 14:07 EDT.
  *
@@ -127,6 +129,30 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     }
   }
 
+  // ESC1: splice Escalations tab when enabled (all roles including READ_ONLY).
+  if (CoreConfig.isEscalationsEnabled(cfg)) {
+    var escTabCfg = cfg.escalations.tab || {};
+    var escTabDef = {
+      id:    'escalations',
+      label: escTabCfg.label || 'Escalations'
+    };
+    var escInsertAfterId = escTabCfg.insertAfter || 'portfolio';
+    var escInsertIdx = -1;
+    for (var ei = 0; ei < filteredUi.tabs.length; ei++) {
+      if (filteredUi.tabs[ei].id === escInsertAfterId) {
+        escInsertIdx = ei;
+        break;
+      }
+    }
+    if (escInsertIdx >= 0) {
+      filteredUi.tabs = filteredUi.tabs.slice(0, escInsertIdx + 1)
+        .concat([escTabDef])
+        .concat(filteredUi.tabs.slice(escInsertIdx + 1));
+    } else {
+      filteredUi.tabs = filteredUi.tabs.concat([escTabDef]);
+    }
+  }
+
   var parts = [];
 
   parts.push(_CoreUI_Markup_buildHeader_(filteredUi, access, cfg));
@@ -160,6 +186,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   }
   if (tabIds.indexOf('execsummary') !== -1 || tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportingTab_(filteredUi, cfg));
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi, cfg));
+  if (tabIds.indexOf('escalations') !== -1) parts.push(_CoreUI_Markup_buildEscalationsTab_(cfg));
   if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi, cfg));
   if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
   if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi, cfg));
@@ -1670,7 +1697,7 @@ function _CoreUI_Markup_buildEditModal_(ui) {
     '        </div>',
     '        <div class="form-group"><label class="form-label">Stage (override)</label><input type="text" id="edit-stage" class="form-input" placeholder="Leave blank to use source stage"></div>',
     '        <div class="form-group"><label class="form-label">Override MTP Date</label><input type="date" id="edit-mtp" class="form-input"></div>',
-    '        <div class="form-group full-width"><label class="form-label">Current Deployment Update (override)</label><textarea id="edit-update" class="form-textarea" placeholder="Override current update used in report..."></textarea></div>',
+    '        <div class="form-group full-width"><label class="form-label">Current Deployment Update (override)</label><textarea id="edit-update" class="form-textarea" placeholder="Override current update used in report..."></textarea><div class="form-hint" style="font-size:12px;color:var(--color-text-muted);margin-top:4px;">Shows the current source update when no override exists. Saving only writes an override if you change this text.</div></div>',
     '        <div class="form-group full-width">',
     '          <label class="form-label"><input type="checkbox" id="edit-exclude-report" /> Exclude from Monthly Report</label>',
     '          <div class="form-hint" style="font-size:12px;color:var(--color-text-muted);margin-top:4px;">This deployment remains visible in the app but is hidden from Monthly Report outputs.</div>',
@@ -2322,6 +2349,63 @@ function _CoreUI_Markup_buildTrendsTabLegacy_(ui) {
     '  </div>',
     '',
     '</div>'  // #trends-tab
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// TAB: ESCALATIONS (ESC1 — executive watchlist shell; data via getEscalationsDashboardData)
+// ---------------------------------------------------------------------------
+
+/**
+ * Escalations tab shell — KPI strip + placeholder body; lazy-loaded by CoreUI_Js.
+ *
+ * @param {AppConfig} cfg
+ * @return {string}
+ */
+function _CoreUI_Markup_buildEscalationsTab_(cfg) {
+  return [
+    '<div id="escalations-tab" class="tab-content">',
+    '  <div class="info-banner">',
+    '    Executive escalation watchlist — read-only summary from the Paradox escalation workbook.',
+    '  </div>',
+    '  <div class="esc-header-row">',
+    '    <div class="esc-header-text">',
+    '      <h2 class="esc-title">Escalations</h2>',
+    '      <div id="esc-freshness" class="esc-freshness" aria-live="polite"></div>',
+    '    </div>',
+    '    <button type="button" id="esc-refresh-btn" class="btn btn-secondary" onclick="loadEscalationsTab(true)">&#x1F504; Refresh</button>',
+    '  </div>',
+    '  <div id="esc-loading" class="report-loading esc-loading">',
+    '    <div class="spinner-large"></div>',
+    '    <p>Loading escalations&hellip;</p>',
+    '  </div>',
+    '  <div id="esc-kpis" class="stats-grid esc-kpis hidden"></div>',
+    '  <div id="esc-body" class="esc-body hidden"></div>',
+    '</div>',
+    _CoreUI_Markup_buildEscalationDetailModal_()
+  ].join('\n');
+}
+
+/**
+ * Read-only escalation detail modal (ESC1 Phase 4).
+ *
+ * @return {string}
+ */
+function _CoreUI_Markup_buildEscalationDetailModal_() {
+  return [
+    '<div id="esc-modal-backdrop" class="modal-overlay esc-modal risk-modal"',
+    '     role="presentation" onclick="onEscalationModalBackdropClick_(event)">',
+    '  <div id="esc-modal-panel" class="modal-card esc-modal-panel risk-modal-panel"',
+    '       role="dialog" aria-modal="true" aria-labelledby="esc-modal-title"',
+    '       onclick="event.stopPropagation()">',
+    '    <div class="modal-header risk-modal-header esc-modal-header esc-detail-header-bar">',
+    '      <span id="esc-modal-title" class="modal-title esc-detail-title">Escalation Detail</span>',
+    '      <button type="button" class="modal-close" aria-label="Close escalation detail"',
+    '              onclick="closeEscalationModal()">&#x2715;</button>',
+    '    </div>',
+    '    <div id="esc-modal-body" class="modal-body risk-modal-body esc-modal-body"></div>',
+    '  </div>',
+    '</div>'
   ].join('\n');
 }
 

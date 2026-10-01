@@ -16,6 +16,7 @@
  *                   cfg.salesforce block (upcomingWindowDays).
  *   Phase 3i:       adds cfg.sheets.deployments (SFDC_Deployments unified source),
  *                   cfg.salesforce.recentWindowDays, cfg.salesforce.statusValues.
+ *   ESC1:           adds cfg.escalations (executive Escalations tab foundation; default off).
  */
 
 /**
@@ -178,6 +179,70 @@
  */
 
 /**
+ * @typedef {Object} EscalationsFieldAliases
+ * @property {string[]} [id]
+ * @property {string[]} [channelId]
+ * @property {string[]} [workspaceId]
+ * @property {string[]} [channelName]
+ * @property {string[]} [customer]
+ * @property {string[]} [status]
+ * @property {string[]} [severity]
+ * @property {string[]} [openedAt]
+ * @property {string[]} [executiveSummary]
+ * @property {string[]} [customerImpact]
+ * @property {string[]} [businessImpact]
+ * @property {string[]} [technicalStatus]
+ * @property {string[]} [latestDevelopment]
+ * @property {string[]} [nextSteps]
+ * @property {string[]} [openActions]
+ * @property {string[]} [actionOwners]
+ * @property {string[]} [keyRisks]
+ * @property {string[]} [decisionsRequired]
+ * @property {string[]} [execAttention]
+ * @property {string[]} [execAttentionReason]
+ * @property {string[]} [lastActivityAt]
+ * @property {string[]} [lastAnalysisAt]
+ * @property {string[]} [lastSheetUpdateAt]
+ * @property {string[]} [informationGaps]
+ * @property {string[]} [recordVersion]
+ * @property {string[]} [deploymentId]
+ * @property {string[]} [channelUrl]
+ * @property {string[]} [registeredAt]
+ * @property {string[]} [closedAt]
+ * @property {string[]} [registeredBy]
+ * @property {string[]} [processedAt]
+ * @property {string[]} [sourceEventId]
+ * @property {string[]} [sourceMessageTimestamp]
+ * @property {string[]} [outcome]
+ * @property {string[]} [reasonCode]
+ * @property {string[]} [detail]
+ * @property {string[]} [retryable]
+ * @property {string[]} [workflowVersion]
+ * @property {string[]} [historyId]
+ * @property {string[]} [escalationId]
+ * @property {string[]} [updatedAt]
+ * @property {string[]} [updateType]
+ * @property {string[]} [changeSummary]
+ * @property {string[]} [previousValues]
+ * @property {string[]} [newValues]
+ * @property {string[]} [sanaProcessedAt]
+ * @property {string[]} [confidence]
+ */
+
+/**
+ * @typedef {Object} EscalationsConfig  ESC1
+ * @property {boolean} enabled
+ * @property {{ label: string, insertAfter: string }} tab
+ * @property {{ currentState: string, channelRegistry: string, processingLog: string, updateHistory: string }} sheets
+ * @property {{ newWindowDays: number, updatedWindowHours: number, updatedField: string, noUpdateDaysThreshold: number, quietNoticeHours: number }} kpi
+ * @property {{ closedStatusValues: string[] }} status
+ * @property {{ tones: Object<string,string> }} severity
+ * @property {{ maxRows: number, summaryMaxChars: number, textMaxChars: number, placeholderPatterns: string[] }} display
+ * @property {{ currentState: EscalationsFieldAliases, channelRegistry: EscalationsFieldAliases, processingLog: EscalationsFieldAliases, updateHistory: EscalationsFieldAliases }} fields
+ * @property {{ enabled: boolean }} updateHistory
+ */
+
+/**
  * @typedef {Object} MomentumConfig
  * P2: Portfolio Momentum sub-view config.
  *
@@ -288,9 +353,110 @@
  * @property {SalesforceConfig}      [salesforce]  Phase 3a
  * @property {UIConfig}              [ui]
  * @property {StudentConfig}         [student]     S1: HENP Student tab. Absent = off (SLG/HC safety guarantee).
+ * @property {EscalationsConfig}     [escalations] ESC1: executive Escalations tab. Default off.
  */
 
 var CoreConfig = (function () {
+
+  /**
+   * Per-field alias merge for cfg.escalations.fields.* — app overrides win when present.
+   * @param {Object<string, string[]>} appMap
+   * @param {Object<string, string[]>} defaultMap
+   * @return {Object<string, string[]>}
+   * @private
+   */
+  function mergeEscalationsFieldMap_(appMap, defaultMap) {
+    var out = {};
+    Object.keys(defaultMap).forEach(function (key) {
+      if (appMap && Object.prototype.hasOwnProperty.call(appMap, key) &&
+          Array.isArray(appMap[key])) {
+        out[key] = appMap[key];
+      } else {
+        out[key] = defaultMap[key].slice();
+      }
+    });
+    if (appMap) {
+      Object.keys(appMap).forEach(function (extraKey) {
+        if (!Object.prototype.hasOwnProperty.call(out, extraKey) &&
+            Array.isArray(appMap[extraKey])) {
+          out[extraKey] = appMap[extraKey];
+        }
+      });
+    }
+    return out;
+  }
+
+  /**
+   * @return {Object}
+   * @private
+   */
+  function defaultEscalationsFields_() {
+    return {
+      currentState: {
+        id: ['Escalation ID'],
+        channelId: ['Slack Channel ID'],
+        workspaceId: ['Slack Workspace ID'],
+        channelName: ['Slack Channel Name'],
+        customer: ['Customer'],
+        status: ['Escalation Status', 'Status'],
+        severity: ['Severity'],
+        openedAt: ['Escalation Opened Date/Time'],
+        executiveSummary: ['Executive Summary'],
+        customerImpact: ['Customer Impact'],
+        businessImpact: ['Business Impact'],
+        technicalStatus: ['Technical Status'],
+        latestDevelopment: ['Latest Significant Development'],
+        nextSteps: ['Next Steps'],
+        openActions: ['Open Actions'],
+        actionOwners: ['Action Owners'],
+        keyRisks: ['Key Risks'],
+        decisionsRequired: ['Decisions Required'],
+        execAttention: ['Executive Attention Required'],
+        execAttentionReason: ['Executive Attention Reason'],
+        lastActivityAt: ['Last Significant Activity Date/Time'],
+        lastAnalysisAt: ['Last Sana Analysis Date/Time'],
+        lastSheetUpdateAt: ['Last Sheet Update Date/Time'],
+        informationGaps: ['Information Gaps / Uncertainty'],
+        recordVersion: ['Record Version'],
+        deploymentId: ['Deployment ID', 'Salesforce Deployment ID']
+      },
+      channelRegistry: {
+        channelUrl: ['Slack Channel URL'],
+        channelId: ['Slack Channel ID'],
+        channelName: ['Channel Name'],
+        customer: ['Customer'],
+        status: ['Status'],
+        registeredAt: ['Registered Date'],
+        closedAt: ['Closed Date'],
+        registeredBy: ['Registered By']
+      },
+      processingLog: {
+        processedAt: ['Processed Date/Time'],
+        channelId: ['Slack Channel ID'],
+        sourceEventId: ['Source Event ID'],
+        sourceMessageTimestamp: ['Source Message Timestamp'],
+        outcome: ['Outcome'],
+        reasonCode: ['Reason Code'],
+        detail: ['Detail'],
+        retryable: ['Retryable'],
+        workflowVersion: ['Workflow Version']
+      },
+      updateHistory: {
+        historyId: ['History ID'],
+        escalationId: ['Escalation ID'],
+        channelId: ['Slack Channel ID'],
+        updatedAt: ['Update Date/Time'],
+        updateType: ['Update Type'],
+        changeSummary: ['Change Summary'],
+        previousValues: ['Previous Value(s)'],
+        newValues: ['New Value(s)'],
+        execAttention: ['Executive Attention Required'],
+        sanaProcessedAt: ['Sana Processed Date/Time'],
+        recordVersion: ['Record Version'],
+        confidence: ['Confidence']
+      }
+    };
+  }
 
   function withDefaults(appConfig) {
     if (!appConfig) {
@@ -737,6 +903,95 @@ var CoreConfig = (function () {
       cfg.notable.pickerLookbackDays = 180;
 
     // -------------------------------------------------------------------------
+    // Escalations (ESC1) — default off; PDX pilot enables in app config later
+    // -------------------------------------------------------------------------
+    cfg.escalations = cfg.escalations || {};
+    if (cfg.escalations.enabled === undefined) cfg.escalations.enabled = false;
+
+    cfg.escalations.tab = cfg.escalations.tab || {};
+    if (!cfg.escalations.tab.label) cfg.escalations.tab.label = 'Escalations';
+    if (!cfg.escalations.tab.insertAfter) cfg.escalations.tab.insertAfter = 'portfolio';
+
+    cfg.escalations.sheets = cfg.escalations.sheets || {};
+    if (!cfg.escalations.sheets.currentState)
+      cfg.escalations.sheets.currentState = 'Current Escalation State';
+    if (!cfg.escalations.sheets.channelRegistry)
+      cfg.escalations.sheets.channelRegistry = 'Channel Registry';
+    if (!cfg.escalations.sheets.processingLog)
+      cfg.escalations.sheets.processingLog = 'Processing Log';
+    if (!cfg.escalations.sheets.updateHistory)
+      cfg.escalations.sheets.updateHistory = 'Escalation Update History';
+
+    cfg.escalations.kpi = cfg.escalations.kpi || {};
+    if (cfg.escalations.kpi.newWindowDays === undefined) cfg.escalations.kpi.newWindowDays = 7;
+    if (cfg.escalations.kpi.updatedWindowHours === undefined) {
+      cfg.escalations.kpi.updatedWindowHours = 24;
+    }
+    if (!cfg.escalations.kpi.updatedField) cfg.escalations.kpi.updatedField = 'lastSheetUpdateAt';
+    if (cfg.escalations.kpi.noUpdateDaysThreshold === undefined) {
+      cfg.escalations.kpi.noUpdateDaysThreshold = 7;
+    }
+    if (cfg.escalations.kpi.quietNoticeHours === undefined) {
+      cfg.escalations.kpi.quietNoticeHours = 72;
+    }
+
+    cfg.escalations.status = cfg.escalations.status || {};
+    if (!Array.isArray(cfg.escalations.status.closedStatusValues)) {
+      cfg.escalations.status.closedStatusValues = [
+        'closed', 'resolved', 'cancelled', 'canceled', 'complete', 'completed', 'inactive'
+      ];
+    }
+
+    cfg.escalations.severity = cfg.escalations.severity || {};
+    cfg.escalations.severity.tones = cfg.escalations.severity.tones || {};
+    var defaultTones = {
+      critical: 'red',
+      high: 'red',
+      medium: 'yellow',
+      moderate: 'yellow',
+      low: 'green'
+    };
+    Object.keys(defaultTones).forEach(function (toneKey) {
+      if (!cfg.escalations.severity.tones[toneKey]) {
+        cfg.escalations.severity.tones[toneKey] = defaultTones[toneKey];
+      }
+    });
+
+    cfg.escalations.display = cfg.escalations.display || {};
+    if (cfg.escalations.display.maxRows === undefined) cfg.escalations.display.maxRows = 200;
+    if (cfg.escalations.display.summaryMaxChars === undefined) {
+      cfg.escalations.display.summaryMaxChars = 280;
+    }
+    if (cfg.escalations.display.textMaxChars === undefined) {
+      cfg.escalations.display.textMaxChars = 4000;
+    }
+    if (!Array.isArray(cfg.escalations.display.placeholderPatterns)) {
+      cfg.escalations.display.placeholderPatterns = [
+        'not specified', 'to be configured', 'unknown'
+      ];
+    }
+
+    var escFieldDefaults = defaultEscalationsFields_();
+    cfg.escalations.fields = cfg.escalations.fields || {};
+    cfg.escalations.fields.currentState = mergeEscalationsFieldMap_(
+      cfg.escalations.fields.currentState, escFieldDefaults.currentState
+    );
+    cfg.escalations.fields.channelRegistry = mergeEscalationsFieldMap_(
+      cfg.escalations.fields.channelRegistry, escFieldDefaults.channelRegistry
+    );
+    cfg.escalations.fields.processingLog = mergeEscalationsFieldMap_(
+      cfg.escalations.fields.processingLog, escFieldDefaults.processingLog
+    );
+    cfg.escalations.fields.updateHistory = mergeEscalationsFieldMap_(
+      cfg.escalations.fields.updateHistory, escFieldDefaults.updateHistory
+    );
+
+    cfg.escalations.updateHistory = cfg.escalations.updateHistory || {};
+    if (cfg.escalations.updateHistory.enabled === undefined) {
+      cfg.escalations.updateHistory.enabled = false;
+    }
+
+    // -------------------------------------------------------------------------
     // UI
     // -------------------------------------------------------------------------
     cfg.ui = cfg.ui || {};
@@ -1037,6 +1292,18 @@ var CoreConfig = (function () {
   }
 
   /**
+   * True when the Escalations feature is enabled for this app (ESC1).
+   * Default false — only explicit `escalations.enabled === true` enables.
+   *
+   * @param {AppConfig} appConfig
+   * @return {boolean}
+   */
+  function isEscalationsEnabled(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    return cfg.escalations.enabled === true;
+  }
+
+  /**
    * True when the app uses ProductMode union (EVI, AI, and future ProductMode apps).
    *
    * @param {AppConfig} appConfig
@@ -1268,6 +1535,7 @@ var CoreConfig = (function () {
     withDefaults: withDefaults,
     isExecutiveWatchEnabled: isExecutiveWatchEnabled,
     isNotableEnabled: isNotableEnabled,
+    isEscalationsEnabled: isEscalationsEnabled,
     isProductModeApp: isProductModeApp,
     getPortfolioGroupingField: getPortfolioGroupingField,
     getPortfolioGroupingLabel: getPortfolioGroupingLabel,

@@ -236,9 +236,10 @@ To test a library change against a consumer, temporarily set that consumer's
 version. The `*_DM` apps are already permanently on `"0"`.
 
 ### Git
+- See [AGENTS.md](AGENTS.md) for vendor-neutral agent rules (Git ownership, production authorization, secrets).
 - Branch is `main`; feature branches follow `feature/<name>` (e.g. `feature/productmode-pf-source`).
 - Commits use Conventional Commits with an app/area scope: `feat(dhp):`, `fix(wellness):`, `chore(ui):`.
-- Commit or push only when asked.
+- Agents own routine Git operations (status, branch, stage, commit, pull/rebase when safe, push). Do not ask Jeff to run routine Git commands. Never force-push `main` or rewrite shared history.
 
 ---
 

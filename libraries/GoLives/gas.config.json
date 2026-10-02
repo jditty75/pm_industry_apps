@@ -1,0 +1,6 @@
+{
+  "deployment": {
+    "type": "library",
+    "requireExplicitAuthorization": true
+  }
+}

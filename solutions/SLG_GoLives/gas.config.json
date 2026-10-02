@@ -1,0 +1,8 @@
+{
+  "deployment": {
+    "production": {
+      "deploymentId": null,
+      "requireExplicitAuthorization": true
+    }
+  }
+}

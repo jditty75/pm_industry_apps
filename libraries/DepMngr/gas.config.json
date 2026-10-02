@@ -1,0 +1,10 @@
+{
+  "deployment": {
+    "type": "library",
+    "requireExplicitAuthorization": true,
+    "productionImpact": {
+      "description": "A clasp push to DepMngr (CoreLib) can change live behavior immediately for Deployment Health consumers that reference the library at HEAD (version \"0\" with developmentMode true).",
+      "beforePush": "Derive affected consumers from current consumer appsscript.json CoreLib pins; require explicit production authorization before any production-impacting push."
+    }
+  }
+}

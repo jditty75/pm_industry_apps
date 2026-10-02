@@ -1,8 +1,9 @@
 {
   "deployment": {
     "production": {
-      "deploymentId": null,
-      "requireExplicitAuthorization": true
+      "deploymentId": "AKfycbwD-m_yMz22yFe4CKAaEx1lRlXqjNAviJTY7j6rf9Iu-HjYwOujCkcJdClt_2Evqd-6",
+      "requireExplicitAuthorization": true,
+      "url": "https://script.google.com/a/macros/workday.com/s/AKfycbwD-m_yMz22yFe4CKAaEx1lRlXqjNAviJTY7j6rf9Iu-HjYwOujCkcJdClt_2Evqd-6/exec"
     }
   }
 }

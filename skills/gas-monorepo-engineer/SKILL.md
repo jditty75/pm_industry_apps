@@ -36,9 +36,10 @@ Act as the developer/operator. The user supplies product intent and production a
 2. Edit authoritative local source using the project's actual CLASP `rootDir`.
 3. Follow existing architecture/conventions and make targeted changes.
 4. Run validation that actually exists for that app. Do not invent a passing test suite.
-5. Inspect the diff for unrelated changes, IDs/secrets, and accidental generated content.
-6. Commit the completed logical change with a meaningful Conventional Commit and push automatically, subject to pre-push audit.
-7. Report release readiness using the state vocabulary below. Stop before production unless explicitly authorized.
+5. For **UI changes** on apps with local preview support (`docs/agent/ui-preview.md`, `config/ui-preview.json`), run `.\preview.ps1 <app>` (or `preview_engine.py`) before push. Preview is layout/client only — not production verification.
+6. Inspect the diff for unrelated changes, IDs/secrets, and accidental generated content.
+7. Commit the completed logical change with a meaningful Conventional Commit and push automatically, subject to pre-push audit.
+8. Report release readiness using the state vocabulary below. Stop before production unless explicitly authorized.
 
 ## Release state vocabulary
 
@@ -76,6 +77,8 @@ Production Deployment IDs belong in tracked per-app configuration, not `.clasp.j
 
 If working in Jeff's Workday GAS monorepo (`C:\JD` or a clone with the same architecture), read `references/workday-monorepo.md` before modifying a shared library, performing CLASP mutation, or working on structural exceptions.
 
+For **DepMngr (`*_DM`)** and **GoLives (`*_GoLives`)** families, read `references/application-families.md` before changing shared library behavior or assuming an app directory is isolated.
+
 ## Workday web UI
 
 Do not load design references for ordinary maintenance/deployment work. For new/reworked Workday-branded GAS web UI, read only what is needed:
@@ -85,4 +88,4 @@ Do not load design references for ordinary maintenance/deployment work. For new/
 - `references/visual_guidelines.md`
 - Search `references/wday-icons-logos.csv` narrowly; do not load the full catalog.
 
-Use `scripts/preview.py <app-folder>` / `--lint` only when compatible with that app.
+Use `preview.ps1 <app>` or `scripts/preview_engine.py` for monorepo UI preview (`docs/agent/ui-preview.md`). Legacy `scripts/preview.py` / `--lint` remains for Chris four-file web apps (`index.html` + partials).

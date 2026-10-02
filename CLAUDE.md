@@ -26,14 +26,15 @@ Do not duplicate the GAS skill in this file.
 
 - **`libraries/DepMngr` push** can change live behavior for every consumer on CoreLib HEAD (`"0"` + `developmentMode`). Treat as production-impacting; inspect consumer manifests first.
 - **`PS_SPA`** may deploy from project root per CLASP `rootDir`, not `src/` — read local `.clasp.json` before editing.
-- **`snapshots/` and `DHLibrary_v52/`** were removed; historical code is in Git history only.
-- **`Build.ps1`** must not be run again.
+- **DepMngr / GoLives** are function libraries (`*_DM` / `*_GoLives` families) — see skill `references/application-families.md`.
+- Historical `snapshots/` trees belong in Git history only, not the working tree.
 
 ## Where to look next
 
 | Need | Document |
 |------|----------|
 | App discovery / teams / portal names | `config/apps.json` |
+| Local UI preview (before push) | `docs/agent/ui-preview.md` |
 | Layout, commands, patterns, testing | `docs/agent/monorepo-reference.md` |
 | Deploy ledger | `.ai/deployments.md` |
 | Unfinished cross-agent work | `.ai/HANDOFF.md` |

@@ -12,13 +12,14 @@ Google Apps Script monorepo: shared libraries under `libraries/`, deployable sol
 
 ```
 C:\JD
-├── libraries/DepMngr     → CoreLib (Deployment Health)
-├── libraries/GoLives     → GoLives
+├── libraries/DepMngr     → CoreLib function library (*_DM consumers; no standalone UI)
+├── libraries/GoLives     → GoLives function library (*_GoLives consumers; no standalone UI)
 ├── solutions/*           → CLASP projects (see config/apps.json for portal-listed apps)
 ├── config/apps.json      → discovery metadata (not deployment authority)
+├── config/ui-preview.json → local UI preview profiles
 ├── skills/gas-monorepo-engineer/
-├── docs/agent/           → this file and other progressive references
-├── pull_all.ps1, verify.ps1
+├── docs/agent/           → this file, ui-preview.md, other progressive references
+├── preview.ps1, verify.ps1
 └── package.json          → inert at root; per-project npm scripts wrap clasp
 ```
 
@@ -49,9 +50,9 @@ Run from inside a project directory (when `package.json` exists):
 | `npm run deploy` | push + new deployment (production only with authorization) |
 | `npm run version` | libraries: cut immutable version |
 
-Repo helpers: `C:\JD\pull_all.ps1`, `C:\JD\verify.ps1` (partial project lists — extend when adding apps).
+Repo helpers: `C:\JD\preview.ps1` (local UI), `C:\JD\verify.ps1` (clasp status; discovers CLASP projects).
 
-`Build.ps1` is a one-time bootstrap — **never run again**.
+**Do not** use bulk Apps Script pull as routine sync — see `reconcile_from_apps_script.ps1` if present. Historical `Build.ps1` was removed; use Git history for bootstrap artifacts.
 
 ## Architecture patterns (DM family)
 
@@ -73,7 +74,7 @@ V8 runtime; JSDoc on public functions; `Logger.log` prefixed with function name;
 ## Known structural exceptions
 
 - **PS_SPA:** may use `rootDir: ""` with deployable files at project root; confirm `.clasp.json` before edit/push.
-- **Root tooling** (`README.md`, `pull_all.ps1`, workspace file) may lag newer solutions; `config/apps.json` and directory listing are more complete for discovery.
+- **Root tooling** (`README.md`, workspace file) may lag newer solutions; `config/apps.json` and directory listing are more complete for discovery.
 - **GoLives consumers** may pin different library versions — read each `appsscript.json`.
 
 ## Entry points

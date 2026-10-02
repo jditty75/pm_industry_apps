@@ -4,9 +4,13 @@ Use this reference only for the Workday GAS monorepo currently rooted at `C:\JD`
 
 ## Project families
 
-- `libraries/DepMngr`: shared Deployment Health library consumed as `CoreLib`.
-- `libraries/GoLives`: shared Go Lives library.
+Detailed family workflow: `application-families.md` in this folder.
+
+- `libraries/DepMngr`: shared **function library** (CoreLib) — **no standalone UI**; consumed by `*_DM` solutions.
+- `libraries/GoLives`: shared **function library** — **no standalone UI**; consumed by `*_GoLives` solutions.
 - `solutions/*`: deployable GAS solutions; not every directory under `solutions` is necessarily a CLASP project. Treat presence of local `.clasp.json` as the local project indicator.
+
+When working on a consumer, decide shell/config vs shared library changes and assess **all** family consumers before production-impacting library pushes.
 
 ## Critical DepMngr rule
 

@@ -1,4 +1,4 @@
-# Git and cross-agent handoff
+# Git, release bookkeeping, and cross-agent handoff
 
 ## Agent-owned Git
 
@@ -11,10 +11,16 @@ Never force-push the primary/shared branch or destructively reset/clean without 
 Before every push:
 
 1. Fetch remote state when possible.
-2. Inspect branch/upstream and commits ahead/behind (for example, compare `HEAD` with the upstream tracking branch).
-3. Identify which ahead commits were created by the current task versus pre-existing local commits.
-4. If pushing would publish unrelated pre-existing commits, surface that consequence before pushing. Do not silently publish them as if they were part of the current task.
-5. If the user has already established a standing policy that such commits may be published, follow it; otherwise get the minimal clarification needed.
+2. Inspect branch/upstream and commits ahead/behind.
+3. Identify ahead commits created by the current task versus pre-existing local commits.
+4. If pushing would publish unrelated pre-existing commits, surface that consequence before pushing; do not silently publish them.
+5. Stage only intended task paths.
+
+## Deployment bookkeeping commits
+
+When a production event appends `.ai/deployments.md`, keep that bookkeeping commit separate from the source commit when practical. This makes it clear which Git SHA produced source and which SHA merely records the deployment event.
+
+Never change source solely to make Git "match" a rolled-back production version. Production state and development state may legitimately diverge after rollback.
 
 ## Completed vs unfinished state
 
@@ -27,7 +33,7 @@ Recommended shape:
 <goal>
 
 ## Status
-<what is complete; say NOT DEPLOYED when relevant>
+<what is complete; use the release-state vocabulary when relevant>
 
 ## Changed
 <paths/commits>

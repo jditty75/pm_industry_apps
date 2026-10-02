@@ -1,6 +1,7 @@
 /**
  * Self-test harness for inclusion counts, helpers, and milestone pool (§14).
- * Run in the Apps Script editor against the bound SLED_ActiveDeployments sheet.
+ * Run manually in the Apps Script editor against the bound SLED_ActiveDeployments sheet.
+ * Not executed from local Git/CLASP tooling; use Logger output in the editor to verify.
  * @returns {Object}
  */
 function runSelfTest() {

@@ -13,10 +13,16 @@ Agents handle routine Git work: status, branches, staging, meaningful **Conventi
 
 - Never force-push the primary branch (`main`) or destructively rewrite shared history.
 
+## Instruction hierarchy
+
+1. **This file (`AGENTS.md`)** — vendor-neutral repository contract for all agents.
+2. **[`skills/gas-monorepo-engineer/SKILL.md`](skills/gas-monorepo-engineer/SKILL.md)** — Google Apps Script development, CLASP, testing, versioning, deployment, and rollback for this monorepo.
+3. **Progressive repository references** when relevant — e.g. [`docs/agent/monorepo-reference.md`](docs/agent/monorepo-reference.md), [`config/apps.json`](config/apps.json), and references linked from the GAS skill.
+
 ## Google Apps Script
 
-- For GAS apps, libraries, CLASP, testing, versioning, and deployment mechanics: read and follow [`skills/gas-monorepo-engineer/SKILL.md`](skills/gas-monorepo-engineer/SKILL.md).
-- Load additional references from that skill **only when relevant** to the task.
+- Follow the GAS skill for all Apps Script work in this repository.
+- Load skill references and monorepo docs **only when the task needs them**; do not duplicate skill content into other entry-point files.
 
 ## Production deployment
 
@@ -37,4 +43,4 @@ Agents handle routine Git work: status, branches, staging, meaningful **Conventi
 
 ## More context
 
-- [`CLAUDE.md`](CLAUDE.md) — detailed monorepo map and conventions (Claude-oriented but useful to all agents).
+- [`CLAUDE.md`](CLAUDE.md) — concise Claude-oriented entry point (points back to this hierarchy).

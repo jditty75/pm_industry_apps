@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "description": "Business and discovery metadata for PS Portal–listed applications. Deployment authority remains per-project gas.config.json.",
+  "source": "PS Portal.xlsx Apps sheet (2026-10-02 export)",
+  "applications": [
+    {
+      "appId": "SLG_CAPACITY",
+      "name": "SLG Capacity Planner",
+      "projectPath": "solutions/SLG_Capacity",
+      "team": "State & Local Government",
+      "description": "Capacity Planning tool for SLG Delivery",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbw0u6ZRgGy9VByUOhMX7SfHKqNUxp5-_w9_6IiLFofiFWdd8zUwY3VJjnU1lJNp_tXm7A/exec"
+    },
+    {
+      "appId": "SLG_DM",
+      "name": "SLG Deployment Manager",
+      "projectPath": "solutions/SLG_DM",
+      "team": "State & Local Government",
+      "description": "A one stop shop for all Deployment data including overall health, recent and upcoming go lives, portfolio health, and more.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec"
+    },
+    {
+      "appId": "HC_GoLives",
+      "name": "Healthcare Go Lives Tool",
+      "projectPath": "solutions/HC_GoLives",
+      "team": "Healthcare",
+      "description": "A self service tool to view all go livees (both past and upcoming) along with searchable metadata and customer logos.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbypu1PcW_a8_1W298-0MAia7WpGLt7bhsdIG38I6tk1W9HkDo3kUf7LXjz5bYMtTxH9OA/exec"
+    },
+    {
+      "appId": "SLG_GoLives",
+      "name": "SLG Go Lives Tool",
+      "projectPath": "solutions/SLG_GoLives",
+      "team": "State & Local Government",
+      "description": "A self service tool to view all go livees (both past and upcoming) along with searchable metadata and customer logos.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbxxHaERksDiLQNjv5MPqGhrVo7WzQhSNM48sXfzIaEfPfJEHMFRgRDnwRSkHtlpSbY_Yg/exec"
+    },
+    {
+      "appId": "HENP_GoLives",
+      "name": "HENP Go Lives Tool",
+      "projectPath": "solutions/HENP_GoLives",
+      "team": "Higher Education / Nonprofit",
+      "description": "A self service tool to view all go livees (both past and upcoming) along with searchable metadata and customer logos.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbz_uLwbEd09_10WGn97u9rdUuWvfIMbXCp3I7ZH9XUF7w29X8tMGtYQDpb9vRvB5H5x/exec"
+    },
+    {
+      "appId": "HENP_DM",
+      "name": "HENP Deployment Manager",
+      "projectPath": "solutions/HENP_DM",
+      "team": "Higher Education / Nonprofit",
+      "description": "A one stop shop for all Deployment data including overall health, recent and upcoming go lives, portfolio health, and more.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ/exec"
+    },
+    {
+      "appId": "HC_DM",
+      "name": "Healthcare Deployment Manager",
+      "projectPath": "solutions/HC_DM",
+      "team": "Healthcare",
+      "description": "A one stop shop for all Deployment data including overall health, recent and upcoming go lives, portfolio health, and more.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA/exec"
+    },
+    {
+      "appId": "SLG_CSHub",
+      "name": "SLG Consulting Hub",
+      "projectPath": "solutions/SLG_ConsultingHub",
+      "team": "State & Local Government",
+      "description": "Tool for submitting and managing topics for monthly Consulting learning sessions.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbwA45PnnMOeKS1Aes_BWBZU5jFeTrmO82j_3SuSO7wU5xiYk605i--SNEn9DrDdHbUa/exec"
+    },
+    {
+      "appId": "HC_Wellness",
+      "name": "Healthcare Wellness Manager",
+      "projectPath": "solutions/HC_Wellness",
+      "team": "Healthcare",
+      "description": "Tool for identifying and creating meeting agendas for monthly Healthcare Wellness meetings",
+      "visibility": "RESTRICTED_DOMAIN",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbxgkk3ppHVNSmjtXYylzEPFKw_5RSaChuZildp6mYnHqy0e4cMbqbmfkKnsjSgOsCrzWQ/exec"
+    },
+    {
+      "appId": "SLED_Marketing",
+      "name": "SLED Go Lives - LinkedIn",
+      "projectPath": "solutions/SLED_Marketing",
+      "team": "US SLED",
+      "description": "Tool for viewing upcoming go lives for the US SLED Marketing team to evaluate for LinkedIn posts",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun/exec"
+    },
+    {
+      "appId": "SLED_Pipeline",
+      "name": "SLED Pipeline Analysis",
+      "projectPath": "solutions/SLED_Pipeline",
+      "team": "US SLED",
+      "description": "Tool for reviewing subscription and service opportunities for analysis / decision making",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbwD-m_yMz22yFe4CKAaEx1lRlXqjNAviJTY7j6rf9Iu-HjYwOujCkcJdClt_2Evqd-6/exec"
+    },
+    {
+      "appId": "PDX_DM",
+      "name": "Paradox Deployment Manager",
+      "projectPath": "solutions/PDX_DM",
+      "team": "Other",
+      "description": "A one stop shop for all Deployment data including overall health, recent and upcoming go lives, portfolio health, and more.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbwTrF_88o8996OtYciHJrmGeafgRPhbMsF6bDlHGbuyOtKwIJSDSbvz0mADZMmqmiCZ/exec"
+    },
+    {
+      "appId": "EVI_DM",
+      "name": "Evisort Deployment Manager",
+      "projectPath": "solutions/EVI_DM",
+      "team": "Other",
+      "description": "A one stop shop for all Deployment data including overall health, recent and upcoming go lives, portfolio health, and more.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbw1I6aXuRrWblrCnyMOMvpTULaDs_Ib_gPVwxiP4slmddTGXflY5BWqgMoZhaC3ltUfeA/exec"
+    },
+    {
+      "appId": "HS_DM",
+      "name": "HiredScore Deployment Manager",
+      "projectPath": "solutions/HS_DM",
+      "team": "Other",
+      "description": "A one stop shop for all Deployment data including overall health, recent and upcoming go lives, portfolio health, and more.",
+      "visibility": "PUBLIC_DOMAIN_READONLY",
+      "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbx7TBgF4SE1B5epdzSTVFTl3MZ6Olja1I3QPWNdlF06w747U3Rl6YgU1l-oMT_AzHo-Jg/exec"
+    }
+  ]
+}

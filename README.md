@@ -2,6 +2,8 @@
 
 Maintained by Jeff Ditty.
 
+**Agents:** start at [AGENTS.md](AGENTS.md) → [GAS skill](skills/gas-monorepo-engineer/SKILL.md) → [monorepo reference](docs/agent/monorepo-reference.md) / [app catalog](config/apps.json) when needed.
+
 ## Quick start
 1. cd into any project under libraries/ or solutions/
 2. npm run pull    (sync from Apps Script HEAD)
@@ -11,20 +13,13 @@ Maintained by Jeff Ditty.
 
 ## Projects
 
-### Libraries
-- libraries/DepMngr  used by HC_DM, SLG_DM, HENP_DM
-- libraries/GoLives  used by SLG_GoLives, HC_GoLives, HENP_GoLives
+See [config/apps.json](config/apps.json) for PS Portal–listed applications (paths, teams, descriptions). Additional CLASP projects may exist under `solutions/` and `libraries/` with per-app `gas.config.json` for production deployment.
 
-### Solutions (container-bound to Google Sheets)
-- solutions/HC_DM
-- solutions/SLG_DM
-- solutions/HENP_DM
-- solutions/SLG_GoLives
-- solutions/HC_GoLives
-- solutions/HENP_GoLives
-- solutions/SLG_ConsultingHub (standalone)
-- solutions/SLG_Capacity (standalone)
-- solutions/HC_Wellness (standalone)
+### Libraries
+- libraries/DepMngr (CoreLib)
+- libraries/GoLives
+
+Historical `snapshots/` and `DHLibrary_v52/` copies were removed; use Git history for older versions.
 
 ## Daily workflow
 

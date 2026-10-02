@@ -1,31 +1,29 @@
 # Production deployment log
 
-Append-only release records (no Script IDs). Deployment IDs match per-app `gas.config.json`.
+Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
-## 2026-10-02 — SLED_Marketing
+### 2026-10-02 — SLED_Marketing — deploy
 
-| Field | Value |
-|-------|--------|
-| App | `solutions/SLED_Marketing` |
-| Git SHA | `f9fe0aa` |
-| Commit | `docs(sled-marketing): clarify runSelfTest is editor-only` |
-| Production deployment ID | `AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun` |
-| Apps Script deployment | `@5` |
-| Description | Production: docs(sled-marketing) runSelfTest JSDoc (git f9fe0aa) |
-| URL | https://script.google.com/a/macros/workday.com/s/AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun/exec |
-| Authorized by | User (explicit deploy request, 2026-10-02) |
-| CLASP user | jeffrey.ditty@workday.com |
+- Git source: `f9fe0aa` (`docs(sled-marketing): clarify runSelfTest is editor-only`)
+- Deployment ID: `AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun`
+- Previous GAS version: 4
+- Live GAS version: 5
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun/exec
+- Description: Production: docs(sled-marketing) runSelfTest JSDoc (git f9fe0aa)
+- Verification: per user-authorized production deploy workflow
+- Result: success
+- Authorized by: User (explicit deploy request, 2026-10-02)
+- CLASP user: jeffrey.ditty@workday.com
 
-## 2026-10-02 — SLED_Marketing (rollback)
+### 2026-10-02 — SLED_Marketing — rollback
 
-| Field | Value |
-|-------|--------|
-| App | `solutions/SLED_Marketing` |
-| Action | Production rollback (user-authorized) |
-| Failed / rolled back from | Apps Script deployment **@5** (script version **5**, git `f9fe0aa`) |
-| Restored to | Script version **4** on same production deployment ID |
-| Production deployment ID | `AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun` |
-| Apps Script deployment (after) | **@4** — Rollback: restore Apps Script version 4 (pre git f9fe0aa prod @5) |
-| URL | https://script.google.com/a/macros/workday.com/s/AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun/exec |
-| Git note | `main` still contains `f9fe0aa`; only live deployment was repointed. Apps Script **HEAD** may still reflect version 5 source until a future push. |
-| CLASP user | jeffrey.ditty@workday.com |
+- Git source: `f9fe0aa` (unchanged on `main`; rollback did not revert Git)
+- Deployment ID: `AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun`
+- Previous GAS version: 5 (production had served git `f9fe0aa` source at deployment @5)
+- Live GAS version: 4
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbx00XznZNnEojwGBwgQoAAs6jJQE25LgCtEStqmVDeRffm25Q7jSyYCFSLwiKM-sRun/exec
+- Description: Rollback: restore Apps Script version 4 (pre git f9fe0aa prod @5)
+- Verification: per user-authorized rollback workflow
+- Result: success
+- Note: Apps Script **HEAD** / development source was not reverted by this rollback; only the configured production deployment was repointed.
+- CLASP user: jeffrey.ditty@workday.com

@@ -12,7 +12,7 @@ $Projects = @(
     "solutions\SLG_Capacity",
     "solutions\HC_Wellness"
 )
-# Note: HENP_GoLives skipped because scriptId is empty until you create it
+# Note: list is not exhaustive; see config/apps.json and solutions/ for all CLASP projects
 
 foreach ($p in $Projects) {
     $path = "C:\JD\$p"

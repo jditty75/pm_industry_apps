@@ -154,7 +154,7 @@ var APP_CONFIG = {
     headerSubtitle: 'Review and manage deployment data across all stages',
 
     webApp: {
-      baseUrl: 'https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA',
+      baseUrl: 'https://script.google.com/a/macros/workday.com/s/AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA',
       defaultEndpoint: 'exec'
     },
 

@@ -21,7 +21,7 @@
 
 // Set this to your deployed Web App URL for Healthcare
 var WEB_APP_URL =
-  'https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec';
+  'https://script.google.com/a/macros/workday.com/s/AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA/exec';
 
 /**
  * TABLES:

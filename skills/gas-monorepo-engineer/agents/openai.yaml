@@ -1,0 +1,3 @@
+interface:
+  display_name: "GAS Monorepo Engineer"
+  short_description: "Manage GAS code, Git, deployments, and rollbacks safely"

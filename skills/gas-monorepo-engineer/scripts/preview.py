@@ -29,7 +29,7 @@ import re
 import sys
 import webbrowser
 
-INCLUDE_RE = re.compile(r"<\?!?=?\s*include\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\?>")
+INCLUDE_RE = re.compile(r"<\?!?=?\s*include\(\s*['\"]([^'\"]+)['\"]\s*\)\s*;?\s*\?>")
 ASSET_RE = re.compile(r"<\?(!?)=\s*assets\.([A-Za-z0-9_]+)\s*\?>")
 SCRIPTLET_RE = re.compile(r"<\?[\s\S]*?\?>")
 
@@ -178,7 +178,7 @@ def build(folder, out_name):
             else:
                 log.append(f"  ! include('{name}') -> {fname} not found, left blank")
             doc = re.sub(
-                r"<\?!?=?\s*include\(\s*['\"]" + re.escape(name) + r"['\"]\s*\)\s*\?>",
+                r"<\?!?=?\s*include\(\s*['\"]" + re.escape(name) + r"['\"]\s*\)\s*;?\s*\?>",
                 lambda m: content,
                 doc,
             )

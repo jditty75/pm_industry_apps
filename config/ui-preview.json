@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "description": "Local UI preview profiles. Safe defaults: no production URLs, no clasp, mock google.script.run.",
+  "outputDir": ".preview-out",
+  "libraries": {
+    "DepMngr": "libraries/DepMngr/src",
+    "GoLives": "libraries/GoLives/src"
+  },
+  "profiles": {
+    "html-includes": {
+      "description": "HtmlService createTemplateFromFile with <?!= include('Partial') ?> partials",
+      "entry": "index.html",
+      "caseInsensitiveIncludes": true
+    },
+    "dm-depmngr-webapp": {
+      "description": "Deployment Health WebApp.html + CoreLib CoreUI bundles from DepMngr",
+      "extends": "dm-depmngr-webapp-base",
+      "entry": "WebApp.html",
+      "depMngr": true,
+      "configScript": "Config_APP.js",
+      "codeConstants": "Code.js"
+    },
+    "golives-index": {
+      "description": "Self-contained Go Lives Index.html in solution src",
+      "entry": "Index.html",
+      "stripScriptlets": true
+    },
+    "static-html": {
+      "description": "Single HtmlService file, no includes",
+      "entry": "Index.html",
+      "stripScriptlets": false
+    },
+    "pipeline-webapp": {
+      "description": "SLED_Pipeline WebApp + lowercase partials",
+      "extends": "html-includes",
+      "entry": "WebApp.html",
+      "includeFolder": "."
+    }
+  },
+  "applications": {
+    "libraries/DepMngr": {
+      "appId": "CORELIB_DEPMNGR",
+      "previewSupport": "NO_STANDALONE_UI",
+      "note": "Function library only; preview via any *_DM consumer."
+    },
+    "libraries/GoLives": {
+      "appId": "LIB_GOLIVES",
+      "previewSupport": "NO_STANDALONE_UI",
+      "note": "Function library only; preview via *_GoLives consumer."
+    },
+    "solutions/SLG_DM": {
+      "appId": "SLG_DM",
+      "profile": "dm-depmngr-webapp",
+      "srcDir": "src",
+      "configScript": "Config_SLG.js",
+      "previewSupport": "PARTIAL",
+      "limitations": ["google.script.run returns mock; no live sheet data", "APP_CONFIG evaluated via Node from Config + Code constants"]
+    },
+    "solutions/HC_DM": {
+      "appId": "HC_DM",
+      "profile": "dm-depmngr-webapp",
+      "srcDir": "src",
+      "configScript": "Config_HC.js",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/HENP_DM": {
+      "appId": "HENP_DM",
+      "profile": "dm-depmngr-webapp",
+      "srcDir": "src",
+      "configScript": "Config_HENP.js",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/EVI_DM": {
+      "appId": "EVI_DM",
+      "profile": "dm-depmngr-webapp",
+      "srcDir": "src",
+      "configScript": "Config_EVI.js",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/PDX_DM": {
+      "appId": "PDX_DM",
+      "profile": "dm-depmngr-webapp",
+      "srcDir": "src",
+      "configScript": "Config_PDX.js",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/HS_DM": {
+      "appId": "HS_DM",
+      "profile": "dm-depmngr-webapp",
+      "srcDir": "src",
+      "configScript": "Config_HS.js",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/SLG_GoLives": {
+      "appId": "SLG_GoLives",
+      "profile": "golives-index",
+      "srcDir": "src",
+      "previewSupport": "PARTIAL",
+      "limitations": ["Data loads via google.script.run only; shell and CSS render locally"]
+    },
+    "solutions/HC_GoLives": {
+      "appId": "HC_GoLives",
+      "profile": "golives-index",
+      "srcDir": "src",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/HENP_GoLives": {
+      "appId": "HENP_GoLives",
+      "profile": "golives-index",
+      "srcDir": "src",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/SLG_Capacity": {
+      "appId": "SLG_CAPACITY",
+      "profile": "html-includes",
+      "srcDir": "src",
+      "entry": "Index.html",
+      "previewSupport": "PARTIAL",
+      "limitations": ["Heavy google.script.run; layout and static panels only without mock handlers"]
+    },
+    "solutions/SLG_ConsultingHub": {
+      "appId": "SLG_CSHub",
+      "profile": "html-includes",
+      "srcDir": "src",
+      "entry": "Index.html",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/HC_Wellness": {
+      "appId": "HC_Wellness",
+      "profile": "html-includes",
+      "srcDir": "src",
+      "entry": "Index.html",
+      "previewSupport": "PARTIAL",
+      "limitations": ["Agenda data from server; Index shell only"]
+    },
+    "solutions/SLED_Marketing": {
+      "appId": "SLED_Marketing",
+      "profile": "html-includes",
+      "srcDir": "src",
+      "entry": "Index.html",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/SLED_Pipeline": {
+      "appId": "SLED_Pipeline",
+      "profile": "pipeline-webapp",
+      "srcDir": "src",
+      "previewSupport": "PARTIAL"
+    },
+    "solutions/PS_SPA": {
+      "appId": "PS_SPA",
+      "profile": "static-html",
+      "srcDir": "src",
+      "entry": "Index.html",
+      "previewSupport": "FULL",
+      "limitations": ["Static marketing page; no server scriptlets"]
+    },
+    "solutions/GS_Kit": {
+      "appId": "GS_KIT",
+      "previewSupport": "NOT_YET",
+      "note": "Design assets and Google Sites kit — not a CLASP web app."
+    }
+  }
+}

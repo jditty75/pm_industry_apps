@@ -1,5 +1,7 @@
 ﻿# Dependencies
 node_modules/
+__pycache__/
+*.pyc
 
 # Build / OS
 .DS_Store
@@ -32,3 +34,12 @@ Thumbs.db
 # Local Apps Script clasp project bindings
 .clasp.json
 **/.clasp.json
+
+# Local UI preview output
+.preview-out/
+**/preview.html
+
+# Disposable inventory / downloaded skill archives
+gas-project-inventory.txt
+monorepo-structure.txt
+gas-monorepo-engineer-v*.zip

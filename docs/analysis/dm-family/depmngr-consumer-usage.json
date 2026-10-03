@@ -1,0 +1,1028 @@
+{
+  "gitSha": "953068a698d9d13da5b3a0520d2174c5326c789a",
+  "coreLibRefsUnion": {
+    "CoreAnalytics.update": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreConfig.withDefaults": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugDdFromContacts_": [
+      "SLG_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugDeploymentHealthPlan": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugOverviewNextHighRisk": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugProductModeActiveDeploymentsUnion": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugProductModeCanonicalUnionCounts": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugProductModeCounts": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugProductModeDeploymentDisplayGrain": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugProductModeGoLiveEvents": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugProductModeSources": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._debugWellnessData": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._perfCacheDeleteKey_": [
+      "SLG_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._perfCacheRead_": [
+      "SLG_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._perfCacheWrite_": [
+      "SLG_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData._validateEffectiveDeployments": [
+      "HC_DM",
+      "HENP_DM"
+    ],
+    "CoreData.buildStudentTabData_": [
+      "HENP_DM"
+    ],
+    "CoreData.bulkClearAllOverrides": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.bulkClearMonthlyOverrides": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.checkDataFreshnessAndAlert_": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.clearSingleOverride": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.debugDdDigestAssignmentsForUI": [
+      "HC_DM"
+    ],
+    "CoreData.debugHenpStudentMtpDateTraceForUI": [
+      "HENP_DM"
+    ],
+    "CoreData.debugHenpStudentRowForUI": [
+      "HENP_DM"
+    ],
+    "CoreData.debugMdsPglRowsForUI": [
+      "HC_DM"
+    ],
+    "CoreData.debugOverviewVsDeploymentsCountsForUI": [
+      "HENP_DM"
+    ],
+    "CoreData.debugTraceDeploymentInUiPipeline": [
+      "HENP_DM"
+    ],
+    "CoreData.flushAppCaches": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getActiveDeployments": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getAllActiveOverrides": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getAllDeployments": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getAllDeploymentsForUI": [
+      "EVI_DM"
+    ],
+    "CoreData.getAllEffectiveDeployments": [
+      "HC_DM"
+    ],
+    "CoreData.getCsatTabDataForUI": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getDeploymentAuditSummary": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getDistributionLogDataForUI": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getGoLivesExplorerData": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getMdsPglBatchView": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getNotificationKeysForMenu": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getOverrideAuditLog": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getOverviewSnapshot": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getRecentGoLives": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getRecentGoLivesForNotablePicker": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.getUpcomingGoLives": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.saveStudentDeploymentFields": [
+      "HENP_DM"
+    ],
+    "CoreData.setOverrideClassification": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.updateDeploymentWithMetaAndOverride": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.updateGoLivesOverride": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreData.uploadCsatInFlightCsvForUI": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreDistribute.getMonthlyReportSendLog": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreDistribute.initReportDistributionLog": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreDistribute.sendMonthlyReport": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreDistribute.sendMonthlyReportTest": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreEscalations._debugEscalationsDashboard": [
+      "PDX_DM"
+    ],
+    "CoreEscalations._debugEscalationsSchema": [
+      "PDX_DM"
+    ],
+    "CoreEscalations.getDashboardData": [
+      "PDX_DM"
+    ],
+    "CoreExecSummary.get": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreExecSummary.save": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreFreshnessMonitor._debugDataFreshness": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreFreshnessMonitor.getFreshnessForUI": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreFreshnessMonitor.getRollupSnapshot": [
+      "SLG_DM"
+    ],
+    "CoreFreshnessMonitor.installDailyTrigger": [
+      "SLG_DM"
+    ],
+    "CoreFreshnessMonitor.sendDailyRollup": [
+      "SLG_DM"
+    ],
+    "CoreNotable.addNotableDeployment": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreNotable.debugNotableDataPipelineForUI": [
+      "SLG_DM"
+    ],
+    "CoreNotable.getNotableForApp": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreNotable.updateNotableDeployment": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreNotify.debugDdDigestDedupeForUI": [
+      "HC_DM"
+    ],
+    "CoreNotify.initNotificationConfigSheet": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreNotify.runNotifications": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreNotify.sendTestNotification": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreNotify.upsertNotificationRule": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreNotify.validateNotificationConfig": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CorePortfolioHealth.createPortfolioHealthSlides": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CorePortfolioHealth.debugPortfolioHealthSlidesPayload": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CorePortfolioHealth.debugPortfolioHealthVNext": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CorePortfolioHealth.getSnapshot": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CorePortfolioMomentum.getMomentumDebugSummary": [
+      "SLG_DM"
+    ],
+    "CorePortfolioMomentum.getMomentumSnapshot": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CorePortfolioMomentum.queryMomentumDataset": [
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreReport.buildInlineHtmlWithAnalytics": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreReport.buildOutlookHtml": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreReport.buildReportV2WithAnalytics": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreReport.debugGmailReportPreviewPerformance": [
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreReport.debugUpcomingGoLiveReportRowsForUI": [
+      "EVI_DM"
+    ],
+    "CoreReport.exportInlineAndOutlookToDrive": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreReport.exportReportV2ToDrive": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreSalesforce._warmCaches": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreSalesforce.getDeploymentEnrichmentMap": [
+      "SLG_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.debugTrendsDashboardData": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.debugTrendsReadiness": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getGoLiveOutcomePatterns": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getHealthByDeliveryDirector": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getHealthByPartner": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getHealthTrajectory": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getTimeInRedMetrics": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getTimeInStageMetrics": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getTimeToGoLiveMetrics": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreTrends.getTrendsDashboardData": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreUsers.filterRowsByAccountOwner": [
+      "SLG_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreUsers.getActiveUsers": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreUsers.getCurrentUser": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreUsers.getCurrentUserAccess": [
+      "SLG_DM",
+      "HC_DM",
+      "HENP_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ],
+    "CoreUsers.getDDAssignmentMap": [
+      "SLG_DM",
+      "EVI_DM",
+      "PDX_DM",
+      "HS_DM"
+    ]
+  },
+  "singleAppCoreLibRefs": {
+    "CoreData.buildStudentTabData_": [
+      "HENP_DM"
+    ],
+    "CoreData.debugDdDigestAssignmentsForUI": [
+      "HC_DM"
+    ],
+    "CoreData.debugHenpStudentMtpDateTraceForUI": [
+      "HENP_DM"
+    ],
+    "CoreData.debugHenpStudentRowForUI": [
+      "HENP_DM"
+    ],
+    "CoreData.debugMdsPglRowsForUI": [
+      "HC_DM"
+    ],
+    "CoreData.debugOverviewVsDeploymentsCountsForUI": [
+      "HENP_DM"
+    ],
+    "CoreData.debugTraceDeploymentInUiPipeline": [
+      "HENP_DM"
+    ],
+    "CoreData.getAllDeploymentsForUI": [
+      "EVI_DM"
+    ],
+    "CoreData.getAllEffectiveDeployments": [
+      "HC_DM"
+    ],
+    "CoreData.saveStudentDeploymentFields": [
+      "HENP_DM"
+    ],
+    "CoreEscalations._debugEscalationsDashboard": [
+      "PDX_DM"
+    ],
+    "CoreEscalations._debugEscalationsSchema": [
+      "PDX_DM"
+    ],
+    "CoreEscalations.getDashboardData": [
+      "PDX_DM"
+    ],
+    "CoreFreshnessMonitor.getRollupSnapshot": [
+      "SLG_DM"
+    ],
+    "CoreFreshnessMonitor.installDailyTrigger": [
+      "SLG_DM"
+    ],
+    "CoreFreshnessMonitor.sendDailyRollup": [
+      "SLG_DM"
+    ],
+    "CoreNotable.debugNotableDataPipelineForUI": [
+      "SLG_DM"
+    ],
+    "CoreNotify.debugDdDigestDedupeForUI": [
+      "HC_DM"
+    ],
+    "CorePortfolioMomentum.getMomentumDebugSummary": [
+      "SLG_DM"
+    ],
+    "CoreReport.debugUpcomingGoLiveReportRowsForUI": [
+      "EVI_DM"
+    ]
+  },
+  "depMngrModules": {
+    "CoreAnalytics": [],
+    "CoreConfig": [],
+    "CoreData": [
+      "_sfdcDataVersion_",
+      "getRecentGoLivesForNotablePicker"
+    ],
+    "CoreDistribute": [],
+    "CoreEscalations": [],
+    "CoreExecSummary": [],
+    "CoreFreshnessMonitor": [],
+    "CoreHistory": [],
+    "CoreNotable": [],
+    "CoreNotify": [],
+    "CorePortfolioHealth": [],
+    "CorePortfolioMomentum": [],
+    "CoreReport": [
+      "buildHtmlTableAsBars_"
+    ],
+    "CoreSalesforce": [
+      "_clearDdContactsCache",
+      "_clearEnrichmentCache",
+      "_clearEnrichmentSheetCache",
+      "_clearStudentCache_",
+      "_perfCacheDecodeS_",
+      "_perfCacheDeleteKeyS_",
+      "_perfCacheEncodeS_",
+      "_perfCacheReadS_",
+      "_perfCacheWriteS_",
+      "_test_phase3a",
+      "_warmCaches",
+      "getDdAssignmentsFromContacts_",
+      "getStudentDeploymentIds_",
+      "getStudentProductFunctionsMap_"
+    ],
+    "CoreSurveySchedule": [],
+    "CoreTrends": [],
+    "CoreUI": [],
+    "CoreUI_Css": [
+      "_CoreUI_Css_getStylesheet"
+    ],
+    "CoreUI_Js": [
+      "_CoreUI_Js_getJsBundle"
+    ],
+    "CoreUI_Markup": [
+      "_CoreUI_Markup_attr_",
+      "_CoreUI_Markup_buildAuditDetailModal_",
+      "_CoreUI_Markup_buildConfirmModal_",
+      "_CoreUI_Markup_buildCsatRuleModal_",
+      "_CoreUI_Markup_buildCsatTab_",
+      "_CoreUI_Markup_buildDeploymentHealthPlanModal_",
+      "_CoreUI_Markup_buildDeploymentsTab_",
+      "_CoreUI_Markup_buildEditModal_",
+      "_CoreUI_Markup_buildEscalationDetailModal_",
+      "_CoreUI_Markup_buildEscalationsTab_",
+      "_CoreUI_Markup_buildExecEditorToolbar_",
+      "_CoreUI_Markup_buildExecSummaryTab_",
+      "_CoreUI_Markup_buildExecWatchModal_",
+      "_CoreUI_Markup_buildGoLivesModal_",
+      "_CoreUI_Markup_buildGoLivesTabExplorer_",
+      "_CoreUI_Markup_buildGoLivesTabLegacy_",
+      "_CoreUI_Markup_buildGoLivesTab_",
+      "_CoreUI_Markup_buildHeader_",
+      "_CoreUI_Markup_buildMetaModal_",
+      "_CoreUI_Markup_buildMgmPglTab_",
+      "_CoreUI_Markup_buildNotableAddPickerModal_",
+      "_CoreUI_Markup_buildNotableEditModal_",
+      "_CoreUI_Markup_buildNotableTab_",
+      "_CoreUI_Markup_buildOverrideDetailModal_",
+      "_CoreUI_Markup_buildOverrideImpactSummaryModal_",
+      "_CoreUI_Markup_buildOverridesTab_",
+      "_CoreUI_Markup_buildOverviewTab_",
+      "_CoreUI_Markup_buildPortfolioTab_",
+      "_CoreUI_Markup_buildReportSendModal_",
+      "_CoreUI_Markup_buildReportTab_",
+      "_CoreUI_Markup_buildReportingTab_",
+      "_CoreUI_Markup_buildStudentEditModal_",
+      "_CoreUI_Markup_buildStudentTab_",
+      "_CoreUI_Markup_buildTabBar_",
+      "_CoreUI_Markup_buildTrendsTabLegacy_",
+      "_CoreUI_Markup_buildTrendsTabV1_",
+      "_CoreUI_Markup_buildTrendsTab_",
+      "_CoreUI_Markup_buildViewAsReadOnlyBanner_",
+      "_CoreUI_Markup_buildViewAsReadOnlyLinkHtml_",
+      "_CoreUI_Markup_buildViewAsTopLink_",
+      "_CoreUI_Markup_buildWelcomeBannerPlaceholder_",
+      "_CoreUI_Markup_esc_",
+      "_CoreUI_Markup_getAppShell",
+      "_CoreUI_Markup_getHeadScripts",
+      "_CoreUI_Markup_isStudentIntegrated_",
+      "_CoreUI_Markup_workdayWMarkSvg_"
+    ],
+    "CoreUsers": [],
+    "CoreUtils": []
+  },
+  "cfgSheetsReferencedInDepMngr": {
+    "referenced_keys": [
+      "appUsers",
+      "channelRegistry",
+      "csatInFlight",
+      "currentState",
+      "dashboard",
+      "ddAssignment",
+      "deploymentContacts",
+      "deploymentHistory",
+      "deploymentOverrides",
+      "deployments",
+      "deploymentsMeta",
+      "execSummary",
+      "forEach",
+      "goLivesOverrides",
+      "healthReportSnapshots",
+      "length",
+      "processingLog",
+      "sfdcContacts",
+      "sfdcDeploymentProductFunctions",
+      "studentData",
+      "updateHistory",
+      "wellness"
+    ]
+  },
+  "configSheetsByApp": {
+    "SLG_DM": {
+      "activeDeployments": "ActiveDeployments",
+      "goLives": "Go Lives",
+      "deploymentOverrides": "DeploymentOverrides",
+      "goLivesOverrides": "GoLivesOverrides",
+      "deploymentsMeta": "DeploymentsMeta",
+      "changeLog": "ChangeLog",
+      "execSummary": "ExecSummary",
+      "healthReportSnapshots": "HealthReportSnapshots",
+      "healthMonthlySummary": "HealthMonthlySummary",
+      "healthYtdSummary": "HealthYtdSummary",
+      "dashboard": "Dashboard",
+      "appUsers": "AppUsers",
+      "ddAssignment": "DD Assignment",
+      "sfdcDeploymentProductFunctions": "SFDC_DeploymentProductFunctions",
+      "deployments": "SFDC_Deployments",
+      "deploymentContacts": "SFDC_DeploymentContacts",
+      "sfdcContacts": "SFDC_DeploymentContacts",
+      "deploymentHistory": "SFDC_DeploymentHistory"
+    },
+    "HC_DM": {
+      "activeDeployments": "ActiveDeployments",
+      "goLives": "Go Lives",
+      "deploymentOverrides": "DeploymentOverrides",
+      "goLivesOverrides": "GoLivesOverrides",
+      "deploymentsMeta": "DeploymentsMeta",
+      "changeLog": "ChangeLog",
+      "execSummary": "ExecSummary",
+      "healthReportSnapshots": "HealthReportSnapshots",
+      "healthMonthlySummary": "HealthMonthlySummary",
+      "healthYtdSummary": "HealthYtdSummary",
+      "dashboard": "Dashboard",
+      "appUsers": "AppUsers",
+      "ddAssignment": "DD",
+      "sfdcDeploymentProductFunctions": "SFDC_DeploymentProductFunctions",
+      "deployments": "SFDC_Deployments",
+      "deploymentContacts": "SFDC_DeploymentContacts",
+      "sfdcContacts": "SFDC_DeploymentContacts",
+      "deploymentHistory": "SFDC_DeploymentHistory"
+    },
+    "HENP_DM": {
+      "activeDeployments": "ActiveDeployments",
+      "goLives": "Go Lives",
+      "deploymentOverrides": "DeploymentOverrides",
+      "goLivesOverrides": "GoLivesOverrides",
+      "deploymentsMeta": "DeploymentsMeta",
+      "changeLog": "ChangeLog",
+      "execSummary": "ExecSummary",
+      "healthReportSnapshots": "HealthReportSnapshots",
+      "healthMonthlySummary": "HealthMonthlySummary",
+      "healthYtdSummary": "HealthYtdSummary",
+      "dashboard": "Dashboard",
+      "appUsers": "AppUsers",
+      "ddAssignment": "DD",
+      "sfdcDeploymentProductFunctions": "SFDC_DeploymentProductFunctions",
+      "deployments": "SFDC_Deployments",
+      "deploymentContacts": "SFDC_DeploymentContacts",
+      "sfdcContacts": "SFDC_DeploymentContacts",
+      "deploymentHistory": "SFDC_DeploymentHistory"
+    },
+    "EVI_DM": {
+      "activeDeployments": "ActiveDeployments",
+      "goLives": "Go Lives",
+      "deploymentOverrides": "DeploymentOverrides",
+      "goLivesOverrides": "GoLivesOverrides",
+      "deploymentsMeta": "DeploymentsMeta",
+      "changeLog": "ChangeLog",
+      "execSummary": "ExecSummary",
+      "healthReportSnapshots": "HealthReportSnapshots",
+      "healthMonthlySummary": "HealthMonthlySummary",
+      "healthYtdSummary": "HealthYtdSummary",
+      "dashboard": "Dashboard",
+      "appUsers": "AppUsers",
+      "ddAssignment": "DD Assignment",
+      "sfdcDeploymentProductFunctions": "SFDC_DeploymentProductFunctions",
+      "deployments": "SFDC_Deployments",
+      "deploymentContacts": "SFDC_DeploymentContacts",
+      "sfdcContacts": "SFDC_DeploymentContacts",
+      "deploymentHistory": "SFDC_DeploymentHistory"
+    },
+    "PDX_DM": {
+      "activeDeployments": "ActiveDeployments",
+      "goLives": "Go Lives",
+      "deploymentOverrides": "DeploymentOverrides",
+      "goLivesOverrides": "GoLivesOverrides",
+      "deploymentsMeta": "DeploymentsMeta",
+      "changeLog": "ChangeLog",
+      "execSummary": "ExecSummary",
+      "healthReportSnapshots": "HealthReportSnapshots",
+      "healthMonthlySummary": "HealthMonthlySummary",
+      "healthYtdSummary": "HealthYtdSummary",
+      "dashboard": "Dashboard",
+      "appUsers": "AppUsers",
+      "ddAssignment": "DD Assignment",
+      "sfdcDeploymentProductFunctions": "SFDC_DeploymentProductFunctions",
+      "deployments": "SFDC_Deployments",
+      "deploymentContacts": "SFDC_DeploymentContacts",
+      "sfdcContacts": "SFDC_DeploymentContacts",
+      "deploymentHistory": "SFDC_DeploymentHistory"
+    },
+    "HS_DM": {
+      "activeDeployments": "ActiveDeployments",
+      "goLives": "Go Lives",
+      "deploymentOverrides": "DeploymentOverrides",
+      "goLivesOverrides": "GoLivesOverrides",
+      "deploymentsMeta": "DeploymentsMeta",
+      "changeLog": "ChangeLog",
+      "execSummary": "ExecSummary",
+      "healthReportSnapshots": "HealthReportSnapshots",
+      "healthMonthlySummary": "HealthMonthlySummary",
+      "healthYtdSummary": "HealthYtdSummary",
+      "dashboard": "Dashboard",
+      "appUsers": "AppUsers",
+      "ddAssignment": "DD Assignment",
+      "sfdcDeploymentProductFunctions": "SFDC_DeploymentProductFunctions",
+      "deployments": "SFDC_Deployments",
+      "deploymentContacts": "SFDC_DeploymentContacts",
+      "sfdcContacts": "SFDC_DeploymentContacts",
+      "deploymentHistory": "SFDC_DeploymentHistory"
+    }
+  },
+  "configSheetKeyDrift": {
+    "ddAssignment": {
+      "SLG_DM": "DD Assignment",
+      "HC_DM": "DD",
+      "HENP_DM": "DD",
+      "EVI_DM": "DD Assignment",
+      "PDX_DM": "DD Assignment",
+      "HS_DM": "DD Assignment"
+    }
+  },
+  "manifestPins": {
+    "SLG_DM": {
+      "coreLibVersion": "139",
+      "developmentMode": true,
+      "extraScopes": [
+        "https://www.googleapis.com/auth/script.send_mail"
+      ]
+    },
+    "HC_DM": {
+      "coreLibVersion": "139",
+      "developmentMode": false,
+      "extraScopes": []
+    },
+    "HENP_DM": {
+      "coreLibVersion": "139",
+      "developmentMode": false,
+      "extraScopes": []
+    },
+    "EVI_DM": {
+      "coreLibVersion": "113",
+      "developmentMode": false,
+      "extraScopes": [
+        "https://www.googleapis.com/auth/presentations"
+      ]
+    },
+    "PDX_DM": {
+      "coreLibVersion": "0",
+      "developmentMode": true,
+      "extraScopes": [
+        "https://www.googleapis.com/auth/presentations"
+      ]
+    },
+    "HS_DM": {
+      "coreLibVersion": "0",
+      "developmentMode": true,
+      "extraScopes": [
+        "https://www.googleapis.com/auth/presentations"
+      ]
+    }
+  }
+}

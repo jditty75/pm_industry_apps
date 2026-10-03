@@ -1,0 +1,926 @@
+{
+  "generatedAtUtc": "2026-10-03T17:30:40.708487+00:00",
+  "rows": [
+    {
+      "sheet": "AI_Deployments",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "AI_ProductFunction",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "ActiveDeployments",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": true,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "POSSIBLY_LEGACY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [
+        "HC_DM"
+      ],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "AppUsers",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Auto Refresh Execution Log",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "CSAT_InFlight",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Channel Registry",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": false
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Contact1",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "POSSIBLY_LEGACY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Contact2",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "POSSIBLY_LEGACY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Contacts1",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Contacts2",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Current Escalation State",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": false
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "DD",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": true,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "POSSIBLY_LEGACY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "DD Assignment",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "DNU_ActiveDeployments",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "POSSIBLY_LEGACY",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [
+        "EVI_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "hiddenIn": [
+        "SLG_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_App_LandingConfig",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_ChangeLog",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "HC_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_DD",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": true,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "DNU_DD_Debug",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_DeploymentHealth_Snapshot",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "HC_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_Dlist",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": true,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "HC_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_EVI_Deployments",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "EVI_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_EVI_ProductFunction",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "EVI_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_Go Lives",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "POSSIBLY_LEGACY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [
+        "EVI_DM",
+        "HC_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "hiddenIn": [
+        "SLG_DM",
+        "HC_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_HealthMonthlySummary",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_HealthYtdSummary",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": true,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "HENP_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_MetaIDMapping",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU_PerfCache",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "HENP_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DNU__PerfCache",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": true,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "HIGH_CONFIDENCE_UNUSED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "HC_DM"
+      ]
+    },
+    {
+      "sheet": "Dashboard",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "DeploymentOverrides",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "DeploymentsMeta",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Escalation Update History",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": false
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Escalation_Configuration",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": false
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "ExecSummary",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "FutureGL_TBL",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "HC_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "GoLivesOverrides",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "HealthMonthlySummary",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": true,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "POSSIBLY_LEGACY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "HC_DM"
+      ]
+    },
+    {
+      "sheet": "HealthReportSnapshots",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [
+        "EVI_DM",
+        "HC_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "HealthYtdSummary",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "HC_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "NotificationConfig",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "OverrideAudit",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "Processing Log",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": false,
+        "HENP_DM": false,
+        "EVI_DM": false,
+        "PDX_DM": true,
+        "HS_DM": false
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "RecentGL_TBL",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "HC_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "RedYellow_TBL",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": [
+        "SLG_DM",
+        "HENP_DM",
+        "EVI_DM",
+        "PDX_DM",
+        "HS_DM"
+      ]
+    },
+    {
+      "sheet": "ReportDistributionLog",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "SFDC_DHP",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "SFDC_DeploymentContacts",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "SFDC_DeploymentHistory",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "SFDC_DeploymentProductFunctions",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "SFDC_Deployments",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "SFDC_Wellness",
+      "presence": {
+        "SLG_DM": true,
+        "HC_DM": true,
+        "HENP_DM": true,
+        "EVI_DM": true,
+        "PDX_DM": true,
+        "HS_DM": true
+      },
+      "classification": "ACTIVE_SHARED",
+      "headerDrift": true,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    },
+    {
+      "sheet": "StudentDeploymentData",
+      "presence": {
+        "SLG_DM": false,
+        "HC_DM": false,
+        "HENP_DM": true,
+        "EVI_DM": false,
+        "PDX_DM": false,
+        "HS_DM": false
+      },
+      "classification": "ACTIVE_APP_SPECIFIC",
+      "headerDrift": false,
+      "formulaSampleRefsTo": [],
+      "hiddenIn": []
+    }
+  ]
+}

@@ -1,0 +1,811 @@
+{
+  "schemaVersion": 1,
+  "appId": "EVI_DM",
+  "analyzedAtUtc": "2026-10-03T17:22:11Z",
+  "sourceXlsx": "docs/migrations/live/EVI_DM.xlsx",
+  "gitShaAtAnalysis": "953068a698d9d13da5b3a0520d2174c5326c789a",
+  "sheetCount": 36,
+  "sheets": [
+    {
+      "name": "DNU_Go Lives",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 1865,
+      "maxColumn": 11,
+      "headerRow1": [
+        "Account Name",
+        "Industry",
+        "Delivery Assurance Manager: Full Name",
+        "Workday Engagement Manager: Full Name",
+        "Priming Partner: Account Name",
+        "Deployment Name",
+        "Services Approach",
+        "Product Area",
+        "Go Live Date Actual",
+        "In Production"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "CSAT_InFlight",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 17,
+      "maxColumn": 16,
+      "headerRow1": [
+        "deployment_id",
+        "account_name",
+        "deployment_name",
+        "survey_type",
+        "tracking_status",
+        "response_received",
+        "contact_name",
+        "contact_email",
+        "contact_role",
+        "engagement_manager",
+        "partner_name",
+        "sent_date",
+        "opened_date",
+        "started_date",
+        "finished_date",
+        "survey_expires"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_EVI_ProductFunction",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 804,
+      "maxColumn": 6,
+      "headerRow1": [
+        "Id",
+        "Deployment__c",
+        "Product_Area__c",
+        "Function__c",
+        "Production_Move_Date_Target__c",
+        "Production_Move_Date_Actual__c"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_EVI_Deployments",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 579,
+      "maxColumn": 21,
+      "headerRow1": [
+        "Id",
+        "Name",
+        "Customer__r.Name",
+        "Customer__r.Industry",
+        "Customer__r.PS_Region_New__c",
+        "Customer__r.PS_Sub_Region__c",
+        "Customer__r.SubRegion__c",
+        "Deployment_Start_Date__c",
+        "Current_MTP_Date__c",
+        "First_Move_to_Production_Date_Actual__c",
+        "Overall_Status__c",
+        "Deployment_Phase__c",
+        "Deployment_Stage__c",
+        "Overall_Health__c",
+        "Deployment_Completion_Date__c",
+        "Workday_Engagement_Manager__r",
+        "Delivery_Assurance_Manager__r",
+        "Priming_Partner__c",
+        "Implementation_Partner__c",
+        "Deployment_Partner_Name__c",
+        "Deployment_Summary__c"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_DD_Debug",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 174,
+      "maxColumn": 9,
+      "headerRow1": [
+        "Deployment_Id",
+        "Account_Name",
+        "Deployment_Name",
+        "Partner",
+        "DeliveryDirector_Override",
+        "DD_From_Contacts",
+        "Resolved_DD",
+        "DD_Contacts_Count",
+        "DD_Contacts_Emails"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_PerfCache",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 149,
+      "maxColumn": 3,
+      "headerRow1": [
+        "Key",
+        "ValueJson",
+        "Timestamp"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "SFDC_DeploymentProductFunctions",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 5649,
+      "maxColumn": 24,
+      "headerRow1": [
+        "Id",
+        "Deployment__c",
+        "Deployment__r.Id",
+        "Deployment__r.Name",
+        "Deployment__r.Customer__c",
+        "Deployment__r.Customer__r",
+        "Deployment__r.Deployment_Start_Date__c",
+        "Deployment__r.Current_MTP_Date__c",
+        "Deployment__r.First_Move_to_Production_Date_Actual__c",
+        "Deployment__r.Overall_Status__c",
+        "Deployment__r.Deployment_Phase__c",
+        "Deployment__r.Deployment_Stage__c",
+        "Deployment__r.Overall_Health__c",
+        "Deployment__r.Deployment_Completion_Date__c",
+        "Deployment__r.Workday_Engagement_Manager__r",
+        "Deployment__r.Delivery_Assurance_Manager__r",
+        "Deployment__r.Priming_Partner__c",
+        "Deployment__r.Implementation_Partner__c",
+        "Deployment__r.Deployment_Partner_Name__c",
+        "Deployment__r.Deployment_Summary__c",
+        "Product_Area__c",
+        "Function__c",
+        "Production_Move_Date_Target__c",
+        "Production_Move_Date_Actual__c"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "NotificationConfig",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 7,
+      "maxColumn": 16,
+      "headerRow1": [
+        "Allowed fromAlias values (must be verified Gmail send-as aliases): jeffrey.ditty@workday.com"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "ReportDistributionLog",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 4,
+      "maxColumn": 20,
+      "headerRow1": [
+        "timestamp",
+        "appId",
+        "monthLabel",
+        "fromAlias",
+        "subject",
+        "toCount",
+        "ccCount",
+        "toList",
+        "ccList",
+        "status",
+        "error",
+        "messageId",
+        "threadId",
+        "captureMethod",
+        "sentBy",
+        "mode",
+        "category",
+        "notificationKey",
+        "bccCount",
+        "bccList"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "SFDC_DeploymentHistory",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 9892,
+      "maxColumn": 10,
+      "headerRow1": [
+        "Id",
+        "ParentId",
+        "Parent.Name",
+        "Parent.Customer__c",
+        "Parent.Customer__r",
+        "Field",
+        "OldValue",
+        "NewValue",
+        "CreatedDate",
+        "CreatedById"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "SFDC_Deployments",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 623,
+      "maxColumn": 24,
+      "headerRow1": [
+        "Id",
+        "Name",
+        "Customer__c",
+        "Customer__r.Name",
+        "Customer__r.Industry",
+        "Customer__r.PS_Region_New__c",
+        "Customer__r.PS_Sub_Region__c",
+        "Customer__r.SubRegion__c",
+        "Deployment_Start_Date__c",
+        "Current_MTP_Date__c",
+        "First_Move_to_Production_Date_Actual__c",
+        "Overall_Status__c",
+        "Deployment_Phase__c",
+        "Deployment_Stage__c",
+        "Overall_Health__c",
+        "Deployment_Completion_Date__c",
+        "Workday_Engagement_Manager__r",
+        "Delivery_Assurance_Manager__r",
+        "Priming_Partner__c",
+        "Implementation_Partner__c",
+        "Deployment_Partner_Name__c",
+        "Deployment_Summary__c"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "SFDC_Wellness",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 474,
+      "maxColumn": 10,
+      "headerRow1": [
+        "Id",
+        "Overall_Health_Status__c",
+        "Account__c",
+        "High_Risk_Flag__c",
+        "Wellness_Update__c",
+        "CX_Leader_Assignment__r",
+        "Executive_Summary__c",
+        "Summary_of_Issues__c",
+        "Issue_Category__c",
+        "LastModifiedDate"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "SFDC_DeploymentContacts",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 603,
+      "maxColumn": 6,
+      "headerRow1": [
+        "=IFERROR(__xludf.DUMMYFUNCTION(\"QUERY({Contact1!A:F; Contact2!A:F}, \"\"SELECT * WHERE Col1 IS NOT NULL\"\", 1)\"),\"Id\")",
+        "=IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),\"Deployment__c\")",
+        "=IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),\"Contact__c\")",
+        "=IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),\"Contact__r.Name\")",
+        "=IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),\"Contact__r.Email\")",
+        "=IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),\"Contact_Role__c\")"
+      ],
+      "formulaCellCount": 3618
+    },
+    {
+      "name": "Contact1",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 804,
+      "maxColumn": 6,
+      "headerRow1": [
+        "Id",
+        "Deployment__c",
+        "Contact__c",
+        "Contact__r.Name",
+        "Contact__r.Email",
+        "Contact_Role__c"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "Contact2",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 779,
+      "maxColumn": 6,
+      "headerRow1": [
+        "Id",
+        "Deployment__c",
+        "Contact__c",
+        "Contact__r.Name",
+        "Contact__r.Email",
+        "Contact_Role__c"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "AppUsers",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 6,
+      "maxColumn": 26,
+      "headerRow1": [
+        "Email",
+        "DisplayName",
+        "Role",
+        "Active",
+        "AccessLevel"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DD Assignment",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 1,
+      "maxColumn": 26,
+      "headerRow1": [
+        "AccountName",
+        "DD DisplayName",
+        "Active"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "OverrideAudit",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 990,
+      "maxColumn": 26,
+      "headerRow1": [
+        "Timestamp",
+        "User",
+        "Action",
+        "OverrideType",
+        "DeploymentID",
+        "AccountName",
+        "FieldsAffected",
+        "OldValueSnapshot",
+        "NewValueSnapshot",
+        "Notes"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_ActiveDeployments",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 548,
+      "maxColumn": 16,
+      "headerRow1": [
+        "Customer__r.Name",
+        "Customer__r.Industry",
+        "Customer__r.PS_Sub_Region__c",
+        "Customer__r.Consultant_Location_Restriction_Details__c",
+        "Customer__r.Restriction_on_Consultant_Location__c",
+        "Name",
+        "Deployment_Phase__c",
+        "Deployment_Partner_Name__c",
+        "Deployment_Stage__c",
+        "Overall_Health__c",
+        "Current_MTP_Date__c",
+        "Delivery_Assurance_Manager__r",
+        "Workday_Engagement_Manager__r.Name",
+        "Deployment_Summary__c",
+        "Id"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_MetaIDMapping",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 25,
+      "maxColumn": 5,
+      "headerRow1": [
+        "DeploymentsMeta ID (old)",
+        "Delivery Director",
+        "Match Strategy",
+        "Current ID (new)",
+        "Current Account Name"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DeploymentOverrides",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 17,
+      "maxColumn": 28,
+      "headerRow1": [
+        "DeploymentID",
+        "Override_Health",
+        "Override_MTPDate",
+        "Override_Stage",
+        "Override_Account",
+        "Override_Deployment",
+        "Override_CurrentUpdate",
+        "Exclude_From_Report",
+        "LastEditedBy",
+        "LastEditedAt",
+        "Classification",
+        "Reason"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "GoLivesOverrides",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 12,
+      "maxColumn": 26,
+      "headerRow1": [
+        "AccountName",
+        "Exclude_From_Report",
+        "Override_GoLiveDate",
+        "Override_Partner",
+        "LastEditedBy",
+        "LastEditedAt",
+        "Classification",
+        "Reason"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DeploymentsMeta",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 35,
+      "maxColumn": 24,
+      "headerRow1": [
+        "ID",
+        "Delivery Director",
+        "DD Notes",
+        "User",
+        "Timestamp"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "ExecSummary",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 14,
+      "maxColumn": 2,
+      "headerRow1": [],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "RedYellow_TBL",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 1002,
+      "maxColumn": 25,
+      "headerRow1": [],
+      "formulaCellCount": 1
+    },
+    {
+      "name": "Dashboard",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 952,
+      "maxColumn": 13,
+      "headerRow1": [],
+      "formulaCellCount": 557
+    },
+    {
+      "name": "HealthReportSnapshots",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 995,
+      "maxColumn": 26,
+      "headerRow1": [
+        "ReportMonth",
+        "Status",
+        "Count",
+        "Percent"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "RecentGL_TBL",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 999,
+      "maxColumn": 4,
+      "headerRow1": [
+        "RecentGoLives"
+      ],
+      "formulaCellCount": 16
+    },
+    {
+      "name": "FutureGL_TBL",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 999,
+      "maxColumn": 26,
+      "headerRow1": [
+        "FutureGoLives"
+      ],
+      "formulaCellCount": 1
+    },
+    {
+      "name": "DNU_ChangeLog",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 214,
+      "maxColumn": 28,
+      "headerRow1": [
+        "Timestamp",
+        "YearMonth",
+        "Source",
+        "DeploymentID",
+        "Account Name",
+        "Deployment Name",
+        "OldHealth",
+        "NewHealth"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_DeploymentHealth_Snapshot",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 181,
+      "maxColumn": 2,
+      "headerRow1": [
+        "DeploymentID",
+        "Health"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_HealthMonthlySummary",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 9,
+      "maxColumn": 4,
+      "headerRow1": [
+        "YearMonth",
+        "Status",
+        "Count",
+        "Percent"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "HealthYtdSummary",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 5,
+      "maxColumn": 4,
+      "headerRow1": [
+        "Year",
+        "Status",
+        "YtdCount",
+        "YtdPercent"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "Auto Refresh Execution Log",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 1101,
+      "maxColumn": 5,
+      "headerRow1": [
+        "Refresh Time",
+        "Sheet",
+        "Operation",
+        "Status",
+        "User"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "SFDC_DHP",
+      "hidden": false,
+      "sheetState": "visible",
+      "maxRow": 192,
+      "maxColumn": 7,
+      "headerRow1": [
+        "Id",
+        "Deployment__r.Id",
+        "Plan_Owner__r.Name",
+        "DHP_Last_Updated__c",
+        "Deployment_Health_Plan_Update__c",
+        "Deployment_Health_Action_Plan__c",
+        "Issue_Category__c"
+      ],
+      "formulaCellCount": 0
+    },
+    {
+      "name": "DNU_App_LandingConfig",
+      "hidden": true,
+      "sheetState": "hidden",
+      "maxRow": 1,
+      "maxColumn": 12,
+      "headerRow1": [
+        "AppId",
+        "Environment",
+        "Title",
+        "Subtitle",
+        "VersionLabel",
+        "DataHorizonSummary",
+        "DataHorizonDetails",
+        "ReleaseNotesText",
+        "PrimaryActions",
+        "ExtraNotice",
+        "LastUpdatedBy",
+        "LastUpdatedOn"
+      ],
+      "formulaCellCount": 0
+    }
+  ],
+  "namedRangeCount": 4,
+  "namedRanges": [
+    {
+      "name": "HealthTotal",
+      "attrText": "Dashboard!$A$2:$L$5"
+    },
+    {
+      "name": "ApproachTotal",
+      "attrText": "Dashboard!$A$8:$D$13"
+    },
+    {
+      "name": "RedYellow",
+      "attrText": "RedYellow_TBL!$A$2:$G$63"
+    },
+    {
+      "name": "PartnerTotal",
+      "attrText": "Dashboard!$A$16:$E$47"
+    }
+  ],
+  "formulaCrossReferencesSample": [
+    {
+      "fromSheet": "RedYellow_TBL",
+      "fromCell": "A3",
+      "refSheet": "DNU_ActiveDeployments",
+      "refCell": "A2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K3",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K3",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$B$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K3",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K3",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$D$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K3",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$B$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K3",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K4",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K4",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$B$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K4",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K4",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$D$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K4",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$B$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K4",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K5",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K5",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$B$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K5",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K5",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$D$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K5",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$B$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "K5",
+      "refSheet": "HealthReportSnapshots",
+      "refCell": "$A$2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "A8",
+      "refSheet": "DNU_ActiveDeployments",
+      "refCell": "A2"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "A16",
+      "refSheet": "DNU_ActiveDeployments",
+      "refCell": "A2"
+    },
+    {
+      "fromSheet": "RecentGL_TBL",
+      "fromCell": "A3",
+      "refSheet": "DNU_Go Lives",
+      "refCell": "A2"
+    },
+    {
+      "fromSheet": "FutureGL_TBL",
+      "fromCell": "A3",
+      "refSheet": "DNU_ActiveDeployments",
+      "refCell": "A2"
+    }
+  ],
+  "notes": [
+    "Structural inventory only; no cell values beyond row-1 headers.",
+    "formulaCrossReferencesSample is capped; formulas preserved in XLSX export."
+  ]
+}

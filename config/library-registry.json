@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "description": "Shared GAS library release graph roots. Consumer pins are discovered from live appsscript.json; do not hardcode version numbers here.",
+  "libraries": {
+    "DepMngr": {
+      "path": "libraries/DepMngr",
+      "srcGlob": "libraries/DepMngr/src/**",
+      "userSymbol": "CoreLib",
+      "consumerDirPattern": "_DM",
+      "ledgerPath": ".ai/library-releases/depmngr.jsonl",
+      "pinStrategyDoc": "docs/analysis/dm-family/corelib-pin-strategy.md",
+      "validation": {
+        "previewAppsFrom": "config/ui-preview.json",
+        "selftestScripts": [
+          "skills/gas-monorepo-engineer/scripts/preview_selftest.py",
+          "skills/gas-monorepo-engineer/scripts/preview_dm_notable.py"
+        ]
+      }
+    },
+    "GoLives": {
+      "path": "libraries/GoLives",
+      "srcGlob": "libraries/GoLives/src/**",
+      "userSymbol": "GoLives",
+      "consumerDirPattern": "_GoLives",
+      "ledgerPath": ".ai/library-releases/golives.jsonl",
+      "pinStrategyDoc": "docs/analysis/golives-family/golives-pin-strategy.md",
+      "validation": {
+        "previewAppsFrom": "config/ui-preview.json",
+        "selftestScripts": [
+          "skills/gas-monorepo-engineer/scripts/preview_selftest.py"
+        ]
+      }
+    }
+  }
+}

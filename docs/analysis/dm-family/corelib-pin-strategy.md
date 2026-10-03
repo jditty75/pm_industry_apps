@@ -2,7 +2,7 @@
 
 **Scope:** Six `*_DM` consumers. **No pin changes** in the M1 preview task; this document is analysis only.
 
-**Evidence source:** `solutions/*/src/appsscript.json` (local) reflected in [`depmngr-consumer-usage.json`](./depmngr-consumer-usage.json) `manifestPins` (regenerated via `rationalization_analyze.py`).
+**Evidence source:** `solutions/*/src/appsscript.json` (local). Regenerate pins and blast radius with `.\release.ps1 DepMngr -Plan` (read-only). Historical snapshot: [`depmngr-consumer-usage.json`](./depmngr-consumer-usage.json).
 
 ## Current pins (as of analysis regeneration)
 

@@ -40,6 +40,8 @@ Local UI preview always targets a **consuming solution** under `solutions/`, opt
 
 Apply the same family-aware reasoning as DepMngr: assess all GoLives consumers before changing shared behavior.
 
+**Release planning:** `.\release.ps1 DepMngr -Plan` / `.\release.ps1 GoLives -Plan` — see `references/shared-library-release.md`.
+
 ## Standalone solutions
 
 No DepMngr/GoLives family library (examples): `SLG_Capacity`, `SLG_ConsultingHub`, `HC_Wellness`, `SLED_Marketing`, `SLED_Pipeline`, `PS_SPA`, `GS_Kit` (design assets only).

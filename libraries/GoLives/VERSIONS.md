@@ -1,15 +1,22 @@
-﻿# GoLives Version History
+﻿# GoLives version history
 
-Track every immutable version cut from this library here.
+Immutable GAS library versions are recorded in **Git** via the append-only ledger:
+
+- `.ai/library-releases/golives.jsonl`
+
+Planning: `.\release.ps1 GoLives -Plan`
+
+Pin strategy: `docs/analysis/golives-family/golives-pin-strategy.md`
 
 | Version | Date | Changes | Cut By |
 |---|---|---|---|
-| 1 | (initial) | Initial version | Jeff |
+| — | — | See ledger for post-tooling releases | — |
 
-## How to cut a new version
-1. Make changes in src/
-2. npm run push (pushes to HEAD for testing)
-3. Test by temporarily pointing a consumer solution at HEAD
-4. npm run version -- "Description of changes"
-5. Add a row to this file with the new version number
-6. Commit to Git
+## How to cut a new version (after authorized release plan)
+
+1. Validate via a consumer preview / family checks.
+2. Authorized library push if needed.
+3. `npm run version -- "Description"` in `libraries/GoLives`.
+4. Bump all `*_GoLives` manifests per plan.
+5. Authorized push + production deploy per consumer.
+6. Append ledger row + commit.

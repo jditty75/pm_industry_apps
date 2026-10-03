@@ -52,7 +52,7 @@ Run from inside a project directory (when `package.json` exists):
 | `npm run deploy` | push + new deployment (production only with authorization) |
 | `npm run version` | libraries: cut immutable version |
 
-Repo helpers: `C:\JD\preview.ps1` (local UI), `C:\JD\verify.ps1` (clasp status; discovers CLASP projects).
+Repo helpers: `C:\JD\preview.ps1` (local UI), `C:\JD\verify.ps1` (clasp status; discovers CLASP projects), `C:\JD\release.ps1` (read-only shared-library release plans for DepMngr / GoLives).
 
 **Do not** use bulk Apps Script pull as routine sync — see `reconcile_from_apps_script.ps1` if present. Historical `Build.ps1` was removed; use Git history for bootstrap artifacts.
 

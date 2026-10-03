@@ -69,6 +69,22 @@ Normal production authorization examples include "deploy to production" and an u
 
 Production Deployment IDs belong in tracked per-app configuration, not `.clasp.json`. Prefer the repository's established `gas.config.json` schema. Do not duplicate `scriptId` into tracked configuration.
 
+## Shared libraries (DepMngr / GoLives)
+
+Shared libraries are **not** standalone apps. A library change is a **release graph** (library version cut + consumer pin updates + consumer push/deploy + ledger).
+
+| Workflow step | Normal app | Shared library |
+|---------------|------------|----------------|
+| Preflight | App-specific validation | `.\release.ps1 <DepMngr\|GoLives> -Plan` (read-only) |
+| Authorization | Explicit production deploy in this interaction | Explicit **plan execution** in this interaction (e.g. `Execute the DepMngr release plan.`) |
+| CLASP | Push/deploy per `deployment.md` | Library push/version + each affected consumer (see `references/shared-library-release.md`) |
+
+- **Stage A — PLAN:** build and report the full plan and blast radius; no CLASP mutation.
+- **Stage B — EXECUTE:** only after Jeff authorizes that specific plan; re-run plan first — if Git SHA or consumer manifest fingerprint changed, invalidate and replan.
+- **HEAD consumers:** discovered from live `appsscript.json`; library `clasp push` is production-impacting while any consumer consumes HEAD.
+
+Pin target policy: `docs/analysis/dm-family/corelib-pin-strategy.md` and `docs/analysis/golives-family/golives-pin-strategy.md`. Release mechanics: `references/shared-library-release.md`.
+
 ## Rollback
 
 "Roll the deployment back" is explicit rollback authorization for the clearly identified app in the current interaction. By default, repoint the existing configured production Deployment ID to the previous known-good GAS version, keep the URL unchanged, append the rollback to the deployment ledger, verify what can actually be verified, and stop. Leave Git and Apps Script HEAD unchanged unless the user separately asks to revert/fix source or the rollback cannot be performed safely without it.

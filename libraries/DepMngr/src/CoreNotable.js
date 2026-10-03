@@ -71,6 +71,9 @@ var CoreNotable = (function () {
   return raw.map(function(r) {
     var latestUpdate = '';
     var lu = r['Latest Update [MM/DD/Year]'];
+    if (lu === undefined || lu === null || lu === '') {
+      lu = r['Latest Update'];
+    }
     if (lu instanceof Date) {
       latestUpdate = Utilities.formatDate(lu, Session.getScriptTimeZone(), 'MM/dd/yyyy');
     } else if (lu) {
@@ -160,23 +163,24 @@ var CoreNotable = (function () {
 
     for (var key in fieldUpdates) {
       if (!Object.prototype.hasOwnProperty.call(fieldUpdates, key)) continue;
-      if (!editableSet[key]) {
+      var resolvedHeader = resolveNotableEditableHeader_(key, headerMap, editableSet);
+      if (!resolvedHeader) {
         Logger.log('CoreNotable.updateNotableDeployment: skipping non-editable field "' + key + '".');
         continue;
       }
-      var colIdx = getColIdx_(headerMap, key);
+      var colIdx = getColIdx_(headerMap, resolvedHeader);
       if (!colIdx) {
-        Logger.log('CoreNotable.updateNotableDeployment: header "' + key + '" not found in peer sheet; skipping.');
+        Logger.log('CoreNotable.updateNotableDeployment: header "' + resolvedHeader + '" not found in peer sheet; skipping.');
         continue;
       }
-      var oldVal = String(targetRow[key] !== undefined ? targetRow[key] : '');
+      var oldVal = String(targetRow[resolvedHeader] !== undefined ? targetRow[resolvedHeader] : '');
       var newVal = String(fieldUpdates[key] !== undefined ? fieldUpdates[key] : '');
       if (oldVal === newVal) continue;
 
       peerSheet.getRange(rowIndex, colIdx).setValue(newVal);
-      oldValues[key] = oldVal;
-      newValues[key] = newVal;
-      fieldsChanged.push(key);
+      oldValues[resolvedHeader] = oldVal;
+      newValues[resolvedHeader] = newVal;
+      fieldsChanged.push(resolvedHeader);
     }
 
     var accountName = String(targetRow['Customer (Account) Name'] || '');
@@ -373,7 +377,8 @@ var CoreNotable = (function () {
     }
 
     var lastRow = sheet.getLastRow();
-    if (lastRow < cfg.notable.dataStartRow) return [];
+    var dataStartRow = cfg.notable.dataStartRow;
+    if (lastRow < dataStartRow) return [];
 
     var lastCol = sheet.getLastColumn();
     if (lastCol < 1) return [];
@@ -381,8 +386,9 @@ var CoreNotable = (function () {
     var headerValues = sheet.getRange(cfg.notable.headerRow, 1, 1, lastCol).getValues()[0];
     var headers = headerValues.map(function (h) { return String(h || '').trim(); });
 
-    var numDataRows = lastRow - cfg.notable.dataStartRow + 1;
-    var dataValues = sheet.getRange(cfg.notable.dataStartRow, 1, numDataRows, lastCol).getValues();
+    var numDataRows = Math.max(0, lastRow - dataStartRow + 1);
+    if (numDataRows <= 0) return [];
+    var dataValues = sheet.getRange(dataStartRow, 1, numDataRows, lastCol).getValues();
 
     var rows = dataValues.map(function (row, idx) {
       var obj = { _rowIndex: cfg.notable.dataStartRow + idx };
@@ -493,6 +499,38 @@ var CoreNotable = (function () {
    */
   function getColIdx_(headerMap, headerName) {
     return headerMap[String(headerName || '').trim().toLowerCase()] || 0;
+  }
+
+  /**
+   * Resolves an incoming fieldUpdates key to the peer-sheet header name used for
+   * writes. Handles Latest Update / Latest Update [MM/DD/Year] aliases.
+   *
+   * @param {string} key
+   * @param {Object<string, number>} headerMap
+   * @param {Object<string, boolean>} editableSet
+   * @return {string|null}
+   * @private
+   */
+  function resolveNotableEditableHeader_(key, headerMap, editableSet) {
+    var k = String(key || '').trim();
+    if (!k) return null;
+    if (editableSet[k] && getColIdx_(headerMap, k)) return k;
+
+    var latestAliases = ['Latest Update [MM/DD/Year]', 'Latest Update'];
+    if (latestAliases.indexOf(k) !== -1) {
+      var latestEditable = false;
+      for (var i = 0; i < latestAliases.length; i++) {
+        if (editableSet[latestAliases[i]]) {
+          latestEditable = true;
+          break;
+        }
+      }
+      if (!latestEditable) return null;
+      for (var j = 0; j < latestAliases.length; j++) {
+        if (getColIdx_(headerMap, latestAliases[j])) return latestAliases[j];
+      }
+    }
+    return null;
   }
 
   /**
@@ -642,6 +680,212 @@ var CoreNotable = (function () {
   }
 
   // ---------------------------------------------------------------------------
+  // DEBUG (read-only)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Finds a peer row whose Deployment ID matches the target (15-char prefix).
+   *
+   * @param {Array<Object>} peerRows
+   * @param {string} targetId
+   * @param {AppConfig} cfg
+   * @return {{ peer: Object|null, index: number }}
+   * @private
+   */
+  function _findPeerRowByDeploymentId_(peerRows, targetId, cfg) {
+    var targetShort = String(targetId || '').trim().slice(0, 15);
+    if (!targetShort) return { peer: null, index: -1 };
+    var idHeader = cfg.notable.deploymentIdHeader;
+    for (var i = 0; i < peerRows.length; i++) {
+      var peerId = String(peerRows[i][idHeader] || '').trim();
+      if (peerId && peerId.slice(0, 15) === targetShort) {
+        return { peer: peerRows[i], index: i };
+      }
+    }
+    return { peer: null, index: -1 };
+  }
+
+  /**
+   * Read-only pipeline summary for Notable peer sheet join diagnostics.
+   * Does not write to any spreadsheet.
+   *
+   * @param {AppConfig} config
+   * @param {Array<string>=} trackDeploymentIds  Optional deployment IDs to trace in detail.
+   * @return {Object}
+   */
+  function debugNotableDataPipelineForUI(config, trackDeploymentIds) {
+    _clearNotableCache(config);
+    var cfg = CoreConfig.withDefaults(config);
+    var peerRows = readPeerSheet_(cfg);
+    var localDeployments = CoreData.getAllEffectiveDeployments(cfg);
+    localDeployments = CoreData.filterDeploymentsByStudent_(localDeployments, 'exclude', cfg);
+
+    var localMap = {};
+    var localDuplicateShortIds = [];
+    for (var i = 0; i < localDeployments.length; i++) {
+      var ld = localDeployments[i];
+      var shortId = String(ld.deploymentId || '').trim().slice(0, 15);
+      if (!shortId) continue;
+      if (localMap[shortId] && localDuplicateShortIds.indexOf(shortId) === -1) {
+        localDuplicateShortIds.push(shortId);
+      }
+      localMap[shortId] = ld;
+    }
+
+    var joinedRows = joinAndSort_(peerRows, localDeployments, cfg);
+    var notableDtoCount = joinedRows.length;
+
+    var restrictedStatus = (cfg.notable.validationStatusOptions && cfg.notable.validationStatusOptions[2]) ||
+      'Region Restricted';
+    var regionApprovedStatus = (cfg.notable.validationStatusOptions && cfg.notable.validationStatusOptions[1]) ||
+      'Region Approved';
+    var restrictedHideEnabled = cfg.notable.restrictedHideEnabled !== false;
+
+    var reasonCounts = {
+      emptyDeploymentId: 0,
+      noLocalMatch: 0,
+      joined: 0,
+      restricted: 0,
+      regionApproved: 0,
+      historical: 0
+    };
+    var peerRowsWithDeploymentIdCount = 0;
+    var unmatchedSamples = [];
+    var matchedSamples = [];
+
+    for (var p = 0; p < peerRows.length; p++) {
+      var peer = peerRows[p];
+      var peerId = String(peer[cfg.notable.deploymentIdHeader] || '').trim();
+      if (!peerId) {
+        reasonCounts.emptyDeploymentId++;
+        continue;
+      }
+      peerRowsWithDeploymentIdCount++;
+      var valStatus = String(peer['Data Validation Status'] || '').trim();
+      if (valStatus === restrictedStatus) reasonCounts.restricted++;
+      if (valStatus === regionApprovedStatus) reasonCounts.regionApproved++;
+      if (/historical/i.test(valStatus)) reasonCounts.historical++;
+
+      var local = localMap[peerId.slice(0, 15)];
+      if (!local) {
+        reasonCounts.noLocalMatch++;
+        if (unmatchedSamples.length < 8) {
+          unmatchedSamples.push({
+            deploymentId: peerId,
+            peerShortId: peerId.slice(0, 15),
+            accountName: String(peer['Customer (Account) Name'] || ''),
+            accountNumber: String(peer['Account Customer Number'] || ''),
+            validationStatus: valStatus,
+            peerRowIndex: peer._rowIndex || 0,
+            reason: 'no_matching_local_effective_deployment'
+          });
+        }
+        continue;
+      }
+      reasonCounts.joined++;
+      if (matchedSamples.length < 8) {
+        matchedSamples.push({
+          deploymentId: peerId,
+          accountName: String(peer['Customer (Account) Name'] || ''),
+          validationStatus: valStatus,
+          peerRowIndex: peer._rowIndex || 0,
+          regionalOwner: String(peer['Regional Owner or Delegate'] || '')
+        });
+      }
+    }
+
+    var joinedRestrictedCount = 0;
+    for (var jr = 0; jr < joinedRows.length; jr++) {
+      var jStatus = String(joinedRows[jr]['Data Validation Status'] || '').trim();
+      if (jStatus === restrictedStatus) joinedRestrictedCount++;
+    }
+    var clientVisibleIfRestrictedHidden = notableDtoCount - joinedRestrictedCount;
+    var clientVisibleIfRestrictedShown = notableDtoCount;
+
+    var defaultTrackIds = [
+      'a0rVT00000mT5KLYA0',
+      'a0rVT00000tFsq1YAC',
+      'a0rVT00000vtwYyYAI'
+    ];
+    var idsToTrack = Array.isArray(trackDeploymentIds) && trackDeploymentIds.length
+      ? trackDeploymentIds
+      : defaultTrackIds;
+
+    var trackedDeployments = idsToTrack.map(function (trackId) {
+      var found = _findPeerRowByDeploymentId_(peerRows, trackId, cfg);
+      var peer = found.peer;
+      var peerId = peer ? String(peer[cfg.notable.deploymentIdHeader] || '').trim() : '';
+      var peerShortId = peerId ? peerId.slice(0, 15) : String(trackId || '').trim().slice(0, 15);
+      var local = peerShortId ? localMap[peerShortId] : null;
+      var valStatus = peer ? String(peer['Data Validation Status'] || '').trim() : '';
+      var joinIncluded = !!(peer && local);
+      var isRestricted = valStatus === restrictedStatus;
+      var hiddenByRestrictedToggle = joinIncluded && isRestricted && restrictedHideEnabled;
+      var reason = '';
+      if (!peer) {
+        reason = 'peer_row_not_read_or_id_mismatch';
+      } else if (!peerId) {
+        reason = 'empty_peer_deployment_id';
+      } else if (!local) {
+        reason = 'no_matching_local_effective_deployment';
+      } else if (hiddenByRestrictedToggle) {
+        reason = 'joined_but_hidden_by_default_restricted_toggle';
+      } else {
+        reason = 'joined_visible';
+      }
+      return {
+        trackId: String(trackId || '').trim(),
+        peerFound: !!peer,
+        peerRowIndex: peer ? (peer._rowIndex || 0) : 0,
+        peerAccountName: peer ? String(peer['Customer (Account) Name'] || '') : '',
+        peerValidationStatus: valStatus,
+        peerDeploymentId: peerId,
+        peerShortId: peerShortId,
+        localFound: !!local,
+        localDeploymentId: local ? String(local.deploymentId || '') : '',
+        localAccountName: local ? String(local.accountName || '') : '',
+        localDeploymentName: local ? String(local.deploymentName || '') : '',
+        localHealth: local ? String(local.health || '') : '',
+        localStage: local ? String(local.stage || '') : '',
+        localOverallStatus: local ? String(local.overallStatus || local.status || '') : '',
+        localMtpDate: local ? (local.mtpDate || local.currentMtpDate || '') : '',
+        joinIncluded: joinIncluded,
+        hiddenByRestrictedToggle: hiddenByRestrictedToggle,
+        reason: reason
+      };
+    });
+
+    Logger.log('CoreNotable.debugNotableDataPipelineForUI: app=' + cfg.appId +
+      ' peer=' + peerRows.length + ' withId=' + peerRowsWithDeploymentIdCount +
+      ' joined=' + notableDtoCount + ' noLocal=' + reasonCounts.noLocalMatch);
+
+    return {
+      appId: cfg.appId,
+      tabName: cfg.notable.tabName,
+      headerRow: cfg.notable.headerRow,
+      dataStartRow: cfg.notable.dataStartRow,
+      peerRowCount: peerRows.length,
+      peerRowsWithDeploymentIdCount: peerRowsWithDeploymentIdCount,
+      localEffectiveDeploymentCount: localDeployments.length,
+      localDuplicateShortIdCount: localDuplicateShortIds.length,
+      joinedRowCount: notableDtoCount,
+      matchedRowCount: reasonCounts.joined,
+      unmatchedPeerCount: reasonCounts.noLocalMatch,
+      emptyDeploymentIdCount: reasonCounts.emptyDeploymentId,
+      restrictedCount: reasonCounts.restricted,
+      historicalCount: reasonCounts.historical,
+      clientVisibleRowCountEstimate: clientVisibleIfRestrictedHidden,
+      clientVisibleIfRestrictedShown: clientVisibleIfRestrictedShown,
+      clientVisibleIfRestrictedHidden: clientVisibleIfRestrictedHidden,
+      restrictedHideEnabled: restrictedHideEnabled,
+      reasonCounts: reasonCounts,
+      trackedDeployments: trackedDeployments,
+      unmatchedSamples: unmatchedSamples,
+      matchedSamples: matchedSamples
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // PRE-WARM
   // ---------------------------------------------------------------------------
 
@@ -680,11 +924,12 @@ var CoreNotable = (function () {
   // ---------------------------------------------------------------------------
 
   return {
-    getNotableForApp:        getNotableForApp,
-    updateNotableDeployment: updateNotableDeployment,
-    addNotableDeployment:    addNotableDeployment,
-    _clearNotableCache:      _clearNotableCache,
-    _warmNotable:            _warmNotable
+    getNotableForApp:                 getNotableForApp,
+    updateNotableDeployment:          updateNotableDeployment,
+    addNotableDeployment:             addNotableDeployment,
+    debugNotableDataPipelineForUI:    debugNotableDataPipelineForUI,
+    _clearNotableCache:               _clearNotableCache,
+    _warmNotable:                     _warmNotable
   };
 
 })();

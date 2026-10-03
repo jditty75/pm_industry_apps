@@ -34,6 +34,20 @@ GO_LIVES_ROW_FIELDS = ("deploymentId", "accountName", "partner")
 GO_LIVES_EXPLORER_FIELDS = ("valid", "rows", "totalCount", "kpiSummary", "timeline", "filterOptions")
 OVERRIDE_ROW_FIELDS = ("type", "accountName", "deploymentId", "classification", "hasOperationalOverride")
 
+NOTABLE_ROW_FIELDS = (
+    "deploymentId",
+    "accountName",
+    "validationStatus",
+    "notabilityTrigger",
+    "latestUpdate",
+    "regionalOwner",
+    "local",
+)
+
+NOTABLE_LOCAL_FIELDS = ("deploymentName", "partner", "health", "stage", "mtpDate")
+
+NOTABLE_PICKER_FIELDS = ("deploymentId", "accountName", "deploymentName", "view")
+
 
 def _missing_fields(obj: dict[str, Any], required: tuple[str, ...]) -> list[str]:
     return [f for f in required if f not in obj]
@@ -158,6 +172,40 @@ def validate_m1_bundle(bundle: dict[str, Any]) -> list[str]:
     return issues
 
 
+def validate_notable_rows(rows: Any) -> list[str]:
+    issues: list[str] = []
+    if not isinstance(rows, list):
+        return ["notableDeployments must be an array"]
+    for i, row in enumerate(rows[:3]):
+        if not isinstance(row, dict):
+            issues.append(f"notableDeployments[{i}] must be an object")
+            continue
+        issues.extend(
+            f"notableDeployments[{i}] missing {f}" for f in _missing_fields(row, NOTABLE_ROW_FIELDS)
+        )
+        local = row.get("local")
+        if not isinstance(local, dict):
+            issues.append(f"notableDeployments[{i}].local must be an object")
+        else:
+            issues.extend(
+                f"notableDeployments[{i}].local missing {f}"
+                for f in _missing_fields(local, NOTABLE_LOCAL_FIELDS)
+            )
+    return issues
+
+
+def validate_notable_picker(rows: Any) -> list[str]:
+    issues: list[str] = []
+    if not isinstance(rows, list):
+        return ["notablePicker must be an array"]
+    for i, row in enumerate(rows[:2]):
+        if isinstance(row, dict):
+            issues.extend(
+                f"notablePicker[{i}] missing {f}" for f in _missing_fields(row, NOTABLE_PICKER_FIELDS)
+            )
+    return issues
+
+
 def validate_m2_bundle(bundle: dict[str, Any]) -> list[str]:
     issues = validate_m1_bundle(bundle)
     issues.extend(validate_go_lives_rows(bundle.get("recentGoLives"), "recentGoLives"))
@@ -166,6 +214,8 @@ def validate_m2_bundle(bundle: dict[str, Any]) -> list[str]:
     issues.extend(validate_active_overrides(bundle.get("activeOverrides")))
     if not isinstance(bundle.get("overrideAuditLog"), list):
         issues.append("overrideAuditLog must be an array")
+    issues.extend(validate_notable_rows(bundle.get("notableDeployments")))
+    issues.extend(validate_notable_picker(bundle.get("notablePicker")))
     return issues
 
 
@@ -184,6 +234,8 @@ def assert_scenario_expectations(scenario: str, bundle: dict[str, Any]) -> list[
             issues.append("empty scenario must have no go-live rows")
         if bundle.get("activeOverrides"):
             issues.append("empty scenario must have no active overrides")
+        if bundle.get("notableDeployments"):
+            issues.append("empty scenario must have no notable deployments")
         return issues
     if scenario == "mixed-health":
         ta = totals.get("totalActive", 0)
@@ -197,6 +249,17 @@ def assert_scenario_expectations(scenario: str, bundle: dict[str, Any]) -> list[
                 issues.append(f"mixed-health lifecycleBuckets.{key}.count must be > 0")
         if len(rows) < 3:
             issues.append("mixed-health needs multiple deployment rows")
+        notable = bundle.get("notableDeployments") or []
+        if len(notable) < 3:
+            issues.append("mixed-health needs >= 3 notable deployment rows")
+        statuses = {str(r.get("validationStatus") or "") for r in notable if isinstance(r, dict)}
+        if "Region Restricted" not in statuses:
+            issues.append("mixed-health notable must include Region Restricted row")
+        if not any(isinstance(r, dict) and not str(r.get("latestUpdate") or "").strip() for r in notable):
+            issues.append("mixed-health notable must include blank latestUpdate row")
+        picker = bundle.get("notablePicker") or []
+        if len(picker) < 2:
+            issues.append("mixed-health notablePicker needs recent+upcoming entries")
         return issues
     if scenario == "at-risk":
         if totals.get("red", 0) + totals.get("yellow", 0) < totals.get("green", 0) + 1:

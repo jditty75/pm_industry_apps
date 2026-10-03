@@ -869,6 +869,7 @@ var CoreConfig = (function () {
       cfg.notable.editableColumnHeaders = [
         'Data Validation Status',
         'Latest Update',
+        'Latest Update [MM/DD/Year]',
         'Regional Owner or Delegate',
         'Notability Trigger',
         'Fit-for-Purpose',

@@ -290,6 +290,18 @@ function sendMonthlyReportTestNew() {
 // ============================================================================
 
 /**
+ * Read-only Notable peer-sheet join diagnostic (run from Apps Script editor).
+ * Logs summary counts and per-deployment traces for missing-row investigation.
+ *
+ * @return {Object}
+ */
+function _debugNotableDataPipeline() {
+  var result = CoreLib.CoreNotable.debugNotableDataPipelineForUI(APP_CONFIG);
+  Logger.log('_debugNotableDataPipeline: ' + JSON.stringify(result));
+  return result;
+}
+
+/**
  * Debug: Show which ranges are detected for each TABLES config entry,
  * using named ranges and a dynamic fallback finder.
  */

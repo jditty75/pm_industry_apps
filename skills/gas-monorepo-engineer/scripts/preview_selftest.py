@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from preview_dm_contract import assert_scenario_expectations, validate_m2_bundle  # noqa: E402
 from preview_dm_fixtures import M1_HANDLERS, build_m1_responses  # noqa: E402
 from preview_dm_m2 import M2_HANDLERS, build_scenario_bundle  # noqa: E402
+from preview_dm_notable import NOTABLE_READ_HANDLERS  # noqa: E402
 from preview_engine import build_app, load_config, resolve_app_path, validate_built_preview  # noqa: E402
 from preview_server import ensure_server  # noqa: E402
 
@@ -41,6 +42,9 @@ def assert_dm_html(app_id: str, html: str, scenario: str) -> list[str]:
     for handler in M1_HANDLERS + M2_HANDLERS:
         if handler not in html:
             issues.append(f"missing preview handler registration for {handler}")
+    for handler in NOTABLE_READ_HANDLERS:
+        if handler not in html:
+            issues.append(f"missing notable preview handler {handler}")
     if "preview-dm-mock-runtime" not in html:
         issues.append("missing preview-dm-mock-runtime script")
     if "__PREVIEW_DM_M1_HANDLERS__" not in html:

@@ -613,6 +613,8 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
       saveMutableState(mat.state);
       return undefined;
     }},
+    getNotableData: function () {{ return materializedBundle().bundle.notableDeployments || []; }},
+    getGoLivesForNotablePicker: function () {{ return materializedBundle().bundle.notablePicker || []; }},
     clearSingleOverrideForUI: function (type, idOrAccount) {{
       var mat = materializedBundle();
       var key = String(idOrAccount || '').trim();
@@ -713,11 +715,11 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
 }})();
 </script>
 <div id="gas-preview-badge" onclick="this.remove()"
-  title="Local preview — synthetic DM fixtures (M1+M2). M3+ tabs still need handlers. Click to dismiss."
+  title="Local preview — synthetic DM fixtures (M1+M2+Notable). M3+ tabs still need handlers. Click to dismiss."
   style="position:fixed;top:12px;left:12px;z-index:2147483647;font:600 11px/1.4 Archivo,system-ui,sans-serif;
   background:rgba(15,46,102,.92);color:#fff;padding:7px 12px;border-radius:999px;letter-spacing:.02em;
   box-shadow:0 2px 12px rgba(0,0,0,.18);cursor:pointer;max-width:min(92vw,520px);">
-  LOCAL PREVIEW &mdash; DM M1+M2 ({app_id}, scenario {data['scenario']})</div>
+  LOCAL PREVIEW &mdash; DM M1+M2+Notable ({app_id}, scenario {data['scenario']})</div>
 """
 
 

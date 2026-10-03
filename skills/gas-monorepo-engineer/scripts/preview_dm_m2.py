@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from preview_dm_fixtures import SCENARIOS, _add_days, _today_key
+from preview_dm_notable import NOTABLE_READ_HANDLERS, attach_notable_bundle
 
 M2_READ_HANDLERS = (
     "getRecentGoLivesData",
@@ -23,17 +24,15 @@ M2_WRITE_HANDLERS = (
     "clearSingleOverrideForUI",
 )
 
-M2_HANDLERS = tuple(M2_READ_HANDLERS) + tuple(M2_WRITE_HANDLERS)
+M2_HANDLERS = tuple(M2_READ_HANDLERS) + tuple(M2_WRITE_HANDLERS) + tuple(NOTABLE_READ_HANDLERS)
 
 M3_PLUS_METHODS = (
     "getTrendsDashboardData",
     "getCsatTabDataForUI",
-    "getNotableData",
     "getStudentTabData",
     "getEscalationsDashboardData",
     "getReportSendConfigForUI",
     "getGoLivesExplorerData",
-    "getGoLivesForNotablePicker",
     "getPortfolioHealthData",
     "getExecutiveSummaryHtml",
     "saveExecutiveSummaryHtml",
@@ -342,7 +341,7 @@ def enrich_m2_bundle(bundle: dict[str, Any], scenario: str) -> dict[str, Any]:
     bundle["golivesExplorer"] = golives_explorer_from_rows(recent, upcoming, scenario)
     bundle["activeOverrides"] = overrides
     bundle["overrideAuditLog"] = seed_audit_log(overrides)
-    return bundle
+    return attach_notable_bundle(bundle, scenario)
 
 
 def build_scenario_bundle(app_id: str, scenario: str, m1_builder) -> dict[str, Any]:

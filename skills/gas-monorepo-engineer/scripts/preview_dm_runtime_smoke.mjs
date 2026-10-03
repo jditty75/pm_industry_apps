@@ -75,6 +75,39 @@ const fixture = {
     },
   ],
   overrideAuditLog: [],
+  notableDeployments: [
+    {
+      deploymentId: 'PREVIEW_DEP_0001',
+      accountName: 'Example County',
+      validationStatus: 'Region Approved',
+      notabilityTrigger: 'Smoke notable row',
+      latestUpdate: '10/01/2026',
+      regionalOwner: 'Preview Owner',
+      local: {
+        deploymentName: 'Preview Deployment 1',
+        partner: 'Preview Partner LLC',
+        health: 'Green',
+        stage: 'Test',
+        mtpDate: '2026-10-18',
+      },
+    },
+  ],
+  notablePicker: [
+    {
+      deploymentId: 'PREVIEW_DEP_0001',
+      accountName: 'Example County',
+      deploymentName: 'Preview Deployment 1',
+      view: 'recent',
+      goLiveDate: '2026-09-20',
+    },
+    {
+      deploymentId: 'PREVIEW_DEP_0002',
+      accountName: 'Sample Health System',
+      deploymentName: 'Preview Deployment 2',
+      view: 'upcoming',
+      mtpDate: '2026-11-01',
+    },
+  ],
 };
 
 const M3_PLUS = ['getTrendsDashboardData'];
@@ -118,6 +151,8 @@ function installMock(handlersForScenario, stateRef) {
       };
       saveMutableState(st);
     },
+    getNotableData: () => handlersForScenario().notableDeployments || [],
+    getGoLivesForNotablePicker: () => handlersForScenario().notablePicker || [],
   };
 
   function runCall(method, args) {
@@ -189,12 +224,16 @@ async function main() {
     clearFail: null,
     clearOk: null,
     writeOk: null,
+    notable: null,
+    notablePicker: null,
   };
 
   globalThis.google.script.run.withSuccessHandler((d) => { results.identity = d; }).getIdentityBoot();
   globalThis.google.script.run.withSuccessHandler((d) => { results.recent = d; }).getRecentGoLivesData();
   globalThis.google.script.run.withSuccessHandler((d) => { results.upcoming = d; }).getUpcomingGoLivesData();
   globalThis.google.script.run.withSuccessHandler((d) => { results.overrides = d; }).getAllActiveOverridesForUI();
+  globalThis.google.script.run.withSuccessHandler((d) => { results.notable = d; }).getNotableData();
+  globalThis.google.script.run.withSuccessHandler((d) => { results.notablePicker = d; }).getGoLivesForNotablePicker();
   globalThis.google.script.run
     .withSuccessHandler((d) => { results.clearFail = d; })
     .clearSingleOverrideForUI('deployment', 'MISSING');
@@ -222,6 +261,14 @@ async function main() {
   }
   if (!Array.isArray(results.overrides) || results.overrides.length < 1) {
     console.error('FAIL: active overrides', results.overrides);
+    process.exit(1);
+  }
+  if (!Array.isArray(results.notable) || results.notable.length < 1) {
+    console.error('FAIL: notable data', results.notable);
+    process.exit(1);
+  }
+  if (!Array.isArray(results.notablePicker) || results.notablePicker.length < 2) {
+    console.error('FAIL: notable picker', results.notablePicker);
     process.exit(1);
   }
   if (results.clearFail?.success !== false) {

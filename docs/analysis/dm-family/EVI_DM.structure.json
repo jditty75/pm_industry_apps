@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "appId": "EVI_DM",
-  "analyzedAtUtc": "2026-10-03T17:22:11Z",
+  "analyzedAtUtc": "2026-10-03T17:37:37Z",
   "sourceXlsx": "docs/migrations/live/EVI_DM.xlsx",
-  "gitShaAtAnalysis": "953068a698d9d13da5b3a0520d2174c5326c789a",
+  "gitShaAtAnalysis": "1f81e08c2998ed6fb2085c6ad6655731480169c4",
   "sheetCount": 36,
   "sheets": [
     {
@@ -24,7 +24,9 @@
         "Go Live Date Actual",
         "In Production"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "CSAT_InFlight",
@@ -50,7 +52,9 @@
         "finished_date",
         "survey_expires"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_EVI_ProductFunction",
@@ -66,7 +70,9 @@
         "Production_Move_Date_Target__c",
         "Production_Move_Date_Actual__c"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_EVI_Deployments",
@@ -97,7 +103,9 @@
         "Deployment_Partner_Name__c",
         "Deployment_Summary__c"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_DD_Debug",
@@ -116,7 +124,9 @@
         "DD_Contacts_Count",
         "DD_Contacts_Emails"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_PerfCache",
@@ -129,7 +139,9 @@
         "ValueJson",
         "Timestamp"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "SFDC_DeploymentProductFunctions",
@@ -163,7 +175,9 @@
         "Production_Move_Date_Target__c",
         "Production_Move_Date_Actual__c"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "NotificationConfig",
@@ -174,7 +188,9 @@
       "headerRow1": [
         "Allowed fromAlias values (must be verified Gmail send-as aliases): jeffrey.ditty@workday.com"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "ReportDistributionLog",
@@ -204,7 +220,9 @@
         "bccCount",
         "bccList"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "SFDC_DeploymentHistory",
@@ -224,7 +242,9 @@
         "CreatedDate",
         "CreatedById"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "SFDC_Deployments",
@@ -256,7 +276,9 @@
         "Deployment_Partner_Name__c",
         "Deployment_Summary__c"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "SFDC_Wellness",
@@ -276,7 +298,9 @@
         "Issue_Category__c",
         "LastModifiedDate"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "SFDC_DeploymentContacts",
@@ -292,7 +316,9 @@
         "=IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),\"Contact__r.Email\")",
         "=IFERROR(__xludf.DUMMYFUNCTION(\"\"\"COMPUTED_VALUE\"\"\"),\"Contact_Role__c\")"
       ],
-      "formulaCellCount": 3618
+      "formulaCellCount": 3618,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "Contact1",
@@ -308,7 +334,9 @@
         "Contact__r.Email",
         "Contact_Role__c"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "Contact2",
@@ -324,7 +352,9 @@
         "Contact__r.Email",
         "Contact_Role__c"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "AppUsers",
@@ -339,7 +369,9 @@
         "Active",
         "AccessLevel"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DD Assignment",
@@ -352,7 +384,9 @@
         "DD DisplayName",
         "Active"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "OverrideAudit",
@@ -372,7 +406,9 @@
         "NewValueSnapshot",
         "Notes"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_ActiveDeployments",
@@ -397,7 +433,9 @@
         "Deployment_Summary__c",
         "Id"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_MetaIDMapping",
@@ -412,7 +450,9 @@
         "Current ID (new)",
         "Current Account Name"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DeploymentOverrides",
@@ -434,7 +474,9 @@
         "Classification",
         "Reason"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "GoLivesOverrides",
@@ -452,7 +494,9 @@
         "Classification",
         "Reason"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DeploymentsMeta",
@@ -467,7 +511,9 @@
         "User",
         "Timestamp"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "ExecSummary",
@@ -476,7 +522,9 @@
       "maxRow": 14,
       "maxColumn": 2,
       "headerRow1": [],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "RedYellow_TBL",
@@ -485,7 +533,13 @@
       "maxRow": 1002,
       "maxColumn": 25,
       "headerRow1": [],
-      "formulaCellCount": 1
+      "formulaCellCount": 1,
+      "formulaOutboundSheets": [
+        "DNU_ActiveDeployments"
+      ],
+      "formulaInboundFromDnuFeeders": [
+        "RedYellow_TBL"
+      ]
     },
     {
       "name": "Dashboard",
@@ -494,7 +548,14 @@
       "maxRow": 952,
       "maxColumn": 13,
       "headerRow1": [],
-      "formulaCellCount": 557
+      "formulaCellCount": 557,
+      "formulaOutboundSheets": [
+        "DNU_ActiveDeployments",
+        "HealthReportSnapshots"
+      ],
+      "formulaInboundFromDnuFeeders": [
+        "Dashboard"
+      ]
     },
     {
       "name": "HealthReportSnapshots",
@@ -508,7 +569,9 @@
         "Count",
         "Percent"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "RecentGL_TBL",
@@ -519,7 +582,13 @@
       "headerRow1": [
         "RecentGoLives"
       ],
-      "formulaCellCount": 16
+      "formulaCellCount": 16,
+      "formulaOutboundSheets": [
+        "DNU_Go Lives"
+      ],
+      "formulaInboundFromDnuFeeders": [
+        "RecentGL_TBL"
+      ]
     },
     {
       "name": "FutureGL_TBL",
@@ -530,7 +599,13 @@
       "headerRow1": [
         "FutureGoLives"
       ],
-      "formulaCellCount": 1
+      "formulaCellCount": 1,
+      "formulaOutboundSheets": [
+        "DNU_ActiveDeployments"
+      ],
+      "formulaInboundFromDnuFeeders": [
+        "FutureGL_TBL"
+      ]
     },
     {
       "name": "DNU_ChangeLog",
@@ -548,7 +623,9 @@
         "OldHealth",
         "NewHealth"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_DeploymentHealth_Snapshot",
@@ -560,7 +637,9 @@
         "DeploymentID",
         "Health"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_HealthMonthlySummary",
@@ -574,7 +653,9 @@
         "Count",
         "Percent"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "HealthYtdSummary",
@@ -588,7 +669,9 @@
         "YtdCount",
         "YtdPercent"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "Auto Refresh Execution Log",
@@ -603,7 +686,9 @@
         "Status",
         "User"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "SFDC_DHP",
@@ -620,7 +705,9 @@
         "Deployment_Health_Action_Plan__c",
         "Issue_Category__c"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     },
     {
       "name": "DNU_App_LandingConfig",
@@ -642,26 +729,40 @@
         "LastUpdatedBy",
         "LastUpdatedOn"
       ],
-      "formulaCellCount": 0
+      "formulaCellCount": 0,
+      "formulaOutboundSheets": [],
+      "formulaInboundFromDnuFeeders": []
     }
   ],
   "namedRangeCount": 4,
   "namedRanges": [
     {
       "name": "HealthTotal",
-      "attrText": "Dashboard!$A$2:$L$5"
+      "attrText": "Dashboard!$A$2:$L$5",
+      "refSheets": [
+        "Dashboard"
+      ]
     },
     {
       "name": "ApproachTotal",
-      "attrText": "Dashboard!$A$8:$D$13"
+      "attrText": "Dashboard!$A$8:$D$13",
+      "refSheets": [
+        "Dashboard"
+      ]
     },
     {
       "name": "RedYellow",
-      "attrText": "RedYellow_TBL!$A$2:$G$63"
+      "attrText": "RedYellow_TBL!$A$2:$G$63",
+      "refSheets": [
+        "RedYellow_TBL"
+      ]
     },
     {
       "name": "PartnerTotal",
-      "attrText": "Dashboard!$A$16:$E$47"
+      "attrText": "Dashboard!$A$16:$E$47",
+      "refSheets": [
+        "Dashboard"
+      ]
     }
   ],
   "formulaCrossReferencesSample": [
@@ -804,8 +905,77 @@
       "refCell": "A2"
     }
   ],
+  "formulaDependencyEdges": [
+    {
+      "fromSheet": "Dashboard",
+      "toSheet": "DNU_ActiveDeployments"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "toSheet": "HealthReportSnapshots"
+    },
+    {
+      "fromSheet": "FutureGL_TBL",
+      "toSheet": "DNU_ActiveDeployments"
+    },
+    {
+      "fromSheet": "RecentGL_TBL",
+      "toSheet": "DNU_Go Lives"
+    },
+    {
+      "fromSheet": "RedYellow_TBL",
+      "toSheet": "DNU_ActiveDeployments"
+    }
+  ],
+  "formulaReferencesToDnuSheets": [
+    {
+      "fromSheet": "RedYellow_TBL",
+      "fromCell": "A3",
+      "refSheet": "DNU_ActiveDeployments"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "A8",
+      "refSheet": "DNU_ActiveDeployments"
+    },
+    {
+      "fromSheet": "Dashboard",
+      "fromCell": "A16",
+      "refSheet": "DNU_ActiveDeployments"
+    },
+    {
+      "fromSheet": "RecentGL_TBL",
+      "fromCell": "A3",
+      "refSheet": "DNU_Go Lives"
+    },
+    {
+      "fromSheet": "FutureGL_TBL",
+      "fromCell": "A3",
+      "refSheet": "DNU_ActiveDeployments"
+    }
+  ],
+  "formulaIndirectReferencesSample": [],
+  "namedRangeSheetDependencies": [
+    {
+      "namedRange": "HealthTotal",
+      "refSheet": "Dashboard"
+    },
+    {
+      "namedRange": "ApproachTotal",
+      "refSheet": "Dashboard"
+    },
+    {
+      "namedRange": "RedYellow",
+      "refSheet": "RedYellow_TBL"
+    },
+    {
+      "namedRange": "PartnerTotal",
+      "refSheet": "Dashboard"
+    }
+  ],
   "notes": [
     "Structural inventory only; no cell values beyond row-1 headers.",
-    "formulaCrossReferencesSample is capped; formulas preserved in XLSX export."
+    "formulaDependencyEdges aggregates all parsed cross-sheet refs (no cell values).",
+    "formulaCrossReferencesSample is capped for human inspection."
   ]
 }

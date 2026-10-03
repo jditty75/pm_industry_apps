@@ -431,8 +431,16 @@ def analyze_workbook(app_id: str, xlsx_path: Path) -> dict[str, Any]:
     sheets_out = []
     formula_refs: list[dict[str, str]] = []
     ref_pattern = re.compile(
-        r"(?:'([^']+)'|([A-Za-z0-9_]+))!(\$?[A-Z]{1,3}\$?\d+)"
+        r"(?:'([^']+)'|([A-Za-z0-9_ #]+))!(\$?[A-Z]{1,3}\$?\d+)"
     )
+    sheet_ref_pattern = re.compile(
+        r"(?:'([^']+)'|([A-Za-z0-9_ #]+))!"
+    )
+    edge_set: set[tuple[str, str]] = set()
+    dnu_edges: list[dict[str, str]] = []
+    indirect_refs: list[dict[str, str]] = []
+    named_range_deps: list[dict[str, str]] = []
+    formula_sample_cap = 500
 
     for name in wb.sheetnames:
         ws = wb[name]
@@ -452,17 +460,39 @@ def analyze_workbook(app_id: str, xlsx_path: Path) -> dict[str, Any]:
                     headers.append(str(val)[:120])
 
         formula_count = 0
-        sample_formulas = 0
+        sheet_outbound: set[str] = set()
+        sheet_inbound_from_dnu: set[str] = set()
         for row in ws.iter_rows():
             for cell in row:
                 if cell.data_type == "f" or (
                     isinstance(cell.value, str) and cell.value.startswith("=")
                 ):
                     formula_count += 1
-                    if sample_formulas < 25:
-                        ftxt = str(cell.value) if cell.value else ""
-                        for m in ref_pattern.finditer(ftxt):
-                            sheet_ref = m.group(1) or m.group(2)
+                    ftxt = str(cell.value) if cell.value else ""
+                    if "INDIRECT(" in ftxt.upper():
+                        indirect_refs.append(
+                            {
+                                "fromSheet": name,
+                                "fromCell": cell.coordinate,
+                                "note": "INDIRECT",
+                            }
+                        )
+                    for m in ref_pattern.finditer(ftxt):
+                        sheet_ref = (m.group(1) or m.group(2) or "").strip()
+                        if not sheet_ref:
+                            continue
+                        edge_set.add((name, sheet_ref))
+                        sheet_outbound.add(sheet_ref)
+                        if sheet_ref.startswith("DNU_") or sheet_ref.startswith("DNU "):
+                            dnu_edges.append(
+                                {
+                                    "fromSheet": name,
+                                    "fromCell": cell.coordinate,
+                                    "refSheet": sheet_ref,
+                                }
+                            )
+                            sheet_inbound_from_dnu.add(name)
+                        if len(formula_refs) < formula_sample_cap:
                             formula_refs.append(
                                 {
                                     "fromSheet": name,
@@ -471,7 +501,6 @@ def analyze_workbook(app_id: str, xlsx_path: Path) -> dict[str, Any]:
                                     "refCell": m.group(3),
                                 }
                             )
-                        sample_formulas += 1
 
         sheets_out.append(
             {
@@ -482,21 +511,31 @@ def analyze_workbook(app_id: str, xlsx_path: Path) -> dict[str, Any]:
                 "maxColumn": max_col,
                 "headerRow1": headers,
                 "formulaCellCount": formula_count,
+                "formulaOutboundSheets": sorted(sheet_outbound),
+                "formulaInboundFromDnuFeeders": sorted(sheet_inbound_from_dnu),
             }
         )
 
     named_ranges = []
     for defn in wb.defined_names.values():
-        named_ranges.append(
-            {
-                "name": defn.name,
-                "attrText": str(defn.attr_text)[:500],
-            }
-        )
+        attr = str(defn.attr_text)[:500]
+        nr_entry = {"name": defn.name, "attrText": attr}
+        ref_sheets: set[str] = set()
+        for m in sheet_ref_pattern.finditer(attr):
+            ref_sheets.add((m.group(1) or m.group(2) or "").strip())
+        if ref_sheets:
+            nr_entry["refSheets"] = sorted(ref_sheets)
+            for rs in ref_sheets:
+                named_range_deps.append({"namedRange": defn.name, "refSheet": rs})
+        named_ranges.append(nr_entry)
+
+    dependency_edges = [
+        {"fromSheet": a, "toSheet": b} for a, b in sorted(edge_set)
+    ]
 
     wb.close()
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "appId": app_id,
         "analyzedAtUtc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sourceXlsx": f"docs/migrations/live/{app_id}.xlsx",
@@ -505,10 +544,15 @@ def analyze_workbook(app_id: str, xlsx_path: Path) -> dict[str, Any]:
         "sheets": sheets_out,
         "namedRangeCount": len(named_ranges),
         "namedRanges": named_ranges,
-        "formulaCrossReferencesSample": formula_refs[:500],
+        "formulaCrossReferencesSample": formula_refs[:formula_sample_cap],
+        "formulaDependencyEdges": dependency_edges,
+        "formulaReferencesToDnuSheets": dnu_edges[:1000],
+        "formulaIndirectReferencesSample": indirect_refs[:200],
+        "namedRangeSheetDependencies": named_range_deps[:500],
         "notes": [
             "Structural inventory only; no cell values beyond row-1 headers.",
-            "formulaCrossReferencesSample is capped; formulas preserved in XLSX export.",
+            "formulaDependencyEdges aggregates all parsed cross-sheet refs (no cell values).",
+            "formulaCrossReferencesSample is capped for human inspection.",
         ],
     }
 

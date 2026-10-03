@@ -21,6 +21,7 @@
 | [preview-fixture-design.md](./preview-fixture-design.md) | Canonical sanitized preview workbook + scenarios |
 | [cleanup-plan.md](./cleanup-plan.md) | Ordered cleanup (workbook + code), risk-ranked |
 | [preview-data-plan.md](./preview-data-plan.md) | Minimum work to make `preview.ps1` realistically interactive |
+| [corelib-pin-strategy.md](./corelib-pin-strategy.md) | DepMngr pin evidence and recommended migration sequence |
 | [tools/rationalization_analyze.py](./tools/rationalization_analyze.py) | Regenerate JSON artifacts |
 
 Regenerate structure from live snapshots: `.\docs\migrations\tools\snapshot-dm-workbooks.ps1 -Force`  

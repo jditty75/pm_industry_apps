@@ -174,11 +174,19 @@ def grep_cfg_sheets_reads() -> dict[str, list[str]]:
     return {"referenced_keys": sorted(keys)}
 
 
-def classify_sheet(name: str, apps_present: list[str], formula_refs: set[str]) -> str:
+def classify_sheet(
+    name: str,
+    apps_present: list[str],
+    formula_refs: set[str],
+    inbound_edges: set[str],
+    dnu_feeder: bool,
+) -> str:
     if name.startswith("DNU_") or name.startswith("DNU ") or "DNU_" in name:
-        if formula_refs:
+        if inbound_edges or formula_refs:
             return "POSSIBLY_LEGACY"
         return "HIGH_CONFIDENCE_UNUSED"
+    if dnu_feeder:
+        return "POSSIBLY_LEGACY"
     core = {
         "SFDC_Deployments",
         "SFDC_DeploymentProductFunctions",
@@ -226,9 +234,32 @@ def build_workbook_matrix(structs: dict[str, dict]) -> dict:
                 "headers": sh.get("headerRow1") or [],
             }
     formula_targets: dict[str, set[str]] = defaultdict(set)
+    inbound_edges: dict[str, set[str]] = defaultdict(set)
+    outbound_edges: dict[str, set[str]] = defaultdict(set)
+    dnu_feeder_sheets: dict[str, set[str]] = defaultdict(set)
+    named_range_targets: dict[str, set[str]] = defaultdict(set)
+
     for app, s in structs.items():
         for ref in s.get("formulaCrossReferencesSample") or []:
-            formula_targets[ref.get("refSheet", "")].add(app)
+            tgt = ref.get("refSheet", "")
+            if tgt:
+                formula_targets[tgt].add(app)
+        for edge in s.get("formulaDependencyEdges") or []:
+            src = edge.get("fromSheet", "")
+            tgt = edge.get("toSheet", "")
+            if tgt:
+                formula_targets[tgt].add(app)
+                inbound_edges[tgt].add(app)
+            if src and tgt:
+                outbound_edges[src].add(tgt)
+        for ref in s.get("formulaReferencesToDnuSheets") or []:
+            src = ref.get("fromSheet", "")
+            if src:
+                dnu_feeder_sheets[src].add(app)
+        for ref in s.get("namedRangeSheetDependencies") or []:
+            tgt = ref.get("refSheet", "")
+            if tgt:
+                named_range_targets[tgt].add(app)
 
     rows = []
     for name in sorted(all_sheets.keys()):
@@ -241,9 +272,19 @@ def build_workbook_matrix(structs: dict[str, dict]) -> dict:
             {
                 "sheet": name,
                 "presence": {a: (a in all_sheets[name]) for a in APPS},
-                "classification": classify_sheet(name, present, formula_targets.get(name, set())),
+                "classification": classify_sheet(
+                    name,
+                    present,
+                    formula_targets.get(name, set()),
+                    inbound_edges.get(name, set()),
+                    bool(dnu_feeder_sheets.get(name)),
+                ),
                 "headerDrift": len(hdr_groups) > 1,
                 "formulaSampleRefsTo": sorted(formula_targets.get(name, set())),
+                "formulaInboundFromApps": sorted(inbound_edges.get(name, set())),
+                "formulaOutboundToSheets": sorted(outbound_edges.get(name, set())),
+                "namedRangeRefsFromApps": sorted(named_range_targets.get(name, set())),
+                "feedsFromDnuSheetsInApps": sorted(dnu_feeder_sheets.get(name, set())),
                 "hiddenIn": [
                     a
                     for a in present

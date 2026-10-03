@@ -1,5 +1,5 @@
 {
-  "generatedAtUtc": "2026-10-03T17:30:40.708487+00:00",
+  "generatedAtUtc": "2026-10-03T17:37:57.442967+00:00",
   "rows": [
     {
       "sheet": "AI_Deployments",
@@ -14,6 +14,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "PDX_DM",
         "HS_DM"
@@ -32,6 +36,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "PDX_DM",
         "HS_DM"
@@ -52,6 +60,12 @@
       "formulaSampleRefsTo": [
         "HC_DM"
       ],
+      "formulaInboundFromApps": [
+        "HC_DM"
+      ],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -67,6 +81,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -82,6 +100,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -97,6 +119,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -112,6 +138,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -127,6 +157,10 @@
       "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -142,6 +176,10 @@
       "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -157,6 +195,10 @@
       "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -172,6 +214,10 @@
       "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -187,6 +233,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -202,6 +252,10 @@
       "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -217,6 +271,10 @@
       "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -238,6 +296,16 @@
         "PDX_DM",
         "SLG_DM"
       ],
+      "formulaInboundFromApps": [
+        "EVI_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "HENP_DM",
@@ -259,6 +327,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "EVI_DM",
@@ -279,6 +351,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "HC_DM",
         "HENP_DM",
@@ -300,6 +376,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -315,6 +395,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "EVI_DM",
@@ -335,6 +419,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "HC_DM",
@@ -357,6 +445,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "HC_DM"
       ]
@@ -374,6 +466,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "EVI_DM"
       ]
@@ -391,6 +487,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "EVI_DM"
       ]
@@ -415,6 +515,17 @@
         "PDX_DM",
         "SLG_DM"
       ],
+      "formulaInboundFromApps": [
+        "EVI_DM",
+        "HC_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "HC_DM",
@@ -437,6 +548,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "HENP_DM",
@@ -458,6 +573,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "HENP_DM"
       ]
@@ -475,6 +594,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "EVI_DM",
@@ -495,6 +618,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "HENP_DM",
@@ -515,6 +642,10 @@
       "classification": "HIGH_CONFIDENCE_UNUSED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "HC_DM"
       ]
@@ -529,9 +660,30 @@
         "PDX_DM": true,
         "HS_DM": true
       },
-      "classification": "ACTIVE_SHARED",
+      "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [
+        "ActiveDeployments",
+        "DNU_ActiveDeployments",
+        "HealthReportSnapshots"
+      ],
+      "namedRangeRefsFromApps": [
+        "EVI_DM",
+        "HC_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "feedsFromDnuSheetsInApps": [
+        "EVI_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
       "hiddenIn": [
         "EVI_DM",
         "PDX_DM",
@@ -551,6 +703,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -566,6 +722,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -581,6 +741,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -596,6 +760,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -611,6 +779,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "EVI_DM",
         "PDX_DM",
@@ -627,9 +799,22 @@
         "PDX_DM": true,
         "HS_DM": true
       },
-      "classification": "ACTIVE_SHARED",
+      "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [
+        "ActiveDeployments",
+        "DNU_ActiveDeployments"
+      ],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [
+        "EVI_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
       "hiddenIn": [
         "SLG_DM",
         "HC_DM",
@@ -652,6 +837,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -667,6 +856,10 @@
       "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "HC_DM"
       ]
@@ -691,6 +884,17 @@
         "PDX_DM",
         "SLG_DM"
       ],
+      "formulaInboundFromApps": [
+        "EVI_DM",
+        "HC_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -706,6 +910,10 @@
       "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": [
         "SLG_DM",
         "HC_DM",
@@ -727,6 +935,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -742,6 +954,10 @@
       "classification": "UNKNOWN_RUNTIME_DEPENDENCY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -757,6 +973,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -769,9 +989,22 @@
         "PDX_DM": true,
         "HS_DM": true
       },
-      "classification": "ACTIVE_SHARED",
+      "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [
+        "DNU_Go Lives"
+      ],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [
+        "EVI_DM",
+        "HC_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
       "hiddenIn": [
         "SLG_DM",
         "HC_DM",
@@ -791,9 +1024,29 @@
         "PDX_DM": true,
         "HS_DM": true
       },
-      "classification": "ACTIVE_SHARED",
+      "classification": "POSSIBLY_LEGACY",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [
+        "ActiveDeployments",
+        "DNU_ActiveDeployments"
+      ],
+      "namedRangeRefsFromApps": [
+        "EVI_DM",
+        "HC_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
+      "feedsFromDnuSheetsInApps": [
+        "EVI_DM",
+        "HENP_DM",
+        "HS_DM",
+        "PDX_DM",
+        "SLG_DM"
+      ],
       "hiddenIn": [
         "SLG_DM",
         "HENP_DM",
@@ -815,6 +1068,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -830,6 +1087,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -845,6 +1106,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -860,6 +1125,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -875,6 +1144,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -890,6 +1163,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -905,6 +1182,10 @@
       "classification": "ACTIVE_SHARED",
       "headerDrift": true,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     },
     {
@@ -920,6 +1201,10 @@
       "classification": "ACTIVE_APP_SPECIFIC",
       "headerDrift": false,
       "formulaSampleRefsTo": [],
+      "formulaInboundFromApps": [],
+      "formulaOutboundToSheets": [],
+      "namedRangeRefsFromApps": [],
+      "feedsFromDnuSheetsInApps": [],
       "hiddenIn": []
     }
   ]

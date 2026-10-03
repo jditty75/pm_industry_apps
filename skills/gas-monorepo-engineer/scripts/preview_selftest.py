@@ -8,7 +8,8 @@ import urllib.request
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, os.path.dirname(__file__))
-from preview_dm_fixtures import M1_HANDLERS  # noqa: E402
+from preview_dm_contract import assert_scenario_expectations, validate_m1_bundle  # noqa: E402
+from preview_dm_fixtures import M1_HANDLERS, build_m1_responses  # noqa: E402
 from preview_engine import build_app, load_config, resolve_app_path, validate_built_preview  # noqa: E402
 from preview_server import ensure_server  # noqa: E402
 
@@ -34,7 +35,6 @@ PRODUCTION_URL_RE = re.compile(
     re.I,
 )
 
-
 def assert_dm_html(app_id: str, html: str, scenario: str) -> list[str]:
     issues = []
     for handler in M1_HANDLERS:
@@ -50,6 +50,11 @@ def assert_dm_html(app_id: str, html: str, scenario: str) -> list[str]:
         issues.append("possible production API URL in preview HTML")
     if f'data-preview-scenario="{scenario}"' not in html:
         issues.append(f"scenario attribute not embedded ({scenario})")
+    if "createGoogleScriptRun" not in html or "defineProperty(window.google.script" not in html:
+        issues.append("DM mock must expose fresh google.script.run via getter")
+    bundle = build_m1_responses(app_id, scenario)
+    issues.extend(validate_m1_bundle(bundle))
+    issues.extend(assert_scenario_expectations(scenario, bundle))
     return issues
 
 
@@ -58,6 +63,18 @@ def main():
     out_dir = os.path.join(REPO, cfg.get("outputDir", ".preview-out"))
     failed = 0
     built_files: dict[str, str] = {}
+
+    smoke = os.path.join(os.path.dirname(__file__), "preview_dm_runtime_smoke.mjs")
+    if os.path.isfile(smoke):
+        import subprocess
+
+        r = subprocess.run(["node", smoke], cwd=os.path.dirname(smoke), capture_output=True, text=True)
+        if r.returncode != 0:
+            print("FAIL preview_dm_runtime_smoke.mjs")
+            print(r.stdout or r.stderr)
+            failed += 1
+        else:
+            print((r.stdout or "").strip())
 
     for app in LEGACY_CHECKS:
         path, _log, html = build_app(app)

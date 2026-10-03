@@ -67,6 +67,23 @@ if (mode === 'css') {
   runInSandbox(sandbox, read(path.join(depSrc, 'CoreUI_Markup.js')), 'CoreUI_Markup.js');
   const out = vm.runInContext('_CoreUI_Markup_getHeadScripts()', sandbox);
   process.stdout.write(String(out));
+} else if (mode === 'ui-config') {
+  const srcDir = path.resolve(repoRoot, solutionSrc);
+  const cfgPath = path.join(srcDir, configName);
+  const codePath = path.join(srcDir, codeName);
+  const sandbox = createSandbox();
+  if (fs.existsSync(codePath)) {
+    runInSandbox(sandbox, read(codePath), codeName);
+  } else {
+    runInSandbox(sandbox, 'var TABLES = []; var BAR_CONFIG = {};', 'constants-stub');
+  }
+  runInSandbox(sandbox, read(cfgPath), configName);
+  loadDepMngrCore(sandbox);
+  const out = vm.runInContext(
+    'JSON.stringify((typeof APP_CONFIG !== "undefined" && APP_CONFIG.ui) ? APP_CONFIG.ui : {})',
+    sandbox
+  );
+  process.stdout.write(String(out));
 } else if (mode === 'shell') {
   const srcDir = path.resolve(repoRoot, solutionSrc);
   const cfgPath = path.join(srcDir, configFile);

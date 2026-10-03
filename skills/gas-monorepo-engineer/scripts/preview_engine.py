@@ -126,14 +126,28 @@ def inject_preview_shim(doc: str, app_meta: dict | None = None, scenario: str = 
     profile = (app_meta or {}).get("profile", "")
     mock_profile = (app_meta or {}).get("mockProfile")
     app_id = (app_meta or {}).get("appId", "")
-    if profile == "dm-depmngr-webapp" or mock_profile == "dm-v1" or app_id.endswith("_DM"):
+    is_dm = profile == "dm-depmngr-webapp" or mock_profile == "dm-v1" or app_id.endswith("_DM")
+    dm_early_inserted = False
+    if is_dm:
         shim = build_dm_mock_script(app_id or "SLG_DM", scenario)
+        marker = "// CoreUI client JS bundle"
+        midx = doc.find(marker)
+        if midx > 0:
+            script_start = doc.rfind("<script>", 0, midx)
+            if script_start >= 0:
+                doc = doc[:script_start] + shim + "\n" + doc[script_start:]
+                dm_early_inserted = True
     else:
         shim = GENERIC_SHIM
     lower = doc.lower()
     idx = lower.rfind("</body>")
     if idx == -1:
         return doc + shim
+    if is_dm:
+        if dm_early_inserted:
+            badge_only = shim.split("</script>", 1)[-1] if "</script>" in shim else ""
+            return doc[:idx] + badge_only + "\n</body>" + doc[idx + len("</body>") :]
+        return doc[:idx] + shim + "\n</body>" + doc[idx + len("</body>") :]
     return doc[:idx] + shim + "\n</body>" + doc[idx + len("</body>") :]
 
 
@@ -229,7 +243,13 @@ def apply_dm_depmngr(doc, app_path, app_meta, log):
     doc = DM_CORELIB_RE.sub(repl_corelib, doc)
 
     # Remove server script blocks (access gate, APP_UI_CONFIG builders) — inject mocks
-    mock_ui = '{"appTitle":"Preview (mock)","preview":true}'
+    try:
+        ui_json = node_extract("ui-config", src_rel, config_name, code_name).strip()
+        if not ui_json or ui_json == "{}":
+            ui_json = '{"appTitle":"Preview (mock)","preview":true}'
+    except RuntimeError:
+        ui_json = '{"appTitle":"Preview (mock)","preview":true}'
+    mock_ui = ui_json
     mock_access = '{"role":"ADMIN","canViewApp":true,"email":"preview.user@workday.com"}'
     doc = re.sub(
         r"<\?\s*if\s*\(!__userAccess\.canViewApp\)\s*\{[\s\S]*?\<\?\s*\}\s*else\s*\{",

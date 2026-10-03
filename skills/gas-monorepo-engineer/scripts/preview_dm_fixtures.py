@@ -117,6 +117,10 @@ def _product_mode_rows() -> list[dict[str, Any]]:
         _base_row(104, "Example County", "Green", "building", deployment_name="Evisort CLM Rollout"),
         _base_row(105, "Demo Municipal Corp", "Yellow", "building", deployment_name="HiredScore Legacy Sandbox"),
         _base_row(106, "Preview State College", "Green", "starting", deployment_name="Unmatched Industry Parent"),
+        _base_row(107, "Example County", "Green", "Test", deployment_name="Evisort Contract AI"),
+        _base_row(108, "Sample Health System", "Yellow", "On-Boarding", deployment_name="CLM Implementation"),
+        _base_row(109, "Test Customer Agency", "Red", "Deploy", deployment_name="Paradox Scheduling"),
+        _base_row(110, "Demo Municipal Corp", "Green", "Test", deployment_name="Paradox Assistant"),
     ]
 
 
@@ -170,22 +174,74 @@ def deployments_for_scenario(scenario: str) -> list[dict[str, Any]]:
     return _industry_rows_mixed()
 
 
+def product_mode_deployments_for_scenario(app_id: str, scenario: str) -> list[dict[str, Any]]:
+    """ProductMode apps: rows must match deploymentNameIncludes (see Config_*)."""
+    if scenario == "empty":
+        return []
+    profile = load_app_profiles().get(app_id, {})
+    includes = profile.get("deploymentNameIncludes") or ["Preview"]
+    pool = _product_mode_rows()
+    matched = [r for r in pool if _row_matches_product_mode_(r, profile)]
+    if scenario == "at-risk":
+        base = matched or pool[:4]
+        out = []
+        for i, row in enumerate(base):
+            copy = dict(row)
+            copy["health"] = "Red" if i < len(base) // 2 else "Yellow"
+            copy["stage"] = "Deploy"
+            out.append(copy)
+        return out[:10] if out else []
+    if scenario == "volume":
+        out = []
+        for i in range(50):
+            src = matched[i % len(matched)] if matched else pool[i % len(pool)]
+            copy = dict(src)
+            copy["deploymentId"] = f"PREVIEW_PM_{i + 1:04d}"
+            copy["accountName"] = f"Test Customer {i + 1}"
+            out.append(copy)
+        return out
+    if scenario == "edge-values":
+        return matched[:2] if matched else pool[:2]
+    if scenario == "go-live-window":
+        out = (matched or pool)[:8]
+        for j, row in enumerate(out):
+            row = dict(row)
+            row["mtpDate"] = _add_days(3 + j * 2)
+            out[j] = row
+        return out
+    # mixed-health and default: expand matched pool to 10+ rows with varied health
+    if not matched:
+        matched = pool[:4]
+    out = []
+    health_cycle = ["Green", "Green", "Yellow", "Red"]
+    stage_cycle = ["On-Boarding", "Test", "Test", "Deploy"]
+    for i in range(max(12, len(matched))):
+        src = dict(matched[i % len(matched)])
+        src["deploymentId"] = f"PREVIEW_PM_{i + 1:04d}"
+        src["accountName"] = SYNTHETIC_ACCOUNTS[i % len(SYNTHETIC_ACCOUNTS)]
+        src["health"] = health_cycle[i % len(health_cycle)]
+        src["stage"] = stage_cycle[i % len(stage_cycle)]
+        src["rowIndex"] = i + 2
+        out.append(src)
+    return out
+
+
+def _row_matches_product_mode_(row: dict[str, Any], profile: dict[str, Any]) -> bool:
+    includes = [s.lower() for s in profile.get("deploymentNameIncludes") or []]
+    excludes = [s.lower() for s in profile.get("deploymentNameExcludes") or []]
+    name = (row.get("deploymentName") or "").lower()
+    if excludes and any(x in name for x in excludes):
+        return False
+    if includes and not any(x in name for x in includes):
+        return False
+    return True
+
+
 def apply_product_mode_filter(rows: list[dict[str, Any]], app_id: str) -> list[dict[str, Any]]:
     profile = load_app_profiles().get(app_id, {})
     if not profile.get("productMode"):
         return rows
-    includes = [s.lower() for s in profile.get("deploymentNameIncludes") or []]
-    excludes = [s.lower() for s in profile.get("deploymentNameExcludes") or []]
-    pool = _product_mode_rows()
-    out = []
-    for row in pool:
-        name = (row.get("deploymentName") or "").lower()
-        if excludes and any(x in name for x in excludes):
-            continue
-        if includes and not any(x in name for x in includes):
-            continue
-        out.append(row)
-    return out if out else pool[:2]
+    return product_mode_deployments_for_scenario(app_id, "mixed-health")
 
 
 def overview_from_rows(rows: list[dict[str, Any]], scenario: str) -> dict[str, Any]:
@@ -281,8 +337,11 @@ def build_all_scenarios_bundle(app_id: str, default_scenario: str) -> dict[str, 
 
 def build_m1_responses(app_id: str, scenario: str) -> dict[str, Any]:
     scenario = scenario if scenario in SCENARIOS else "mixed-health"
-    rows = deployments_for_scenario(scenario)
-    rows = apply_product_mode_filter(rows, app_id)
+    profile = load_app_profiles().get(app_id, {})
+    if profile.get("productMode"):
+        rows = product_mode_deployments_for_scenario(app_id, scenario)
+    else:
+        rows = deployments_for_scenario(scenario)
     return {
         "scenario": scenario,
         "appId": app_id,
@@ -382,42 +441,54 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
     throw new Error('[preview] Unimplemented: ' + method);
   }}
 
-  function createRunner(state) {{
-    state = state || {{ success: null, failure: null }};
-    var runner = {{
-      withSuccessHandler: function (fn) {{
-        state.success = fn;
-        return createRunner(state);
-      }},
-      withFailureHandler: function (fn) {{
-        state.failure = fn;
-        return createRunner(state);
-      }},
-      withUserObject: function () {{ return createRunner(state); }}
-    }};
-    return new Proxy(runner, {{
+  /** Each `google.script.run` access must return a fresh chain (GAS semantics). */
+  function createGoogleScriptRun() {{
+    var handlers = {{ success: null, failure: null, userObject: null }};
+    var chain = {{}};
+    var proxy = new Proxy(chain, {{
       get: function (target, prop) {{
-        if (prop in target) return target[prop];
+        if (prop === 'withSuccessHandler') {{
+          return function (fn) {{
+            handlers.success = fn;
+            return proxy;
+          }};
+        }}
+        if (prop === 'withFailureHandler') {{
+          return function (fn) {{
+            handlers.failure = fn;
+            return proxy;
+          }};
+        }}
+        if (prop === 'withUserObject') {{
+          return function (obj) {{
+            handlers.userObject = obj;
+            return proxy;
+          }};
+        }}
         if (typeof prop === 'string' && prop !== 'then') {{
           return function () {{
             var args = arguments;
             setTimeout(function () {{
               try {{
                 var result = runCall(prop, args);
-                if (state.success) state.success(result);
+                if (handlers.success) handlers.success(result);
               }} catch (e) {{
-                if (state.failure) state.failure(String(e.message || e));
+                if (handlers.failure) handlers.failure(String(e.message || e));
               }}
             }}, 0);
-            return createRunner(state);
           }};
         }}
         return undefined;
       }}
     }});
+    return proxy;
   }}
 
-  window.google.script.run = createRunner();
+  Object.defineProperty(window.google.script, 'run', {{
+    configurable: true,
+    enumerable: true,
+    get: function () {{ return createGoogleScriptRun(); }}
+  }});
   var noop = function () {{}};
   window.google.script.host = {{ close: noop, setHeight: noop, setWidth: noop, origin: '', editor: {{ focus: noop }} }};
   window.google.script.url = {{ getLocation: function (cb) {{ if (cb) cb({{ parameter: {{}}, hash: '' }}); }} }};

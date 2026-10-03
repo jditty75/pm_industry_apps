@@ -14,6 +14,12 @@ python skills/gas-monorepo-engineer/scripts/preview_selftest.py
 Scenarios: `mixed-health` (default), `at-risk`, `empty`, `go-live-window`, `edge-values`, `volume`.  
 Runtime override: `?scenario=at-risk` on the localhost URL (all scenarios embedded at build time).
 
+## M1 mock runtime
+
+- Each `google.script.run` access returns a **new** handler chain (matches GAS; required because boot fires identity, freshness, and overview in parallel).
+- Mock script is injected **before** the CoreUI JS bundle; `APP_UI_CONFIG` is evaluated from real `Config_*.js` via `gas_bundle_extract.mjs ui-config`.
+- Contract tests: `preview_dm_contract.py` + `preview_dm_runtime_smoke.mjs`.
+
 ## M1 mock handlers
 
 Implemented in `preview_dm_fixtures.py` / injected by `preview_engine.py`:

@@ -19,9 +19,9 @@ Prioritized by confidence, blast radius, and dependency order. Complete workbook
 |---|------|------|------------|------|
 | 1.1 | Remove duplicate `DNU__PerfCache` (SLG) after confirming cache keys | Workbook | None | Low |
 | 1.2 | Delete EVI `Contact1`/`Contact2` if connector confirms unused | Workbook | SFDC connector config | Low |
-| 1.3 | Prune `columns.goLives` from configs + typedef | Config/code | None | Low (unused) |
+| 1.3 | Prune `columns.goLives` from configs + typedef | Config/code | None | Low (unused) — **partial (2026-10-03):** removed from all six `Config_*.js`; `CoreConfig.js` default deferred (Notable WIP in same file) |
 | 1.4 | Normalize `ddAssignment` tab name HC/HENP → `DD Assignment` **or** document `DD` as canonical | Workbook+config | User habit | Medium (links/macros) |
-| 1.5 | Trim duplicate debug functions from HS/PDX `WebAppCode.js` into shared debug module | Code | None | Low if menu-only |
+| 1.5 | Trim duplicate debug functions from HS/PDX `WebAppCode.js` into shared debug module | Code | None | Low if menu-only — **partial:** removed duplicate `_debugSfdcColumns` from `Config_SLG.js` (canonical copy remains in `WebAppCode.js`); HS/PDX consolidation **deferred** |
 
 ## Phase 2 — Legacy workbook/config reconciliation
 

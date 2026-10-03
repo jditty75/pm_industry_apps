@@ -94,19 +94,7 @@ var APP_CONFIG = {
     PRIMING_PARTNER:           21,
     IMPL_PARTNER:              22,
     PARTNER:                   23,
-    CURRENT_DEPLOYMENT_UPDATE: 24,
-    goLives: {
-      ACCOUNT_NAME:        1,
-      INDUSTRY:            2,
-      DAM_FULL_NAME:       3,
-      WD_ENG_MANAGER:      4,
-      PARTNER:             5,
-      DEPLOYMENT_NAME:     6,
-      SERVICES_APPROACH:   7,
-      PRODUCT_AREA:        8,
-      GO_LIVE_DATE_ACTUAL: 9,
-      IN_PRODUCTION:      10
-    }
+    CURRENT_DEPLOYMENT_UPDATE: 24
   },
 
   report: {
@@ -362,14 +350,4 @@ function _test_phase3a_SLG() {
   } else {
     Logger.log('No phased deployments found in this enrichment map.');
   }
-}
-
-function _debugSfdcColumns() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('SFDC_Deployments');
-  if (!sheet) { Logger.log('SFDC_Deployments sheet not found'); return; }
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  headers.forEach(function(h, i) {
-    Logger.log('Col ' + (i + 1) + ' (index ' + i + '): ' + h);
-  });
 }

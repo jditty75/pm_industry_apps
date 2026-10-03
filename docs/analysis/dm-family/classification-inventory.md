@@ -33,7 +33,7 @@ Method: static cross-reference of structure JSON, `APP_CONFIG.sheets`, DepMngr r
 | `sheets.deployments`, `sfdcDeploymentProductFunctions`, … | ACTIVE_SHARED | Must match live SFDC tab names |
 | `sheets.activeDeployments`, `sheets.goLives` | POSSIBLY_LEGACY | Tabs largely removed; keys retained |
 | `sheets.changeLog`, `healthMonthlySummary` | POSSIBLY_LEGACY | Point at non-existent visible tabs |
-| `columns.goLives` | HIGH_CONFIDENCE_UNUSED | Per `dhm-config-inventory.md`; no readers |
+| `columns.goLives` | CLEANED (configs) / DEFERRED (`CoreConfig` default) | Removed from all `Config_*.js` (2026-10-03); library default block remains until Notable WIP lands |
 | `columns.*` (flat deployment map) | POSSIBLY_LEGACY | Fallback for header resolver only |
 | `activeDeployments.productMode*` | ACTIVE_APP_SPECIFIC | HS, PDX, EVI (ProductMode family) |
 | `activeDeployments` (industry / status filters) | ACTIVE_APP_SPECIFIC | SLG, HC, HENP IndustryMode |

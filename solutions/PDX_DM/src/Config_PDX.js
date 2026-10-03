@@ -117,19 +117,7 @@ var APP_CONFIG = {
     PRIMING_PARTNER:           21,
     IMPL_PARTNER:              22,
     PARTNER:                   23,
-    CURRENT_DEPLOYMENT_UPDATE: 24,
-    goLives: {
-      ACCOUNT_NAME:        1,
-      INDUSTRY:            2,
-      DAM_FULL_NAME:       3,
-      WD_ENG_MANAGER:      4,
-      PARTNER:             5,
-      DEPLOYMENT_NAME:     6,
-      SERVICES_APPROACH:   7,
-      PRODUCT_AREA:        8,
-      GO_LIVE_DATE_ACTUAL: 9,
-      IN_PRODUCTION:      10
-    }
+    CURRENT_DEPLOYMENT_UPDATE: 24
   },
 
   report: {

@@ -1,5 +1,5 @@
 /**
- * Verifies DM preview mock: each google.script.run chain gets isolated handlers.
+ * Verifies DM preview mock: isolated google.script.run chains + M2 go-lives/overrides.
  * Run: node preview_dm_runtime_smoke.mjs
  */
 const fixture = {
@@ -9,33 +9,120 @@ const fixture = {
     access: { email: 'preview.user@workday.com', role: 'ADMIN', canViewApp: true },
   },
   freshness: { status: 'fresh', ageHours: 1, lastRefresh: '2026-10-03T08:00:00.000Z' },
-  deployments: [{ deploymentId: 'PREVIEW_DEP_0001', accountName: 'Example County', health: 'Green' }],
+  deployments: [
+    {
+      deploymentId: 'PREVIEW_DEP_0001',
+      accountName: 'Example County',
+      deploymentName: 'Preview Deployment 1',
+      health: 'Green',
+      stage: 'Test',
+      partner: 'Preview Partner LLC',
+    },
+  ],
   overview: {
     executiveWatchEnabled: true,
     totals: { totalActive: 12, red: 2, yellow: 2, green: 8, executiveWatch: 1 },
     topHighRisk: [],
-    upcomingGoLives: { total: 1, items: [{ accountName: 'Example County', currentMtp: '2026-10-18', deploymentName: 'X' }] },
+    upcomingGoLives: {
+      total: 1,
+      items: [{ accountName: 'Example County', currentMtp: '2026-10-18', deploymentName: 'X' }],
+    },
     lifecycleBuckets: {
       starting: { count: 1, percent: 10 },
       building: { count: 8, percent: 80 },
       landing: { count: 3, percent: 10 },
     },
   },
+  recentGoLives: [
+    {
+      deploymentId: 'PREVIEW_DEP_0001',
+      accountName: 'Example County',
+      partner: 'Preview Partner LLC',
+      lastGoLiveDate: '2026-09-20',
+      recordType: 'completed',
+    },
+  ],
+  upcomingGoLives: [
+    {
+      deploymentId: 'PREVIEW_DEP_0001',
+      accountName: 'Example County',
+      partner: 'Preview Partner LLC',
+      mtpDate: '2026-10-18',
+      recordType: 'upcoming',
+    },
+  ],
+  golivesExplorer: {
+    valid: true,
+    rows: [],
+    totalCount: 0,
+    kpiSummary: { contextLine: '', cards: [] },
+    timeline: [],
+    filterOptions: { partners: [], health: [], regions: [], productAreas: [], engagementManagers: [], fiscalYears: [] },
+  },
+  activeOverrides: [
+    {
+      type: 'deployment',
+      accountName: 'Example County',
+      deploymentId: 'PREVIEW_DEP_0001',
+      classification: 'Monthly',
+      hasOperationalOverride: true,
+      fieldsSet: ['Override_Health'],
+      currentValues: { health: 'Yellow' },
+      sourceValues: { health: 'Green' },
+      effectiveValues: { health: 'Yellow' },
+      hasReportExclusion: false,
+      category: 'operational',
+    },
+  ],
+  overrideAuditLog: [],
 };
 
-const M2_PLUS = ['getUpcomingGoLivesData'];
+const M3_PLUS = ['getTrendsDashboardData'];
 
-function installMock(handlersForScenario) {
+function installMock(handlersForScenario, stateRef) {
+  const STATE_KEY = 'preview-dm-override-state-v1-test';
+  const loadMutableState = () => stateRef.current;
+  const saveMutableState = (st) => {
+    stateRef.current = st;
+  };
+
   const HANDLERS = {
     getIdentityBoot: () => handlersForScenario().identityBoot,
     getDataFreshnessForUI: () => handlersForScenario().freshness,
     getAllDeploymentsForUI: () => handlersForScenario().deployments,
     getOverviewData: () => handlersForScenario().overview,
+    getRecentGoLivesData: () => handlersForScenario().recentGoLives || [],
+    getUpcomingGoLivesData: () => handlersForScenario().upcomingGoLives || [],
+    getGoLivesExplorerDataForUI: () => handlersForScenario().golivesExplorer,
+    getAllActiveOverridesForUI: () => {
+      const st = loadMutableState();
+      const base = handlersForScenario().activeOverrides || [];
+      return st.extraOverride ? base.concat([st.extraOverride]) : base;
+    },
+    clearSingleOverrideForUI: (type, id) => {
+      const st = loadMutableState();
+      if (id === 'MISSING') return { success: false, cleared: 0 };
+      st.cleared = { type, id };
+      saveMutableState(st);
+      return { success: true, cleared: 1 };
+    },
+    updateDeploymentWithMetaAndOverride: (_ri, depId, _meta, overrideData) => {
+      if (!overrideData.classification) throw new Error('classification required');
+      const st = loadMutableState();
+      st.extraOverride = {
+        type: 'deployment',
+        accountName: 'New Override',
+        deploymentId: depId,
+        classification: overrideData.classification,
+        hasOperationalOverride: true,
+      };
+      saveMutableState(st);
+    },
   };
 
-  function runCall(method) {
-    if (HANDLERS[method]) return HANDLERS[method]();
-    if (M2_PLUS.includes(method)) throw new Error('M2');
+  function runCall(method, args) {
+    if (HANDLERS[method]) return HANDLERS[method](...(args || []));
+    if (M3_PLUS.includes(method)) throw new Error('M3');
     throw new Error('unimplemented');
   }
 
@@ -60,10 +147,10 @@ function installMock(handlersForScenario) {
           return () => proxy;
         }
         if (typeof prop === 'string' && prop !== 'then') {
-          return function () {
+          return function (...args) {
             setTimeout(() => {
               try {
-                const result = runCall(prop);
+                const result = runCall(prop, args);
                 if (handlers.success) handlers.success(result);
               } catch (e) {
                 if (handlers.failure) handlers.failure(String(e.message || e));
@@ -91,32 +178,67 @@ function sleep(ms) {
 }
 
 async function main() {
+  const stateRef = { current: { extraOverride: null, cleared: null } };
   const pack = () => fixture;
-  installMock(pack);
-  const results = { identity: null, freshness: null, overview: null };
+  installMock(pack, stateRef);
+  const results = {
+    identity: null,
+    recent: null,
+    upcoming: null,
+    overrides: null,
+    clearFail: null,
+    clearOk: null,
+    writeOk: null,
+  };
 
+  globalThis.google.script.run.withSuccessHandler((d) => { results.identity = d; }).getIdentityBoot();
+  globalThis.google.script.run.withSuccessHandler((d) => { results.recent = d; }).getRecentGoLivesData();
+  globalThis.google.script.run.withSuccessHandler((d) => { results.upcoming = d; }).getUpcomingGoLivesData();
+  globalThis.google.script.run.withSuccessHandler((d) => { results.overrides = d; }).getAllActiveOverridesForUI();
   globalThis.google.script.run
-    .withSuccessHandler((d) => { results.identity = d; })
-    .getIdentityBoot();
+    .withSuccessHandler((d) => { results.clearFail = d; })
+    .clearSingleOverrideForUI('deployment', 'MISSING');
   globalThis.google.script.run
-    .withSuccessHandler((d) => { results.freshness = d; })
-    .getDataFreshnessForUI();
-  globalThis.google.script.run
-    .withSuccessHandler((d) => { results.overview = d; })
-    .getOverviewData();
+    .withSuccessHandler(() => {
+      globalThis.google.script.run
+        .withSuccessHandler((d) => { results.overridesAfterWrite = d; })
+        .getAllActiveOverridesForUI();
+    })
+    .updateDeploymentWithMetaAndOverride(null, 'PREVIEW_DEP_0001', {}, { overrideHealth: 'Red', classification: 'Monthly' }, '');
 
-  await sleep(30);
+  await sleep(40);
 
   if (!results.identity?.user?.email) {
     console.error('FAIL: identity boot not delivered');
     process.exit(1);
   }
-  if (results.freshness?.status !== 'fresh') {
-    console.error('FAIL: freshness handler wrong', results.freshness);
+  if (!Array.isArray(results.recent) || results.recent.length < 1) {
+    console.error('FAIL: recent go lives', results.recent);
     process.exit(1);
   }
-  if (results.overview?.totals?.totalActive !== 12) {
-    console.error('FAIL: overview handler wrong', results.overview);
+  if (!Array.isArray(results.upcoming) || results.upcoming.length < 1) {
+    console.error('FAIL: upcoming go lives', results.upcoming);
+    process.exit(1);
+  }
+  if (!Array.isArray(results.overrides) || results.overrides.length < 1) {
+    console.error('FAIL: active overrides', results.overrides);
+    process.exit(1);
+  }
+  if (results.clearFail?.success !== false) {
+    console.error('FAIL: clear missing override should return success:false', results.clearFail);
+    process.exit(1);
+  }
+  if (!results.overridesAfterWrite || results.overridesAfterWrite.length < 2) {
+    console.error('FAIL: write override should increase list', results.overridesAfterWrite);
+    process.exit(1);
+  }
+  let m3Err = null;
+  globalThis.google.script.run
+    .withFailureHandler((e) => { m3Err = e; })
+    .getTrendsDashboardData();
+  await sleep(20);
+  if (!m3Err || !String(m3Err).includes('M3')) {
+    console.error('FAIL: M3+ method should fail', m3Err);
     process.exit(1);
   }
   console.log('PASS preview_dm_runtime_smoke');

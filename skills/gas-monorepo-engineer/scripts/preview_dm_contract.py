@@ -30,6 +30,10 @@ OVERVIEW_TOP_RISK_FIELDS = ("accountName", "health", "currentMtp", "deploymentNa
 OVERVIEW_UPCOMING_ITEM_FIELDS = ("accountName", "currentMtp", "deploymentName")
 LIFECYCLE_KEYS = ("starting", "building", "landing")
 
+GO_LIVES_ROW_FIELDS = ("deploymentId", "accountName", "partner")
+GO_LIVES_EXPLORER_FIELDS = ("valid", "rows", "totalCount", "kpiSummary", "timeline", "filterOptions")
+OVERRIDE_ROW_FIELDS = ("type", "accountName", "deploymentId", "classification", "hasOperationalOverride")
+
 
 def _missing_fields(obj: dict[str, Any], required: tuple[str, ...]) -> list[str]:
     return [f for f in required if f not in obj]
@@ -113,12 +117,55 @@ def validate_overview(overview: Any) -> list[str]:
     return issues
 
 
+def validate_go_lives_rows(rows: Any, label: str) -> list[str]:
+    issues: list[str] = []
+    if not isinstance(rows, list):
+        return [f"{label} must be an array"]
+    for i, row in enumerate(rows[:2]):
+        if not isinstance(row, dict):
+            issues.append(f"{label}[{i}] must be an object")
+            continue
+        issues.extend(f"{label}[{i}] missing {f}" for f in _missing_fields(row, GO_LIVES_ROW_FIELDS))
+    return issues
+
+
+def validate_golives_explorer(payload: Any) -> list[str]:
+    issues: list[str] = []
+    if not isinstance(payload, dict):
+        return ["golivesExplorer must be an object"]
+    issues.extend(f"golivesExplorer missing {f}" for f in _missing_fields(payload, GO_LIVES_EXPLORER_FIELDS))
+    if payload.get("valid") is not True:
+        issues.append("golivesExplorer.valid must be true for preview scenarios")
+    return issues
+
+
+def validate_active_overrides(rows: Any) -> list[str]:
+    issues: list[str] = []
+    if not isinstance(rows, list):
+        return ["activeOverrides must be an array"]
+    for i, row in enumerate(rows[:2]):
+        if isinstance(row, dict):
+            issues.extend(f"activeOverrides[{i}] missing {f}" for f in _missing_fields(row, OVERRIDE_ROW_FIELDS))
+    return issues
+
+
 def validate_m1_bundle(bundle: dict[str, Any]) -> list[str]:
     issues: list[str] = []
     issues.extend(validate_identity_boot(bundle.get("identityBoot") or {}))
     issues.extend(validate_freshness(bundle.get("freshness") or {}))
     issues.extend(validate_deployment_rows(bundle.get("deployments")))
     issues.extend(validate_overview(bundle.get("overview")))
+    return issues
+
+
+def validate_m2_bundle(bundle: dict[str, Any]) -> list[str]:
+    issues = validate_m1_bundle(bundle)
+    issues.extend(validate_go_lives_rows(bundle.get("recentGoLives"), "recentGoLives"))
+    issues.extend(validate_go_lives_rows(bundle.get("upcomingGoLives"), "upcomingGoLives"))
+    issues.extend(validate_golives_explorer(bundle.get("golivesExplorer")))
+    issues.extend(validate_active_overrides(bundle.get("activeOverrides")))
+    if not isinstance(bundle.get("overrideAuditLog"), list):
+        issues.append("overrideAuditLog must be an array")
     return issues
 
 
@@ -133,6 +180,10 @@ def assert_scenario_expectations(scenario: str, bundle: dict[str, Any]) -> list[
             issues.append("empty scenario must have totalActive=0")
         if rows:
             issues.append("empty scenario must have no deployment rows")
+        if bundle.get("recentGoLives") or bundle.get("upcomingGoLives"):
+            issues.append("empty scenario must have no go-live rows")
+        if bundle.get("activeOverrides"):
+            issues.append("empty scenario must have no active overrides")
         return issues
     if scenario == "mixed-health":
         ta = totals.get("totalActive", 0)

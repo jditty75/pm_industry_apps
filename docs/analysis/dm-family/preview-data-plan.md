@@ -25,26 +25,28 @@
 
 **Reuse:** `config/ui-preview.json` — add optional `mockProfile: "dm-v1"` on all `*_DM` entries pointing at shared fixture pack.
 
-## Milestone 2 — Go Lives + overrides (read-only)
+## Milestone 2 — Go Lives + overrides (implemented)
 
-Handlers:
+**Handlers (read):**
 
 - `getRecentGoLivesData`, `getUpcomingGoLivesData`
-- `getGoLivesExplorerDataForUI` (return minimal explorer state)
-- `getAllActiveOverridesForUI`, `getOverrideAuditLogForUI` (empty audit acceptable)
+- `getGoLivesExplorerDataForUI`
+- `getAllActiveOverridesForUI`, `getOverrideAuditLogForUI`
 
-Fixtures: `golives-window.json`, `overrides-sample.json`.
+**Handlers (write — session-local only):**
 
-**Acceptance:** Go Lives tab renders tables; Manage Overrides lists rows (no write mocks yet).
-
-## Milestone 3 — Writes + modals (optional)
-
-Stub success responses (no persistence):
-
-- `updateDeploymentWithMetaAndOverride`, `updateGoLivesOverride`, `saveExecutiveSummaryHtml`
+- `updateDeploymentWithMetaAndOverride`, `updateGoLivesOverride`
 - `setOverrideClassificationForUI`, `clearSingleOverrideForUI`
 
-Return `{ ok: true }` shapes matching client expectations.
+Builders: `preview_dm_m2.py` derives go-live and override fixtures from the same deployment rows as M1 (per scenario). Mutable override state lives in `sessionStorage` (`preview-dm-override-state-v1`) inside the injected mock runtime.
+
+**Acceptance:** Go Lives tab (legacy + explorer) and Manage Overrides exercise real client handlers; writes never call GAS.
+
+## Milestone 3 — Module tabs + remaining writes
+
+Still stub / unimplemented in preview:
+
+- `saveExecutiveSummaryHtml`, portfolio/trends/CSAT/notable/reporting endpoints (see `M3_PLUS_METHODS` in `preview_dm_m2.py`)
 
 ## Milestone 4 — Module tabs
 
@@ -69,6 +71,7 @@ When preview app is `HS_DM` or `PDX_DM`:
 - [x] Create `fixtures/dm/*.json` (sanitized, no real accounts)
 - [x] `preview_engine.py` + `preview_dm_fixtures.py`: DM mock shim inject
 - [x] `preview_selftest.py`: assert handlers exist for Milestone 1 methods (six apps)
+- [x] M2: go-lives + overrides fixtures, session-local write mocks, contract tests (`validate_m2_bundle`, `preview_dm_runtime_smoke.mjs`)
 - [x] Document in `docs/agent/ui-preview.md` + `references/ui-preview-dm.md`
 - [x] `preview.ps1 -Scenario at-risk` passes query to opened URL
 

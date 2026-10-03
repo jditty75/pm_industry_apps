@@ -19,19 +19,6 @@ M1_HANDLERS = (
     "getOverviewData",
 )
 
-M2_PLUS_METHODS = (
-    "getRecentGoLivesData",
-    "getUpcomingGoLivesData",
-    "getGoLivesExplorerDataForUI",
-    "getAllActiveOverridesForUI",
-    "getTrendsDashboardData",
-    "getCsatTabDataForUI",
-    "getNotableData",
-    "getStudentTabData",
-    "getEscalationsDashboardData",
-    "getReportSendConfigForUI",
-)
-
 SCENARIOS = (
     "mixed-health",
     "at-risk",
@@ -324,8 +311,10 @@ def freshness_for_scenario(scenario: str) -> dict[str, Any]:
 
 
 def build_all_scenarios_bundle(app_id: str, default_scenario: str) -> dict[str, Any]:
+    from preview_dm_m2 import build_scenario_bundle
+
     default_scenario = default_scenario if default_scenario in SCENARIOS else "mixed-health"
-    by_scenario = {sc: build_m1_responses(app_id, sc) for sc in SCENARIOS}
+    by_scenario = {sc: build_scenario_bundle(app_id, sc, build_m1_responses) for sc in SCENARIOS}
     primary = by_scenario[default_scenario]
     return {
         "scenario": default_scenario,
@@ -355,6 +344,8 @@ def build_m1_responses(app_id: str, scenario: str) -> dict[str, Any]:
 
 def build_dm_mock_script(app_id: str, scenario: str) -> str:
     """Return <script> block: chainable google.script.run + M1 fixture handlers."""
+    from preview_dm_m2 import M2_HANDLERS, M3_PLUS_METHODS
+
     data = build_all_scenarios_bundle(app_id, scenario)
     by_scenario = {sc: data["byScenario"][sc] for sc in SCENARIOS}
     payload = json.dumps(
@@ -371,14 +362,17 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
     )
     by_scenario_json = json.dumps(by_scenario, separators=(",", ":"))
     m1_list = json.dumps(list(M1_HANDLERS))
-    m2_list = json.dumps(list(M2_PLUS_METHODS))
+    m2_list = json.dumps(list(M2_HANDLERS))
+    m3_list = json.dumps(list(M3_PLUS_METHODS))
     return f"""
 <script id="preview-dm-mock-runtime" data-preview-app="{app_id}" data-preview-scenario="{data['scenario']}"
   data-preview-marker="{data['markerAccount']}">
-/* LOCAL PREVIEW — DM M1 mock google.script.run (no production endpoints) */
+/* LOCAL PREVIEW — DM M1+M2 mock google.script.run (no production endpoints) */
 (function () {{
   var M1 = {m1_list};
-  var M2_PLUS = {m2_list};
+  var M2 = {m2_list};
+  var M3_PLUS = {m3_list};
+  var STATE_KEY = 'preview-dm-override-state-v1';
   var FIXTURE = {payload};
   window.__PREVIEW_DM_FIXTURES_BY_SCENARIO__ = {by_scenario_json};
 
@@ -414,11 +408,232 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
     return FIXTURE;
   }}
 
+  function loadMutableState() {{
+    try {{
+      var raw = sessionStorage.getItem(STATE_KEY);
+      if (raw) return JSON.parse(raw);
+    }} catch (e) {{}}
+    return {{ deploymentOverrides: {{}}, golivesOverrides: {{}}, auditLog: [], removedKeys: {{ deployment: {{}}, golives: {{}} }} }};
+  }}
+
+  function saveMutableState(st) {{
+    try {{ sessionStorage.setItem(STATE_KEY, JSON.stringify(st)); }} catch (e) {{}}
+    window.__PREVIEW_DM_MUTABLE_STATE__ = st;
+  }}
+
+  function nowIso() {{ return new Date().toISOString(); }}
+
+  function pushAudit(st, entry) {{
+    st.auditLog = st.auditLog || [];
+    st.auditLog.unshift(entry);
+    if (st.auditLog.length > 100) st.auditLog.length = 100;
+  }}
+
+  function mergeActiveOverrides(baseList, st) {{
+    var out = [];
+    var removedDep = st.removedKeys && st.removedKeys.deployment || {{}};
+    var removedGl = st.removedKeys && st.removedKeys.golives || {{}};
+    (baseList || []).forEach(function (row) {{
+      var key = row.type === 'golives' ? row.accountName : row.deploymentId;
+      if (row.type === 'deployment' && removedDep[key]) return;
+      if (row.type === 'golives' && removedGl[key]) return;
+      var copy = JSON.parse(JSON.stringify(row));
+      if (row.type === 'deployment' && st.deploymentOverrides && st.deploymentOverrides[key]) {{
+        Object.assign(copy, st.deploymentOverrides[key]);
+      }}
+      if (row.type === 'golives' && st.golivesOverrides && st.golivesOverrides[key]) {{
+        Object.assign(copy, st.golivesOverrides[key]);
+      }}
+      out.push(copy);
+    }});
+    Object.keys(st.deploymentOverrides || {{}}).forEach(function (id) {{
+      if (removedDep[id]) return;
+      if (out.some(function (r) {{ return r.type === 'deployment' && r.deploymentId === id; }})) return;
+      out.push(st.deploymentOverrides[id]);
+    }});
+    Object.keys(st.golivesOverrides || {{}}).forEach(function (acct) {{
+      if (removedGl[acct]) return;
+      if (out.some(function (r) {{ return r.type === 'golives' && r.accountName === acct; }})) return;
+      out.push(st.golivesOverrides[acct]);
+    }});
+    return out;
+  }}
+
+  function applyDeploymentOverrideFlags(rows, st) {{
+    return (rows || []).map(function (row) {{
+      var key = String(row.parentDeploymentId || row.deploymentId || '').trim();
+      var ov = st.deploymentOverrides && st.deploymentOverrides[key];
+      if (!ov) return row;
+      var copy = Object.assign({{}}, row);
+      if (ov.hasOperationalOverride || ov.hasReportExclusion) {{
+        copy.hasOperationalOverride = !!ov.hasOperationalOverride;
+        copy.hasReportExclusion = !!ov.hasReportExclusion;
+        copy.hasAnyOverride = !!(copy.hasOperationalOverride || copy.hasReportExclusion);
+        copy.overrideClassification = ov.classification || copy.overrideClassification;
+      }}
+      return copy;
+    }});
+  }}
+
+  function materializedBundle() {{
+    var base = handlersForScenario();
+    var st = loadMutableState();
+    saveMutableState(st);
+    var bundle = JSON.parse(JSON.stringify(base));
+    bundle.deployments = applyDeploymentOverrideFlags(bundle.deployments, st);
+    bundle.activeOverrides = mergeActiveOverrides(bundle.activeOverrides, st);
+    bundle.overrideAuditLog = (st.auditLog && st.auditLog.length)
+      ? st.auditLog.concat(bundle.overrideAuditLog || [])
+      : (bundle.overrideAuditLog || []);
+    return {{ bundle: bundle, state: st }};
+  }}
+
+  function findDeploymentInBundle(bundle, deploymentId) {{
+    var target = String(deploymentId || '').trim();
+    return (bundle.deployments || []).find(function (d) {{
+      var id = String(d.deploymentId || '').trim();
+      return id === target || id.slice(0, 15) === target.slice(0, 15);
+    }});
+  }}
+
+  function buildDeploymentOverrideRow(dep, overrideData, notes) {{
+    var srcHealth = dep.health || 'Green';
+    var effHealth = overrideData.overrideHealth || srcHealth;
+    var hasOp = !!(overrideData.overrideHealth || overrideData.overrideMtpDate || overrideData.overrideStage || overrideData.overrideCurrentUpdate);
+    var exclude = !!overrideData.excludeFromReport;
+    var fields = [];
+    if (overrideData.overrideHealth) fields.push('Override_Health');
+    if (overrideData.overrideMtpDate) fields.push('Override_MTPDate');
+    if (overrideData.overrideStage) fields.push('Override_Stage');
+    if (overrideData.excludeFromReport) fields.push('Exclude_From_Report');
+    return {{
+      type: 'deployment',
+      accountName: dep.accountName,
+      deploymentId: dep.deploymentId,
+      deploymentName: dep.deploymentName || '',
+      fieldsSet: fields,
+      currentValues: {{
+        health: overrideData.overrideHealth || '',
+        mtpDate: overrideData.overrideMtpDate || '',
+        stage: overrideData.overrideStage || '',
+        excludeFromReport: exclude
+      }},
+      sourceValues: {{ health: srcHealth, mtpDate: dep.mtpDate || '', stage: dep.stage || '', account: dep.accountName, deployment: dep.deploymentName || '' }},
+      effectiveValues: {{ health: effHealth, mtpDate: overrideData.overrideMtpDate || dep.mtpDate || '', stage: overrideData.overrideStage || dep.stage || '', excludeFromReport: exclude }},
+      setBy: 'preview.user@workday.com',
+      setAt: nowIso(),
+      classification: overrideData.classification || 'Monthly',
+      reason: notes || '',
+      hasOperationalOverride: hasOp,
+      hasReportExclusion: exclude,
+      isStaleMonthly: false,
+      isOrphaned: false,
+      category: exclude && !hasOp ? 'report' : 'operational'
+    }};
+  }}
+
   var HANDLERS = {{
-    getIdentityBoot: function () {{ return handlersForScenario().identityBoot; }},
-    getDataFreshnessForUI: function () {{ return handlersForScenario().freshness; }},
-    getAllDeploymentsForUI: function () {{ return handlersForScenario().deployments; }},
-    getOverviewData: function () {{ return handlersForScenario().overview; }}
+    getIdentityBoot: function () {{ return materializedBundle().bundle.identityBoot; }},
+    getDataFreshnessForUI: function () {{ return materializedBundle().bundle.freshness; }},
+    getAllDeploymentsForUI: function () {{ return materializedBundle().bundle.deployments; }},
+    getOverviewData: function () {{ return materializedBundle().bundle.overview; }},
+    getRecentGoLivesData: function () {{ return materializedBundle().bundle.recentGoLives || []; }},
+    getUpcomingGoLivesData: function () {{ return materializedBundle().bundle.upcomingGoLives || []; }},
+    getGoLivesExplorerDataForUI: function (_vm, _pm, _filters) {{
+      return materializedBundle().bundle.golivesExplorer || {{ valid: true, rows: [], totalCount: 0 }};
+    }},
+    getAllActiveOverridesForUI: function () {{ return materializedBundle().bundle.activeOverrides || []; }},
+    getOverrideAuditLogForUI: function (opts) {{
+      var log = materializedBundle().bundle.overrideAuditLog || [];
+      var sinceDays = opts && opts.sinceDays;
+      if (sinceDays === 0) return log.slice(0, 500);
+      return log;
+    }},
+    updateDeploymentWithMetaAndOverride: function (_rowIndex, deploymentId, _meta, overrideData, notes) {{
+      var mat = materializedBundle();
+      var dep = findDeploymentInBundle(mat.bundle, deploymentId);
+      if (!dep) throw new Error('[preview] Deployment not found for override save');
+      if (!overrideData || !overrideData.classification) throw new Error('classification required');
+      var row = buildDeploymentOverrideRow(dep, overrideData, notes);
+      mat.state.deploymentOverrides[dep.deploymentId] = row;
+      if (mat.state.removedKeys && mat.state.removedKeys.deployment) delete mat.state.removedKeys.deployment[dep.deploymentId];
+      pushAudit(mat.state, {{
+        timestamp: nowIso(), user: 'preview.user@workday.com', action: 'SET', accountName: dep.accountName,
+        overrideType: 'deployment', fieldsAffected: row.fieldsSet.join(', '), notes: notes || ''
+      }});
+      saveMutableState(mat.state);
+      return undefined;
+    }},
+    updateGoLivesOverride: function (accountName, overrideData, notes) {{
+      if (!accountName) throw new Error('accountName required');
+      if (!overrideData || !overrideData.classification) throw new Error('classification required');
+      var mat = materializedBundle();
+      var acct = String(accountName).trim();
+      var row = {{
+        type: 'golives', accountName: acct, deploymentId: acct, deploymentName: '',
+        fieldsSet: ['Override_GoLiveDate', 'Override_Partner'].filter(function () {{ return true; }}),
+        currentValues: {{ goLiveDate: overrideData.overrideDate || '', partner: overrideData.overridePartner || '', excludeFromReport: !!overrideData.excludeFromReport }},
+        sourceValues: {{}}, effectiveValues: {{ goLiveDate: overrideData.overrideDate || '', partner: overrideData.overridePartner || '', excludeFromReport: !!overrideData.excludeFromReport }},
+        setBy: 'preview.user@workday.com', setAt: nowIso(), classification: overrideData.classification || 'Monthly',
+        reason: notes || '', hasOperationalOverride: !!(overrideData.overrideDate || overrideData.overridePartner),
+        hasReportExclusion: !!overrideData.excludeFromReport, isStaleMonthly: false, isOrphaned: false, category: 'operational'
+      }};
+      mat.state.golivesOverrides[acct] = row;
+      if (mat.state.removedKeys && mat.state.removedKeys.golives) delete mat.state.removedKeys.golives[acct];
+      pushAudit(mat.state, {{
+        timestamp: nowIso(), user: 'preview.user@workday.com', action: 'SET', accountName: acct,
+        overrideType: 'golives', fieldsAffected: 'Go Lives override', notes: notes || ''
+      }});
+      saveMutableState(mat.state);
+      return undefined;
+    }},
+    setOverrideClassificationForUI: function (type, idOrAccount, classification) {{
+      var mat = materializedBundle();
+      var key = String(idOrAccount || '').trim();
+      if (type === 'deployment' && mat.state.deploymentOverrides[key]) {{
+        mat.state.deploymentOverrides[key].classification = classification;
+      }} else if (type === 'golives' && mat.state.golivesOverrides[key]) {{
+        mat.state.golivesOverrides[key].classification = classification;
+      }} else {{
+        var list = mat.bundle.activeOverrides || [];
+        var base = list.find(function (r) {{
+          return (type === 'deployment' ? r.deploymentId : r.accountName) === key;
+        }});
+        if (base) {{
+          var clone = JSON.parse(JSON.stringify(base));
+          clone.classification = classification;
+          if (type === 'deployment') mat.state.deploymentOverrides[key] = clone;
+          else mat.state.golivesOverrides[key] = clone;
+        }}
+      }}
+      pushAudit(mat.state, {{
+        timestamp: nowIso(), user: 'preview.user@workday.com', action: 'CLASSIFY', accountName: key,
+        overrideType: type, fieldsAffected: 'classification', notes: classification
+      }});
+      saveMutableState(mat.state);
+      return undefined;
+    }},
+    clearSingleOverrideForUI: function (type, idOrAccount) {{
+      var mat = materializedBundle();
+      var key = String(idOrAccount || '').trim();
+      var had = false;
+      if (type === 'deployment') {{
+        had = !!(mat.state.deploymentOverrides[key] || (mat.bundle.activeOverrides || []).some(function (r) {{ return r.deploymentId === key; }}));
+        delete mat.state.deploymentOverrides[key];
+        mat.state.removedKeys.deployment[key] = true;
+      }} else {{
+        had = !!(mat.state.golivesOverrides[key] || (mat.bundle.activeOverrides || []).some(function (r) {{ return r.accountName === key; }}));
+        delete mat.state.golivesOverrides[key];
+        mat.state.removedKeys.golives[key] = true;
+      }}
+      if (!had) return {{ success: false, cleared: 0 }};
+      pushAudit(mat.state, {{
+        timestamp: nowIso(), user: 'preview.user@workday.com', action: 'CLEAR', accountName: key,
+        overrideType: type, fieldsAffected: '', notes: 'Preview clear'
+      }});
+      saveMutableState(mat.state);
+      return {{ success: true, cleared: 1 }};
+    }}
   }};
 
   window.google = window.google || {{}};
@@ -433,11 +648,11 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
         throw err;
       }}
     }}
-    if (M2_PLUS.indexOf(method) !== -1) {{
-      showDiag('M2–M5 preview: google.script.run.' + method + ' is not implemented in M1. See docs/analysis/dm-family/preview-data-plan.md', true);
-      throw new Error('[preview] Unimplemented (scheduled M2–M5): ' + method);
+    if (M3_PLUS.indexOf(method) !== -1) {{
+      showDiag('M3+ preview: google.script.run.' + method + ' is not implemented yet. See docs/analysis/dm-family/preview-data-plan.md', true);
+      throw new Error('[preview] Unimplemented (M3+): ' + method);
     }}
-    showDiag('Unimplemented google.script.run.' + method + ' — add handler in preview_dm_fixtures.py / preview_dm_mock runtime', true);
+    showDiag('Unimplemented google.script.run.' + method + ' — add handler in preview_dm_fixtures.py / preview_dm_m2.py', true);
     throw new Error('[preview] Unimplemented: ' + method);
   }}
 
@@ -493,15 +708,16 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
   window.google.script.host = {{ close: noop, setHeight: noop, setWidth: noop, origin: '', editor: {{ focus: noop }} }};
   window.google.script.url = {{ getLocation: function (cb) {{ if (cb) cb({{ parameter: {{}}, hash: '' }}); }} }};
   window.__PREVIEW_DM_M1_HANDLERS__ = M1;
+  window.__PREVIEW_DM_M2_HANDLERS__ = M2;
   window.__PREVIEW_DM_SCENARIO__ = FIXTURE.scenario;
 }})();
 </script>
 <div id="gas-preview-badge" onclick="this.remove()"
-  title="Local preview — synthetic DM fixtures (M1). M2–M5 tabs need additional handlers. Click to dismiss."
+  title="Local preview — synthetic DM fixtures (M1+M2). M3+ tabs still need handlers. Click to dismiss."
   style="position:fixed;top:12px;left:12px;z-index:2147483647;font:600 11px/1.4 Archivo,system-ui,sans-serif;
   background:rgba(15,46,102,.92);color:#fff;padding:7px 12px;border-radius:999px;letter-spacing:.02em;
   box-shadow:0 2px 12px rgba(0,0,0,.18);cursor:pointer;max-width:min(92vw,520px);">
-  LOCAL PREVIEW &mdash; DM M1 mock data ({app_id}, scenario {data['scenario']})</div>
+  LOCAL PREVIEW &mdash; DM M1+M2 ({app_id}, scenario {data['scenario']})</div>
 """
 
 

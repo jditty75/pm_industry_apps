@@ -8,8 +8,9 @@ import urllib.request
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 sys.path.insert(0, os.path.dirname(__file__))
-from preview_dm_contract import assert_scenario_expectations, validate_m1_bundle  # noqa: E402
+from preview_dm_contract import assert_scenario_expectations, validate_m2_bundle  # noqa: E402
 from preview_dm_fixtures import M1_HANDLERS, build_m1_responses  # noqa: E402
+from preview_dm_m2 import M2_HANDLERS, build_scenario_bundle  # noqa: E402
 from preview_engine import build_app, load_config, resolve_app_path, validate_built_preview  # noqa: E402
 from preview_server import ensure_server  # noqa: E402
 
@@ -28,7 +29,7 @@ DM_APPS = [
     "HS_DM",
 ]
 
-DM_SCENARIOS = ("mixed-health", "empty", "at-risk")
+DM_SCENARIOS = ("mixed-health", "empty", "at-risk", "go-live-window")
 
 PRODUCTION_URL_RE = re.compile(
     r"https://script\.google\.com/macros/s/|googleapis\.com/auth",
@@ -37,13 +38,17 @@ PRODUCTION_URL_RE = re.compile(
 
 def assert_dm_html(app_id: str, html: str, scenario: str) -> list[str]:
     issues = []
-    for handler in M1_HANDLERS:
+    for handler in M1_HANDLERS + M2_HANDLERS:
         if handler not in html:
-            issues.append(f"missing M1 handler registration for {handler}")
+            issues.append(f"missing preview handler registration for {handler}")
     if "preview-dm-mock-runtime" not in html:
         issues.append("missing preview-dm-mock-runtime script")
     if "__PREVIEW_DM_M1_HANDLERS__" not in html:
         issues.append("missing __PREVIEW_DM_M1_HANDLERS__ marker")
+    if "__PREVIEW_DM_M2_HANDLERS__" not in html:
+        issues.append("missing __PREVIEW_DM_M2_HANDLERS__ marker")
+    if "M3_PLUS" not in html:
+        issues.append("missing M3_PLUS unsupported-method diagnostics")
     if scenario != "empty" and "Example County" not in html:
         issues.append("missing synthetic fixture marker Example County")
     if PRODUCTION_URL_RE.search(html):
@@ -52,8 +57,8 @@ def assert_dm_html(app_id: str, html: str, scenario: str) -> list[str]:
         issues.append(f"scenario attribute not embedded ({scenario})")
     if "createGoogleScriptRun" not in html or "defineProperty(window.google.script" not in html:
         issues.append("DM mock must expose fresh google.script.run via getter")
-    bundle = build_m1_responses(app_id, scenario)
-    issues.extend(validate_m1_bundle(bundle))
+    bundle = build_scenario_bundle(app_id, scenario, build_m1_responses)
+    issues.extend(validate_m2_bundle(bundle))
     issues.extend(assert_scenario_expectations(scenario, bundle))
     return issues
 

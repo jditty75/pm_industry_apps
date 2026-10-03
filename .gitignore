@@ -27,6 +27,9 @@ Thumbs.db
 !.cursor/rules/
 !.cursor/rules/**
 
+# Claude Code CLI local settings (Cursor uses CLAUDE.md + skills/gas-monorepo-engineer)
+.claude/
+
 # Clasp credentials (NEVER commit)
 .clasprc.json
 ~/.clasprc.json

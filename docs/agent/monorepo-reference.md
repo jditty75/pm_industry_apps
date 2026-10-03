@@ -25,6 +25,8 @@ C:\JD
 
 Per project: `src/` (or CLASP `rootDir`), local `.clasp.json` (gitignored), `gas.config.json`, often `package.json`.
 
+Long-form discovery specs live under `docs/specs/` (see `docs/specs/README.md`). Open `apps-script.code-workspace` for all active CLASP roots plus `docs/`, `config/`, and the GAS skill folder.
+
 Historical `snapshots/` and `DHLibrary_v52/` were removed from the tree; use Git history for old versions.
 
 ## Application map (summary)

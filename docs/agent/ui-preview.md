@@ -8,6 +8,7 @@ From repo root (`C:\JD`):
 
 ```powershell
 .\preview.ps1 SLG_DM
+.\preview.ps1 SLG_DM -Scenario at-risk
 .\preview.ps1 --list
 .\preview.ps1 SLG_DM -NoOpen
 .\preview.ps1 --stop
@@ -40,9 +41,15 @@ Authoritative list: [`config/ui-preview.json`](../../config/ui-preview.json) (`p
 | `NOT_YET` | Documented gap — do not assume preview works |
 | `NO_STANDALONE_UI` | Libraries (`DepMngr`, `GoLives`) — preview a consumer |
 
+## DM family (`*_DM`)
+
+- **M1 interactive mock:** chainable `google.script.run` with synthetic fixtures (deployments, overview, identity, freshness).
+- **Scenarios:** `-Scenario` on `preview.ps1` or `?scenario=` on the served URL. Default `mixed-health`.
+- Detail: [`skills/gas-monorepo-engineer/references/ui-preview-dm.md`](../../skills/gas-monorepo-engineer/references/ui-preview-dm.md) and [`docs/analysis/dm-family/preview-data-plan.md`](../analysis/dm-family/preview-data-plan.md).
+
 ## What is mocked
 
-- `google.script.run` — chained no-op with console warnings
+- `google.script.run` — DM M1 handler map; other apps use generic chained warnings
 - `google.script.host` / `google.script.url`
 - DepMngr `CoreLib.CoreUI.*` — inlined from **local** `libraries/DepMngr/src` via Node VM
 - `APP_UI_CONFIG` / `APP_UI_CONFIG` stubs when server scriptlets are stripped
@@ -69,9 +76,9 @@ Every generated file includes a **LOCAL PREVIEW** banner (preview output only; a
 
 1. Edit local source (and shared library UI files if the family requires it).
 2. Run static checks that exist for the app (`preview_engine.py --lint --folder …` only for Chris four-file apps).
-3. **`.\preview.ps1 <app>`** when `previewSupport` is `FULL` or `PARTIAL`.
+3. **`.\preview.ps1 <app>`** when `previewSupport` is `FULL` or `PARTIAL`. For `*_DM`, include **`-Scenario mixed-health`** (and `empty` / `at-risk` when touching empty states or risk styling).
 4. Confirm `validate: PASS` and open the **localhost** URL; inspect layout in the browser when available.
-5. Optional regression: `python skills/gas-monorepo-engineer/scripts/preview_selftest.py`
+5. Regression: `python skills/gas-monorepo-engineer/scripts/preview_selftest.py` (includes six DM apps).
 6. Git diff / review; commit and push source.
 7. State **`READY FOR PRODUCTION AUTHORIZATION`** — preview success is **not** production verification.
 8. After **explicit** Jeff authorization in the same interaction: CLASP push/deploy and real smoke test.

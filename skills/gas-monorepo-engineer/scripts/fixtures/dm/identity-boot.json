@@ -1,0 +1,32 @@
+{
+  "user": {
+    "email": "preview.user@workday.com",
+    "displayName": "Preview User",
+    "role": "PM",
+    "isAdmin": true,
+    "active": true
+  },
+  "activeUsers": [
+    {
+      "email": "preview.user@workday.com",
+      "displayName": "Preview User",
+      "role": "PM",
+      "active": true
+    },
+    {
+      "email": "preview.dd@workday.com",
+      "displayName": "Preview Delivery Director",
+      "role": "DD",
+      "active": true
+    }
+  ],
+  "access": {
+    "email": "preview.user@workday.com",
+    "role": "ADMIN",
+    "actualRole": "ADMIN",
+    "effectiveRole": "ADMIN",
+    "canViewApp": true,
+    "isViewAsReadOnly": false,
+    "viewAsRole": null
+  }
+}

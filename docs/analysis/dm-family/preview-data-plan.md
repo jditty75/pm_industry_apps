@@ -66,11 +66,11 @@ When preview app is `HS_DM` or `PDX_DM`:
 
 ## Implementation checklist
 
-- [ ] Create `fixtures/dm/*.json` (sanitized, no real accounts)
-- [ ] `preview_engine.py`: `build_dm_mock_shim(app_id)` inject
-- [ ] `preview_selftest.py`: assert handlers exist for Milestone 1 methods
-- [ ] Document in `docs/agent/ui-preview.md` (short pointer to this plan)
-- [ ] Optional: `preview.ps1 -Scenario at-risk` passes query to opened URL
+- [x] Create `fixtures/dm/*.json` (sanitized, no real accounts)
+- [x] `preview_engine.py` + `preview_dm_fixtures.py`: DM mock shim inject
+- [x] `preview_selftest.py`: assert handlers exist for Milestone 1 methods (six apps)
+- [x] Document in `docs/agent/ui-preview.md` + `references/ui-preview-dm.md`
+- [x] `preview.ps1 -Scenario at-risk` passes query to opened URL
 
 ## Out of scope (v1)
 

@@ -1,0 +1,15 @@
+{
+  "status": "stale",
+  "ageHours": 96,
+  "lastRefresh": "2026-09-29T08:00:00.000Z",
+  "sourceSheet": "SFDC_Deployments",
+  "details": [
+    {
+      "sheetName": "SFDC_Deployments",
+      "lastRefresh": "2026-09-29T08:00:00.000Z",
+      "ageHours": 96,
+      "status": "Critical",
+      "message": "Preview synthetic stale signal"
+    }
+  ]
+}

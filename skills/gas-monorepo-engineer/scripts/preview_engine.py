@@ -16,6 +16,7 @@ import subprocess
 import sys
 import webbrowser
 
+from preview_dm_fixtures import build_dm_mock_script
 from preview_server import ensure_server, stop_server
 from preview_validate import validate_preview_html
 
@@ -87,9 +88,9 @@ def placeholder_data_uri():
     return "data:image/svg+xml;utf8," + svg
 
 
-SHIM = """
+GENERIC_SHIM = """
 <script>
-/* LOCAL PREVIEW — mock google.script.* (no production endpoints) */
+/* LOCAL PREVIEW — generic mock google.script.* (no production endpoints) */
 (function () {
   window.google = window.google || {};
   window.google.script = window.google.script || {};
@@ -98,7 +99,12 @@ SHIM = """
   chain.withFailureHandler = function () { return chain; };
   chain.withUserObject = function () { return chain; };
   var run = new Proxy({}, {
-    get: function () { return function () { console.warn('[preview] google.script.run.' + arguments); return chain; }; }
+    get: function (_t, prop) {
+      return function () {
+        console.warn('[preview] unimplemented google.script.run.' + prop);
+        return chain;
+      };
+    }
   });
   window.google.script.run = run;
   var noop = function () {};
@@ -115,13 +121,20 @@ SHIM = """
 """
 
 
-def inject_preview_shim(doc: str) -> str:
+def inject_preview_shim(doc: str, app_meta: dict | None = None, scenario: str = "mixed-health") -> str:
     """Insert preview shim before the last </body> (avoids JS string literals containing </body>)."""
+    profile = (app_meta or {}).get("profile", "")
+    mock_profile = (app_meta or {}).get("mockProfile")
+    app_id = (app_meta or {}).get("appId", "")
+    if profile == "dm-depmngr-webapp" or mock_profile == "dm-v1" or app_id.endswith("_DM"):
+        shim = build_dm_mock_script(app_id or "SLG_DM", scenario)
+    else:
+        shim = GENERIC_SHIM
     lower = doc.lower()
     idx = lower.rfind("</body>")
     if idx == -1:
-        return doc + SHIM
-    return doc[:idx] + SHIM + "\n</body>" + doc[idx + len("</body>") :]
+        return doc + shim
+    return doc[:idx] + shim + "\n</body>" + doc[idx + len("</body>") :]
 
 
 def inline_includes(doc, folder, log):
@@ -246,7 +259,7 @@ def apply_dm_depmngr(doc, app_path, app_meta, log):
     return doc
 
 
-def build_app(app_key, out_name=None, open_browser=True):  # noqa: ARG001 open_browser legacy
+def build_app(app_key, out_name=None, open_browser=True, scenario="mixed-health"):  # noqa: ARG001
     app_path, app_meta = resolve_app_path(app_key)
     if not app_meta:
         sys.exit(f"error: unknown app '{app_key}'. See config/ui-preview.json")
@@ -287,7 +300,7 @@ def build_app(app_key, out_name=None, open_browser=True):  # noqa: ARG001 open_b
             doc = SCRIPTLET_RE.sub("", doc)
             log.append(f"  stripped {len(leftovers)} unresolved scriptlet(s)")
 
-    doc = inject_preview_shim(doc)
+    doc = inject_preview_shim(doc, app_meta, scenario=scenario)
 
     out_dir = os.path.join(REPO_ROOT, cfg.get("outputDir", ".preview-out"))
     os.makedirs(out_dir, exist_ok=True)
@@ -300,8 +313,17 @@ def build_app(app_key, out_name=None, open_browser=True):  # noqa: ARG001 open_b
     return out_path, log, doc
 
 
+DM_APP_MARKERS = {
+    "SLG_DM": ["id=\"coreui-app-shell\"", "preview-dm-mock-runtime", "Example County"],
+    "HC_DM": ["id=\"coreui-app-shell\"", "preview-dm-mock-runtime"],
+    "HENP_DM": ["id=\"coreui-app-shell\"", "preview-dm-mock-runtime"],
+    "EVI_DM": ["id=\"coreui-app-shell\"", "preview-dm-mock-runtime"],
+    "PDX_DM": ["id=\"coreui-app-shell\"", "preview-dm-mock-runtime"],
+    "HS_DM": ["id=\"coreui-app-shell\"", "preview-dm-mock-runtime"],
+}
+
 APP_VALIDATION_MARKERS = {
-    "SLG_DM": ["id=\"coreui-app-shell\""],
+    "SLG_DM": DM_APP_MARKERS["SLG_DM"],
     "PS_SPA": ["portal-card"],
     "SLG_GoLives": ["Go Lives"],
     "SLG_CAPACITY": ["wfm25-topbar", "wfm25-shell"],
@@ -310,7 +332,7 @@ APP_VALIDATION_MARKERS = {
 
 def validate_built_preview(app_meta, html: str) -> tuple[bool, list]:
     app_id = app_meta.get("appId", "")
-    markers = APP_VALIDATION_MARKERS.get(app_id, [])
+    markers = APP_VALIDATION_MARKERS.get(app_id) or DM_APP_MARKERS.get(app_id, [])
     return validate_preview_html(html, app_id=app_id, required_markers=markers or None)
 
 
@@ -337,6 +359,11 @@ def main():
     ap.add_argument("--stop", action="store_true", help="Stop localhost preview server")
     ap.add_argument("--lint", action="store_true", help="Delegate to legacy preview.py lint (four-file apps only)")
     ap.add_argument("--folder", help="Legacy: compile folder with index.html (Chris four-file pattern)")
+    ap.add_argument(
+        "--scenario",
+        default=os.environ.get("PREVIEW_SCENARIO", "mixed-health"),
+        help="DM preview fixture scenario (default: mixed-health)",
+    )
     args = ap.parse_args()
 
     cfg = load_config()
@@ -377,7 +404,7 @@ def main():
         ap.print_help()
         sys.exit(2)
 
-    out_path, log, html = build_app(args.app, out_name=args.out)
+    out_path, log, html = build_app(args.app, out_name=args.out, scenario=args.scenario)
     app_path, app_meta = resolve_app_path(args.app)
     ok, issues = validate_built_preview(app_meta, html)
     print(f"built {out_path}")
@@ -395,6 +422,9 @@ def main():
         base = ensure_server(out_dir)
         fname = os.path.basename(out_path)
         url = f"{base}/{fname}"
+        if app_meta and app_meta.get("profile") == "dm-depmngr-webapp":
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}scenario={args.scenario}"
         webbrowser.open(url)
         print(f"opened {url}")
         print(f"preview server: {base}  (use .\\preview.ps1 --stop to stop)")

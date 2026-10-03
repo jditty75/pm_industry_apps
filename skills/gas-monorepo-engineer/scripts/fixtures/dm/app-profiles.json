@@ -1,0 +1,20 @@
+{
+  "SLG_DM": { "productMode": false },
+  "HC_DM": { "productMode": false },
+  "HENP_DM": { "productMode": false },
+  "EVI_DM": {
+    "productMode": true,
+    "deploymentNameIncludes": ["Evisort", "CLM"],
+    "deploymentNameExcludes": ["Legacy"]
+  },
+  "PDX_DM": {
+    "productMode": true,
+    "deploymentNameIncludes": ["Paradox"],
+    "deploymentNameExcludes": []
+  },
+  "HS_DM": {
+    "productMode": true,
+    "deploymentNameIncludes": ["HiredScore"],
+    "deploymentNameExcludes": ["Legacy"]
+  }
+}

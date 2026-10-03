@@ -10,7 +10,8 @@ param(
     [switch]$NoOpen,
     [switch]$Stop,
     [string]$Out,
-    [string]$Folder
+    [string]$Folder,
+    [string]$Scenario = "mixed-health"
 )
 
 $Engine = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\scripts\preview_engine.py"
@@ -26,6 +27,7 @@ if ($NoOpen) { $argsList += "--no-open" }
 if ($Out) { $argsList += "--out"; $argsList += $Out }
 if ($Folder) { $argsList += "--folder"; $argsList += $Folder }
 if ($App) { $argsList += $App }
+if ($Scenario) { $argsList += "--scenario"; $argsList += $Scenario }
 
 & python $Engine @argsList
 exit $LASTEXITCODE

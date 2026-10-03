@@ -51,6 +51,7 @@
     "solutions/SLG_DM": {
       "appId": "SLG_DM",
       "profile": "dm-depmngr-webapp",
+      "mockProfile": "dm-v1",
       "srcDir": "src",
       "configScript": "Config_SLG.js",
       "previewSupport": "PARTIAL",
@@ -59,6 +60,7 @@
     "solutions/HC_DM": {
       "appId": "HC_DM",
       "profile": "dm-depmngr-webapp",
+      "mockProfile": "dm-v1",
       "srcDir": "src",
       "configScript": "Config_HC.js",
       "previewSupport": "PARTIAL"
@@ -66,6 +68,7 @@
     "solutions/HENP_DM": {
       "appId": "HENP_DM",
       "profile": "dm-depmngr-webapp",
+      "mockProfile": "dm-v1",
       "srcDir": "src",
       "configScript": "Config_HENP.js",
       "previewSupport": "PARTIAL"
@@ -73,6 +76,7 @@
     "solutions/EVI_DM": {
       "appId": "EVI_DM",
       "profile": "dm-depmngr-webapp",
+      "mockProfile": "dm-v1",
       "srcDir": "src",
       "configScript": "Config_EVI.js",
       "previewSupport": "PARTIAL"
@@ -80,6 +84,7 @@
     "solutions/PDX_DM": {
       "appId": "PDX_DM",
       "profile": "dm-depmngr-webapp",
+      "mockProfile": "dm-v1",
       "srcDir": "src",
       "configScript": "Config_PDX.js",
       "previewSupport": "PARTIAL"
@@ -87,6 +92,7 @@
     "solutions/HS_DM": {
       "appId": "HS_DM",
       "profile": "dm-depmngr-webapp",
+      "mockProfile": "dm-v1",
       "srcDir": "src",
       "configScript": "Config_HS.js",
       "previewSupport": "PARTIAL"

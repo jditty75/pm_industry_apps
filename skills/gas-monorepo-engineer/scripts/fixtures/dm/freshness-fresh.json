@@ -1,0 +1,15 @@
+{
+  "status": "fresh",
+  "ageHours": 2.5,
+  "lastRefresh": "2026-10-03T08:00:00.000Z",
+  "sourceSheet": "SFDC_Deployments",
+  "details": [
+    {
+      "sheetName": "SFDC_Deployments",
+      "lastRefresh": "2026-10-03T08:00:00.000Z",
+      "ageHours": 2.5,
+      "status": "OK",
+      "message": "Preview synthetic freshness"
+    }
+  ]
+}

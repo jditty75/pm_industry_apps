@@ -42,6 +42,12 @@ Thumbs.db
 .preview-out/
 **/preview.html
 
+# DM workbook live snapshots (may contain customer/internal data)
+docs/migrations/live/
+
+# Optional Drive read-only token for snapshot export (separate from clasprc scopes)
+docs/migrations/tools/.dm-snapshot-oauth.json
+
 # Disposable inventory / downloaded skill archives
 gas-project-inventory.txt
 monorepo-structure.txt

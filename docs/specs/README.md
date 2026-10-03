@@ -8,4 +8,4 @@ Discovery and implementation specs for CoreLib and `*_DM` apps. These are **refe
 | [productmode-hs-pdx-split.md](productmode-hs-pdx-split.md) | Reference / follow-up | HS_DM + PDX_DM split; CoreLib scoping gaps in §5 may still need work |
 | [henp-student-reintegration.md](henp-student-reintegration.md) | Active | HENP Student integrated-mode reintegration |
 
-Binary assets: [../reference/EscalationAgents.docx](../reference/EscalationAgents.docx), [../migrations/PDX_DeploymentHealth_v1.xlsx](../migrations/PDX_DeploymentHealth_v1.xlsx).
+Binary assets: [../reference/EscalationAgents.docx](../reference/EscalationAgents.docx), [../migrations/PDX_DeploymentHealth_v1.xlsx](../migrations/PDX_DeploymentHealth_v1.xlsx). Historical `AI_DeploymentHealth_v1.xlsx` is cited in [productmode-hs-pdx-split.md](productmode-hs-pdx-split.md) but is not in the tree; use `docs/migrations/tools/snapshot-dm-workbooks.ps1` to capture a fresh HS_DM live export instead of restoring from an assumed workbook.

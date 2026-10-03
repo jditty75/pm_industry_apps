@@ -16,6 +16,9 @@ import subprocess
 import sys
 import webbrowser
 
+from preview_server import ensure_server, stop_server
+from preview_validate import validate_preview_html
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 CONFIG_PATH = os.path.join(REPO_ROOT, "config", "ui-preview.json")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,7 +28,7 @@ INCLUDE_RE = re.compile(r"<\?!?=?\s*include\(\s*['\"]([^'\"]+)['\"]\s*\)\s*;?\s*
 ASSET_RE = re.compile(r"<\?(!?)=\s*assets\.([A-Za-z0-9_]+)\s*\?>")
 SCRIPTLET_RE = re.compile(r"<\?[\s\S]*?\?>")
 DM_CORELIB_RE = re.compile(
-    r"<\?!?=\s*CoreLib\.CoreUI\.(getStylesheet|getHeadScripts|getAppShell|getJsBundle|getAccessDeniedShell)\(\)\s*\?>"
+    r"<\?!?=\s*CoreLib\.CoreUI\.(getStylesheet|getHeadScripts|getAppShell|getJsBundle|getAccessDeniedShell)\([^)]*\)\s*\?>"
 )
 
 
@@ -104,11 +107,21 @@ SHIM = """
 })();
 </script>
 <div id="gas-preview-badge" onclick="this.remove()"
-  title="Local preview only. Mock data / no server. Click to dismiss."
+  title="Local preview only — mock data; GAS server APIs unavailable. Click to dismiss."
   style="position:fixed;top:12px;left:12px;z-index:2147483647;font:600 11px/1.4 Archivo,system-ui,sans-serif;
-  background:rgba(15,46,102,.92);color:#fff;padding:7px 12px;border-radius:999px;letter-spacing:.04em;
-  box-shadow:0 2px 12px rgba(0,0,0,.18);cursor:pointer;">LOCAL PREVIEW &middot; mock GAS</div>
+  background:rgba(15,46,102,.92);color:#fff;padding:7px 12px;border-radius:999px;letter-spacing:.02em;
+  box-shadow:0 2px 12px rgba(0,0,0,.18);cursor:pointer;max-width:min(92vw,520px);">
+  LOCAL PREVIEW &mdash; mock data / GAS server APIs unavailable</div>
 """
+
+
+def inject_preview_shim(doc: str) -> str:
+    """Insert preview shim before the last </body> (avoids JS string literals containing </body>)."""
+    lower = doc.lower()
+    idx = lower.rfind("</body>")
+    if idx == -1:
+        return doc + SHIM
+    return doc[:idx] + SHIM + "\n</body>" + doc[idx + len("</body>") :]
 
 
 def inline_includes(doc, folder, log):
@@ -213,6 +226,16 @@ def apply_dm_depmngr(doc, app_path, app_meta, log):
     )
     doc = re.sub(r"<\?\s*\}\s*\?>\s*</body>", "</body>", doc, count=1)
     doc = re.sub(r"<\?[\s\S]*?\?>", "", doc)
+    doc = re.sub(
+        r"window\.APP_UI_CONFIG\s*=\s*;",
+        f"window.APP_UI_CONFIG = {mock_ui};",
+        doc,
+    )
+    doc = re.sub(
+        r"window\.__USER_ACCESS__\s*=\s*;",
+        f"window.__USER_ACCESS__ = {mock_access};",
+        doc,
+    )
     if "window.APP_UI_CONFIG" not in doc:
         doc = doc.replace(
             "</head>",
@@ -223,7 +246,7 @@ def apply_dm_depmngr(doc, app_path, app_meta, log):
     return doc
 
 
-def build_app(app_key, out_name=None, open_browser=True):
+def build_app(app_key, out_name=None, open_browser=True):  # noqa: ARG001 open_browser legacy
     app_path, app_meta = resolve_app_path(app_key)
     if not app_meta:
         sys.exit(f"error: unknown app '{app_key}'. See config/ui-preview.json")
@@ -264,20 +287,31 @@ def build_app(app_key, out_name=None, open_browser=True):
             doc = SCRIPTLET_RE.sub("", doc)
             log.append(f"  stripped {len(leftovers)} unresolved scriptlet(s)")
 
-    if "</body>" in doc:
-        doc = doc.replace("</body>", SHIM + "\n</body>", 1)
-    else:
-        doc += SHIM
+    doc = inject_preview_shim(doc)
 
     out_dir = os.path.join(REPO_ROOT, cfg.get("outputDir", ".preview-out"))
     os.makedirs(out_dir, exist_ok=True)
     safe_name = app_meta.get("appId", app_key.replace("/", "_")).replace(" ", "_")
     out_file = out_name or f"{safe_name}.html"
     out_path = os.path.join(out_dir, out_file)
-    with open(out_path, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(doc)
 
-    return out_path, log
+    return out_path, log, doc
+
+
+APP_VALIDATION_MARKERS = {
+    "SLG_DM": ["id=\"coreui-app-shell\""],
+    "PS_SPA": ["portal-card"],
+    "SLG_GoLives": ["Go Lives"],
+    "SLG_CAPACITY": ["wfm25-topbar", "wfm25-shell"],
+}
+
+
+def validate_built_preview(app_meta, html: str) -> tuple[bool, list]:
+    app_id = app_meta.get("appId", "")
+    markers = APP_VALIDATION_MARKERS.get(app_id, [])
+    return validate_preview_html(html, app_id=app_id, required_markers=markers or None)
 
 
 def list_apps():
@@ -300,9 +334,17 @@ def main():
     ap.add_argument("--list", action="store_true", help="List applications and preview support")
     ap.add_argument("--out", help="Output filename under .preview-out/")
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--stop", action="store_true", help="Stop localhost preview server")
     ap.add_argument("--lint", action="store_true", help="Delegate to legacy preview.py lint (four-file apps only)")
     ap.add_argument("--folder", help="Legacy: compile folder with index.html (Chris four-file pattern)")
     args = ap.parse_args()
+
+    cfg = load_config()
+    out_dir = os.path.join(REPO_ROOT, cfg.get("outputDir", ".preview-out"))
+
+    if args.stop:
+        stop_server(out_dir)
+        return
 
     if args.list:
         for app_id, path, support in list_apps():
@@ -335,13 +377,27 @@ def main():
         ap.print_help()
         sys.exit(2)
 
-    out_path, log = build_app(args.app, out_name=args.out, open_browser=not args.no_open)
+    out_path, log, html = build_app(args.app, out_name=args.out)
+    app_path, app_meta = resolve_app_path(args.app)
+    ok, issues = validate_built_preview(app_meta, html)
     print(f"built {out_path}")
     for line in log:
         print(line)
+    if ok:
+        print("validate: PASS (structural HTML)")
+    else:
+        print("validate: FAIL")
+        for issue in issues:
+            print(f"  - {issue}")
+        sys.exit(1)
+
     if not args.no_open:
-        webbrowser.open("file://" + out_path.replace("\\", "/"))
-        print("opened in browser")
+        base = ensure_server(out_dir)
+        fname = os.path.basename(out_path)
+        url = f"{base}/{fname}"
+        webbrowser.open(url)
+        print(f"opened {url}")
+        print(f"preview server: {base}  (use .\\preview.ps1 --stop to stop)")
 
 
 if __name__ == "__main__":

@@ -46,4 +46,4 @@ No DepMngr/GoLives family library (examples): `SLG_Capacity`, `SLG_ConsultingHub
 
 ## UI preview
 
-See `docs/agent/ui-preview.md`. Preview runs locally only; it does not replace Apps Script execution or production verification.
+See `docs/agent/ui-preview.md`. Preview is served on **127.0.0.1** with structural HTML validation; inspect the browser when possible. It does not replace Apps Script execution or production verification.

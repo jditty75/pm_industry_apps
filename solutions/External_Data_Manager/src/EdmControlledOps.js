@@ -49,6 +49,40 @@ function runEdmV1bSetDestinationSpreadsheetIds(hcSpreadsheetId, slgSpreadsheetId
 }
 
 /**
+ * Read-only operational snapshot (no IDs, no PII).
+ * @return {Object}
+ */
+function runEdmVerifyOperationalState() {
+  var props = PropertiesService.getScriptProperties();
+  var propReport = runEdmVerifyScriptProperties().properties;
+  var triggers = ScriptApp.getProjectTriggers();
+  var inboxConfigured = !!props.getProperty(EdmProperties.QUALTRICS_INBOX_FOLDER_ID);
+  var failedConfigured = !!props.getProperty(EdmProperties.QUALTRICS_FAILED_FOLDER_ID);
+  var ledgerConfigured = !!props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID);
+  var destConfigured = [
+    EdmDestinationRegistry.APP_HC,
+    EdmDestinationRegistry.APP_SLG,
+    EdmDestinationRegistry.APP_HENP
+  ].filter(function (appId) {
+    return !!EdmDestinationRegistry.resolveSpreadsheetId(appId, props);
+  });
+  return {
+    ok: true,
+    properties: propReport,
+    ingestEnabled: props.getProperty(EdmProperties.INGEST_ENABLED) === 'true',
+    deleteSuccessfulSource: props.getProperty(EdmProperties.DELETE_SUCCESSFUL_SOURCE) === 'true',
+    qualtricsInboxConfigured: inboxConfigured,
+    qualtricsFailedConfigured: failedConfigured,
+    auditLedgerConfigured: ledgerConfigured,
+    destinationsResolved: destConfigured,
+    triggerCount: triggers.length,
+    triggerHandlers: triggers.map(function (t) {
+      return t.getHandlerFunction();
+    })
+  };
+}
+
+/**
  * @return {Object}
  */
 function runEdmVerifyScriptProperties() {
@@ -124,6 +158,80 @@ function sanitizeQualtricsRunSummary_(runResult) {
       };
     })
   };
+}
+
+/**
+ * Sanitized dry-run against configured Qualtrics Inbox (no ingest, no delete).
+ * @param {string=} sourceFileName optional inbox CSV name
+ * @return {Object}
+ */
+/**
+ * Read-only CSAT_InFlight row/header summary per destination (no PII, no spreadsheet ids).
+ * @return {Object}
+ */
+function runEdmDestinationCsatBaselineSummary() {
+  var props = PropertiesService.getScriptProperties();
+  var expected = [
+    'deployment_id',
+    'account_name',
+    'deployment_name',
+    'survey_type',
+    'tracking_status',
+    'response_received',
+    'contact_name',
+    'contact_email',
+    'contact_role',
+    'engagement_manager',
+    'partner_name',
+    'sent_date',
+    'opened_date',
+    'started_date',
+    'finished_date',
+    'survey_expires'
+  ];
+  var apps = [
+    EdmDestinationRegistry.APP_HC,
+    EdmDestinationRegistry.APP_SLG,
+    EdmDestinationRegistry.APP_HENP
+  ];
+  var summary = {};
+  apps.forEach(function (appId) {
+    var ssId = EdmDestinationRegistry.resolveSpreadsheetId(appId, props);
+    if (!ssId) {
+      summary[appId] = { ok: false, message: 'destination not configured' };
+      return;
+    }
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = ss.getSheetByName('CSAT_InFlight');
+    if (!sheet) {
+      summary[appId] = { ok: false, message: 'CSAT_InFlight missing' };
+      return;
+    }
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    var headers = lastCol > 0
+      ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String)
+      : [];
+    summary[appId] = {
+      ok: true,
+      dataRowCount: Math.max(0, lastRow - 1),
+      headerColumnCount: headers.length,
+      headersMatchCanonical: headers.length === expected.length &&
+        headers.every(function (h, i) {
+          return h === expected[i];
+        }),
+      backupFolderName: 'DHM_CSAT_Imports'
+    };
+  });
+  return { ok: true, apps: summary };
+}
+
+function runEdmQualtricsInboxDryRunSummary(sourceFileName) {
+  var run = processQualtricsInboxNow({
+    dryRun: true,
+    sourceFileName: sourceFileName || undefined
+  });
+  return sanitizeQualtricsRunSummary_(run);
 }
 
 /**

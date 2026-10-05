@@ -2,6 +2,15 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — External_Data_Manager — CLASP push (non-production)
+
+- Git source: (EDM Qualtrics V1 pre-ingestion pass)
+- Change: pin CoreLib **144** immutable; operational verify helpers; qualtrics CSV local validator
+- GAS: `clasp push --force` to existing EDM standalone project (no new deployment)
+- Production impact: none (ingest property remains off; no trigger)
+- Apps Script Execution API: remote `scripts.run` still **403 PERMISSION_DENIED** from automation; use GAS editor for `runEdmVerifyOperationalState` / `runEdmDestinationCsatBaselineSummary` until API access is granted
+- Result: success (HEAD updated)
+
 ### 2026-10-05 — HENP_DM — deploy
 
 - Git source: `73f37fb` (CoreLib 144 CSAT pin + push; clasp push `--force` after skip)

@@ -11,8 +11,11 @@ Standalone Google Apps Script project for shared **external-data orchestration**
 | `processQualtricsInboxNow` + `runQualtricsInboxScheduled` (trigger **not installed**) | Scheduled trigger installation |
 | Dry-run default (`dryRun: true`) | Deleting successful Inbox sources (default **off**) |
 | Sheet-backed job audit ledger (counts/metadata only) | Production DM deployment |
+| CoreLib **144** immutable pin (`developmentMode: false`) | First real Qualtrics ingest (explicit authorization) |
 
 **V1A** remains: local normalize/route tests, `EdmOrchestrator.processQualtricsCsvJob` (stops at `READY_FOR_INGESTION`).
+
+**V1 operations:** [edm-qualtrics-v1-runbook.md](./edm-qualtrics-v1-runbook.md)
 
 ## Architecture decision: EDM → DepMngr
 
@@ -35,7 +38,7 @@ flowchart LR
 - **EDM** owns orchestration, Drive, checksum/duplicate/stale guards, locking, audit, routing config.
 - **DepMngr** owns tenant/deployment-universe filtering and `CSAT_InFlight` replacement (`ingestCsatInFlight`).
 - **Manual UI** still calls `uploadCsatInFlightCsvForUI` → parse CSV → same canonical ingest path.
-- **Library pin:** EDM `appsscript.json` references `CoreLib` with `developmentMode: true` until a numbered release includes `ingestCsatInFlight`. Ingest-enabled runs require that API on the executing library version.
+- **Library pin:** EDM uses immutable CoreLib **144** (`developmentMode: false`) with `ingestCsatInFlight` on the executing library version.
 
 ## Routing (authoritative)
 
@@ -119,6 +122,7 @@ Optional explicit `context.spreadsheetId` for EDM; container UI uses active spre
 ```powershell
 cd solutions/External_Data_Manager
 npm test
+node scripts/validate-qualtrics-csv.js "<absolute-path-to-export.csv>"
 
 cd libraries/DepMngr
 npm test

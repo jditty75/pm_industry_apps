@@ -28,12 +28,14 @@
 
 No joins to Salesforce, no aggregations, no external lookups. **Deterministic** for a given input file and code version.
 
-## SLG / HENP split logic
+## First-level routing (Healthcare vs SLED)
 
-Split is **only** on normalized `app`:
+Split is **only** on normalized `app` (from Qualtrics `Sub Region`):
 
-- `US SLED` → `survey_normalized_sled.csv` → **SLG_DM** upload (operational).
-- `US Healthcare` → `survey_normalized_healthcare.csv` → **HENP_DM** upload (operational; filename says “healthcare” but HC_DM is not in source yet).
+- `US Healthcare` → `survey_normalized_healthcare.csv` → **Healthcare population** → **HC_DM** at ingest.
+- `US SLED` → `survey_normalized_sled.csv` → **SLED population** → **SLG_DM** and **HENP_DM** at ingest (same normalized rows; each workbook keeps rows whose `deployment_id` is in that app’s effective deployment universe).
+
+Python does not perform SLG vs HENP filtering; DepMngr `uploadCsatInFlightCsvForUI` tenant filter does.
 
 ## Validation and errors
 

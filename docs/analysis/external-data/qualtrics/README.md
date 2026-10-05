@@ -20,7 +20,8 @@ Jeff manually exports Qualtrics → runs local Python → uploads per-app `surve
 
 - **Transformer location:** Not in monorepo; lives at `C:\Users\jeffrey.ditty\Documents\PY\Qualtrics.py` (header comment: `qualtrics_normalize.py`).
 - **GAS ingestion:** Single shared implementation: `CoreLib.CoreData.uploadCsatInFlightCsvForUI` (container wrappers in each `*_DM` `WebAppCode.js`).
-- **Split routing:** Python splits on Qualtrics `Sub Region` → `app` column: `US SLED` → `survey_normalized_sled.csv`; `US Healthcare` → `survey_normalized_healthcare.csv`. Operational mapping to DM apps is **SLG + HENP today** (Qualtrics label `US Healthcare` is not the same as `HC_DM`).
+- **Split routing:** Python splits on Qualtrics `Sub Region` → `app`: `US Healthcare` → Healthcare population / **HC_DM**; `US SLED` → SLED population / **SLG_DM** + **HENP_DM** (downstream DepMngr tenant filter per workbook). HENP does **not** consume the Healthcare population.
+- **V1A implementation:** `solutions/External_Data_Manager` — CSV normalizer + orchestrator through `READY_FOR_INGESTION` only. See [external-data-manager.md](../../agent/external-data-manager.md).
 - **Portability:** Transformation logic is **SIMPLE_PORTABLE** to JavaScript; main GAS gap is **reading `.xlsx`** (mitigate via Drive conversion or Qualtrics CSV export).
 - **Canonical boundary (today):** `uploadCsatInFlightCsvForUI(config, csvText)` after transform; refactor target: separate **transform** from **ingest** and allow **spreadsheet context** for non-UI callers.
 

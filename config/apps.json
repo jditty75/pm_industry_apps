@@ -121,6 +121,15 @@
       "productionUrl": "https://script.google.com/a/macros/workday.com/s/AKfycbw1I6aXuRrWblrCnyMOMvpTULaDs_Ib_gPVwxiP4slmddTGXflY5BWqgMoZhaC3ltUfeA/exec"
     },
     {
+      "appId": "EXTERNAL_DATA_MANAGER",
+      "name": "External Data Manager",
+      "projectPath": "solutions/External_Data_Manager",
+      "team": "Other",
+      "description": "Shared external-data orchestration (Qualtrics inbox automation, Capacity, future pipelines). V1A: local transform/orchestration only.",
+      "visibility": "RESTRICTED_DOMAIN",
+      "productionUrl": null
+    },
+    {
       "appId": "HS_DM",
       "name": "HiredScore Deployment Manager",
       "projectPath": "solutions/HS_DM",

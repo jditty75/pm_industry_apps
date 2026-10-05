@@ -35,7 +35,7 @@ Historical `snapshots/` and `DHLibrary_v52/` were removed from the tree; use Git
 |--------|----------|---------|
 | Deployment Health `*_DM` | SLG, HC, HENP, EVI, PDX, HS (+ product-mode variants as present) | DepMngr / CoreLib |
 | Go Lives | SLG, HC, HENP GoLives | GoLives |
-| Standalone | SLG_Capacity, SLG_ConsultingHub, HC_Wellness, SLED_Marketing, SLED_Pipeline, PS_SPA | none |
+| Standalone | SLG_Capacity, SLG_ConsultingHub, HC_Wellness, SLED_Marketing, SLED_Pipeline, PS_SPA, External_Data_Manager | none (EDM: [external-data-manager.md](./external-data-manager.md)) |
 
 Full portal-mapped list: `config/apps.json`. DepMngr module map: start with `libraries/DepMngr/src/CoreConfig.js`.
 

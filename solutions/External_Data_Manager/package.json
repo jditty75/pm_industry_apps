@@ -1,0 +1,13 @@
+{
+  "name": "external_data_manager",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "test:fixtures": "node test/fixtures/build-synthetic-fixture.js",
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "open": "clasp open",
+    "status": "clasp status"
+  }
+}

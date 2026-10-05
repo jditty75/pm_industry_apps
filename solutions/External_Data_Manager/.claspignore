@@ -1,0 +1,9 @@
+.git/**
+.gitignore
+.cursorrules
+node_modules/**
+package.json
+package-lock.json
+test/**
+*.md
+gas.config.json

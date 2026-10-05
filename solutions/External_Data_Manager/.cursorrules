@@ -1,0 +1,14 @@
+# Project: External_Data_Manager
+
+Standalone orchestrator for external data pipelines (Qualtrics V1A first).
+
+## Conventions
+- V8 runtime; JSDoc on public functions.
+- Logger.log prefixed with function name.
+- No hardcoded Drive folder IDs, spreadsheet IDs, or script IDs — Script Properties only.
+- V1A: no Drive processing, no triggers, no DM workbook writes.
+
+## File layout
+- Source in `./src` (pushed via clasp when authorized).
+- Local tests in `./test` (not pushed).
+- `gas.config.json` holds deployment metadata when production exists.

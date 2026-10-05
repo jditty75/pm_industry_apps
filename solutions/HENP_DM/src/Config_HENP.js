@@ -141,11 +141,12 @@ var APP_CONFIG = {
       { id: 'execsummary', label: 'Executive Summary' },
       { id: 'report', label: 'Monthly Report Preview' },
       { id: 'portfolio', label: 'Portfolio Health' },
+      { id: 'mgmPgl',      label: 'CSAT' },
       { id: 'notable', label: 'Notable Deployments' },
       { id: 'overrides', label: 'Manage Overrides' }
     ],
     enableAccountLinks: true,
-    mgmPglTab: { enabled: false },
+    mgmPglTab: { enabled: true, goLiveEventClusterDays: 2 },
     // T1: Trends tab.
     trendsTab: { enabled: false },
     notable: { enabled: true },

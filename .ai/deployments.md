@@ -4,6 +4,45 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 
 ### 2026-10-05 — HENP_DM — deploy
 
+- Git source: `9c429a0` (CoreLib 143 Notable Active+Complete pin + push; clasp push `--force` after skip)
+- Deployment ID: `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`
+- Previous GAS version: 105
+- Live GAS version: 106
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ/exec
+- Description: Notable Active+Complete CoreLib 143 (git 9c429a0)
+- Verification: pre-release automated Notable + visual acceptance; live production Notable smoke not performed
+- Result: success
+- Authorized by: User (Execute notable active plus complete release plan CoreLib 143, 2026-10-05)
+- CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-05 — HC_DM — deploy
+
+- Git source: `9c429a0` (CoreLib 143 Notable Active+Complete pin + push; clasp push `--force` after skip)
+- Deployment ID: `AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA`
+- Previous GAS version: 85
+- Live GAS version: 86
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA/exec
+- Description: Notable Active+Complete CoreLib 143 (git 9c429a0)
+- Verification: pre-release automated Notable + visual acceptance; live production Notable smoke not performed
+- Result: success
+- Authorized by: User (Execute notable active plus complete release plan CoreLib 143, 2026-10-05)
+- CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-05 — SLG_DM — deploy
+
+- Git source: `9c429a0` (CoreLib 143 Notable Active+Complete pin + push; clasp push `--force` after skip)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: 193
+- Live GAS version: 194
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec
+- Description: Notable Active+Complete CoreLib 143 (git 9c429a0)
+- Verification: pre-release automated Notable + visual acceptance; live production Notable smoke not performed
+- Result: success
+- Authorized by: User (Execute notable active plus complete release plan CoreLib 143, 2026-10-05)
+- CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-05 — HENP_DM — deploy
+
 - Git source: `0fff3c6` (CoreLib 142 cumulative consumer pin + push)
 - Deployment ID: `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`
 - Previous GAS version: 104

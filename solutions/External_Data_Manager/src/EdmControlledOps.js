@@ -235,6 +235,190 @@ function runEdmQualtricsInboxDryRunSummary(sourceFileName) {
 }
 
 /**
+ * Sanitized tail of the audit ledger (last job row, no PII).
+ * @param {number} [limit]
+ * @return {Object}
+ */
+function runEdmAuditLedgerTailSummary(limit) {
+  var max = limit || 1;
+  var props = PropertiesService.getScriptProperties();
+  var ledgerId = props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID);
+  if (!ledgerId) {
+    return { ok: false, message: 'audit ledger not configured' };
+  }
+  var sheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+  var rows = EdmAuditLedgerSheet.readAllJobs(sheet);
+  var tail = rows.slice(Math.max(0, rows.length - max));
+  return {
+    ok: true,
+    rowCount: rows.length,
+    tail: tail.map(function (r) {
+      return {
+        job_id: r.job_id,
+        source_filename: r.source_filename,
+        source_checksum: r.source_checksum ? String(r.source_checksum).slice(0, 16) + '…' : '',
+        source_row_count: r.source_row_count,
+        healthcare_count: r.healthcare_count,
+        sled_count: r.sled_count,
+        overall_status: r.overall_status,
+        source_disposition: r.source_disposition,
+        destination_statuses: r.destination_statuses
+      };
+    })
+  };
+}
+
+/**
+ * Single authorized first real Qualtrics ingest (editor or clasp run).
+ * Enables ingest, runs one non–dry-run job, disables ingest again.
+ *
+ * @param {Object=} config
+ * @param {string} [config.sourceFileName] optional inbox CSV basename
+ * @param {number} [config.expectedSourceRows] default 596
+ * @param {number} [config.expectedCanonicalRows] default 220
+ * @param {number} [config.expectedHealthcare] default 86
+ * @param {number} [config.expectedSled] default 134
+ * @param {string} [config.expectedChecksumPrefix] optional sha256 hex prefix (16 chars)
+ * @return {Object}
+ */
+function runEdmAuthorizedFirstRealIngestion(config) {
+  config = config || {};
+  var expectedSourceList = config.expectedSourceRows != null
+    ? (Array.isArray(config.expectedSourceRows) ? config.expectedSourceRows : [config.expectedSourceRows])
+    : [596, 597];
+  var expectedCanonical = config.expectedCanonicalRows != null ? config.expectedCanonicalRows : 220;
+  var expectedHc = config.expectedHealthcare != null ? config.expectedHealthcare : 86;
+  var expectedSled = config.expectedSled != null ? config.expectedSled : 134;
+  var sourceFileName = config.sourceFileName || undefined;
+
+  var report = {
+    ok: false,
+    phase: 'preflight',
+    preOperational: null,
+    preCsatBaseline: null,
+    dryRun: null,
+    ingest: null,
+    postOperational: null,
+    postCsatBaseline: null,
+    auditLedger: null
+  };
+
+  report.preOperational = runEdmVerifyOperationalState();
+  if (!report.preOperational.ok) {
+    report.message = 'operational verify failed';
+    return report;
+  }
+  if (report.preOperational.ingestEnabled) {
+    report.message = 'ingest already enabled; abort';
+    return report;
+  }
+  if (report.preOperational.deleteSuccessfulSource) {
+    report.message = 'delete flag enabled; abort';
+    return report;
+  }
+  if (report.preOperational.triggerCount > 0) {
+    report.message = 'scheduled trigger present; abort';
+    return report;
+  }
+
+  report.preCsatBaseline = runEdmDestinationCsatBaselineSummary();
+  report.phase = 'dry_run';
+
+  var dryRunRaw = processQualtricsInboxNow({
+    dryRun: true,
+    sourceFileName: sourceFileName
+  });
+  report.dryRun = sanitizeQualtricsRunSummary_(dryRunRaw);
+  var job = (dryRunRaw.outcome && dryRunRaw.outcome.job) || {};
+  var checksumFull = (dryRunRaw.outcome && dryRunRaw.outcome.job && dryRunRaw.outcome.job.source &&
+    dryRunRaw.outcome.job.source.checksum) || '';
+  if (!checksumFull && dryRunRaw.outcome && dryRunRaw.outcome.job) {
+    checksumFull = dryRunRaw.outcome.job.checksum || '';
+  }
+  report.dryRun.checksumPrefix = checksumFull ? String(checksumFull).slice(0, 16) : '';
+
+  if (!dryRunRaw.ok) {
+    report.message = 'dry-run failed';
+    return report;
+  }
+  if (expectedSourceList.indexOf(job.sourceRowCount) === -1) {
+    report.message = 'source row count mismatch: got ' + job.sourceRowCount +
+      ' expected one of ' + expectedSourceList.join(',');
+    return report;
+  }
+  if (job.healthcareCount !== expectedHc || job.sledCount !== expectedSled) {
+    report.message = 'population count mismatch';
+    return report;
+  }
+  var sledPlusHc = (job.healthcareCount || 0) + (job.sledCount || 0);
+  if (sledPlusHc !== expectedCanonical) {
+    report.message = 'normalized population total mismatch';
+    return report;
+  }
+  if (config.expectedChecksumPrefix &&
+    report.dryRun.checksumPrefix !== config.expectedChecksumPrefix) {
+    report.message = 'checksum prefix mismatch';
+    return report;
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  report.phase = 'ingest';
+  props.setProperty(EdmProperties.INGEST_ENABLED, 'true');
+  var ingestRaw;
+  try {
+    ingestRaw = processQualtricsInboxNow({
+      dryRun: false,
+      ingestEnabled: true,
+      sourceFileName: sourceFileName
+    });
+  } finally {
+    props.setProperty(EdmProperties.INGEST_ENABLED, 'false');
+  }
+
+  report.ingest = sanitizeQualtricsRunSummary_(ingestRaw);
+  report.ingest.disposition = ingestRaw.disposition;
+
+  report.postOperational = runEdmVerifyOperationalState();
+  report.postCsatBaseline = runEdmDestinationCsatBaselineSummary();
+  report.auditLedger = runEdmAuditLedgerTailSummary(1);
+  report.phase = 'complete';
+
+  var ingestOk = ingestRaw.ok && ingestRaw.outcome &&
+    ingestRaw.outcome.job &&
+    ingestRaw.outcome.job.status === EdmJobTypes.JobStatus.SUCCESS;
+  var dests = report.ingest.destinations || [];
+  var allDestOk = dests.length === 3 && dests.every(function (d) {
+    return d.status === 'success';
+  });
+  report.ok = ingestOk && allDestOk &&
+    !report.postOperational.ingestEnabled &&
+    !report.postOperational.deleteSuccessfulSource &&
+    report.postOperational.triggerCount === 0 &&
+    (ingestRaw.disposition === 'INBOX_AFTER_SUCCESS' || ingestRaw.disposition === 'INBOX');
+
+  if (!report.ok) {
+    report.message = 'ingest or post-verify failed';
+  } else {
+    report.message = 'FIRST REAL INGESTION VERIFIED';
+  }
+  return report;
+}
+
+/**
+ * Zero-arg editor entry for first authorized real ingest (inbox PGL full-dashboard export).
+ * @return {Object}
+ */
+function runEdmAuthorizedFirstRealIngestionNow() {
+  return runEdmAuthorizedFirstRealIngestion({
+    expectedSourceRows: [596, 597],
+    expectedCanonicalRows: 220,
+    expectedHealthcare: 86,
+    expectedSled: 134,
+    expectedChecksumPrefix: '8545dbf0510b0d55'
+  });
+}
+
+/**
  * Run two dry-run inbox passes for duplicate-behavior validation.
  * @return {Object}
  */

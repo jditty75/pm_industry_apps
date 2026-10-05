@@ -2,6 +2,17 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — External_Data_Manager — first real Qualtrics ingest (attempt; editor)
+
+- Authorization: user (Authorize EDM Qualtrics V1 first real ingestion, 2026-10-05)
+- GAS: `clasp push --force` (HEAD); API executable deployment **@2** repointed (not a DM/CoreLib release)
+- Entry point: `runEdmAuthorizedFirstRealIngestionNow()` (preflight + single ingest + ingest flag off in `finally`)
+- Remote `scripts.run` / `clasp run`: still **blocked** (403 / permission) from automation
+- Local preflight (Inbox `PGLandMDS…de647ecf…` CSV): validate ok; checksum prefix `8545dbf0510b0d55`; pipeline **597** source rows → **220** normalized populations (**86** HC / **134** SLED); destinations dry-run **86 / 134 / 134**
+- Editor execution: user reports **failed** (`ok:false`); Inbox source **still present** (deletion off); awaiting pasted execution JSON for root cause
+- Production CSAT mutation: **not verified** from this environment
+- Ingest property / delete flag / trigger: **not verified** post-run (needs pasted result or GAS verify helpers)
+
 ### 2026-10-05 — External_Data_Manager — CLASP push (non-production)
 
 - Git source: (EDM Qualtrics V1 pre-ingestion pass)

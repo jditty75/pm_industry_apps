@@ -2,6 +2,20 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — HENP_DM — deploy
+
+- Git source: `aa22987` (HENP CSAT tab UI config only; CoreLib pin unchanged @144)
+- Deployment ID: `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`
+- Previous GAS version: 107
+- Live GAS version: 108
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ/exec
+- Description: HENP CSAT tab enablement (git aa22987)
+- Verification: `preview_selftest.py` PASS pre-deploy; production CSAT tab browser smoke not performed from agent
+- Result: success
+- Authorized by: User (Authorize HENP_DM production deployment for CSAT enablement at git aa22987, 2026-10-05)
+- CLASP user: jeffrey.ditty@workday.com
+- Not performed: Qualtrics re-ingest; CoreLib change; EDM automation activation
+
 ### 2026-10-05 — DepMngr CoreLib 145 (EDM external CSAT ingest) — library cut
 
 - Library: CoreLib **145** — tenant filter + sheet replace run under `spreadsheetId` override; script lock when EDM opens destination workbook

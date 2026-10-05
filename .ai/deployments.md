@@ -2,6 +2,53 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — HENP_DM — deploy
+
+- Git source: `73f37fb` (CoreLib 144 CSAT pin + push; clasp push `--force` after skip)
+- Deployment ID: `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`
+- Previous GAS version: 106
+- Live GAS version: 107
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ/exec
+- Description: CoreLib 144 CSAT canonical ingestCsatInFlight (git 73f37fb)
+- Verification: DepMngr `npm test` pass; `preview_selftest.py` pass; production browser smoke not performed
+- Result: success
+- Authorized by: User (Execute DepMngr CoreLib 144 release scoped to SLG/HC/HENP, 2026-10-05)
+- CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-05 — HC_DM — deploy
+
+- Git source: `73f37fb` (CoreLib 144 CSAT pin + push; clasp push `--force` after skip)
+- Deployment ID: `AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA`
+- Previous GAS version: 86
+- Live GAS version: 87
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA/exec
+- Description: CoreLib 144 CSAT canonical ingestCsatInFlight (git 73f37fb)
+- Verification: DepMngr `npm test` pass; `preview_selftest.py` pass; production browser smoke not performed
+- Result: success
+- Authorized by: User (Execute DepMngr CoreLib 144 release scoped to SLG/HC/HENP, 2026-10-05)
+- CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-05 — SLG_DM — deploy
+
+- Git source: `73f37fb` (CoreLib 144 CSAT pin + push; clasp push `--force` after skip)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: 194
+- Live GAS version: 195
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec
+- Description: CoreLib 144 CSAT canonical ingestCsatInFlight (git 73f37fb)
+- Verification: DepMngr `npm test` pass; `preview_selftest.py` pass; production browser smoke not performed
+- Result: success
+- Authorized by: User (Execute DepMngr CoreLib 144 release scoped to SLG/HC/HENP, 2026-10-05)
+- CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-05 — DepMngr CoreLib 144 (CSAT canonical ingest) — library cut
+
+- Library: CoreLib **144** (git `73f37fb` / feature `2f8f8e6`)
+- Consumers deployed: **SLG_DM @195**, **HC_DM @87**, **HENP_DM @107**
+- Unchanged pins: **EVI_DM @139**, **PDX_DM @139**, **HS_DM @139**
+- Ledger: `.ai/library-releases/depmngr.jsonl`
+- Result: success
+
 ### 2026-10-05 — DepMngr CoreLib 143 (Notable Active+Complete) — production verification
 
 - Library: CoreLib **143** (git `9c429a0`)

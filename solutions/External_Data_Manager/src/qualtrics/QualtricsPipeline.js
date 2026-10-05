@@ -1,5 +1,5 @@
 /**
- * Qualtrics pipeline adapter (validate → transform → route).
+ * Qualtrics pipeline adapter (validate → normalize → route).
  * @namespace QualtricsPipeline
  */
 var QualtricsPipeline = (function () {
@@ -9,33 +9,34 @@ var QualtricsPipeline = (function () {
 
   /**
    * @param {string} csvText
+   * @param {QualtricsRoutingConfig.QualtricsRoutingConfigShape} [routingConfig]
    * @return {EdmJobTypes.EdmValidationResult}
    */
-  function validateSource(csvText) {
+  function validateSource(csvText, routingConfig) {
     try {
-      QualtricsTransform.normalizeQualtricsCsv(csvText);
-      return { ok: true };
+      var dataset = QualtricsTransform.buildCanonicalDataset(csvText);
+      return QualtricsRoute.validateRoutableRows(dataset.rows, routingConfig);
     } catch (e) {
       return { ok: false, errors: [String(e.message || e)] };
     }
   }
 
   /**
+   * Normalization only — canonical dataset, no HC/SLG/HENP branching.
+   *
    * @param {string} csvText
    * @return {EdmJobTypes.EdmTransformationResult}
    */
   function transform(csvText) {
     try {
-      var norm = QualtricsTransform.normalizeQualtricsCsv(csvText);
-      var routed = QualtricsRoute.routePopulations(norm.rows);
+      var dataset = QualtricsTransform.buildCanonicalDataset(csvText);
       return {
         ok: true,
         payload: {
-          rows: norm.rows,
-          healthcare: routed.healthcare,
-          sled: routed.sled,
-          counts: routed.counts,
-          sourceRowCount: norm.sourceRowCount
+          rows: dataset.rows,
+          sourceRowCount: dataset.sourceRowCount,
+          contractVersion: dataset.contractVersion,
+          ignoredSourceColumns: dataset.ignoredSourceColumns
         }
       };
     } catch (e) {
@@ -44,31 +45,15 @@ var QualtricsPipeline = (function () {
   }
 
   /**
-   * @param {Object} transformPayload
-   * @return {{ healthcare: Object[], sled: Object[], destinationPlan: Object[] }}
+   * @param {Object} transformPayload output of transform()
+   * @param {QualtricsRoutingConfig.QualtricsRoutingConfigShape} [routingConfig]
+   * @return {{ canonicalRows: Object[], routing: Object }}
    */
-  function route(transformPayload) {
-    var plan = [];
-    if (transformPayload.healthcare.length) {
-      plan.push({
-        population: QualtricsSchema.POPULATION_HEALTHCARE,
-        destinations: QualtricsRoute.ROUTE_BY_APP['US Healthcare'].destinations,
-        rowCount: transformPayload.healthcare.length,
-        ingestEnabled: false
-      });
-    }
-    if (transformPayload.sled.length) {
-      plan.push({
-        population: QualtricsSchema.POPULATION_SLED,
-        destinations: QualtricsRoute.ROUTE_BY_APP['US SLED'].destinations,
-        rowCount: transformPayload.sled.length,
-        ingestEnabled: false
-      });
-    }
+  function route(transformPayload, routingConfig) {
+    var routing = QualtricsRoute.routeCanonicalDataset(transformPayload.rows, routingConfig);
     return {
-      healthcare: transformPayload.healthcare,
-      sled: transformPayload.sled,
-      destinationPlan: plan
+      canonicalRows: transformPayload.rows,
+      routing: routing
     };
   }
 

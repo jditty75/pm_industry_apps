@@ -153,26 +153,17 @@ var QualtricsTransform = (function () {
   }
 
   /**
-   * @param {Object[]} apps
-   * @return {string|null} error message
+   * @param {string[]} headers
+   * @return {string[]}
    */
-  function validateApps(rawRows) {
-    var bad = {};
-    var hasNull = false;
-    for (var j = 0; j < rawRows.length; j++) {
-      var row = rawRows[j];
-      var app = row['Sub Region'];
-      if (app == null || String(app).trim() === '') {
-        hasNull = true;
-      } else if (!schema.VALID_APPS[app]) {
-        bad[app] = true;
-      }
-    }
-    if (hasNull || Object.keys(bad).length) {
-      var detail = Object.keys(bad).length ? Object.keys(bad).join(', ') : 'nulls present';
-      return "Unexpected/blank 'app' values: " + detail;
-    }
-    return null;
+  function findIgnoredSourceColumns(headers) {
+    var headerSet = {};
+    headers.forEach(function (h) {
+      headerSet[h] = true;
+    });
+    return headers.filter(function (h) {
+      return schema.SOURCE_COLUMNS.indexOf(h) < 0;
+    });
   }
 
   /**
@@ -258,38 +249,57 @@ var QualtricsTransform = (function () {
   }
 
   /**
+   * Build canonical normalized Qualtrics dataset (no destination / population routing).
+   * Extra source columns not in COLMAP are ignored; required COLMAP headers must be present.
+   *
    * @param {string} csvText
-   * @return {{ rows: Object.<string, string>[], sourceRowCount: number }}
+   * @return {{
+   *   rows: Object.<string, string>[],
+   *   sourceRowCount: number,
+   *   contractVersion: string,
+   *   ignoredSourceColumns: string[]
+   * }}
    */
-  function normalizeQualtricsCsv(csvText) {
+  function buildCanonicalDataset(csvText) {
     var matrix = csv.parseCsvText(csvText);
     if (!matrix.length) {
       throw new Error('Export schema changed. Missing columns: ' + schema.SOURCE_COLUMNS.join(', '));
     }
-    var missing = validateSchema(matrix[0]);
+    var headers = matrix[0];
+    var missing = validateSchema(headers);
     if (missing.length) {
       throw new Error('Export schema changed. Missing columns: ' + missing.join(', '));
     }
+    var ignoredSourceColumns = findIgnoredSourceColumns(headers);
     var rawRows = matrixToRawRows(matrix);
-    var appErr = validateApps(rawRows);
-    if (appErr) {
-      throw new Error(appErr);
-    }
     var mapped = rawRows.map(mapRawRow).map(standardizeRow);
     var deduped = dedupeLatestPerContact(mapped);
     var rows = deduped.map(serializeRow);
     return {
       rows: rows,
-      sourceRowCount: rawRows.length
+      sourceRowCount: rawRows.length,
+      contractVersion: schema.NORMALIZED_CONTRACT_VERSION,
+      ignoredSourceColumns: ignoredSourceColumns
     };
   }
 
+  /**
+   * @deprecated Use buildCanonicalDataset — routing validation is separate.
+   * @param {string} csvText
+   * @return {Object}
+   */
+  function normalizeQualtricsCsv(csvText) {
+    return buildCanonicalDataset(csvText);
+  }
+
   return {
+    buildCanonicalDataset: buildCanonicalDataset,
     normalizeQualtricsCsv: normalizeQualtricsCsv,
     toBool: toBool,
     trackingStatus: trackingStatus,
     formatUtcZ: formatUtcZ,
     validateSchema: validateSchema,
+    findIgnoredSourceColumns: findIgnoredSourceColumns,
     matrixToRawRows: matrixToRawRows
   };
 })();

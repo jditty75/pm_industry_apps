@@ -41,6 +41,23 @@ flowchart LR
 
 Do not route Healthcare to HENP.
 
+## Normalization vs routing (Qualtrics)
+
+| Layer | Responsibility | Hardcodes DM apps? |
+|-------|----------------|------------------|
+| `QualtricsTransform.buildCanonicalDataset` | Required COLMAP columns, ignore extra source columns, dedupe, `OUT_ORDER` contract | **No** |
+| `QualtricsRoutingConfig` | Route rules: match normalized field → `populationId` → destination `appId` list | **Config only** (default ships HC/SLG/HENP mapping) |
+| `QualtricsRoute` | Validate rows are routable; build population slices + destination plan | **No** |
+| `QualtricsPipeline` | `validateSource` → `transform` → `route` | **No** |
+
+**Extend without redesigning the normalizer:**
+
+- **Add application X:** append a `destinations` entry on the relevant route (or add a route).
+- **Route Industry Y to application Z:** add a route with `match: { field: 'customer_segment', op: 'equals', value: 'Y' }` and `destinations: [{ appId: 'Z_DM', ... }]`.
+- **New Qualtrics source column:** ignored until added to `QualtricsSchema.COLMAP` / `OUT_ORDER` intentionally.
+
+V1B may load routing config from Script Properties or a Sheet; V1A uses `QualtricsRoutingConfig.DEFAULT` in code.
+
 ## Key modules
 
 | Area | Files |
@@ -49,7 +66,8 @@ Do not route Healthcare to HENP.
 | Integrity | `EdmChecksum.js`, `EdmDuplicateGuard.js`, `EdmLocking.js` |
 | Drive (config only) | `EdmDriveFolders.js` |
 | Audit design | `EdmAuditLedger.js` |
-| Qualtrics | `src/qualtrics/*` |
+| Qualtrics normalize | `QualtricsTransform.js`, `QualtricsSchema.js` |
+| Qualtrics route config | `QualtricsRoutingConfig.js`, `QualtricsRoute.js`, `QualtricsPipeline.js` |
 
 ## Script Properties (future)
 

@@ -14,6 +14,7 @@ var EdmOrchestrator = (function () {
    * @property {EdmDuplicateGuard.PriorJobRef[]} [priorJobs]
    * @property {function(string): string} [checksumFn]
    * @property {boolean} [skipDuplicateCheck]
+   * @property {QualtricsRoutingConfig.QualtricsRoutingConfigShape} [qualtricsRoutingConfig]
    */
 
   /**
@@ -59,7 +60,8 @@ var EdmOrchestrator = (function () {
     }
 
     job = EdmJob.transition(job, EdmJobTypes.JobStatus.VALIDATING);
-    var validation = QualtricsPipeline.validateSource(csvText);
+    var routingConfig = options.qualtricsRoutingConfig;
+    var validation = QualtricsPipeline.validateSource(csvText, routingConfig);
     if (!validation.ok) {
       job = EdmJob.transition(job, EdmJobTypes.JobStatus.FAILED, {
         errorCategory: 'VALIDATION',
@@ -79,13 +81,16 @@ var EdmOrchestrator = (function () {
     }
 
     job = EdmJob.transition(job, EdmJobTypes.JobStatus.ROUTING);
-    var routed = QualtricsPipeline.route(transformResult.payload);
+    var routed = QualtricsPipeline.route(transformResult.payload, routingConfig);
+    var routing = routed.routing;
+    var popCounts = routing.countsByPopulationId || {};
     job = EdmJob.transition(job, EdmJobTypes.JobStatus.READY_FOR_INGESTION, {
       transformerVersion: TRANSFORMER_VERSION,
       sourceRowCount: transformResult.payload.sourceRowCount,
-      healthcareCount: routed.healthcare.length,
-      sledCount: routed.sled.length,
-      destinations: (routed.destinationPlan || []).map(function (p) {
+      populationCounts: popCounts,
+      healthcareCount: popCounts.healthcare || 0,
+      sledCount: popCounts.sled || 0,
+      destinations: (routing.destinationPlan || []).map(function (p) {
         return {
           destinationId: p.destinations.join('+'),
           status: 'pending',
@@ -99,9 +104,14 @@ var EdmOrchestrator = (function () {
       job: job,
       result: {
         ok: true,
-        healthcare: routed.healthcare,
-        sled: routed.sled,
-        destinationPlan: routed.destinationPlan,
+        canonicalDataset: {
+          rows: routed.canonicalRows,
+          contractVersion: transformResult.payload.contractVersion,
+          ignoredSourceColumns: transformResult.payload.ignoredSourceColumns
+        },
+        routeSlices: routing.slices,
+        destinationPlan: routing.destinationPlan,
+        populationCounts: popCounts,
         normalizedRowCount: transformResult.payload.rows.length
       }
     };

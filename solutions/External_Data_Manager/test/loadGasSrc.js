@@ -19,6 +19,7 @@ const FILES = [
   'qualtrics/QualtricsSchema.js',
   'qualtrics/QualtricsCsv.js',
   'qualtrics/QualtricsTransform.js',
+  'qualtrics/QualtricsRoutingConfig.js',
   'qualtrics/QualtricsRoute.js',
   'qualtrics/QualtricsPipeline.js',
   'EdmOrchestrator.js'

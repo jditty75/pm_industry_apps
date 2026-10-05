@@ -86,15 +86,11 @@ var QualtricsSchema = (function () {
     'nps', 'overall_satisfaction', 'pgl_satisfaction', 'mds_satisfaction'
   ];
 
-  /** @type {Object.<string, boolean>} */
-  var VALID_APPS = {
-    'US Healthcare': true,
-    'US SLED': true
-  };
+  /** Normalized Qualtrics column used for primary route matching (from `Sub Region`). */
+  var ROUTING_KEY_FIELD = 'app';
 
-  /** Population labels after first-level routing (not DM app ids). */
-  var POPULATION_HEALTHCARE = 'Healthcare';
-  var POPULATION_SLED = 'SLED';
+  /** @type {string} */
+  var NORMALIZED_CONTRACT_VERSION = 'qualtrics-normalized-v1';
 
   return {
     ROW_GRAIN: ROW_GRAIN,
@@ -104,8 +100,7 @@ var QualtricsSchema = (function () {
     TS_COLS: TS_COLS,
     SCORE_COLS: SCORE_COLS,
     OUT_ORDER: OUT_ORDER,
-    VALID_APPS: VALID_APPS,
-    POPULATION_HEALTHCARE: POPULATION_HEALTHCARE,
-    POPULATION_SLED: POPULATION_SLED
+    ROUTING_KEY_FIELD: ROUTING_KEY_FIELD,
+    NORMALIZED_CONTRACT_VERSION: NORMALIZED_CONTRACT_VERSION
   };
 })();

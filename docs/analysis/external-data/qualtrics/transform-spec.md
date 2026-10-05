@@ -16,7 +16,9 @@ Tracked behavioral contract for the Qualtrics normalizer. **Oracle:** `Qualtrics
 5. **Derive** — `tracking_status`, `response_received`, `full_name`.
 6. **Dedup** — `latest_per_contact`: latest `ts_email_sent` per (`survey_id`, `contact_id`).
 7. **Serialize** — ISO `…Z` timestamps; `response_received` Yes/No; scores as pandas-like strings (`9` → `9.0`).
-8. **Route** — filter by `app` into Healthcare vs SLED populations (not HC/SLG/HENP files yet).
+8. **Route (separate step)** — `QualtricsRoute.routeCanonicalDataset` uses `QualtricsRoutingConfig` (not the normalizer) to map normalized rows to `populationId` slices and destination `appId` lists.
+
+**Normalizer boundary:** `buildCanonicalDataset` does not validate routable `app` values; `QualtricsPipeline.validateSource` runs routing validation. Extra Qualtrics columns not in `COLMAP` are ignored until added to the normalized contract.
 
 ## `tracking_status` precedence
 

@@ -36,11 +36,13 @@ test('synthetic fixture exists and parses', () => {
 test('routing healthcare vs sled populations', () => {
   const g = loadEdmGlobals();
   const csvText = fs.readFileSync(SYNTHETIC, 'utf8');
-  const norm = g.QualtricsTransform.normalizeQualtricsCsv(csvText);
-  const routed = g.QualtricsRoute.routePopulations(norm.rows);
-  assert.equal(routed.healthcare.length + routed.sled.length, norm.rows.length);
-  routed.healthcare.forEach((r) => assert.equal(r.app, 'US Healthcare'));
-  routed.sled.forEach((r) => assert.equal(r.app, 'US SLED'));
+  const norm = g.QualtricsTransform.buildCanonicalDataset(csvText);
+  const routed = g.QualtricsRoute.routeCanonicalDataset(norm.rows);
+  const hc = routed.slices.find((s) => s.populationId === 'healthcare').rows;
+  const sled = routed.slices.find((s) => s.populationId === 'sled').rows;
+  assert.equal(hc.length + sled.length, norm.rows.length);
+  hc.forEach((r) => assert.equal(r.app, 'US Healthcare'));
+  sled.forEach((r) => assert.equal(r.app, 'US SLED'));
 });
 
 test('dedup keeps later email send', () => {
@@ -73,13 +75,15 @@ test('negative: missing required column', () => {
   assert.throws(() => g.QualtricsTransform.normalizeQualtricsCsv(broken), /Missing columns/);
 });
 
-test('negative: blank and unexpected Sub Region', () => {
+test('negative: blank and unexpected Sub Region (routing validation)', () => {
   const g = loadEdmGlobals();
   let csvText = fs.readFileSync(SYNTHETIC, 'utf8');
   csvText = csvText.replace('US Healthcare', '', 1);
-  assert.throws(() => g.QualtricsTransform.normalizeQualtricsCsv(csvText), /Unexpected\/blank/);
+  let validation = g.QualtricsPipeline.validateSource(csvText);
+  assert.equal(validation.ok, false);
   csvText = fs.readFileSync(SYNTHETIC, 'utf8').replace('US SLED', 'US Invalid', 1);
-  assert.throws(() => g.QualtricsTransform.normalizeQualtricsCsv(csvText), /Unexpected\/blank/);
+  validation = g.QualtricsPipeline.validateSource(csvText);
+  assert.equal(validation.ok, false);
 });
 
 test('orchestrator stops at READY_FOR_INGESTION', () => {
@@ -92,8 +96,8 @@ test('orchestrator stops at READY_FOR_INGESTION', () => {
   });
   assert.equal(outcome.job.status, g.EdmJobTypes.JobStatus.READY_FOR_INGESTION);
   assert.ok(outcome.result.ok);
-  assert.ok(outcome.job.healthcareCount > 0);
-  assert.ok(outcome.job.sledCount > 0);
+  assert.ok(outcome.job.populationCounts.healthcare > 0);
+  assert.ok(outcome.job.populationCounts.sled > 0);
 });
 
 test('duplicate successful checksum rejected', () => {
@@ -111,7 +115,9 @@ test('duplicate successful checksum rejected', () => {
 test('python oracle equivalence on synthetic fixture', () => {
   const g = loadEdmGlobals();
   const csvText = fs.readFileSync(SYNTHETIC, 'utf8');
-  const jsNorm = g.QualtricsTransform.normalizeQualtricsCsv(csvText);
+  const jsNorm = g.QualtricsTransform.buildCanonicalDataset(csvText);
+  const routeOk = g.QualtricsRoute.validateRoutableRows(jsNorm.rows);
+  assert.equal(routeOk.ok, true);
   const oraclePath = path.join(__dirname, 'oracle', 'normalize_qualtrics_oracle.py');
   let pyOut;
   try {

@@ -1,68 +1,141 @@
 /**
- * First-level Qualtrics population routing and downstream destination config.
+ * Configuration-driven routing for canonical Qualtrics datasets.
  * @namespace QualtricsRoute
  */
 var QualtricsRoute = (function () {
   'use strict';
 
-  var APP_HEALTHCARE = 'US Healthcare';
-  var APP_SLED = 'US SLED';
-
   /**
-   * Future DM destinations (tenant filter inside each workbook at ingest).
-   * @type {Object.<string, { population: string, destinations: string[], enabled: boolean }>}
+   * @param {Object.<string, string>} row normalized row
+   * @param {QualtricsRoutingConfig.QualtricsRouteRule} route
+   * @return {boolean}
    */
-  var ROUTE_BY_APP = {
-    'US Healthcare': {
-      population: QualtricsSchema.POPULATION_HEALTHCARE,
-      destinations: ['HC_DM'],
-      enabled: true
-    },
-    'US SLED': {
-      population: QualtricsSchema.POPULATION_SLED,
-      destinations: ['SLG_DM', 'HENP_DM'],
-      enabled: true
+  function rowMatchesRoute(row, route) {
+    var field = route.match.field;
+    var val = row[field];
+    if (route.match.op === 'equals') {
+      return val === route.match.value;
     }
-  };
+    return false;
+  }
 
   /**
-   * @param {Object.<string, string>[]} normalizedRows
-   * @return {{ healthcare: Object.<string, string>[], sled: Object.<string, string>[], counts: Object }}
+   * @param {Object.<string, string>} row
+   * @param {QualtricsRoutingConfig.QualtricsRouteRule[]} routes
+   * @return {QualtricsRoutingConfig.QualtricsRouteRule|null}
    */
-  function routePopulations(normalizedRows) {
-    var healthcare = [];
-    var sled = [];
-    normalizedRows.forEach(function (row) {
-      if (row.app === APP_HEALTHCARE) {
-        healthcare.push(row);
-      } else if (row.app === APP_SLED) {
-        sled.push(row);
+  function findMatchingRoute(row, routes) {
+    for (var i = 0; i < routes.length; i++) {
+      if (rowMatchesRoute(row, routes[i])) {
+        return routes[i];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Ensures every row maps to a configured route (replaces hardcoded VALID_APPS in normalizer).
+   *
+   * @param {Object.<string, string>[]} rows
+   * @param {QualtricsRoutingConfig.QualtricsRoutingConfigShape} [routingConfig]
+   * @return {EdmJobTypes.EdmValidationResult}
+   */
+  function validateRoutableRows(rows, routingConfig) {
+    var config = QualtricsRoutingConfig.getActiveConfig(routingConfig);
+    var errors = [];
+    var bad = {};
+    var hasNull = false;
+    var keyField = config.routingKeyField || QualtricsSchema.ROUTING_KEY_FIELD;
+
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var keyVal = row[keyField];
+      if (keyVal == null || String(keyVal).trim() === '') {
+        hasNull = true;
+        continue;
+      }
+      if (!findMatchingRoute(row, config.routes)) {
+        bad[keyVal] = true;
+      }
+    }
+    if (hasNull || Object.keys(bad).length) {
+      var detail = Object.keys(bad).length ? Object.keys(bad).join(', ') : 'nulls present';
+      errors.push("Unexpected/blank '" + keyField + "' values: " + detail);
+    }
+    return errors.length ? { ok: false, errors: errors } : { ok: true };
+  }
+
+  /**
+   * @param {Object.<string, string>[]} rows canonical normalized rows
+   * @param {QualtricsRoutingConfig.QualtricsRoutingConfigShape} [routingConfig]
+   * @return {{
+   *   slices: Object[],
+   *   countsByPopulationId: Object.<string, number>,
+   *   destinationPlan: Object[]
+   * }}
+   */
+  function routeCanonicalDataset(rows, routingConfig) {
+    var config = QualtricsRoutingConfig.getActiveConfig(routingConfig);
+    var validation = validateRoutableRows(rows, config);
+    if (!validation.ok) {
+      throw new Error((validation.errors || []).join('; '));
+    }
+
+    var byPopulation = {};
+    config.routes.forEach(function (r) {
+      byPopulation[r.populationId] = [];
+    });
+
+    rows.forEach(function (row) {
+      var route = findMatchingRoute(row, config.routes);
+      if (route) {
+        byPopulation[route.populationId].push(row);
       }
     });
+
+    var countsByPopulationId = {};
+    Object.keys(byPopulation).forEach(function (popId) {
+      countsByPopulationId[popId] = byPopulation[popId].length;
+    });
+
+    var slices = config.routes
+      .filter(function (r) {
+        return byPopulation[r.populationId].length > 0;
+      })
+      .map(function (r) {
+        return {
+          routeId: r.routeId,
+          populationId: r.populationId,
+          match: r.match,
+          rows: byPopulation[r.populationId],
+          destinations: r.destinations
+        };
+      });
+
+    var destinationPlan = slices.map(function (s) {
+      return {
+        routeId: s.routeId,
+        populationId: s.populationId,
+        destinations: s.destinations.map(function (d) {
+          return d.appId;
+        }),
+        destinationRefs: s.destinations,
+        rowCount: s.rows.length,
+        ingestEnabled: false
+      };
+    });
+
     return {
-      healthcare: healthcare,
-      sled: sled,
-      counts: {
-        total: normalizedRows.length,
-        healthcare: healthcare.length,
-        sled: sled.length
-      }
+      slices: slices,
+      countsByPopulationId: countsByPopulationId,
+      destinationPlan: destinationPlan
     };
   }
 
-  /**
-   * @param {string} appValue
-   * @return {Object|null}
-   */
-  function getRouteConfig(appValue) {
-    return ROUTE_BY_APP[appValue] || null;
-  }
-
   return {
-    APP_HEALTHCARE: APP_HEALTHCARE,
-    APP_SLED: APP_SLED,
-    ROUTE_BY_APP: ROUTE_BY_APP,
-    routePopulations: routePopulations,
-    getRouteConfig: getRouteConfig
+    rowMatchesRoute: rowMatchesRoute,
+    findMatchingRoute: findMatchingRoute,
+    validateRoutableRows: validateRoutableRows,
+    routeCanonicalDataset: routeCanonicalDataset
   };
 })();

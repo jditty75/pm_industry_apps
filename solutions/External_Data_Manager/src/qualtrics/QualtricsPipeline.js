@@ -14,6 +14,13 @@ var QualtricsPipeline = (function () {
    */
   function validateSource(csvText, routingConfig) {
     try {
+      var kindCheck = QualtricsSourceClassifier.assertExpectedKind(
+        QualtricsSourceClassifier.SourceKind.QUALTRICS_INFLIGHT,
+        csvText
+      );
+      if (!kindCheck.ok) {
+        return kindCheck;
+      }
       var dataset = QualtricsTransform.buildCanonicalDataset(csvText);
       return QualtricsRoute.validateRoutableRows(dataset.rows, routingConfig);
     } catch (e) {

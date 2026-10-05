@@ -7,10 +7,17 @@ var EdmJobHistory = (function () {
 
   /**
    * @param {Object[]} ledgerRows from EdmAuditLedgerSheet.readPriorJobs
+   * @param {string} [pipelineId] when set, ignore jobs from other pipelines
    * @return {EdmDuplicateGuard.PriorJobRef[]}
    */
-  function toPriorJobRefs(ledgerRows) {
-    return (ledgerRows || []).map(function (r) {
+  function toPriorJobRefs(ledgerRows, pipelineId) {
+    var rows = ledgerRows || [];
+    if (pipelineId) {
+      rows = rows.filter(function (r) {
+        return String(r.pipeline || '') === pipelineId;
+      });
+    }
+    return rows.map(function (r) {
       return {
         checksum: r.source_checksum || r.checksum || '',
         status: r.overall_status || r.status || '',

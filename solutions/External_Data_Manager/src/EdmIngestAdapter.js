@@ -31,7 +31,35 @@ var EdmIngestAdapter = (function () {
     return Object.assign({ destinationId: logicalAppId }, result);
   }
 
+  /**
+   * @param {string} logicalAppId
+   * @param {Object[]} canonicalRows csat-response-v1 DTOs
+   * @param {Object} metadata
+   * @param {string} spreadsheetId
+   * @param {Object} coreLib
+   * @return {Object}
+   */
+  function ingestCanonicalCsatResponses(logicalAppId, canonicalRows, metadata, spreadsheetId, coreLib) {
+    if (!coreLib || !coreLib.CoreData || !coreLib.CoreData.ingestCsatResponses) {
+      return {
+        success: false,
+        destinationId: logicalAppId,
+        message: 'CoreLib.CoreData.ingestCsatResponses unavailable (DepMngr library release required)',
+        eligible: (canonicalRows || []).length,
+        inserted: 0,
+        updated: 0
+      };
+    }
+    var rawCfg = EdmDmConfigResolver.resolve(logicalAppId);
+    var cfg = coreLib.CoreConfig.withDefaults(rawCfg);
+    var result = coreLib.CoreData.ingestCsatResponses(cfg, canonicalRows, metadata, {
+      spreadsheetId: spreadsheetId
+    });
+    return Object.assign({ destinationId: logicalAppId }, result);
+  }
+
   return {
-    ingestNormalizedRows: ingestNormalizedRows
+    ingestNormalizedRows: ingestNormalizedRows,
+    ingestCanonicalCsatResponses: ingestCanonicalCsatResponses
   };
 })();

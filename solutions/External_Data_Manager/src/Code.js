@@ -66,7 +66,10 @@ function processQualtricsInboxNow(options) {
     var priorJobs = [];
     if (ledgerId) {
       var sheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
-      priorJobs = EdmJobHistory.toPriorJobRefs(EdmAuditLedgerSheet.readAllJobs(sheet));
+      priorJobs = EdmJobHistory.toPriorJobRefs(
+        EdmAuditLedgerSheet.readAllJobs(sheet),
+        QualtricsPipeline.PIPELINE_ID
+      );
     }
 
     var outcome = EdmQualtricsProcessor.processCsvJob(csvText, {
@@ -171,6 +174,89 @@ function isQualtricsIngestEnabled_() {
 function isDeleteSuccessfulSourceEnabled_() {
   return PropertiesService.getScriptProperties()
     .getProperty(EdmProperties.DELETE_SUCCESSFUL_SOURCE) === 'true';
+}
+
+/**
+ * @return {boolean}
+ */
+function isQualtricsResponsesIngestEnabled_() {
+  return PropertiesService.getScriptProperties()
+    .getProperty(EdmProperties.RESPONSES_INGEST_ENABLED) === 'true';
+}
+
+/**
+ * Manual Responses inbox processor (dry-run default; does not alter InFlight trigger).
+ *
+ * @param {Object=} options
+ * @return {Object}
+ */
+function processQualtricsResponsesInboxNow(options) {
+  options = options || {};
+  var dryRun = options.dryRun !== false;
+  var ingestEnabled = !!options.ingestEnabled && isQualtricsResponsesIngestEnabled_();
+  if (options.ingestEnabled && !dryRun && !ingestEnabled) {
+    return {
+      ok: false,
+      message: 'Ingest requested but EDM_QUALTRICS_RESPONSES_INGEST_ENABLED is not true'
+    };
+  }
+
+  var lock = EdmLocking.tryAcquire(EdmLocking.QUALTRICS_INGEST_LOCK_KEY, LockService, 1000);
+  if (!lock.acquired) {
+    return { ok: false, message: 'Another Qualtrics job is running' };
+  }
+
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var inboxId = props.getProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID);
+    if (!inboxId) {
+      return { ok: false, message: 'QUALTRICS_RESPONSES_INBOX_FOLDER_ID not configured' };
+    }
+
+    var candidate = EdmQualtricsInbox.findCandidateCsv(
+      inboxId,
+      options.sourceFileName,
+      DriveApp
+    );
+    if (!candidate) {
+      return { ok: true, message: 'No CSV in Responses Inbox' };
+    }
+
+    var csvText = EdmQualtricsInbox.readCsvText(candidate.file);
+    var ledgerId = props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID);
+    var priorJobs = [];
+    if (ledgerId) {
+      var sheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+      priorJobs = EdmJobHistory.toPriorJobRefs(
+        EdmAuditLedgerSheet.readAllJobs(sheet),
+        QualtricsResponsesPipeline.PIPELINE_ID
+      );
+    }
+
+    var outcome = EdmQualtricsResponsesProcessor.processCsvJob(csvText, {
+      filename: candidate.name,
+      fileId: candidate.id
+    }, {
+      dryRun: dryRun,
+      ingestEnabled: ingestEnabled,
+      deleteSuccessfulSource: options.deleteSuccessfulSource === true,
+      priorJobs: priorJobs,
+      allowDuplicateOverride: options.allowDuplicateOverride,
+      allowStaleOverride: options.allowStaleOverride,
+      skipDuplicateCheck: false
+    });
+
+    return {
+      ok: outcome.result.ok,
+      dryRun: dryRun,
+      jobId: outcome.job.jobId,
+      diagnostics: outcome.result.diagnostics,
+      warningCounts: outcome.result.warningCounts,
+      outcome: outcome
+    };
+  } finally {
+    lock.release();
+  }
 }
 
 /**

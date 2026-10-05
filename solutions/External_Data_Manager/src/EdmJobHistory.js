@@ -14,6 +14,7 @@ var EdmJobHistory = (function () {
       return {
         checksum: r.source_checksum || r.checksum || '',
         status: r.overall_status || r.status || '',
+        errorMessage: r.error_message || '',
         exportTimestamp: r.source_export_timestamp || '',
         completedAt: r.updated_at || r.completed_at || ''
       };

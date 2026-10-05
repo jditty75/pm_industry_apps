@@ -21,8 +21,40 @@ test('dry-run processes synthetic CSV without ingest flags', () => {
   });
   assert.equal(outcome.result.ok, true);
   assert.equal(outcome.result.dryRun, true);
+  assert.equal(outcome.job.status, g.EdmJobTypes.JobStatus.READY_FOR_INGESTION);
+  assert.equal(outcome.job.errorMessage, 'DRY_RUN');
   assert.ok(outcome.result.destinationResults.length >= 2);
   assert.equal(outcome.deleteSourceAllowed, false);
+});
+
+test('dry-run ledger success does not block later duplicate check', () => {
+  const g = loadEdmGlobals();
+  const chk = g.EdmChecksum.sha256Hex(syntheticCsv);
+  const outcome = g.EdmQualtricsProcessor.processCsvJob(syntheticCsv, { filename: 'a.csv' }, {
+    dryRun: true,
+    priorJobs: [{
+      checksum: chk,
+      status: g.EdmJobTypes.JobStatus.SUCCESS,
+      errorMessage: 'DRY_RUN'
+    }],
+    deps: { checksumFn: () => chk }
+  });
+  assert.equal(outcome.result.ok, true);
+});
+
+test('prior READY_FOR_INGESTION dry-run job does not block duplicate check', () => {
+  const g = loadEdmGlobals();
+  const chk = g.EdmChecksum.sha256Hex(syntheticCsv);
+  const outcome = g.EdmQualtricsProcessor.processCsvJob(syntheticCsv, { filename: 'a.csv' }, {
+    dryRun: true,
+    priorJobs: [{
+      checksum: chk,
+      status: g.EdmJobTypes.JobStatus.READY_FOR_INGESTION,
+      errorMessage: 'DRY_RUN'
+    }],
+    deps: { checksumFn: () => chk }
+  });
+  assert.equal(outcome.result.ok, true);
 });
 
 test('duplicate checksum rejected', () => {

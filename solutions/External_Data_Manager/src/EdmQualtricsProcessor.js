@@ -117,7 +117,7 @@ var EdmQualtricsProcessor = (function () {
     var diagnostics = buildDiagnostics_(job, destinationResults);
 
     if (options.dryRun || !options.ingestEnabled) {
-      job = EdmJob.transition(job, EdmJobTypes.JobStatus.SUCCESS, {
+      job = EdmJob.transition(job, EdmJobTypes.JobStatus.READY_FOR_INGESTION, {
         errorMessage: options.dryRun ? 'DRY_RUN' : 'INGEST_DISABLED'
       });
       destinationResults.forEach(function (d) {

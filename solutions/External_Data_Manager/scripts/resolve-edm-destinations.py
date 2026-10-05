@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 APPS = {
     "HC_DM": REPO / "solutions/HC_DM/.clasp.json",
     "SLG_DM": REPO / "solutions/SLG_DM/.clasp.json",
@@ -42,6 +42,11 @@ def script_parent_id(script_id: str, token: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose", action="store_true", help="print full spreadsheet IDs")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print JSON map to stdout (for local orchestration only; do not commit)",
+    )
     args = parser.parse_args()
     token = load_access_token()
     resolved: dict[str, str] = {}
@@ -49,7 +54,7 @@ def main() -> None:
         if not clasp_path.is_file():
             print(f"{app}: SKIP (no local .clasp.json)")
             continue
-        script_id = json.loads(clasp_path.read_text(encoding="utf-8")).get("scriptId", "")
+        script_id = json.loads(clasp_path.read_text(encoding="utf-8-sig")).get("scriptId", "")
         if not script_id:
             print(f"{app}: SKIP (empty scriptId)")
             continue
@@ -61,6 +66,9 @@ def main() -> None:
             print(f"{app}: resolved (len={len(parent)})")
     if not resolved:
         raise SystemExit(1)
+    if args.json:
+        print(json.dumps(resolved))
+        return
     print("Set via EdmSetup.setDestinationSpreadsheetId in GAS or Script Properties:")
     for app, sid in resolved.items():
         key = {

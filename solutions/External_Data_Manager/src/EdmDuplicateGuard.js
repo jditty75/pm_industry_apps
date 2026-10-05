@@ -9,9 +9,25 @@ var EdmDuplicateGuard = (function () {
    * @typedef {Object} PriorJobRef
    * @property {string} checksum
    * @property {string} status
+   * @property {string} [errorMessage]
    * @property {string} [exportTimestamp]
    * @property {string} [completedAt]
    */
+
+  /**
+   * @param {PriorJobRef} prior
+   * @return {boolean}
+   */
+  function isSuccessfulIngestion_(prior) {
+    if (prior.status !== EdmJobTypes.JobStatus.SUCCESS) {
+      return false;
+    }
+    var marker = String(prior.errorMessage || '');
+    if (marker === 'DRY_RUN' || marker === 'INGEST_DISABLED') {
+      return false;
+    }
+    return true;
+  }
 
   /**
    * @param {string} checksum
@@ -21,7 +37,7 @@ var EdmDuplicateGuard = (function () {
   function checkDuplicateSuccessful(checksum, priorJobs) {
     for (var i = 0; i < priorJobs.length; i++) {
       var p = priorJobs[i];
-      if (p.checksum === checksum && p.status === EdmJobTypes.JobStatus.SUCCESS) {
+      if (p.checksum === checksum && isSuccessfulIngestion_(p)) {
         return { allow: false, reason: 'DUPLICATE_SUCCESS_CHECKSUM' };
       }
     }

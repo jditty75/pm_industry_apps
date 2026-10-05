@@ -745,8 +745,37 @@ var CoreData = (function () {
   // INTERNAL HELPERS
   // ===========================================================================
 
+  /** When set, CSAT ingest and tenant reads target this workbook (EDM / automation). */
+  var _spreadsheetIngestOverride_ = null;
+
   function getSpreadsheet_() {
+    if (_spreadsheetIngestOverride_) {
+      return _spreadsheetIngestOverride_;
+    }
     return SpreadsheetApp.getActiveSpreadsheet();
+  }
+
+  /**
+   * Runs fn with SpreadsheetApp bound to spreadsheetId (container-bound callers omit id).
+   * @param {string} [spreadsheetId]
+   * @param {function(): *} fn
+   * @return {*}
+   * @private
+   */
+  function _runWithOptionalSpreadsheetId_(spreadsheetId, fn) {
+    if (!spreadsheetId) {
+      return fn();
+    }
+    var ss = SpreadsheetApp.openById(spreadsheetId);
+    var prev = _spreadsheetIngestOverride_;
+    _spreadsheetIngestOverride_ = ss;
+    _clearCache(null);
+    try {
+      return fn();
+    } finally {
+      _spreadsheetIngestOverride_ = prev;
+      _clearCache(null);
+    }
   }
 
   function getCurrentUserEmail_() {
@@ -11405,14 +11434,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   // ===========================================================================
 
   /** @const {string[]} CSAT_InFlight sheet storage schema */
-  var _CSAT_INFLIGHT_COLUMNS_ = [
-    'deployment_id', 'account_name', 'deployment_name',
-    'survey_type', 'tracking_status', 'response_received',
-    'contact_name', 'contact_email', 'contact_role',
-    'engagement_manager', 'partner_name',
-    'sent_date', 'opened_date', 'started_date', 'finished_date',
-    'survey_expires'
-  ];
+  var _CSAT_INFLIGHT_COLUMNS_ = CoreCsatIngest.CSAT_INFLIGHT_COLUMNS;
 
   /**
    * Sheet cell → YYYY-MM-DD without UTC-shifting date-only strings.
@@ -11525,7 +11547,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @private
    */
   function _getOrCreateCsatInFlightSheet_(cfg) {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = getSpreadsheet_();
     var sheetName = cfg.sheets.csatInFlight || 'CSAT_InFlight';
     var sheet = ss.getSheetByName(sheetName);
     if (!sheet) {
@@ -11544,7 +11566,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    */
   function _readCsatInFlightRows_(cfg) {
     var sheetName = cfg.sheets.csatInFlight || 'CSAT_InFlight';
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = getSpreadsheet_();
     var sheet = ss.getSheetByName(sheetName);
     if (!sheet) return [];
     var lastRow = sheet.getLastRow();
@@ -11567,38 +11589,77 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * Replaces CSAT_InFlight without clear-then-write gap; restores prior data on failure.
    * @param {AppConfig} cfg
-   * @param {Array<Object>} rows
+   * @param {Array<Object>} storageRows
+   * @return {{ written: number, verification: Object }}
    * @private
    */
-  function _writeCsatInFlightSheet_(cfg, rows) {
+  function _replaceCsatInFlightSafely_(cfg, storageRows) {
     var sheet = _getOrCreateCsatInFlightSheet_(cfg);
-    sheet.getRange(1, 1, 1, _CSAT_INFLIGHT_COLUMNS_.length)
-      .setValues([_CSAT_INFLIGHT_COLUMNS_]);
-    var lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-      sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+    var cols = _CSAT_INFLIGHT_COLUMNS_;
+    var matrix = CoreCsatIngest.buildInFlightValueMatrix(storageRows || []);
+    var priorLastRow = sheet.getLastRow();
+    var priorData = null;
+    if (priorLastRow >= 2) {
+      priorData = sheet.getRange(2, 1, priorLastRow, cols.length).getValues();
     }
-    if (!rows || !rows.length) return;
 
-    var matrix = rows.map(function (obj) {
-      return _CSAT_INFLIGHT_COLUMNS_.map(function (col) {
-        return obj[col] !== undefined && obj[col] !== null ? obj[col] : '';
-      });
-    });
-    sheet.getRange(2, 1, matrix.length, _CSAT_INFLIGHT_COLUMNS_.length).setValues(matrix);
+    var lock = LockService.getDocumentLock();
+    if (!lock.tryLock(30000)) {
+      throw new Error('CoreData._replaceCsatInFlightSafely_: could not acquire document lock');
+    }
+    try {
+      var fullMatrix = [cols].concat(matrix);
+      sheet.getRange(1, 1, fullMatrix.length, cols.length).setValues(fullMatrix);
+      var plan = CoreCsatIngest.planTrailingClear(priorLastRow, matrix.length);
+      if (plan.clearFromRow != null && plan.clearThroughRow >= plan.clearFromRow) {
+        sheet.getRange(plan.clearFromRow, 1, plan.clearThroughRow, cols.length).clearContent();
+      }
+      var hdr = sheet.getRange(1, 1, 1, cols.length).getValues()[0];
+      var verify = CoreCsatIngest.verifyInFlightHeaders(hdr, matrix.length);
+      var lastRow = sheet.getLastRow();
+      if (matrix.length > 0 && lastRow < 1 + matrix.length) {
+        verify = { ok: false, errors: (verify.errors || []).concat(['row count']) };
+      }
+      if (!verify.ok) {
+        throw new Error('CSAT_InFlight verification failed: ' + (verify.errors || []).join(', '));
+      }
+      return {
+        written: matrix.length,
+        verification: { ok: true, headerOk: true, rowCount: matrix.length }
+      };
+    } catch (writeErr) {
+      Logger.log('CoreData._replaceCsatInFlightSafely_: restore after failure: ' + writeErr);
+      try {
+        sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
+        if (priorData && priorData.length) {
+          sheet.getRange(2, 1, 1 + priorData.length, cols.length).setValues(priorData);
+        } else if (priorLastRow > 1) {
+          sheet.getRange(2, 1, priorLastRow, cols.length).clearContent();
+        }
+      } catch (restoreErr) {
+        Logger.log('CoreData._replaceCsatInFlightSafely_: restore failed: ' + restoreErr);
+      }
+      throw writeErr;
+    } finally {
+      lock.releaseLock();
+    }
   }
 
   /**
    * @param {AppConfig} cfg
    * @param {string} csvText
+   * @param {Object=} metadata
    * @private
    */
-  function _backupCsatImport_(cfg, csvText) {
+  function _backupCsatImport_(cfg, csvText, metadata) {
+    metadata = metadata || {};
     var tz = Session.getScriptTimeZone();
-    var dateKey = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var ts = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd_HHmmss');
     var appId = cfg.appId || 'DHM';
-    var fileName = 'CSAT_Import_' + appId + '_' + dateKey + '.csv';
+    var jobSuffix = metadata.jobId ? String(metadata.jobId).slice(0, 24) : ts;
+    var fileName = 'CSAT_Import_' + appId + '_' + ts + '_' + jobSuffix + '.csv';
     var folders = DriveApp.getFoldersByName('DHM_CSAT_Imports');
     var folder = folders.hasNext()
       ? folders.next()
@@ -11622,7 +11683,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    */
   function _csatAllowedDeploymentIds_(cfg) {
     var allowedIds = {};
-    if (cfg.appId === 'HC_DM') {
+    if (cfg.appId === 'HC' || cfg.appId === 'HC_DM') {
       try {
         readSfdcDeploymentsRaw_(cfg).forEach(function (r) {
           if (r.overallStatus === 'Active' && r.deploymentId) {
@@ -11780,8 +11841,93 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
-   * V2.8: Parses and ingests a survey_normalized CSV export.
-   * Clears and overwrites CSAT_InFlight; backs up to Drive; invalidates caches.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} parsedRows survey_normalized-shaped rows
+   * @return {Object}
+   * @private
+   */
+  function _buildCsatStorageFromParsed_(cfg, parsedRows) {
+    var allowedIds = _csatAllowedDeploymentIds_(cfg);
+    var deps = {
+      canonicalId: _canonicalId_,
+      normalizeTrackingStatus: _normalizeCsatTrackingStatus_,
+      formatShortDate: formatShortDate_
+    };
+    return CoreCsatIngest.buildStorageRowsFromParsed(parsedRows, allowedIds, deps);
+  }
+
+  /**
+   * Canonical CSAT in-flight ingest (normalized Qualtrics rows or pre-parsed CSV rows).
+   *
+   * @param {AppConfig} config
+   * @param {Array<Object>} rows normalized Qualtrics rows (default) or parsed CSV rows when metadata.rowFormat='parsed_csv'
+   * @param {Object=} metadata { source, jobId, backupCsvText, skipBackup, rowFormat }
+   * @param {Object=} context { spreadsheetId }
+   * @return {Object}
+   */
+  function ingestCsatInFlight(config, rows, metadata, context) {
+    metadata = metadata || {};
+    context = context || {};
+    var cfg = CoreConfig.withDefaults(config);
+    var parsedRows = metadata.rowFormat === 'parsed_csv'
+      ? (rows || [])
+      : CoreCsatIngest.mapNormalizedQualtricsRowsToParsed(rows || []);
+
+    var built = _buildCsatStorageFromParsed_(cfg, parsedRows);
+    if (!built.storageRows.length && built.totalInput > 0) {
+      Logger.log('CoreData.ingestCsatInFlight: zero eligible rows for appId=' + cfg.appId);
+    }
+
+    var runIngest = function () {
+      if (metadata.backupCsvText && !metadata.skipBackup) {
+        try {
+          _backupCsatImport_(cfg, metadata.backupCsvText, metadata);
+        } catch (e) {
+          Logger.log('CoreData.ingestCsatInFlight: backup failed: ' + e);
+        }
+      }
+      var replaceResult = _replaceCsatInFlightSafely_(cfg, built.storageRows);
+      _setCsatLastImportAt_(cfg);
+      _clearCache(cfg);
+      return replaceResult;
+    };
+
+    var replaceResult;
+    try {
+      replaceResult = _runWithOptionalSpreadsheetId_(context.spreadsheetId, runIngest);
+    } catch (e) {
+      Logger.log('CoreData.ingestCsatInFlight: failed appId=' + cfg.appId + ': ' + e);
+      return {
+        success: false,
+        imported: 0,
+        discarded: built.discarded,
+        totalInput: built.totalInput,
+        eligibleCount: built.matched,
+        writtenCount: 0,
+        excludedCount: built.discarded,
+        verification: { ok: false, error: String(e) },
+        message: 'CSAT ingest failed: ' + e
+      };
+    }
+
+    Logger.log('CoreData.ingestCsatInFlight [' + cfg.appId + ']: input=' + built.totalInput +
+               ', written=' + replaceResult.written);
+    return {
+      success: true,
+      imported: built.matched,
+      discarded: built.discarded,
+      totalInput: built.totalInput,
+      eligibleCount: built.matched,
+      writtenCount: replaceResult.written,
+      excludedCount: built.discarded,
+      count: built.matched,
+      verification: replaceResult.verification,
+      message: 'Ingested ' + built.matched + ' of ' + built.totalInput + ' survey rows.'
+    };
+  }
+
+  /**
+   * V2.8: Parses and ingests a survey_normalized CSV export (manual UI path).
    *
    * @param {AppConfig} config
    * @param {string} csvText
@@ -11790,51 +11936,16 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   function uploadCsatInFlightCsvForUI(config, csvText) {
     var cfg = CoreConfig.withDefaults(config);
     var parsedRows = _parseCsatInFlightCsv_(csvText);
-    var allowedIds = _csatAllowedDeploymentIds_(cfg);
-
-    var matched = [];
-    parsedRows.forEach(function (row) {
-      var canonId = _canonicalId_(row.deployment_id);
-      if (!canonId || !allowedIds[canonId]) return;
-      matched.push({
-        deployment_id:      canonId,
-        account_name:       row.account_name || '\u2014',
-        deployment_name:    row.deployment_name || '',
-        survey_type:        row.survey_type || '',
-        tracking_status:    _normalizeCsatTrackingStatus_(row.tracking_status),
-        response_received:  row.response_received || '',
-        contact_name:       row.full_name || ((row.first_name || '') + ' ' + (row.last_name || '')).trim() || '\u2014',
-        contact_email:      row.contact_email || '',
-        contact_role:       row.contact_role || '',
-        engagement_manager: row.engagement_manager || '',
-        partner_name:       row.partner_name || '',
-        sent_date:          formatShortDate_(row.ts_email_sent),
-        opened_date:        formatShortDate_(row.ts_email_opened),
-        started_date:       formatShortDate_(row.ts_survey_started),
-        finished_date:      formatShortDate_(row.ts_survey_finished),
-        survey_expires:     formatShortDate_(row.survey_expires)
-      });
-    });
-
-    Logger.log('CSAT Ingestion [' + cfg.appId + ']: input=' + parsedRows.length +
-               ', matched=' + matched.length);
     try {
-      _backupCsatImport_(cfg, csvText);
+      _backupCsatImport_(cfg, csvText, { source: 'ui' });
     } catch (e) {
       Logger.log('CSAT backup failed: ' + e);
     }
-    _writeCsatInFlightSheet_(cfg, matched);
-    _setCsatLastImportAt_(cfg);
-    _clearCache(cfg);
-
-    return {
-      success: true,
-      imported: matched.length,
-      discarded: parsedRows.length - matched.length,
-      totalInput: parsedRows.length,
-      count: matched.length,
-      message: 'Ingested ' + matched.length + ' of ' + parsedRows.length + ' survey rows.'
-    };
+    return ingestCsatInFlight(cfg, parsedRows, {
+      source: 'ui',
+      rowFormat: 'parsed_csv',
+      skipBackup: true
+    }, {});
   }
 
   /**
@@ -15426,6 +15537,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     matchesDdDigestPartnerFilter: matchesDdDigestPartnerFilter,
 
     // V2.8: CSAT in-flight surveys + unified tab payload
+    ingestCsatInFlight:          ingestCsatInFlight,
     uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,
     getCsatTabDataForUI:         getCsatTabDataForUI,
     getDistributionLogDataForUI: getDistributionLogDataForUI,

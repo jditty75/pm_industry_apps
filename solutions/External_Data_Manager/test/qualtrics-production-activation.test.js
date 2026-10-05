@@ -123,3 +123,90 @@ test('duplicate guard path does not imply destination ingest during activation',
   assert.equal(outcome.job.errorCategory, 'DUPLICATE_SUCCESS_CHECKSUM');
   assert.equal(outcome.deleteSourceAllowed, false);
 });
+
+test('finishEditorActivation throws on early-return failure report', () => {
+  const g = loadEdmGlobals();
+  assert.throws(() => {
+    g.EdmProductionActivation.finishEditorActivation({
+      ok: false,
+      phase: 'duplicate_guard',
+      message: 'duplicate guard preflight failed'
+    });
+  }, /duplicate guard preflight failed/);
+});
+
+test('finishEditorActivation throws when post-verify fails', () => {
+  const g = loadEdmGlobals();
+  assert.throws(() => {
+    g.EdmProductionActivation.finishEditorActivation({
+      ok: false,
+      phase: 'complete',
+      message: 'activation post-verify failed',
+      post: {
+        ingestEnabled: true,
+        deleteSuccessfulSource: true,
+        triggerCount: 1,
+        triggerHandlers: [g.EdmProductionActivation.SCHEDULE_HANDLER]
+      },
+      postInbox: { csvCount: 1 }
+    });
+  }, /activation post-verify failed/);
+});
+
+test('finishEditorActivation succeeds when postconditions met', () => {
+  const g = loadEdmGlobals();
+  const report = g.EdmProductionActivation.finishEditorActivation({
+    ok: true,
+    phase: 'complete',
+    message: 'EDM QUALTRICS V1 PRODUCTION ACTIVATION COMPLETE',
+    post: {
+      ingestEnabled: true,
+      deleteSuccessfulSource: true,
+      triggerCount: 1,
+      triggerHandlers: [g.EdmProductionActivation.SCHEDULE_HANDLER]
+    },
+    postInbox: { csvCount: 0 }
+  });
+  assert.equal(report.ok, true);
+});
+
+test('diagnoseActivationBlockers flags duplicate and trigger issues', () => {
+  const g = loadEdmGlobals();
+  const h = g.EdmProductionActivation.SCHEDULE_HANDLER;
+  assert.ok(
+    g.EdmProductionActivation.diagnoseActivationBlockers({
+      triggerCount: 2,
+      triggerHandlers: [h, h],
+      inboxCsvCount: 0,
+      ledgerFirstJobSuccess: true,
+      duplicateGuardOk: true
+    }).indexOf('unexpected_trigger') >= 0
+  );
+  assert.ok(
+    g.EdmProductionActivation.diagnoseActivationBlockers({
+      triggerCount: 0,
+      triggerHandlers: [],
+      inboxCsvCount: 1,
+      ledgerFirstJobSuccess: true,
+      duplicateGuardOk: false
+    }).indexOf('duplicate_guard_failed') >= 0
+  );
+});
+
+test('buildDebugStateLine uses booleans and counts only', () => {
+  const g = loadEdmGlobals();
+  const line = g.EdmProductionActivation.buildDebugStateLine({
+    ingestEnabled: false,
+    deleteSuccessfulSource: false,
+    triggerCount: 0,
+    triggerHandlers: [],
+    inboxCsvCount: 2,
+    ledgerFirstJobSuccess: true,
+    duplicateBlockedOnInbox: true,
+    syntheticInInbox: true,
+    activationBlockers: ['duplicate_guard_failed']
+  });
+  assert.ok(line.startsWith('EdmDebugProductionActivationState'));
+  assert.ok(line.includes('ingestEnabled=false'));
+  assert.ok(!line.includes('8545'));
+});

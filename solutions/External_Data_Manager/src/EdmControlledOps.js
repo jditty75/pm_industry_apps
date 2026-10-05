@@ -728,10 +728,57 @@ function runEdmQualtricsV1ProductionActivation(config) {
  * @return {Object}
  */
 function runEdmQualtricsV1ProductionActivationNow() {
-  return runEdmQualtricsV1ProductionActivation({
+  var report = runEdmQualtricsV1ProductionActivation({
     expectedChecksumPrefix: '8545dbf0510b0d55',
     scheduleMinutes: 15
   });
+  return EdmProductionActivation.finishEditorActivation(report);
+}
+
+/**
+ * Read-only runtime snapshot for editor diagnosis (no mutations).
+ * @return {{ ok: boolean, logLine: string }}
+ */
+function runEdmDebugProductionActivationState() {
+  var props = PropertiesService.getScriptProperties();
+  var triggers = ScriptApp.getProjectTriggers();
+  var handlers = triggers.map(function (t) {
+    return t.getHandlerFunction();
+  });
+  var inv = runEdmQualtricsInboxInventory();
+  var ledgerFirst = runEdmVerifyFirstRealJobInLedger_('8545dbf0510b0d55');
+  var duplicateGuardOk = true;
+  var duplicateBlocked = null;
+  if (inv.ok && inv.csvCount > 0) {
+    var dup = runEdmVerifyInboxSuccessfulSourceDuplicateGuard('8545dbf0510b0d55');
+    duplicateGuardOk = dup.ok;
+    duplicateBlocked = dup.duplicateBlocked;
+  }
+  var syntheticInInbox = !!(inv.csvNames && inv.csvNames.indexOf(
+    EdmSyntheticQualtricsFixture.FILENAME
+  ) >= 0);
+  var blockers = EdmProductionActivation.diagnoseActivationBlockers({
+    triggerCount: triggers.length,
+    triggerHandlers: handlers,
+    inboxCsvCount: inv.ok ? inv.csvCount : -1,
+    ledgerFirstJobSuccess: ledgerFirst.ok,
+    duplicateGuardOk: duplicateGuardOk
+  });
+  var state = {
+    ingestEnabled: props.getProperty(EdmProperties.INGEST_ENABLED) === 'true',
+    deleteSuccessfulSource:
+      props.getProperty(EdmProperties.DELETE_SUCCESSFUL_SOURCE) === 'true',
+    triggerCount: triggers.length,
+    triggerHandlers: handlers,
+    inboxCsvCount: inv.ok ? inv.csvCount : -1,
+    ledgerFirstJobSuccess: ledgerFirst.ok,
+    duplicateBlockedOnInbox: duplicateBlocked,
+    syntheticInInbox: syntheticInInbox,
+    activationBlockers: blockers
+  };
+  var logLine = EdmProductionActivation.buildDebugStateLine(state);
+  Logger.log(logLine);
+  return { ok: true, logLine: logLine };
 }
 
 /**

@@ -90,11 +90,117 @@ var EdmProductionActivation = (function () {
     ].join(' ');
   }
 
+  /**
+   * @param {Object} report
+   * @return {string}
+   */
+  function failureMessage(report) {
+    return 'EDM Qualtrics V1 activation failed phase=' + (report.phase || '') +
+      ' reason=' + (report.message || 'unknown');
+  }
+
+  /**
+   * Assert final report postconditions (after activation run).
+   *
+   * @param {Object} report
+   */
+  function assertReportPostconditions(report) {
+    if (!report.ok) {
+      throw new Error(failureMessage(report));
+    }
+    var post = report.post || {};
+    if (!post.ingestEnabled) {
+      throw new Error('postcondition failed: ingestEnabled');
+    }
+    if (!post.deleteSuccessfulSource) {
+      throw new Error('postcondition failed: deleteSuccessfulSource');
+    }
+    if (post.triggerCount !== 1) {
+      throw new Error('postcondition failed: triggerCount');
+    }
+    var handlers = post.triggerHandlers || [];
+    if (handlers.indexOf(SCHEDULE_HANDLER) < 0) {
+      throw new Error('postcondition failed: scheduleHandler');
+    }
+    var inv = report.postInbox || {};
+    if (inv.csvCount !== 0) {
+      throw new Error('postcondition failed: inboxCsvCount');
+    }
+  }
+
+  /**
+   * Editor entry: log sanitized summary; throw on failure (visible red execution).
+   *
+   * @param {Object} report
+   * @return {Object} report when successful
+   */
+  function finishEditorActivation(report) {
+    var summary = buildLogSummary(report);
+    Logger.log(summary);
+    if (!report.ok) {
+      throw new Error(failureMessage(report));
+    }
+    assertReportPostconditions(report);
+    return report;
+  }
+
+  /**
+   * @param {Object} state sanitized runtime snapshot
+   * @return {string}
+   */
+  function buildDebugStateLine(state) {
+    return [
+      'EdmDebugProductionActivationState',
+      'ingestEnabled=' + !!state.ingestEnabled,
+      'deleteSuccessfulSource=' + !!state.deleteSuccessfulSource,
+      'triggerCount=' + (state.triggerCount != null ? state.triggerCount : 0),
+      'triggerHandlers=' + ((state.triggerHandlers || []).join('|') || 'none'),
+      'inboxCsvCount=' + (state.inboxCsvCount != null ? state.inboxCsvCount : '?'),
+      'ledgerFirstJobSuccess=' + !!state.ledgerFirstJobSuccess,
+      'duplicateBlockedOnInbox=' + (state.duplicateBlockedOnInbox == null
+        ? 'n/a'
+        : !!state.duplicateBlockedOnInbox),
+      'syntheticInInbox=' + !!state.syntheticInInbox,
+      'activationBlockers=' + ((state.activationBlockers || []).join(',') || 'none')
+    ].join(' ');
+  }
+
+  /**
+   * Read-only diagnosis matching activation preflight (no mutations).
+   *
+   * @param {Object} state
+   * @return {string[]}
+   */
+  function diagnoseActivationBlockers(state) {
+    var blockers = [];
+    var triggerCount = state.triggerCount || 0;
+    var handlers = state.triggerHandlers || [];
+    if (triggerCount > 0) {
+      var onlySchedule = triggerCount === 1 && handlers[0] === SCHEDULE_HANDLER;
+      if (!onlySchedule) {
+        blockers.push('unexpected_trigger');
+      }
+    }
+    if (state.inboxCsvCount === 0) {
+      if (!state.ledgerFirstJobSuccess) {
+        blockers.push('empty_inbox_no_ledger_success');
+      }
+    } else if (!state.duplicateGuardOk) {
+      blockers.push('duplicate_guard_failed');
+    }
+    return blockers;
+  }
+
   return {
     SCHEDULE_HANDLER: SCHEDULE_HANDLER,
     setProductionScriptProperties: setProductionScriptProperties,
     verifiedSourceRemovalResult: verifiedSourceRemovalResult,
     evaluateActivationSuccess: evaluateActivationSuccess,
-    buildLogSummary: buildLogSummary
+    buildLogSummary: buildLogSummary,
+    failureMessage: failureMessage,
+    assertReportPostconditions: assertReportPostconditions,
+    finishEditorActivation: finishEditorActivation,
+    buildDebugStateLine: buildDebugStateLine,
+    diagnoseActivationBlockers: diagnoseActivationBlockers
   };
 })();

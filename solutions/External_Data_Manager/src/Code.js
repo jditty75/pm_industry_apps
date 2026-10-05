@@ -46,6 +46,7 @@ function processQualtricsInboxNow(options) {
 
   try {
     var props = PropertiesService.getScriptProperties();
+    ensureEdmBootstrapFromDrive_(props);
     var inboxId = props.getProperty(EdmProperties.QUALTRICS_INBOX_FOLDER_ID);
     if (!inboxId) {
       return { ok: false, message: 'QUALTRICS_INBOX_FOLDER_ID not configured' };
@@ -170,6 +171,37 @@ function isDeleteSuccessfulSourceEnabled_() {
  * @param {string} [csvText]
  * @return {Object}
  */
+/**
+ * One-time import of Script Properties from Drive bootstrap JSON (shared-drive safe).
+ * @param {Object} props
+ */
+function ensureEdmBootstrapFromDrive_(props) {
+  if (props.getProperty(EdmProperties.QUALTRICS_INBOX_FOLDER_ID)) {
+    return;
+  }
+  var iter = DriveApp.searchFiles(
+    'title = "edm-v1b-bootstrap.json" and mimeType = "application/json" and trashed = false'
+  );
+  while (iter.hasNext()) {
+    var file = iter.next();
+    try {
+      var config = JSON.parse(file.getBlob().getDataAsString('utf-8'));
+      if (!config || !config.QUALTRICS_INBOX_FOLDER_ID) {
+        continue;
+      }
+      props.setProperties(config, false);
+      if (!props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID)) {
+        EdmSetup.ensureAuditLedger();
+      }
+      file.setTrashed(true);
+      Logger.log('ensureEdmBootstrapFromDrive_: imported bootstrap properties');
+      return;
+    } catch (e) {
+      Logger.log('ensureEdmBootstrapFromDrive_: invalid bootstrap skipped');
+    }
+  }
+}
+
 function runQualtricsV1aHarness(csvText) {
   if (!csvText) {
     return {

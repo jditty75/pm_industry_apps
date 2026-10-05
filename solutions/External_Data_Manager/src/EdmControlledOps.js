@@ -654,13 +654,21 @@ function runEdmQualtricsV1ProductionActivation(config) {
   }
 
   var inboxBefore = runEdmQualtricsInboxInventory();
+  report.inboxBeforeSyntheticRemoval = inboxBefore;
+
+  report.phase = 'synthetic_cleanup';
+  report.syntheticCleanup = runEdmRemoveSyntheticQualtricsFromInbox();
+
+  var inboxAfterSynthetic = runEdmQualtricsInboxInventory();
+  report.inboxAfterSynthetic = inboxAfterSynthetic;
+
   report.phase = 'duplicate_guard';
-  if (inboxBefore.csvCount === 0) {
+  if (inboxAfterSynthetic.csvCount === 0) {
     report.duplicateGuard = runEdmVerifyFirstRealJobInLedger_(config.expectedChecksumPrefix);
     report.sourceCleanup = {
       ok: true,
       disposition: 'ALREADY_EMPTY',
-      inbox: inboxBefore
+      inbox: inboxAfterSynthetic
     };
   } else {
     report.duplicateGuard = runEdmVerifyInboxSuccessfulSourceDuplicateGuard(
@@ -683,9 +691,6 @@ function runEdmQualtricsV1ProductionActivation(config) {
     report.message = 'first real job not confirmed in ledger';
     return report;
   }
-
-  report.phase = 'synthetic_cleanup';
-  report.syntheticCleanup = runEdmRemoveSyntheticQualtricsFromInbox();
 
   report.phase = 'properties';
   var props = PropertiesService.getScriptProperties();
@@ -757,12 +762,14 @@ function runEdmDebugProductionActivationState() {
   var syntheticInInbox = !!(inv.csvNames && inv.csvNames.indexOf(
     EdmSyntheticQualtricsFixture.FILENAME
   ) >= 0);
+  var syntheticOnlyInbox = inv.ok && inv.csvCount === 1 && syntheticInInbox;
   var blockers = EdmProductionActivation.diagnoseActivationBlockers({
     triggerCount: triggers.length,
     triggerHandlers: handlers,
     inboxCsvCount: inv.ok ? inv.csvCount : -1,
     ledgerFirstJobSuccess: ledgerFirst.ok,
-    duplicateGuardOk: duplicateGuardOk
+    duplicateGuardOk: duplicateGuardOk,
+    syntheticOnlyInbox: syntheticOnlyInbox
   });
   var state = {
     ingestEnabled: props.getProperty(EdmProperties.INGEST_ENABLED) === 'true',

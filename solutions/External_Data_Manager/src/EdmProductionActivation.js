@@ -8,6 +8,33 @@ var EdmProductionActivation = (function () {
   var SCHEDULE_HANDLER = 'runQualtricsInboxScheduled';
 
   /**
+   * Inbox CSV names after removing only the known EDM synthetic fixture (exact match).
+   *
+   * @param {string[]} csvNames
+   * @param {string} syntheticFileName from EdmSyntheticQualtricsFixture.FILENAME
+   * @return {string[]}
+   */
+  function filterInboxAfterSyntheticRemoval(csvNames, syntheticFileName) {
+    return (csvNames || []).filter(function (name) {
+      return name !== syntheticFileName;
+    });
+  }
+
+  /**
+   * @param {number} csvCountAfterSynthetic
+   * @param {boolean} ledgerFirstJobSuccess
+   * @return {'empty_inbox_ledger_verified'|'empty_inbox_missing_ledger'|'production_source_inbox'}
+   */
+  function preflightPathAfterSyntheticRemoval(csvCountAfterSynthetic, ledgerFirstJobSuccess) {
+    if (csvCountAfterSynthetic === 0) {
+      return ledgerFirstJobSuccess
+        ? 'empty_inbox_ledger_verified'
+        : 'empty_inbox_missing_ledger';
+    }
+    return 'production_source_inbox';
+  }
+
+  /**
    * @param {Object} props PropertiesService script properties
    * @return {{ ingestEnabled: boolean, deleteSuccessfulSource: boolean, ok: boolean }}
    */
@@ -185,6 +212,8 @@ var EdmProductionActivation = (function () {
       if (!state.ledgerFirstJobSuccess) {
         blockers.push('empty_inbox_no_ledger_success');
       }
+    } else if (state.syntheticOnlyInbox && state.ledgerFirstJobSuccess) {
+      /* Activation removes known synthetic before duplicate guard; not a blocker. */
     } else if (!state.duplicateGuardOk) {
       blockers.push('duplicate_guard_failed');
     }
@@ -193,6 +222,8 @@ var EdmProductionActivation = (function () {
 
   return {
     SCHEDULE_HANDLER: SCHEDULE_HANDLER,
+    filterInboxAfterSyntheticRemoval: filterInboxAfterSyntheticRemoval,
+    preflightPathAfterSyntheticRemoval: preflightPathAfterSyntheticRemoval,
     setProductionScriptProperties: setProductionScriptProperties,
     verifiedSourceRemovalResult: verifiedSourceRemovalResult,
     evaluateActivationSuccess: evaluateActivationSuccess,

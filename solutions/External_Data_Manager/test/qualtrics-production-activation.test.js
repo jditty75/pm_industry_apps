@@ -188,9 +188,91 @@ test('diagnoseActivationBlockers flags duplicate and trigger issues', () => {
       triggerHandlers: [],
       inboxCsvCount: 1,
       ledgerFirstJobSuccess: true,
-      duplicateGuardOk: false
+      duplicateGuardOk: false,
+      syntheticOnlyInbox: false
     }).indexOf('duplicate_guard_failed') >= 0
   );
+  const noBlockers = g.EdmProductionActivation.diagnoseActivationBlockers({
+    triggerCount: 0,
+    triggerHandlers: [],
+    inboxCsvCount: 1,
+    ledgerFirstJobSuccess: true,
+    duplicateGuardOk: false,
+    syntheticOnlyInbox: true
+  });
+  assert.equal(noBlockers.length, 0);
+});
+
+test('live state: synthetic-only inbox preflight after fixture removal', () => {
+  const g = loadEdmGlobals();
+  const synthetic = 'synthetic-qualtrics-dryrun.csv';
+  const after = g.EdmProductionActivation.filterInboxAfterSyntheticRemoval(
+    [synthetic],
+    synthetic
+  );
+  assert.deepEqual(after, []);
+  assert.equal(
+    g.EdmProductionActivation.preflightPathAfterSyntheticRemoval(0, true),
+    'empty_inbox_ledger_verified'
+  );
+  assert.equal(
+    g.EdmProductionActivation.preflightPathAfterSyntheticRemoval(0, false),
+    'empty_inbox_missing_ledger'
+  );
+});
+
+test('non-synthetic inbox csv is not removed by synthetic cleanup filter', () => {
+  const g = loadEdmGlobals();
+  const synthetic = 'synthetic-qualtrics-dryrun.csv';
+  const customer = 'PGLandMDSSurveyDashboard-custom.csv';
+  const after = g.EdmProductionActivation.filterInboxAfterSyntheticRemoval(
+    [customer, synthetic],
+    synthetic
+  );
+  assert.deepEqual(after, [customer]);
+  assert.equal(
+    g.EdmProductionActivation.preflightPathAfterSyntheticRemoval(after.length, true),
+    'production_source_inbox'
+  );
+});
+
+test('expected activation end state for synthetic-only live inbox (no ingest during activation)', () => {
+  const g = loadEdmGlobals();
+  const propsStore = {};
+  const props = {
+    setProperty: (k, v) => {
+      propsStore[k] = v;
+    },
+    getProperty: (k) => propsStore[k]
+  };
+  assert.equal(propsStore[g.EdmProperties.INGEST_ENABLED], undefined);
+  const flags = g.EdmProductionActivation.setProductionScriptProperties(props);
+  assert.equal(flags.ingestEnabled, true);
+  assert.equal(flags.deleteSuccessfulSource, true);
+  const emptyRun = { ok: true, message: 'No CSV in Inbox' };
+  const postOperational = {
+    ingestEnabled: flags.ingestEnabled,
+    deleteSuccessfulSource: flags.deleteSuccessfulSource,
+    triggerCount: 1,
+    triggerHandlers: [g.EdmProductionActivation.SCHEDULE_HANDLER]
+  };
+  assert.equal(
+    g.EdmProductionActivation.evaluateActivationSuccess(
+      emptyRun,
+      postOperational,
+      { csvCount: 0 },
+      { ok: true }
+    ),
+    true
+  );
+  const finished = g.EdmProductionActivation.finishEditorActivation({
+    ok: true,
+    phase: 'complete',
+    message: 'EDM QUALTRICS V1 PRODUCTION ACTIVATION COMPLETE',
+    post: postOperational,
+    postInbox: { csvCount: 0 }
+  });
+  assert.equal(finished.ok, true);
 });
 
 test('buildDebugStateLine uses booleans and counts only', () => {

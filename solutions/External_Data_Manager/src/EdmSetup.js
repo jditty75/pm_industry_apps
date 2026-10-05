@@ -44,8 +44,22 @@ var EdmSetup = (function () {
     );
   }
 
+  /**
+   * @param {string} externalDataParentFolderId
+   * @return {Object}
+   */
+  function setupQualtricsResponsesDriveFolders(externalDataParentFolderId) {
+    var props = PropertiesService.getScriptProperties();
+    return EdmQualtricsDriveSetup.setupResponsesAndPersist(
+      externalDataParentFolderId,
+      props,
+      DriveApp
+    );
+  }
+
   return {
     setupQualtricsDriveFolders: setupQualtricsDriveFolders,
+    setupQualtricsResponsesDriveFolders: setupQualtricsResponsesDriveFolders,
     ensureAuditLedger: ensureAuditLedger,
     setDestinationSpreadsheetId: setDestinationSpreadsheetId
   };

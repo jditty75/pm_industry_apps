@@ -8,6 +8,7 @@ var EdmQualtricsDriveSetup = (function () {
   var QUALTRICS_SEGMENT = 'Qualtrics';
   var CHILD_INBOX = 'Inbox';
   var CHILD_FAILED = 'Failed';
+  var CHILD_RESPONSES = 'Responses';
 
   /**
    * @param {Object} parentFolder Drive folder
@@ -71,12 +72,50 @@ var EdmQualtricsDriveSetup = (function () {
     return ids;
   }
 
+  /**
+   * Idempotent: External Data/Qualtrics/Responses/Inbox + Responses/Failed.
+   * Does not alter production InFlight Inbox/Failed siblings.
+   *
+   * @param {string} externalDataParentFolderId
+   * @param {Object} driveApp
+   * @return {{ qualtricsFolderId: string, responsesFolderId: string, inboxId: string, failedId: string }}
+   */
+  function ensureQualtricsResponsesFolders(externalDataParentFolderId, driveApp) {
+    var parent = driveApp.getFolderById(externalDataParentFolderId);
+    var qualtricsId = findOrCreateChild_(parent, QUALTRICS_SEGMENT);
+    var qualtricsFolder = driveApp.getFolderById(qualtricsId);
+    var responsesId = findOrCreateChild_(qualtricsFolder, CHILD_RESPONSES);
+    var responsesFolder = driveApp.getFolderById(responsesId);
+    return {
+      qualtricsFolderId: qualtricsId,
+      responsesFolderId: responsesId,
+      inboxId: findOrCreateChild_(responsesFolder, CHILD_INBOX),
+      failedId: findOrCreateChild_(responsesFolder, CHILD_FAILED)
+    };
+  }
+
+  /**
+   * @param {string} parentFolderId
+   * @param {Object} props
+   * @param {Object} driveApp
+   * @return {Object}
+   */
+  function setupResponsesAndPersist(parentFolderId, props, driveApp) {
+    var ids = ensureQualtricsResponsesFolders(parentFolderId, driveApp);
+    props.setProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID, ids.inboxId);
+    props.setProperty(EdmProperties.QUALTRICS_RESPONSES_FAILED_FOLDER_ID, ids.failedId);
+    return ids;
+  }
+
   return {
     QUALTRICS_SEGMENT: QUALTRICS_SEGMENT,
     CHILD_INBOX: CHILD_INBOX,
     CHILD_FAILED: CHILD_FAILED,
+    CHILD_RESPONSES: CHILD_RESPONSES,
     ensureQualtricsPipelineFolders: ensureQualtricsPipelineFolders,
+    ensureQualtricsResponsesFolders: ensureQualtricsResponsesFolders,
     setupAndPersist: setupAndPersist,
+    setupResponsesAndPersist: setupResponsesAndPersist,
     findUniqueChildByName_: findUniqueChildByName_
   };
 })();

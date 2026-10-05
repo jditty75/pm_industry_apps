@@ -11970,6 +11970,209 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function _csatResponsesContractPropertyKey_(cfg) {
+    return 'CSAT_RESPONSES_CONTRACT:' + (cfg.appId || 'DHM');
+  }
+
+  /**
+   * Idempotent CSAT_Responses sheet bootstrap (headers only; no data import).
+   *
+   * @param {AppConfig} config
+   * @param {Object=} context { spreadsheetId }
+   * @return {Object}
+   */
+  function bootstrapCsatResponsesStorage(config, context) {
+    context = context || {};
+    var cfg = CoreConfig.withDefaults(config);
+
+    function runBootstrap_() {
+      var ss = getSpreadsheet_();
+      var sheetName = (cfg.sheets && cfg.sheets.csatResponses) ||
+        CoreCsatResponses.SHEET_NAME_DEFAULT;
+      var cols = CoreCsatResponses.CSAT_RESPONSES_COLUMNS;
+      var sheet = ss.getSheetByName(sheetName);
+      var created = false;
+      if (!sheet) {
+        sheet = ss.insertSheet(sheetName);
+        sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
+        sheet.setFrozenRows(1);
+        created = true;
+      } else {
+        var hdr = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+        var assess = CoreCsatResponses.assessStorageHeaderState(hdr);
+        if (assess.state === 'incompatible') {
+          return {
+            success: false,
+            created: false,
+            sheetName: sheetName,
+            contractVersion: CoreCsatResponses.CONTRACT_VERSION,
+            columnCount: cols.length,
+            message: 'incompatible_existing_schema',
+            errors: assess.errors
+          };
+        }
+        if (assess.state === 'missing' || !CoreCsatResponses.verifyHeaders(hdr).ok) {
+          sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
+          sheet.setFrozenRows(1);
+        }
+      }
+      var commentCols = ['comment_reasons', 'comment_improve', 'comment_working_well', 'comment_additional'];
+      var maxRows = sheet.getMaxRows();
+      commentCols.forEach(function (name) {
+        var idx = cols.indexOf(name);
+        if (idx >= 0) {
+          sheet.getRange(1, idx + 1, maxRows, idx + 1).setNumberFormat('@');
+        }
+      });
+      PropertiesService.getScriptProperties().setProperty(
+        _csatResponsesContractPropertyKey_(cfg),
+        CoreCsatResponses.CONTRACT_VERSION
+      );
+      var dataRowCount = Math.max(0, sheet.getLastRow() - 1);
+      return {
+        success: true,
+        created: created,
+        sheetName: sheetName,
+        contractVersion: CoreCsatResponses.CONTRACT_VERSION,
+        columnCount: cols.length,
+        dataRowCount: dataRowCount,
+        message: created ? 'sheet_created' : 'sheet_verified'
+      };
+    }
+
+    try {
+      var result = context.spreadsheetId
+        ? _runWithOptionalSpreadsheetId_(context.spreadsheetId, runBootstrap_)
+        : runBootstrap_();
+      Logger.log('CoreData.bootstrapCsatResponsesStorage [' + cfg.appId + ']: ' + result.message);
+      return result;
+    } catch (e) {
+      Logger.log('CoreData.bootstrapCsatResponsesStorage: failed appId=' + cfg.appId + ': ' + e);
+      return {
+        success: false,
+        message: 'bootstrap_failed',
+        contractVersion: CoreCsatResponses.CONTRACT_VERSION
+      };
+    }
+  }
+
+  /**
+   * Read-only eligibility summary for canonical CSAT Responses rows (counts only).
+   *
+   * @param {AppConfig} config
+   * @param {Object[]} canonicalRows
+   * @param {Object=} context { spreadsheetId }
+   * @return {Object}
+   */
+  function previewCsatResponsesEligibility(config, canonicalRows, context) {
+    context = context || {};
+    var cfg = CoreConfig.withDefaults(config);
+
+    function runPreview_() {
+      var eligibleIds = _csatResponsesEligibleDeploymentIds_(cfg);
+      var universeSize = Object.keys(eligibleIds).length;
+      var prepared = CoreCsatResponses.filterAndPrepareInbound(
+        canonicalRows || [],
+        eligibleIds,
+        {
+          canonicalId: _canonicalId_,
+          hashFn: _sha256Hex_,
+          jobId: 'preview',
+          nowIso: new Date().toISOString()
+        }
+      );
+      return {
+        success: true,
+        contractVersion: CoreCsatResponses.CONTRACT_VERSION,
+        totalInput: prepared.totalInput,
+        eligible: prepared.eligible.length,
+        excluded: prepared.excluded,
+        rejected: prepared.rejected,
+        deploymentUniverseSize: universeSize
+      };
+    }
+
+    try {
+      return context.spreadsheetId
+        ? _runWithOptionalSpreadsheetId_(context.spreadsheetId, runPreview_)
+        : runPreview_();
+    } catch (e) {
+      Logger.log('CoreData.previewCsatResponsesEligibility: failed appId=' + cfg.appId + ': ' + e);
+      return { success: false, message: 'preview_failed' };
+    }
+  }
+
+  /**
+   * Sanitized storage verification (counts/metadata only).
+   *
+   * @param {AppConfig} config
+   * @param {Object=} context { spreadsheetId }
+   * @return {Object}
+   */
+  function verifyCsatResponsesStorage(config, context) {
+    context = context || {};
+    var cfg = CoreConfig.withDefaults(config);
+
+    function runVerify_() {
+      var sheet = _getCsatResponsesSheet_(cfg);
+      if (!sheet) {
+        return { success: false, message: 'sheet_missing' };
+      }
+      var cols = CoreCsatResponses.CSAT_RESPONSES_COLUMNS;
+      var hdr = sheet.getRange(1, 1, 1, cols.length).getValues()[0];
+      var headerCheck = CoreCsatResponses.verifyHeaders(hdr);
+      var rows = _readCsatResponsesRows_(cfg);
+      var ids = {};
+      var dup = 0;
+      var revDist = { one: 0, gtOne: 0 };
+      rows.forEach(function (r) {
+        var id = String(r.response_id || '').trim();
+        if (!id) {
+          return;
+        }
+        if (ids[id]) {
+          dup++;
+        }
+        ids[id] = true;
+        var rev = Number(r.revision) || 1;
+        if (rev <= 1) {
+          revDist.one++;
+        } else {
+          revDist.gtOne++;
+        }
+      });
+      var forbiddenCols = ['respondent_email', 'respondent_name', 'contact_email'];
+      var forbiddenPresent = forbiddenCols.some(function (c) {
+        return hdr.indexOf(c) >= 0;
+      });
+      return {
+        success: headerCheck.ok,
+        contractVersion: CoreCsatResponses.CONTRACT_VERSION,
+        headerOk: headerCheck.ok,
+        rowCount: rows.length,
+        uniqueResponseIds: Object.keys(ids).length,
+        duplicateResponseIds: dup,
+        revisionDistribution: revDist,
+        forbiddenColumnsPresent: forbiddenPresent,
+        message: 'counts_only'
+      };
+    }
+
+    try {
+      return context.spreadsheetId
+        ? _runWithOptionalSpreadsheetId_(context.spreadsheetId, runVerify_)
+        : runVerify_();
+    } catch (e) {
+      Logger.log('CoreData.verifyCsatResponsesStorage: failed: ' + e);
+      return { success: false, message: 'verify_failed' };
+    }
+  }
+
+  /**
    * Historical upsert into CSAT_Responses with verify + restore on failure.
    * @param {AppConfig} cfg
    * @param {Object[]} inboundEligible
@@ -15821,6 +16024,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // V2.8: CSAT in-flight surveys + unified tab payload
     ingestCsatInFlight:          ingestCsatInFlight,
     ingestCsatResponses:         ingestCsatResponses,
+    bootstrapCsatResponsesStorage: bootstrapCsatResponsesStorage,
+    previewCsatResponsesEligibility: previewCsatResponsesEligibility,
+    verifyCsatResponsesStorage:  verifyCsatResponsesStorage,
     uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,
     getCsatTabDataForUI:         getCsatTabDataForUI,
     getDistributionLogDataForUI: getDistributionLogDataForUI,

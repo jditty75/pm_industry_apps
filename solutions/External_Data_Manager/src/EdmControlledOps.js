@@ -73,6 +73,11 @@ function runEdmVerifyOperationalState() {
     deleteSuccessfulSource: props.getProperty(EdmProperties.DELETE_SUCCESSFUL_SOURCE) === 'true',
     qualtricsInboxConfigured: inboxConfigured,
     qualtricsFailedConfigured: failedConfigured,
+    qualtricsResponsesInboxConfigured:
+      !!props.getProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID),
+    qualtricsResponsesFailedConfigured:
+      !!props.getProperty(EdmProperties.QUALTRICS_RESPONSES_FAILED_FOLDER_ID),
+    responsesIngestEnabled: props.getProperty(EdmProperties.RESPONSES_INGEST_ENABLED) === 'true',
     auditLedgerConfigured: ledgerConfigured,
     destinationsResolved: destConfigured,
     triggerCount: triggers.length,
@@ -96,7 +101,11 @@ function runEdmVerifyScriptProperties() {
     EdmProperties.DEST_SLG_DM_SPREADSHEET_ID,
     EdmProperties.DEST_HENP_DM_SPREADSHEET_ID,
     EdmProperties.INGEST_ENABLED,
-    EdmProperties.DELETE_SUCCESSFUL_SOURCE
+    EdmProperties.DELETE_SUCCESSFUL_SOURCE,
+    EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID,
+    EdmProperties.QUALTRICS_RESPONSES_FAILED_FOLDER_ID,
+    EdmProperties.RESPONSES_INGEST_ENABLED,
+    EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE
   ];
   var status = {};
   keys.forEach(function (k) {
@@ -810,6 +819,121 @@ function runEdmVerifyFirstRealJobInLedger_(expectedChecksumPrefix) {
     ledgerSuccessMatches: successes.length,
     checksumPrefix: prefix.slice(0, 16)
   };
+}
+
+/**
+ * @param {Object[]} rows canonical csat-response rows
+ * @param {string} logicalAppId
+ * @return {Object[]}
+ */
+function filterCanonicalRowsForDestination_(rows, logicalAppId) {
+  var cfg = QualtricsResponsesRoutingConfig.getActiveConfig();
+  var route = null;
+  for (var i = 0; i < cfg.routes.length; i++) {
+    var r = cfg.routes[i];
+    for (var j = 0; j < (r.destinations || []).length; j++) {
+      if (r.destinations[j].appId === logicalAppId && r.destinations[j].enabled) {
+        route = r;
+        break;
+      }
+    }
+    if (route) {
+      break;
+    }
+  }
+  if (!route) {
+    return [];
+  }
+  var field = route.match.field;
+  var value = route.match.value;
+  return (rows || []).filter(function (row) {
+    return row[field] === value;
+  });
+}
+
+/**
+ * Idempotent Responses Inbox/Failed under Qualtrics/Responses (does not touch InFlight folders).
+ * @param {string} parentFolderId External Data parent folder
+ * @return {Object}
+ */
+function runEdmSetupQualtricsResponsesDrive(parentFolderId) {
+  if (!parentFolderId) {
+    return { ok: false, message: 'parentFolderId required' };
+  }
+  var ids = EdmSetup.setupQualtricsResponsesDriveFolders(parentFolderId);
+  return {
+    ok: true,
+    responsesInboxConfigured: !!ids.inboxId,
+    responsesFailedConfigured: !!ids.failedId,
+    responsesSegmentConfigured: !!ids.responsesFolderId
+  };
+}
+
+/**
+ * Bootstrap CSAT_Responses headers in one destination workbook (no row import).
+ * @param {string} logicalAppId HC_DM|SLG_DM|HENP_DM
+ * @return {Object}
+ */
+function runEdmBootstrapCsatResponsesStorage(logicalAppId) {
+  if (!logicalAppId) {
+    return { ok: false, message: 'logicalAppId required' };
+  }
+  var coreLib = typeof CoreLib !== 'undefined' ? CoreLib : null;
+  if (!coreLib || !coreLib.CoreData || !coreLib.CoreData.bootstrapCsatResponsesStorage) {
+    return { ok: false, message: 'CoreLib.bootstrapCsatResponsesStorage unavailable' };
+  }
+  var props = PropertiesService.getScriptProperties();
+  var spreadsheetId = EdmDestinationRegistry.resolveSpreadsheetId(logicalAppId, props);
+  if (!spreadsheetId) {
+    return { ok: false, message: 'destination spreadsheet not configured' };
+  }
+  var rawCfg = EdmDmConfigResolver.resolve(logicalAppId);
+  var cfg = coreLib.CoreConfig.withDefaults(rawCfg);
+  var result = coreLib.CoreData.bootstrapCsatResponsesStorage(cfg, { spreadsheetId: spreadsheetId });
+  return Object.assign({ ok: !!result.success, destinationId: logicalAppId }, result);
+}
+
+/**
+ * Read-only eligibility counts for routed rows in the Responses Inbox (no writes).
+ * @param {string} logicalAppId
+ * @return {Object}
+ */
+function runEdmPreviewCsatResponsesEligibility(logicalAppId) {
+  if (!logicalAppId) {
+    return { ok: false, message: 'logicalAppId required' };
+  }
+  var props = PropertiesService.getScriptProperties();
+  var inboxId = props.getProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID);
+  if (!inboxId) {
+    return { ok: false, message: 'Responses Inbox not configured' };
+  }
+  var candidate = EdmQualtricsInbox.findCandidateCsv(inboxId, null, DriveApp);
+  if (!candidate) {
+    return { ok: false, message: 'No CSV in Responses Inbox' };
+  }
+  var csvText = EdmQualtricsInbox.readCsvText(candidate.file);
+  var built = QualtricsResponsesTransform.transformCsvText(csvText);
+  if (!built.ok) {
+    return { ok: false, message: 'transform_failed' };
+  }
+  var sliceRows = filterCanonicalRowsForDestination_(built.rows, logicalAppId);
+  var coreLib = typeof CoreLib !== 'undefined' ? CoreLib : null;
+  if (!coreLib || !coreLib.CoreData || !coreLib.CoreData.previewCsatResponsesEligibility) {
+    return { ok: false, message: 'CoreLib.previewCsatResponsesEligibility unavailable' };
+  }
+  var spreadsheetId = EdmDestinationRegistry.resolveSpreadsheetId(logicalAppId, props);
+  var rawCfg = EdmDmConfigResolver.resolve(logicalAppId);
+  var cfg = coreLib.CoreConfig.withDefaults(rawCfg);
+  var preview = coreLib.CoreData.previewCsatResponsesEligibility(cfg, sliceRows, {
+    spreadsheetId: spreadsheetId
+  });
+  return Object.assign({
+    ok: !!preview.success,
+    destinationId: logicalAppId,
+    routedCandidateRows: sliceRows.length,
+    sourceRowCount: built.sourceRowCount,
+    canonicalRowCount: built.rows.length
+  }, preview);
 }
 
 function runEdmV1bControlledInfrastructureSetup(

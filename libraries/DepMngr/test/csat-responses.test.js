@@ -90,3 +90,10 @@ test('formula-like comment prefixed on sheet write', () => {
   const t = C.prepareTextForSheetWrite('=1+1');
   assert.equal(t.charAt(0), "'");
 });
+
+test('storage header assess detects incompatible schema', () => {
+  const bad = C.assessStorageHeaderState(['wrong']);
+  assert.equal(bad.state, 'incompatible');
+  const good = C.assessStorageHeaderState(C.CSAT_RESPONSES_COLUMNS);
+  assert.equal(good.state, 'compatible');
+});

@@ -275,6 +275,21 @@ var CoreCsatResponses = (function () {
    * @param {Object[]} existingRows sheet rows as objects
    * @return {Object.<string, { rowIndex: number, row_hash: string, revision: number, row: Object }>}
    */
+  /**
+   * @param {string[]} headerRow
+   * @return {{ state: string, errors: string[] }}
+   */
+  function assessStorageHeaderState(headerRow) {
+    if (!headerRow || headerRow.length === 0) {
+      return { state: 'missing', errors: [] };
+    }
+    var verify = verifyHeaders(headerRow);
+    if (verify.ok) {
+      return { state: 'compatible', errors: [] };
+    }
+    return { state: 'incompatible', errors: verify.errors };
+  }
+
   function indexExistingByResponseId(existingRows) {
     var map = {};
     (existingRows || []).forEach(function (row, idx) {
@@ -305,6 +320,7 @@ var CoreCsatResponses = (function () {
     planUpsert: planUpsert,
     rowToStorageArray: rowToStorageArray,
     verifyHeaders: verifyHeaders,
-    indexExistingByResponseId: indexExistingByResponseId
+    indexExistingByResponseId: indexExistingByResponseId,
+    assessStorageHeaderState: assessStorageHeaderState
   };
 })();

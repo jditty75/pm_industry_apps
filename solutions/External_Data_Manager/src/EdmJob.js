@@ -5,8 +5,6 @@
 var EdmJob = (function () {
   'use strict';
 
-  var JobStatus = EdmJobTypes.JobStatus;
-
   /**
    * @param {string} pipelineId
    * @param {EdmJobTypes.EdmSourceMetadata} sourceMeta
@@ -19,7 +17,7 @@ var EdmJob = (function () {
     return {
       jobId: id,
       pipelineId: pipelineId,
-      status: JobStatus.RECEIVED,
+      status: EdmJobTypes.JobStatus.RECEIVED,
       source: Object.assign({ pipelineId: pipelineId }, sourceMeta),
       createdAt: now,
       updatedAt: now,

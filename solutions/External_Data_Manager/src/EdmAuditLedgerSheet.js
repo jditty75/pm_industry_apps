@@ -7,15 +7,26 @@ var EdmAuditLedgerSheet = (function () {
 
   var SHEET_NAME = 'EdmJobLedger';
 
-  /** @type {string[]} */
-  var EXTENDED_HEADERS = EdmAuditLedger.LEDGER_HEADERS.concat([
-    'source_disposition',
-    'git_sha',
-    'override_flags',
-    'hc_eligible',
-    'slg_eligible',
-    'henp_eligible'
-  ]);
+  /** @type {string[]|null} */
+  var extendedHeadersMemo_ = null;
+
+  /**
+   * Lazy: EdmAuditLedger must be initialized first (GAS file order is not guaranteed).
+   * @return {string[]}
+   */
+  function extendedHeaders_() {
+    if (!extendedHeadersMemo_) {
+      extendedHeadersMemo_ = EdmAuditLedger.LEDGER_HEADERS.concat([
+        'source_disposition',
+        'git_sha',
+        'override_flags',
+        'hc_eligible',
+        'slg_eligible',
+        'henp_eligible'
+      ]);
+    }
+    return extendedHeadersMemo_;
+  }
 
   /**
    * @param {Object} spreadsheetApp
@@ -24,7 +35,7 @@ var EdmAuditLedgerSheet = (function () {
   function createLedgerSpreadsheet(spreadsheetApp) {
     var ss = spreadsheetApp.create('External Data Manager — Job Ledger');
     var sheet = ss.getSheets()[0].setName(SHEET_NAME);
-    sheet.getRange(1, 1, 1, EXTENDED_HEADERS.length).setValues([EXTENDED_HEADERS]);
+    sheet.getRange(1, 1, 1, extendedHeaders_().length).setValues([extendedHeaders_()]);
     sheet.setFrozenRows(1);
     return ss.getId();
   }
@@ -50,11 +61,11 @@ var EdmAuditLedgerSheet = (function () {
     if (lastRow < 2) {
       return [];
     }
-    var width = EXTENDED_HEADERS.length;
+    var width = extendedHeaders_().length;
     var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
     return values.map(function (row) {
       var obj = {};
-      EXTENDED_HEADERS.forEach(function (h, i) {
+      extendedHeaders_().forEach(function (h, i) {
         obj[h] = row[i];
       });
       return obj;
@@ -95,7 +106,9 @@ var EdmAuditLedgerSheet = (function () {
 
   return {
     SHEET_NAME: SHEET_NAME,
-    EXTENDED_HEADERS: EXTENDED_HEADERS,
+    get EXTENDED_HEADERS() {
+      return extendedHeaders_();
+    },
     createLedgerSpreadsheet: createLedgerSpreadsheet,
     openLedger: openLedger,
     readAllJobs: readAllJobs,

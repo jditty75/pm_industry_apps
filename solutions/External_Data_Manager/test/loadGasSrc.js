@@ -35,10 +35,37 @@ const FILES = [
 ];
 
 /**
+ * All .js files under src/ (relative paths), sorted like typical GAS filename order.
+ * @return {string[]}
+ */
+function listAllEdmSrcJsFiles() {
+  /** @param {string} dir @return {string[]} */
+  function walk(dir) {
+    const out = [];
+    for (const name of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, name.name);
+      if (name.isDirectory()) {
+        out.push(...walk(full));
+      } else if (name.isFile() && name.name.endsWith('.js')) {
+        out.push(path.relative(SRC, full).split(path.sep).join('/'));
+      }
+    }
+    return out;
+  }
+  return walk(SRC).sort((a, b) => {
+    const baseCmp = path.basename(a).localeCompare(path.basename(b));
+    if (baseCmp !== 0) {
+      return baseCmp;
+    }
+    return a.localeCompare(b);
+  });
+}
+
+/**
  * @return {Record<string, unknown>}
  */
-function loadEdmGlobals() {
-  const sandbox = {
+function createEdmSandbox() {
+  return {
     console,
     Date,
     Math,
@@ -68,16 +95,40 @@ function loadEdmGlobals() {
       }
     }
   };
+}
 
+/**
+ * Load EDM globals in an explicit file order (simulates Apps Script load order).
+ * @param {string[]} relPaths relative paths under src/
+ * @return {Record<string, unknown>}
+ */
+function loadEdmGlobalsInFileOrder(relPaths) {
+  const sandbox = createEdmSandbox();
   vm.createContext(sandbox);
-  for (const rel of FILES) {
+  for (const rel of relPaths) {
     const code = fs.readFileSync(path.join(SRC, rel), 'utf8');
     vm.runInContext(code, sandbox, { filename: rel });
   }
-  sandbox.EdmChecksum.sha256Hex = function (text) {
-    return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
-  };
+  if (sandbox.EdmChecksum) {
+    sandbox.EdmChecksum.sha256Hex = function (text) {
+      return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+    };
+  }
   return sandbox;
 }
 
-module.exports = { loadEdmGlobals, SRC };
+/**
+ * @return {Record<string, unknown>}
+ */
+function loadEdmGlobals() {
+  return loadEdmGlobalsInFileOrder(FILES);
+}
+
+module.exports = {
+  loadEdmGlobals,
+  loadEdmGlobalsInFileOrder,
+  listAllEdmSrcJsFiles,
+  createEdmSandbox,
+  FILES,
+  SRC
+};

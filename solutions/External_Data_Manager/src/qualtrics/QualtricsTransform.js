@@ -5,8 +5,15 @@
 var QualtricsTransform = (function () {
   'use strict';
 
-  var schema = QualtricsSchema;
-  var csv = QualtricsCsv;
+  /** @return {typeof QualtricsSchema} */
+  function schema_() {
+    return QualtricsSchema;
+  }
+
+  /** @return {typeof QualtricsCsv} */
+  function csv_() {
+    return QualtricsCsv;
+  }
 
   var EPOCH_MS = Date.UTC(1970, 0, 1, 0, 0, 0, 0);
 
@@ -146,7 +153,7 @@ var QualtricsTransform = (function () {
     headers.forEach(function (h) {
       headerSet[h] = true;
     });
-    var missing = schema.SOURCE_COLUMNS.filter(function (col) {
+    var missing = schema_().SOURCE_COLUMNS.filter(function (col) {
       return !headerSet[col];
     });
     return missing;
@@ -162,7 +169,7 @@ var QualtricsTransform = (function () {
       headerSet[h] = true;
     });
     return headers.filter(function (h) {
-      return schema.SOURCE_COLUMNS.indexOf(h) < 0;
+      return schema_().SOURCE_COLUMNS.indexOf(h) < 0;
     });
   }
 
@@ -172,8 +179,8 @@ var QualtricsTransform = (function () {
    */
   function mapRawRow(raw) {
     var out = {};
-    schema.SOURCE_COLUMNS.forEach(function (src) {
-      out[schema.COLMAP[src]] = raw[src] != null ? raw[src] : '';
+    schema_().SOURCE_COLUMNS.forEach(function (src) {
+      out[schema_().COLMAP[src]] = raw[src] != null ? raw[src] : '';
     });
     return out;
   }
@@ -183,13 +190,13 @@ var QualtricsTransform = (function () {
    * @return {Object}
    */
   function standardizeRow(row) {
-    schema.FLAG_COLS.forEach(function (c) {
+    schema_().FLAG_COLS.forEach(function (c) {
       row[c] = toBool(row[c]);
     });
-    schema.TS_COLS.forEach(function (c) {
+    schema_().TS_COLS.forEach(function (c) {
       row[c] = parseUtcTimestamp(row[c]);
     });
-    schema.SCORE_COLS.forEach(function (c) {
+    schema_().SCORE_COLS.forEach(function (c) {
       row[c] = toScore(row[c]);
     });
     row.tracking_status = trackingStatus(row);
@@ -205,7 +212,7 @@ var QualtricsTransform = (function () {
    * @return {Object[]}
    */
   function dedupeLatestPerContact(rows) {
-    if (schema.ROW_GRAIN !== 'latest_per_contact') {
+    if (schema_().ROW_GRAIN !== 'latest_per_contact') {
       return rows;
     }
     var sorted = rows.slice().sort(function (a, b) {
@@ -234,12 +241,12 @@ var QualtricsTransform = (function () {
    */
   function serializeRow(row) {
     var out = {};
-    schema.OUT_ORDER.forEach(function (col) {
-      if (schema.TS_COLS.indexOf(col) >= 0) {
+    schema_().OUT_ORDER.forEach(function (col) {
+      if (schema_().TS_COLS.indexOf(col) >= 0) {
         out[col] = formatUtcZ(row[col]);
       } else if (col === 'response_received') {
         out[col] = row.response_received ? 'Yes' : 'No';
-      } else if (schema.SCORE_COLS.indexOf(col) >= 0) {
+      } else if (schema_().SCORE_COLS.indexOf(col) >= 0) {
         out[col] = formatScore_(row[col]);
       } else {
         out[col] = row[col] == null ? '' : String(row[col]);
@@ -261,9 +268,9 @@ var QualtricsTransform = (function () {
    * }}
    */
   function buildCanonicalDataset(csvText) {
-    var matrix = csv.parseCsvText(csvText);
+    var matrix = csv_().parseCsvText(csvText);
     if (!matrix.length) {
-      throw new Error('Export schema changed. Missing columns: ' + schema.SOURCE_COLUMNS.join(', '));
+      throw new Error('Export schema changed. Missing columns: ' + schema_().SOURCE_COLUMNS.join(', '));
     }
     var headers = matrix[0];
     var missing = validateSchema(headers);
@@ -278,7 +285,7 @@ var QualtricsTransform = (function () {
     return {
       rows: rows,
       sourceRowCount: rawRows.length,
-      contractVersion: schema.NORMALIZED_CONTRACT_VERSION,
+      contractVersion: schema_().NORMALIZED_CONTRACT_VERSION,
       ignoredSourceColumns: ignoredSourceColumns
     };
   }

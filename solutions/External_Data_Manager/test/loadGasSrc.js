@@ -10,19 +10,28 @@ const SRC = path.join(__dirname, '..', 'src');
 
 const FILES = [
   'EdmJobTypes.js',
+  'EdmProperties.js',
+  'EdmDestinationRegistry.js',
+  'EdmDmConfigResolver.js',
   'EdmJob.js',
   'EdmChecksum.js',
   'EdmDuplicateGuard.js',
   'EdmLocking.js',
   'EdmDriveFolders.js',
   'EdmAuditLedger.js',
+  'EdmAuditLedgerSheet.js',
+  'EdmJobHistory.js',
+  'EdmQualtricsDriveSetup.js',
+  'EdmIngestAdapter.js',
   'qualtrics/QualtricsSchema.js',
   'qualtrics/QualtricsCsv.js',
   'qualtrics/QualtricsTransform.js',
   'qualtrics/QualtricsRoutingConfig.js',
   'qualtrics/QualtricsRoute.js',
   'qualtrics/QualtricsPipeline.js',
-  'EdmOrchestrator.js'
+  'EdmOrchestrator.js',
+  'EdmQualtricsProcessor.js',
+  'EdmQualtricsInbox.js'
 ];
 
 /**
@@ -45,6 +54,12 @@ function loadEdmGlobals() {
     Error,
     RegExp,
     Logger: { log: () => {} },
+    PropertiesService: {
+      getScriptProperties: () => ({
+        getProperty: () => null,
+        setProperty: () => {}
+      })
+    },
     Utilities: {
       DigestAlgorithm: { SHA_256: 'SHA_256' },
       Charset: { UTF_8: 'UTF_8' },

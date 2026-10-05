@@ -2,159 +2,136 @@
 
 Standalone Google Apps Script project for shared **external-data orchestration** (Qualtrics first, Capacity later). Lives at `solutions/External_Data_Manager`.
 
-## V1A scope (current)
+## V1B scope (current)
 
-| In scope | Out of scope (V1B+) |
-|----------|---------------------|
-| Job model, checksum, duplicate/stale guards, locking design | Production Drive folders |
-| Qualtrics CSV parse → validate → normalize → dedupe → route | Inbox polling / triggers |
-| Orchestrator stopping at `READY_FOR_INGESTION` | `clasp push`, deploy, remote GAS project |
-| Node tests + Python test oracle | HC/SLG/HENP workbook writes |
-| Design docs for audit ledger, Drive layout, deletion invariant | `ingestCsatInFlight` refactor in DepMngr |
+| In scope | Out of scope (until authorized) |
+|----------|----------------------------------|
+| Drive folder setup (idempotent) under `External Data/Qualtrics/Inbox` + `Failed` | Real Qualtrics ingest into HC/SLG/HENP production workbooks |
+| Destination registry (logical `HC_DM` / `SLG_DM` / `HENP_DM` → Script Properties) | DepMngr CoreLib version cut / consumer pin changes |
+| `processQualtricsInboxNow` + `runQualtricsInboxScheduled` (trigger **not installed**) | Scheduled trigger installation |
+| Dry-run default (`dryRun: true`) | Deleting successful Inbox sources (default **off**) |
+| Sheet-backed job audit ledger (counts/metadata only) | Production DM deployment |
 
-**Remote GAS:** V1A is **local only**. Before CLASP push, create a standalone Apps Script project (`clasp create --type standalone`), add local `.clasp.json` (gitignored), and set Script Properties when Drive is ready.
+**V1A** remains: local normalize/route tests, `EdmOrchestrator.processQualtricsCsvJob` (stops at `READY_FOR_INGESTION`).
 
-## Architecture
+## Architecture decision: EDM → DepMngr
 
 ```mermaid
 flowchart LR
-  subgraph v1a [V1A]
-    CSV[Qualtrics CSV text]
-    ORCH[EdmOrchestrator]
-    ADP[QualtricsPipeline adapter]
-    CSV --> ORCH --> ADP
-    ADP --> HC[Healthcare population]
-    ADP --> SL[SL ED population]
-  end
-  subgraph v1b [V1B future]
-    HC --> ING_HC[HC_DM ingest]
-    SL --> ING_SLG[SLG_DM ingest]
-    SL --> ING_HENP[HENP_DM ingest]
-  end
+  INBOX[Qualtrics Inbox CSV]
+  PROC[EdmQualtricsProcessor]
+  NORM[QualtricsPipeline]
+  REG[EdmDestinationRegistry]
+  ADP[EdmIngestAdapter]
+  DM[CoreLib.CoreData.ingestCsatInFlight]
+  WB[(Destination DM workbook)]
+  LED[Audit ledger Sheet]
+  INBOX --> PROC --> NORM
+  NORM --> REG
+  REG --> ADP --> DM --> WB
+  PROC --> LED
 ```
 
-**Routing (authoritative):**
+- **EDM** owns orchestration, Drive, checksum/duplicate/stale guards, locking, audit, routing config.
+- **DepMngr** owns tenant/deployment-universe filtering and `CSAT_InFlight` replacement (`ingestCsatInFlight`).
+- **Manual UI** still calls `uploadCsatInFlightCsvForUI` → parse CSV → same canonical ingest path.
+- **Library pin:** EDM `appsscript.json` references `CoreLib` with `developmentMode: true` until a numbered release includes `ingestCsatInFlight`. Ingest-enabled runs require that API on the executing library version.
+
+## Routing (authoritative)
 
 - Qualtrics `Sub Region` → normalized `app`
-- `US Healthcare` → **Healthcare** population → **HC_DM** at ingest
-- `US SLED` → **SLED** population → **SLG_DM** and **HENP_DM** (same normalized rows; DepMngr tenant filter per workbook)
+- `US Healthcare` → **healthcare** population → **HC_DM**
+- `US SLED` → **sled** population → **SLG_DM** + **HENP_DM** (same rows; DepMngr filters per workbook)
 
-Do not route Healthcare to HENP.
+Healthcare is not routed to HENP. Routing lives in `QualtricsRoutingConfig`, not the normalizer.
 
-## Normalization vs routing (Qualtrics)
-
-| Layer | Responsibility | Hardcodes DM apps? |
-|-------|----------------|------------------|
-| `QualtricsTransform.buildCanonicalDataset` | Required COLMAP columns, ignore extra source columns, dedupe, `OUT_ORDER` contract | **No** |
-| `QualtricsRoutingConfig` | Route rules: match normalized field → `populationId` → destination `appId` list | **Config only** (default ships HC/SLG/HENP mapping) |
-| `QualtricsRoute` | Validate rows are routable; build population slices + destination plan | **No** |
-| `QualtricsPipeline` | `validateSource` → `transform` → `route` | **No** |
-
-**Extend without redesigning the normalizer:**
-
-- **Add application X:** append a `destinations` entry on the relevant route (or add a route).
-- **Route Industry Y to application Z:** add a route with `match: { field: 'customer_segment', op: 'equals', value: 'Y' }` and `destinations: [{ appId: 'Z_DM', ... }]`.
-- **New Qualtrics source column:** ignored until added to `QualtricsSchema.COLMAP` / `OUT_ORDER` intentionally.
-
-V1B may load routing config from Script Properties or a Sheet; V1A uses `QualtricsRoutingConfig.DEFAULT` in code.
-
-## Key modules
-
-| Area | Files |
-|------|--------|
-| Job lifecycle | `EdmJobTypes.js`, `EdmJob.js`, `EdmOrchestrator.js` |
-| Integrity | `EdmChecksum.js`, `EdmDuplicateGuard.js`, `EdmLocking.js` |
-| Drive (config only) | `EdmDriveFolders.js` |
-| Audit design | `EdmAuditLedger.js` |
-| Qualtrics normalize | `QualtricsTransform.js`, `QualtricsSchema.js` |
-| Qualtrics route config | `QualtricsRoutingConfig.js`, `QualtricsRoute.js`, `QualtricsPipeline.js` |
-
-## Script Properties (future)
+## Script Properties
 
 | Property | Purpose |
 |----------|---------|
-| `QUALTRICS_PARENT_FOLDER_ID` | Parent Qualtrics folder |
+| `EXTERNAL_DATA_PARENT_FOLDER_ID` | Parent `External Data` Drive folder |
 | `QUALTRICS_INBOX_FOLDER_ID` | Inbox drop folder |
 | `QUALTRICS_FAILED_FOLDER_ID` | Failed source retention |
+| `EDM_AUDIT_LEDGER_SPREADSHEET_ID` | Job ledger spreadsheet |
+| `EDM_DEST_HC_DM_SPREADSHEET_ID` | HC workbook id |
+| `EDM_DEST_SLG_DM_SPREADSHEET_ID` | SLG workbook id |
+| `EDM_DEST_HENP_DM_SPREADSHEET_ID` | HENP workbook id |
+| `EDM_QUALTRICS_INGEST_ENABLED` | Must be `true` for non–dry-run ingest |
+| `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` | Must be `true` to delete Inbox file after full success |
 
-`EdmDriveFolders.ensureQualtricsChildFolders` locates/creates **Inbox** and **Failed** under the parent. No default Archive; successful sources are **deleted** only after full ingest + verify + audit (see below).
+Never commit property **values** or `.clasp.json`.
 
-## Source file deletion invariant
+### One-time setup (GAS editor or API)
 
-A Qualtrics source file must **not** be deleted because transformation alone succeeded. Deletion requires:
+1. `EdmSetup.setupQualtricsDriveFolders('<parent External Data folder id>')`
+2. `EdmSetup.ensureAuditLedger()`
+3. Resolve destination spreadsheet IDs (read-only):  
+   `python solutions/External_Data_Manager/scripts/resolve-edm-destinations.py`  
+   then `EdmSetup.setDestinationSpreadsheetId('HC_DM', '...')` (etc.)
 
-1. Transform success  
-2. All intended destination ingestions success  
-3. Verification success  
-4. Job audit record persisted  
+### Remote GAS project
 
-V1A does not delete any Drive files.
+Create standalone project: `cd solutions/External_Data_Manager && clasp create --type standalone --title "External Data Manager"`  
+Add gitignored `.clasp.json`, then `npm run push` after local tests pass.
 
-## Duplicate / stale protection
+## Process Now / dry-run
 
-- **Checksum:** SHA-256 of source CSV text (`EdmChecksum`).
-- **Duplicate success:** same checksum as a prior `SUCCESS` job → reject (`DUPLICATE_SUCCESS_CHECKSUM`).
-- **Stale export:** if a reliable `exportTimestamp` is provided and is older than a newer successful job → reject (`STALE_AFTER_NEWER_SUCCESS`).
-- **Qualtrics CSV limitation:** exports may not include a trustworthy export timestamp; do not rely on Drive upload time alone when a source timestamp exists.
+```javascript
+// Default: dry-run (no workbook mutation, no delete)
+processQualtricsInboxNow({ dryRun: true });
 
-## Locking
+// Controlled validation on Drive (still no ingest unless enabled)
+processQualtricsInboxNow({ dryRun: false, ingestEnabled: false });
+```
 
-`EdmLocking.QUALTRICS_INGEST_LOCK_KEY` — future `LockService` around workbook mutations so scheduled runs and “Process Now” cannot race.
+Future trigger calls the same processor: `runQualtricsInboxScheduled()` — **do not install** until operations sign-off.
 
-## Audit ledger (V1B)
+## Duplicate / stale / concurrency
 
-Proposed: small Google Sheet owned by EDM with columns in `EdmAuditLedger.LEDGER_HEADERS` (job id, pipeline, checksum, counts, destination statuses, sanitized errors). No PII row payloads.
+- Script lock: `EdmLocking.QUALTRICS_INGEST_LOCK_KEY`
+- Duplicate successful checksum → reject (`DUPLICATE_SUCCESS_CHECKSUM`); override via `allowDuplicateOverride` (audited).
+- Stale export timestamp → reject when a newer successful job exists; override via `allowStaleOverride`.
+- Without trustworthy export timestamp, stale guard does not use Drive upload time.
 
-## Canonical ingest boundary (V1B)
+## Retry (partial failure)
 
-Today: `CoreData.uploadCsatInFlightCsvForUI(config, csvText)` (parse + tenant filter + sheet replace + backup + cache).
+Ingest is **replacement-based** per destination. On `PARTIAL_FAILURE`, retry with `processQualtricsInboxNow({ retryDestinationAppIds: ['HENP_DM'], ... })` (planned) or re-run full job when all destinations are idempotent-safe. Ledger stores per-destination status in `destination_statuses`.
 
-Target:
+## Source deletion invariant
 
-- `ingestCsatInFlight(config, normalizedRows, metadata)` — shared by manual UI and EDM.
-- `acquireSpreadsheet(config)` or explicit spreadsheet id for non–container-bound orchestrator.
+Deletion requires: validation + transform + **all** destination ingestions + verification + audit persist.  
+Default: `deleteSuccessfulSource` false and `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` unset/false.
 
-## Safer CSAT_InFlight replacement (design)
+## Safer CSAT_InFlight (DepMngr)
 
-Recommended V1B approach:
+`CoreData.ingestCsatInFlight` / `_replaceCsatInFlightSafely_`:
 
-1. Parse and validate entire payload in memory.  
-2. Acquire ingest lock.  
-3. Map rows to storage schema; tenant-filter.  
-4. Write to a **staging** range or sheet tab (or hold a single `setValues` payload).  
-5. Verify row/header counts on staging.  
-6. Replace `CSAT_InFlight` in one `setValues` (or swap staging → primary).  
-7. Backup raw CSV to Drive (existing pattern).  
-8. Clear caches only after successful write.  
-9. On failure, leave prior `CSAT_InFlight` untouched.
+1. Build full payload in memory  
+2. Document lock  
+3. Single `setValues` for header + rows; clear trailing rows only  
+4. Verify headers/row count; restore prior range on failure  
+5. Clear caches only after success  
 
-Avoid clear-then-write without a verified replacement buffer (current risk).
-
-## Triggers (design)
-
-- Time-driven: scan Inbox on schedule.  
-- Manual: `processQualtricsInboxNow()` (same processor).  
-- V1A: neither installed.
-
-## Notifications (V1B+)
-
-Replaceable status surface: success / failed / per-destination failure + user action (e.g. check Failed folder). No production email in V1A.
-
-## Capacity reuse
-
-Generic: job states, checksum, duplicate guard, locking keys pattern, orchestrator shape, audit row mapping. Add a `CapacityPipeline` adapter with its own validator/transformer; do not embed Qualtrics rules in `EdmJob*`.
+Optional explicit `context.spreadsheetId` for EDM; container UI uses active spreadsheet.
 
 ## Local tests
 
 ```powershell
 cd solutions/External_Data_Manager
-node test/fixtures/build-synthetic-fixture.js   # optional regenerate
 npm test
+
+cd libraries/DepMngr
+npm test
+
+python skills/gas-monorepo-engineer/scripts/preview_selftest.py
 ```
 
-Python equivalence uses `test/oracle/normalize_qualtrics_oracle.py` (pandas; CSV input). Behavioral reference: external `Qualtrics.py` (not in monorepo).
+## Production authorization boundary
+
+Code/infrastructure setup (EDM project, folders, ledger, properties, dry-run) is separate from **first real Qualtrics ingest** into HC/SLG/HENP. The latter requires explicit authorization after review.
 
 ## Related analysis
 
 - [Qualtrics discovery index](../analysis/external-data/qualtrics/README.md)
+- [Ingestion contract](../analysis/external-data/qualtrics/ingestion-contract.md)
 - [DM family](../analysis/dm-family/README.md)

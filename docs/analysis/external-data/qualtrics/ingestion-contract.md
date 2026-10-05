@@ -7,7 +7,7 @@
 | Markup | `libraries/DepMngr/src/CoreUI_Markup.js` | CSAT tab, dropzone, `survey_normalized_*.csv` hint |
 | Client JS | `libraries/DepMngr/src/CoreUI_Js.js` | `initCsatDropzone_`, `FileReader.readAsText`, `google.script.run.uploadCsatInFlightCsvForUI` |
 | Container wrapper | `solutions/SLG_DM/src/WebAppCode.js`, `solutions/HENP_DM/src/WebAppCode.js` | `CoreLib.CoreConfig.withDefaults(APP_CONFIG)` → `CoreLib.CoreData.uploadCsatInFlightCsvForUI(cfg, csvText)` |
-| Canonical ingest | `libraries/DepMngr/src/CoreData.js` | `uploadCsatInFlightCsvForUI`, `_parseCsatInFlightCsv_`, tenant filter, sheet write, backup, cache clear |
+| Canonical ingest | `libraries/DepMngr/src/CoreData.js` | `ingestCsatInFlight`, `uploadCsatInFlightCsvForUI` (UI parse → ingest), tenant filter, safe sheet replace, backup, cache clear |
 
 `viewModeOpts` is passed from the client but **not used** inside `uploadCsatInFlightCsvForUI` (only in `getCsatTabDataForUI`).
 

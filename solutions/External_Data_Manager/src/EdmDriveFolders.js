@@ -5,8 +5,7 @@
 var EdmDriveFolders = (function () {
   'use strict';
 
-  /** Parent Qualtrics folder; child Inbox + Failed created by setup (V1B+). */
-  var PROP_QUALTRICS_PARENT = 'QUALTRICS_PARENT_FOLDER_ID';
+  var PROP_QUALTRICS_PARENT = 'EXTERNAL_DATA_PARENT_FOLDER_ID';
   var PROP_QUALTRICS_INBOX = 'QUALTRICS_INBOX_FOLDER_ID';
   var PROP_QUALTRICS_FAILED = 'QUALTRICS_FAILED_FOLDER_ID';
 
@@ -36,8 +35,12 @@ var EdmDriveFolders = (function () {
    */
   function findOrCreateChild_(parentFolder, name, driveApp) {
     var it = parentFolder.getFoldersByName(name);
-    if (it.hasNext()) {
-      return it.next().getId();
+    var first = it.hasNext() ? it.next() : null;
+    if (first) {
+      if (it.hasNext()) {
+        throw new Error('Ambiguous Drive folder "' + name + '"');
+      }
+      return first.getId();
     }
     return parentFolder.createFolder(name).getId();
   }
@@ -54,7 +57,8 @@ var EdmDriveFolders = (function () {
         'verificationSuccess',
         'auditRecordPersisted'
       ],
-      v1aDeletesFiles: false
+      v1aDeletesFiles: false,
+      defaultDeleteSuccessfulSource: false
     };
   }
 

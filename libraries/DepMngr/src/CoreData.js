@@ -11595,6 +11595,21 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @return {{ written: number, verification: Object }}
    * @private
    */
+  /**
+   * Document lock for container-bound ingest; script lock when EDM opens a remote workbook.
+   * @return {GoogleAppsScript.Lock.Lock}
+   * @private
+   */
+  function _acquireCsatInFlightReplaceLock_() {
+    var lock = _spreadsheetIngestOverride_
+      ? LockService.getScriptLock()
+      : LockService.getDocumentLock();
+    if (!lock.tryLock(30000)) {
+      throw new Error('CoreData._replaceCsatInFlightSafely_: could not acquire lock');
+    }
+    return lock;
+  }
+
   function _replaceCsatInFlightSafely_(cfg, storageRows) {
     var sheet = _getOrCreateCsatInFlightSheet_(cfg);
     var cols = _CSAT_INFLIGHT_COLUMNS_;
@@ -11605,10 +11620,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       priorData = sheet.getRange(2, 1, priorLastRow, cols.length).getValues();
     }
 
-    var lock = LockService.getDocumentLock();
-    if (!lock.tryLock(30000)) {
-      throw new Error('CoreData._replaceCsatInFlightSafely_: could not acquire document lock');
-    }
+    var lock = _acquireCsatInFlightReplaceLock_();
     try {
       var fullMatrix = [cols].concat(matrix);
       sheet.getRange(1, 1, fullMatrix.length, cols.length).setValues(fullMatrix);
@@ -11873,12 +11885,15 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       ? (rows || [])
       : CoreCsatIngest.mapNormalizedQualtricsRowsToParsed(rows || []);
 
-    var built = _buildCsatStorageFromParsed_(cfg, parsedRows);
-    if (!built.storageRows.length && built.totalInput > 0) {
-      Logger.log('CoreData.ingestCsatInFlight: zero eligible rows for appId=' + cfg.appId);
-    }
-
-    var runIngest = function () {
+    /**
+     * Tenant filter and sheet writes must run with destination workbook bound (EDM external ingest).
+     * @return {{ built: Object, replaceResult: Object }}
+     */
+    function runIngestWithTenantContext_() {
+      var built = _buildCsatStorageFromParsed_(cfg, parsedRows);
+      if (!built.storageRows.length && built.totalInput > 0) {
+        Logger.log('CoreData.ingestCsatInFlight: zero eligible rows for appId=' + cfg.appId);
+      }
       if (metadata.backupCsvText && !metadata.skipBackup) {
         try {
           _backupCsatImport_(cfg, metadata.backupCsvText, metadata);
@@ -11889,27 +11904,33 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       var replaceResult = _replaceCsatInFlightSafely_(cfg, built.storageRows);
       _setCsatLastImportAt_(cfg);
       _clearCache(cfg);
-      return replaceResult;
-    };
+      return { built: built, replaceResult: replaceResult };
+    }
 
-    var replaceResult;
+    var ingestOutcome;
     try {
-      replaceResult = _runWithOptionalSpreadsheetId_(context.spreadsheetId, runIngest);
+      if (context.spreadsheetId) {
+        ingestOutcome = _runWithOptionalSpreadsheetId_(context.spreadsheetId, runIngestWithTenantContext_);
+      } else {
+        ingestOutcome = runIngestWithTenantContext_();
+      }
     } catch (e) {
       Logger.log('CoreData.ingestCsatInFlight: failed appId=' + cfg.appId + ': ' + e);
       return {
         success: false,
         imported: 0,
-        discarded: built.discarded,
-        totalInput: built.totalInput,
-        eligibleCount: built.matched,
+        discarded: 0,
+        totalInput: (parsedRows || []).length,
+        eligibleCount: 0,
         writtenCount: 0,
-        excludedCount: built.discarded,
+        excludedCount: 0,
         verification: { ok: false, error: String(e) },
         message: 'CSAT ingest failed: ' + e
       };
     }
 
+    var built = ingestOutcome.built;
+    var replaceResult = ingestOutcome.replaceResult;
     Logger.log('CoreData.ingestCsatInFlight [' + cfg.appId + ']: input=' + built.totalInput +
                ', written=' + replaceResult.written);
     return {

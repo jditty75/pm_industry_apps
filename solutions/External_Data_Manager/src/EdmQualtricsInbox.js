@@ -50,6 +50,12 @@ var EdmQualtricsInbox = (function () {
    */
   function moveToFailed(file, failedFolderId, driveApp) {
     var failed = driveApp.getFolderById(failedFolderId);
+    try {
+      file.moveTo(failed);
+      return;
+    } catch (moveErr) {
+      Logger.log('EdmQualtricsInbox.moveToFailed: moveTo failed: ' + moveErr);
+    }
     failed.addFile(file);
     var parents = file.getParents();
     while (parents.hasNext()) {

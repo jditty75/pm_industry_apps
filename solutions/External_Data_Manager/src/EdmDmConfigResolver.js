@@ -11,6 +11,8 @@ var EdmDmConfigResolver = (function () {
     deploymentsMeta: 'DeploymentsMeta',
     deploymentOverrides: 'DeploymentOverrides',
     sfdcDeploymentProductFunctions: 'SFDC_DeploymentProductFunctions',
+    deploymentContacts: 'SFDC_DeploymentContacts',
+    sfdcContacts: 'SFDC_DeploymentContacts',
     csatInFlight: 'CSAT_InFlight'
   };
 

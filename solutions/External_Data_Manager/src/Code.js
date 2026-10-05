@@ -86,8 +86,13 @@ function processQualtricsInboxNow(options) {
     if (!outcome.result.ok && !dryRun) {
       var failedId = props.getProperty(EdmProperties.QUALTRICS_FAILED_FOLDER_ID);
       if (failedId) {
-        EdmQualtricsInbox.moveToFailed(candidate.file, failedId, DriveApp);
-        disposition = 'FAILED';
+        try {
+          EdmQualtricsInbox.moveToFailed(candidate.file, failedId, DriveApp);
+          disposition = 'FAILED';
+        } catch (moveErr) {
+          Logger.log('processQualtricsInboxNow: moveToFailed skipped, source kept in Inbox: ' + moveErr);
+          disposition = 'INBOX';
+        }
       }
     } else if (outcome.deleteSourceAllowed) {
       EdmQualtricsInbox.deleteFile(candidate.file);

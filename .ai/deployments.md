@@ -2,6 +2,14 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — DepMngr CoreLib 145 (EDM external CSAT ingest) — library cut
+
+- Library: CoreLib **145** — tenant filter + sheet replace run under `spreadsheetId` override; script lock when EDM opens destination workbook
+- Consumer pin: **External_Data_Manager only** @145; **HC/SLG/HENP DM remain @144** (no DM deploy)
+- Root cause of failed first ingest @144: `_buildCsatStorageFromParsed_` ran before override (`getActiveSpreadsheet()` null); `getDocumentLock()` invalid from standalone EDM
+- EDM: shared-drive safe `moveToFailed` + keep source in Inbox when move fails
+- Result: pushed library + EDM HEAD; **re-run** `runEdmAuthorizedFirstRealIngestionNow()` in editor after pull
+
 ### 2026-10-05 — External_Data_Manager — first real Qualtrics ingest (attempt; editor)
 
 - Authorization: user (Authorize EDM Qualtrics V1 first real ingestion, 2026-10-05)

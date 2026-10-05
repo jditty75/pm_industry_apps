@@ -56,6 +56,7 @@ var CoreData = (function () {
     sfdcRows: null,           // result of readSfdcDeploymentsRaw_
     pfRows: null,             // result of readSfdcProductFunctionsRaw_
     effectiveByProduct: {},   // getAllEffectiveDeployments cache keyed by product chip
+    notableEligibleByProduct: {}, // getNotableEligibleDeployments cache keyed by product chip
     countByProduct: {},       // getActiveCountDeployments cache keyed by product chip
     historicalPfByProduct: {}, // getProductModeHistoricalPfRows_ cache
     metaMap: null,            // result of getDeploymentsMetaMap_
@@ -118,6 +119,7 @@ var CoreData = (function () {
     _cache.sfdcRows = null;
     _cache.pfRows = null;
     _cache.effectiveByProduct = {};
+    _cache.notableEligibleByProduct = {};
     _cache.countByProduct = {};
     _cache.historicalPfByProduct = {};
     _cache.metaMap = null;
@@ -549,6 +551,7 @@ var CoreData = (function () {
     _cache.sfdcRows = null;
     _cache.pfRows = null;
     _cache.effectiveByProduct = {};
+    _cache.notableEligibleByProduct = {};
     _cache.countByProduct = {};
     _cache.historicalPfByProduct = {};
     _cache.metaMap = null;
@@ -2925,6 +2928,170 @@ var CoreData = (function () {
 
     Logger.log('CoreData.buildEffectiveDeploymentsFromSfdc_: ' + effective.length + ' effective rows.');
     return effective;
+  }
+
+  /**
+   * SFDC-based effective deployments for Complete rows only (mirror of Active builder).
+   * Reads SFDC_Deployments, applies meta + overrides. Used for Notable eligible union.
+   *
+   * @param {AppConfig} config
+   * @return {Array<Object>}
+   * @private
+   */
+  function buildEffectiveCompleteDeploymentsFromSfdc_(config) {
+    var cfg = CoreConfig.withDefaults(config);
+    var statusValues = (cfg.salesforce && cfg.salesforce.statusValues) || {};
+    var completeStatus = statusValues.complete || 'Complete';
+
+    var sfdcRows = [];
+    try {
+      sfdcRows = readSfdcDeploymentsRaw_(cfg);
+    } catch (err) {
+      Logger.log('CoreData.buildEffectiveCompleteDeploymentsFromSfdc_: read failed: ' + err);
+      return [];
+    }
+    sfdcRows = sfdcRows.filter(function (r) {
+      return !r.overallStatus || r.overallStatus === completeStatus;
+    });
+    if (!sfdcRows || sfdcRows.length === 0) return [];
+
+    var completeRaw = sfdcRows.filter(function (r) {
+      var st = String(r.status || '').trim();
+      var os = String(r.overallStatus || '').trim();
+      if (os === completeStatus) return true;
+      return st === completeStatus;
+    });
+
+    if (completeRaw.length === 0) {
+      Logger.log('CoreData.buildEffectiveCompleteDeploymentsFromSfdc_: no Complete rows after status filter.');
+      return [];
+    }
+
+    var metaMap = getDeploymentsMetaMap_(cfg);
+    var overridesMap = getDeploymentOverridesMap_(cfg);
+
+    var effective = completeRaw.map(function (r, index) {
+      var meta = metaMap[r.deploymentId] || {};
+      var base = Object.assign({}, r, {
+        rowIndex: index + 2,
+        deliveryDirector: meta.deliveryDirector || '',
+        ddNotes: meta.ddNotes || '',
+        metaUsername: meta.username || '',
+        metaTimestamp: meta.timestamp || ''
+      });
+      return buildEffectiveDeploymentRow_(base, overridesMap);
+    }).filter(function (r) {
+      return !!(r && r.deploymentId && (r.accountName || r.deploymentName));
+    });
+
+    Logger.log('CoreData.buildEffectiveCompleteDeploymentsFromSfdc_: ' + effective.length + ' complete rows.');
+    return effective;
+  }
+
+  /**
+   * 15-char Deployment ID prefix used for Notable peer joins (matches CoreNotable).
+   *
+   * @param {string} deploymentId
+   * @return {string}
+   * @private
+   */
+  function _notableDeploymentShortId_(deploymentId) {
+    return String(deploymentId || '').trim().slice(0, 15);
+  }
+
+  /**
+   * Merges Active and Complete effective deployment rows for Notable matching.
+   * Active rows win when the same 15-char Deployment ID exists in both sources.
+   *
+   * @param {Array<Object>} activeRows
+   * @param {Array<Object>} completeRows
+   * @return {{ rows: Array<Object>, resolutionByShortId: Object<string, string> }}
+   * @private
+   */
+  function mergeNotableEligibleDeployments_(activeRows, completeRows) {
+    var map = {};
+    var order = [];
+    var resolutionByShortId = {};
+
+    function addRow(row, source) {
+      var shortId = _notableDeploymentShortId_(row && row.deploymentId);
+      if (!shortId) return;
+      if (map[shortId]) {
+        if (source === 'active') {
+          map[shortId] = row;
+        }
+        resolutionByShortId[shortId] = 'active_and_complete_overlap_active_wins';
+        return;
+      }
+      map[shortId] = row;
+      resolutionByShortId[shortId] = source;
+      order.push(shortId);
+    }
+
+    (activeRows || []).forEach(function (r) { addRow(r, 'active'); });
+    (completeRows || []).forEach(function (r) { addRow(r, 'complete'); });
+
+    var rows = order.map(function (id) { return map[id]; });
+    return { rows: rows, resolutionByShortId: resolutionByShortId };
+  }
+
+  /**
+   * Active ∪ Complete effective deployments for Notable peer-sheet joins.
+   * Deduplicated by 15-char Deployment ID; Active record wins on overlap.
+   *
+   * @param {AppConfig} config
+   * @param {Object=} productOpts
+   * @return {Array<Object>}
+   */
+  function getNotableEligibleDeployments(config, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
+    var cacheKey = String(pa);
+    if (_cache.notableEligibleByProduct && _cache.notableEligibleByProduct[cacheKey]) {
+      return _cache.notableEligibleByProduct[cacheKey];
+    }
+
+    var active = getAllEffectiveDeployments(cfg, productOpts) || [];
+    var complete = [];
+    try {
+      complete = buildEffectiveCompleteDeploymentsFromSfdc_(cfg) || [];
+    } catch (err) {
+      Logger.log('CoreData.getNotableEligibleDeployments: complete path threw: ' + err);
+      complete = [];
+    }
+    complete = _attachDdContactsToRows_(complete, cfg);
+    complete = filterDeploymentsByProduct_(complete, pa, cfg);
+
+    var merged = mergeNotableEligibleDeployments_(active, complete);
+    var eligible = merged.rows;
+
+    if (!_cache.notableEligibleByProduct) _cache.notableEligibleByProduct = {};
+    _cache.notableEligibleByProduct[cacheKey] = eligible;
+    Logger.log('CoreData.getNotableEligibleDeployments: active=' + active.length +
+               ', complete=' + complete.length + ', merged=' + eligible.length);
+    return eligible;
+  }
+
+  /**
+   * Read-only map of Notable eligible deployment resolution by 15-char Deployment ID.
+   * Values: active | complete | active_and_complete_overlap_active_wins
+   *
+   * @param {AppConfig} config
+   * @param {Object=} productOpts
+   * @return {Object<string, string>}
+   */
+  function debugNotableEligibleResolutionByShortId(config, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var pa = (productOpts && productOpts.product) || 'all';
+    var active = getAllEffectiveDeployments(cfg, productOpts) || [];
+    var complete = [];
+    try {
+      complete = buildEffectiveCompleteDeploymentsFromSfdc_(cfg) || [];
+    } catch (err) {
+      Logger.log('CoreData.debugNotableEligibleResolutionByShortId: complete path threw: ' + err);
+    }
+    complete = filterDeploymentsByProduct_(complete, pa, cfg);
+    return mergeNotableEligibleDeployments_(active, complete).resolutionByShortId;
   }
 
   /**
@@ -15195,6 +15362,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Phase 1 surface — preserved unchanged for backward compatibility
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
+    getNotableEligibleDeployments:       getNotableEligibleDeployments,
+    debugNotableEligibleResolutionByShortId: debugNotableEligibleResolutionByShortId,
     getActiveCountDeployments:           getActiveCountDeployments,
     buildOverrideFootnote_:                buildOverrideFootnote_,
     buildOverrideImpactContext_:           buildOverrideImpactContext_,

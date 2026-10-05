@@ -5,8 +5,8 @@
  *
  * Responsibilities:
  *  - Read notable deployment rows from Mariah's shared peer sheet.
- *  - Join peer rows with each app's effective (local) deployments on
- *    15-character Deployment ID prefix.
+ *  - Join peer rows with each app's Notable-eligible deployments (Active ∪
+ *    Complete, deduplicated by Deployment ID) on 15-character ID prefix.
  *  - Allow power users to add new notable rows or update existing ones
  *    (10 editable fields only).
  *  - Write audit entries to OverrideAudit in the current app spreadsheet.
@@ -42,7 +42,7 @@ var CoreNotable = (function () {
 
   /**
    * Returns an array of notable deployments for this app, joining Mariah's
-   * peer sheet with the app's effective deployments on 15-char Deployment ID
+   * peer sheet with the app's Notable-eligible deployments on 15-char Deployment ID
    * prefix match.
    *
    * Sorting: Region Restricted rows last, then accountName ascending.
@@ -58,7 +58,7 @@ var CoreNotable = (function () {
   Logger.log('CoreNotable.getNotableForApp: reading peer sheet for app ' + cfg.appId);
 
   var peerRows = readPeerSheet_(cfg);
-  var localDeployments = CoreData.getAllEffectiveDeployments(cfg);
+  var localDeployments = CoreData.getNotableEligibleDeployments(cfg);
   // S1: exclude Student deployments from Notable view (HENP only).
   localDeployments = CoreData.filterDeploymentsByStudent_(localDeployments, 'exclude', cfg);
   Logger.log('CoreNotable.getNotableForApp: peerRows=' + peerRows.length +
@@ -238,7 +238,7 @@ var CoreNotable = (function () {
     }
 
     // Verify deployment exists in this app's effective deployments.
-    var localDeployments = CoreData.getAllEffectiveDeployments(cfg);
+    var localDeployments = CoreData.getNotableEligibleDeployments(cfg);
     var localRow = null;
     for (var i = 0; i < localDeployments.length; i++) {
       var lid = String(localDeployments[i].deploymentId || '').trim();
@@ -717,7 +717,9 @@ var CoreNotable = (function () {
     _clearNotableCache(config);
     var cfg = CoreConfig.withDefaults(config);
     var peerRows = readPeerSheet_(cfg);
-    var localDeployments = CoreData.getAllEffectiveDeployments(cfg);
+    var activeDeployments = CoreData.getAllEffectiveDeployments(cfg) || [];
+    var resolutionByShortId = CoreData.debugNotableEligibleResolutionByShortId(cfg) || {};
+    var localDeployments = CoreData.getNotableEligibleDeployments(cfg);
     localDeployments = CoreData.filterDeploymentsByStudent_(localDeployments, 'exclude', cfg);
 
     var localMap = {};
@@ -789,7 +791,8 @@ var CoreNotable = (function () {
           accountName: String(peer['Customer (Account) Name'] || ''),
           validationStatus: valStatus,
           peerRowIndex: peer._rowIndex || 0,
-          regionalOwner: String(peer['Regional Owner or Delegate'] || '')
+          regionalOwner: String(peer['Regional Owner or Delegate'] || ''),
+          localResolutionSource: resolutionByShortId[peerId.slice(0, 15)] || 'active'
         });
       }
     }
@@ -819,6 +822,9 @@ var CoreNotable = (function () {
       var local = peerShortId ? localMap[peerShortId] : null;
       var valStatus = peer ? String(peer['Data Validation Status'] || '').trim() : '';
       var joinIncluded = !!(peer && local);
+      var localResolutionSource = peerShortId && local
+        ? (resolutionByShortId[peerShortId] || 'unresolved')
+        : 'unresolved';
       var isRestricted = valStatus === restrictedStatus;
       var hiddenByRestrictedToggle = joinIncluded && isRestricted && restrictedHideEnabled;
       var reason = '';
@@ -850,6 +856,7 @@ var CoreNotable = (function () {
         localOverallStatus: local ? String(local.overallStatus || local.status || '') : '',
         localMtpDate: local ? (local.mtpDate || local.currentMtpDate || '') : '',
         joinIncluded: joinIncluded,
+        localResolutionSource: localResolutionSource,
         hiddenByRestrictedToggle: hiddenByRestrictedToggle,
         reason: reason
       };
@@ -867,6 +874,8 @@ var CoreNotable = (function () {
       peerRowCount: peerRows.length,
       peerRowsWithDeploymentIdCount: peerRowsWithDeploymentIdCount,
       localEffectiveDeploymentCount: localDeployments.length,
+      localActiveEffectiveDeploymentCount: activeDeployments.length,
+      localNotableEligibleDeploymentCount: localDeployments.length,
       localDuplicateShortIdCount: localDuplicateShortIds.length,
       joinedRowCount: notableDtoCount,
       matchedRowCount: reasonCounts.joined,

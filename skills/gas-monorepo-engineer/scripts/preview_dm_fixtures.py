@@ -26,6 +26,7 @@ SCENARIOS = (
     "go-live-window",
     "edge-values",
     "volume",
+    "notable-active-complete",
 )
 
 SYNTHETIC_ACCOUNTS = [
@@ -129,6 +130,11 @@ def _industry_rows_mixed() -> list[dict[str, Any]]:
 
 
 def deployments_for_scenario(scenario: str) -> list[dict[str, Any]]:
+    if scenario == "notable-active-complete":
+        from preview_dm_notable import notable_active_complete_fixture
+
+        active, _complete, _peers = notable_active_complete_fixture()
+        return active
     if scenario == "empty":
         return []
     if scenario == "at-risk":
@@ -327,11 +333,18 @@ def build_all_scenarios_bundle(app_id: str, default_scenario: str) -> dict[str, 
 def build_m1_responses(app_id: str, scenario: str) -> dict[str, Any]:
     scenario = scenario if scenario in SCENARIOS else "mixed-health"
     profile = load_app_profiles().get(app_id, {})
-    if profile.get("productMode"):
+    complete_deployments: list[dict[str, Any]] | None = None
+    if scenario == "notable-active-complete":
+        from preview_dm_notable import notable_active_complete_fixture
+
+        active, complete_only, _peers = notable_active_complete_fixture()
+        rows = active
+        complete_deployments = complete_only
+    elif profile.get("productMode"):
         rows = product_mode_deployments_for_scenario(app_id, scenario)
     else:
         rows = deployments_for_scenario(scenario)
-    return {
+    payload: dict[str, Any] = {
         "scenario": scenario,
         "appId": app_id,
         "identityBoot": _load_json("identity-boot.json"),
@@ -340,6 +353,9 @@ def build_m1_responses(app_id: str, scenario: str) -> dict[str, Any]:
         "overview": overview_from_rows(rows, scenario),
         "markerAccount": "Example County",
     }
+    if complete_deployments is not None:
+        payload["completeDeployments"] = complete_deployments
+    return payload
 
 
 def build_dm_mock_script(app_id: str, scenario: str) -> str:

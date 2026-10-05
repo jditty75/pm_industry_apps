@@ -265,4 +265,27 @@ def assert_scenario_expectations(scenario: str, bundle: dict[str, Any]) -> list[
         if totals.get("red", 0) + totals.get("yellow", 0) < totals.get("green", 0) + 1:
             issues.append("at-risk should have more red+yellow than green")
         return issues
+    if scenario == "notable-active-complete":
+        from preview_dm_notable import NOTABLE_SCENARIO_IDS
+
+        notable = bundle.get("notableDeployments") or []
+        ids = {str(r.get("deploymentId") or "") for r in notable if isinstance(r, dict)}
+        if NOTABLE_SCENARIO_IDS["active_only"] not in ids:
+            issues.append("notable-active-complete must include active-only notable row")
+        if NOTABLE_SCENARIO_IDS["complete_only"] not in ids:
+            issues.append("notable-active-complete must include complete-only notable row")
+        if NOTABLE_SCENARIO_IDS["transition"] not in ids:
+            issues.append("notable-active-complete must include transitioned deployment row")
+        if NOTABLE_SCENARIO_IDS["complete_no_peer"] in ids:
+            issues.append("notable-active-complete must not surface complete-without-peer row")
+        overlap = [r for r in notable if r.get("deploymentId") == NOTABLE_SCENARIO_IDS["overlap"]]
+        if len(overlap) > 1:
+            issues.append("notable-active-complete overlap id must appear once")
+        if len(overlap) == 1 and (overlap[0].get("local") or {}).get("health") != "Yellow":
+            issues.append("notable-active-complete overlap must prefer active health (Yellow)")
+        if NOTABLE_SCENARIO_IDS["unresolved_peer"] in ids:
+            issues.append("notable-active-complete must exclude unresolved peer without local")
+        if len(notable) < 4:
+            issues.append("notable-active-complete needs enough rows for layout testing")
+        return issues
     return issues

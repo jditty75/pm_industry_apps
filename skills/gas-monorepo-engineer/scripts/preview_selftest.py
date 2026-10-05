@@ -31,6 +31,7 @@ DM_APPS = [
 ]
 
 DM_SCENARIOS = ("mixed-health", "empty", "at-risk", "go-live-window")
+NOTABLE_DM_APPS = ("SLG_DM", "HC_DM", "HENP_DM")
 
 PRODUCTION_URL_RE = re.compile(
     r"https://script\.google\.com/macros/s/|googleapis\.com/auth",
@@ -73,6 +74,23 @@ def main():
     failed = 0
     built_files: dict[str, str] = {}
 
+    notable_selftest = os.path.join(os.path.dirname(__file__), "preview_dm_notable_selftest.py")
+    if os.path.isfile(notable_selftest):
+        import subprocess
+
+        r = subprocess.run(
+            [sys.executable, notable_selftest],
+            cwd=os.path.dirname(notable_selftest),
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            print("FAIL preview_dm_notable_selftest.py")
+            print(r.stdout or r.stderr)
+            failed += 1
+        else:
+            print((r.stdout or "").strip() or "PASS preview_dm_notable_selftest.py")
+
     smoke = os.path.join(os.path.dirname(__file__), "preview_dm_runtime_smoke.mjs")
     if os.path.isfile(smoke):
         import subprocess
@@ -113,6 +131,21 @@ def main():
                 continue
             built_files[label] = os.path.basename(path)
             print(f"PASS {label}: {len(html)} chars")
+
+    for app in NOTABLE_DM_APPS:
+        label = f"{app}:notable-active-complete"
+        path, _log, html = build_app(app, scenario="notable-active-complete")
+        _apath, app_meta = resolve_app_path(app)
+        ok, issues = validate_built_preview(app_meta or {"appId": app}, html)
+        dm_issues = assert_dm_html(app, html, "notable-active-complete")
+        if not ok or dm_issues:
+            print(f"FAIL {label}: validation")
+            for i in issues + dm_issues:
+                print(f"  - {i}")
+            failed += 1
+            continue
+        built_files[label] = os.path.basename(path)
+        print(f"PASS {label}: {len(html)} chars")
 
     if failed:
         sys.exit(1)

@@ -101,7 +101,9 @@ var EdmAuditLedgerSheet = (function () {
   function appendJob(sheet, job, extras) {
     var row = jobToExtendedRow(job, extras);
     var next = sheet.getLastRow() + 1;
-    sheet.getRange(next, 1, next, row.length).setValues([row]);
+    var numCols = row.length;
+    // SpreadsheetApp: getRange(row, column, numRows, numColumns) — not end row/column.
+    sheet.getRange(next, 1, 1, numCols).setValues([row]);
   }
 
   return {

@@ -30,6 +30,7 @@ const FILES = [
   'qualtrics/QualtricsRoute.js',
   'qualtrics/QualtricsPipeline.js',
   'EdmOrchestrator.js',
+  'EdmProductionActivation.js',
   'EdmQualtricsProcessor.js',
   'EdmQualtricsInbox.js'
 ];

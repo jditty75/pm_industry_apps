@@ -591,8 +591,9 @@ function runEdmRemoveVerifiedProcessedInboxSource(expectedChecksumPrefix) {
   }
   EdmQualtricsInbox.deleteFile(candidate.file);
   var inventory = runEdmQualtricsInboxInventory();
+  var removal = EdmProductionActivation.verifiedSourceRemovalResult(verify.inboxFileName);
   return {
-    ok: inventory.csvCount === 0,
+    ok: removal.ok,
     disposition: 'TRASHED_VERIFIED_PROCESSED_SOURCE',
     removedFileName: verify.inboxFileName,
     inbox: inventory
@@ -688,12 +689,11 @@ function runEdmQualtricsV1ProductionActivation(config) {
 
   report.phase = 'properties';
   var props = PropertiesService.getScriptProperties();
-  props.setProperty(EdmProperties.INGEST_ENABLED, 'true');
-  props.setProperty(EdmProperties.DELETE_SUCCESSFUL_SOURCE, 'true');
-  report.properties = {
-    ingestEnabled: true,
-    deleteSuccessfulSource: true
-  };
+  report.properties = EdmProductionActivation.setProductionScriptProperties(props);
+  if (!report.properties.ok) {
+    report.message = 'production script properties read-back failed';
+    return report;
+  }
 
   report.phase = 'trigger';
   report.trigger = runEdmInstallQualtricsInboxScheduleTrigger(config.scheduleMinutes || 15);
@@ -706,22 +706,20 @@ function runEdmQualtricsV1ProductionActivation(config) {
   report.emptyInboxRun = runQualtricsInboxScheduled();
   report.auditTail = runEdmAuditLedgerTailSummary(1);
   report.post = runEdmVerifyOperationalState();
+  report.postInbox = runEdmQualtricsInboxInventory();
 
-  var emptyOk = report.emptyInboxRun &&
-    report.emptyInboxRun.ok === true &&
-    report.emptyInboxRun.message === 'No CSV in Inbox';
-  report.ok = emptyOk &&
-    report.post.ingestEnabled &&
-    report.post.deleteSuccessfulSource &&
-    report.post.triggerCount === 1 &&
-    report.post.triggerHandlers.indexOf(EDM_QUALTRICS_SCHEDULE_HANDLER_) >= 0 &&
-    report.sourceCleanup.inbox &&
-    report.sourceCleanup.inbox.csvCount === 0;
+  report.ok = EdmProductionActivation.evaluateActivationSuccess(
+    report.emptyInboxRun,
+    report.post,
+    report.postInbox,
+    report.trigger
+  );
 
   report.phase = 'complete';
   report.message = report.ok
     ? 'EDM QUALTRICS V1 PRODUCTION ACTIVATION COMPLETE'
     : 'activation post-verify failed';
+  Logger.log(EdmProductionActivation.buildLogSummary(report));
   return report;
 }
 

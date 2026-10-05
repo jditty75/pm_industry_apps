@@ -451,6 +451,315 @@ function runEdmQualtricsDryRunTwice() {
  * @param {string} henpSpreadsheetId
  * @return {Object}
  */
+var EDM_QUALTRICS_SCHEDULE_HANDLER_ = 'runQualtricsInboxScheduled';
+var EDM_DISALLOWED_TRIGGER_HANDLERS_ = [
+  'runEdmPlaceSyntheticQualtricsInbox',
+  'runQualtricsV1aHarness'
+];
+
+/**
+ * Idempotent Qualtrics Inbox schedule (production cadence).
+ * @param {number} [minutes] default 15
+ * @return {Object}
+ */
+function runEdmInstallQualtricsInboxScheduleTrigger(minutes) {
+  var cadence = minutes || 15;
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = [];
+  triggers.forEach(function (t) {
+    var handler = t.getHandlerFunction();
+    if (handler === EDM_QUALTRICS_SCHEDULE_HANDLER_ ||
+      EDM_DISALLOWED_TRIGGER_HANDLERS_.indexOf(handler) >= 0) {
+      ScriptApp.deleteTrigger(t);
+      removed.push(handler);
+    }
+  });
+  ScriptApp.newTrigger(EDM_QUALTRICS_SCHEDULE_HANDLER_)
+    .timeBased()
+    .everyMinutes(cadence)
+    .create();
+  var after = ScriptApp.getProjectTriggers();
+  var qualtricsTriggers = after.filter(function (t) {
+    return t.getHandlerFunction() === EDM_QUALTRICS_SCHEDULE_HANDLER_;
+  });
+  return {
+    ok: qualtricsTriggers.length === 1 &&
+      EDM_DISALLOWED_TRIGGER_HANDLERS_.every(function (h) {
+        return !after.some(function (t) {
+          return t.getHandlerFunction() === h;
+        });
+      }),
+    handler: EDM_QUALTRICS_SCHEDULE_HANDLER_,
+    cadenceMinutes: cadence,
+    qualtricsTriggerCount: qualtricsTriggers.length,
+    removedHandlers: removed
+  };
+}
+
+/**
+ * Inbox CSV names only (no ids, no content).
+ * @return {Object}
+ */
+function runEdmQualtricsInboxInventory() {
+  var props = PropertiesService.getScriptProperties();
+  ensureEdmBootstrapFromDrive_(props);
+  var inboxId = props.getProperty(EdmProperties.QUALTRICS_INBOX_FOLDER_ID);
+  if (!inboxId) {
+    return { ok: false, message: 'inbox not configured' };
+  }
+  var folder = DriveApp.getFolderById(inboxId);
+  var files = folder.getFiles();
+  var names = [];
+  while (files.hasNext()) {
+    var name = files.next().getName();
+    if (/\.csv$/i.test(name)) {
+      names.push(name);
+    }
+  }
+  names.sort();
+  return { ok: true, csvCount: names.length, csvNames: names };
+}
+
+/**
+ * Verify inbox source checksum matches a prior successful ledger job; duplicate guard blocks re-ingest.
+ * Does not write destinations or append ledger rows.
+ *
+ * @param {string} [expectedChecksumPrefix] default first real job prefix
+ * @return {Object}
+ */
+function runEdmVerifyInboxSuccessfulSourceDuplicateGuard(expectedChecksumPrefix) {
+  var prefix = expectedChecksumPrefix || '8545dbf0510b0d55';
+  var props = PropertiesService.getScriptProperties();
+  ensureEdmBootstrapFromDrive_(props);
+  var inboxId = props.getProperty(EdmProperties.QUALTRICS_INBOX_FOLDER_ID);
+  if (!inboxId) {
+    return { ok: false, message: 'inbox not configured' };
+  }
+  var candidate = EdmQualtricsInbox.findCandidateCsv(inboxId, undefined, DriveApp);
+  if (!candidate) {
+    return { ok: false, message: 'no inbox csv' };
+  }
+  var csvText = EdmQualtricsInbox.readCsvText(candidate.file);
+  var checksum = EdmChecksum.sha256Hex(csvText, {
+    computeDigest: Utilities.computeDigest.bind(Utilities)
+  });
+  if (String(checksum).slice(0, prefix.length) !== prefix) {
+    return {
+      ok: false,
+      message: 'checksum prefix mismatch',
+      checksumPrefix: String(checksum).slice(0, 16),
+      inboxFileName: candidate.name
+    };
+  }
+  var ledgerId = props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID);
+  if (!ledgerId) {
+    return { ok: false, message: 'ledger not configured' };
+  }
+  var sheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+  var priorJobs = EdmJobHistory.toPriorJobRefs(EdmAuditLedgerSheet.readAllJobs(sheet));
+  var ledgerSuccess = priorJobs.some(function (p) {
+    return p.checksum === checksum && p.status === EdmJobTypes.JobStatus.SUCCESS;
+  });
+  var dup = EdmDuplicateGuard.checkDuplicateSuccessful(checksum, priorJobs);
+  var blocked = !dup.allow && dup.reason === 'DUPLICATE_SUCCESS_CHECKSUM';
+  return {
+    ok: blocked && ledgerSuccess,
+    checksumPrefix: String(checksum).slice(0, 16),
+    inboxFileName: candidate.name,
+    duplicateBlocked: blocked,
+    ledgerSuccessMatch: ledgerSuccess,
+    reason: dup.reason || ''
+  };
+}
+
+/**
+ * Trash inbox source when checksum matches a successful audited job (not a new ingestion).
+ *
+ * @param {string} [expectedChecksumPrefix]
+ * @return {Object}
+ */
+function runEdmRemoveVerifiedProcessedInboxSource(expectedChecksumPrefix) {
+  var verify = runEdmVerifyInboxSuccessfulSourceDuplicateGuard(expectedChecksumPrefix);
+  if (!verify.ok) {
+    return { ok: false, message: 'refusing cleanup: ' + (verify.message || 'verify failed'), verify: verify };
+  }
+  var props = PropertiesService.getScriptProperties();
+  var inboxId = props.getProperty(EdmProperties.QUALTRICS_INBOX_FOLDER_ID);
+  var candidate = EdmQualtricsInbox.findCandidateCsv(inboxId, verify.inboxFileName, DriveApp);
+  if (!candidate) {
+    return { ok: false, message: 'inbox file missing after verify' };
+  }
+  EdmQualtricsInbox.deleteFile(candidate.file);
+  var inventory = runEdmQualtricsInboxInventory();
+  return {
+    ok: inventory.csvCount === 0,
+    disposition: 'TRASHED_VERIFIED_PROCESSED_SOURCE',
+    removedFileName: verify.inboxFileName,
+    inbox: inventory
+  };
+}
+
+/**
+ * Remove tracked synthetic inbox fixture (never a production source).
+ * @return {Object}
+ */
+function runEdmRemoveSyntheticQualtricsFromInbox() {
+  var props = PropertiesService.getScriptProperties();
+  var inboxId = props.getProperty(EdmProperties.QUALTRICS_INBOX_FOLDER_ID);
+  if (!inboxId) {
+    return { ok: false, message: 'inbox not configured' };
+  }
+  var folder = DriveApp.getFolderById(inboxId);
+  var it = folder.getFilesByName(EdmSyntheticQualtricsFixture.FILENAME);
+  var removed = 0;
+  while (it.hasNext()) {
+    it.next().setTrashed(true);
+    removed++;
+  }
+  return { ok: true, removedCount: removed, fileName: EdmSyntheticQualtricsFixture.FILENAME };
+}
+
+/**
+ *
+ * @param {Object=} config
+ * @param {string} [config.expectedChecksumPrefix]
+ * @param {number} [config.scheduleMinutes]
+ * @return {Object}
+ */
+function runEdmQualtricsV1ProductionActivation(config) {
+  config = config || {};
+  var report = {
+    ok: false,
+    phase: 'preflight',
+    pre: null,
+    duplicateGuard: null,
+    sourceCleanup: null,
+    properties: null,
+    trigger: null,
+    emptyInboxRun: null,
+    post: null,
+    auditTail: null
+  };
+
+  report.pre = runEdmVerifyOperationalState();
+  if (report.pre.triggerCount > 0) {
+    var handlers = report.pre.triggerHandlers || [];
+    var onlyQualtricsSchedule = report.pre.triggerCount === 1 &&
+      handlers[0] === EDM_QUALTRICS_SCHEDULE_HANDLER_;
+    if (!onlyQualtricsSchedule) {
+      report.message = 'unexpected trigger before activation';
+      return report;
+    }
+  }
+
+  var inboxBefore = runEdmQualtricsInboxInventory();
+  report.phase = 'duplicate_guard';
+  if (inboxBefore.csvCount === 0) {
+    report.duplicateGuard = runEdmVerifyFirstRealJobInLedger_(config.expectedChecksumPrefix);
+    report.sourceCleanup = {
+      ok: true,
+      disposition: 'ALREADY_EMPTY',
+      inbox: inboxBefore
+    };
+  } else {
+    report.duplicateGuard = runEdmVerifyInboxSuccessfulSourceDuplicateGuard(
+      config.expectedChecksumPrefix
+    );
+    if (!report.duplicateGuard.ok) {
+      report.message = 'duplicate guard preflight failed';
+      return report;
+    }
+    report.phase = 'source_cleanup';
+    report.sourceCleanup = runEdmRemoveVerifiedProcessedInboxSource(
+      config.expectedChecksumPrefix
+    );
+    if (!report.sourceCleanup.ok) {
+      report.message = 'verified source cleanup failed';
+      return report;
+    }
+  }
+  if (!report.duplicateGuard.ok) {
+    report.message = 'first real job not confirmed in ledger';
+    return report;
+  }
+
+  report.phase = 'synthetic_cleanup';
+  report.syntheticCleanup = runEdmRemoveSyntheticQualtricsFromInbox();
+
+  report.phase = 'properties';
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty(EdmProperties.INGEST_ENABLED, 'true');
+  props.setProperty(EdmProperties.DELETE_SUCCESSFUL_SOURCE, 'true');
+  report.properties = {
+    ingestEnabled: true,
+    deleteSuccessfulSource: true
+  };
+
+  report.phase = 'trigger';
+  report.trigger = runEdmInstallQualtricsInboxScheduleTrigger(config.scheduleMinutes || 15);
+  if (!report.trigger.ok) {
+    report.message = 'trigger install failed';
+    return report;
+  }
+
+  report.phase = 'empty_inbox';
+  report.emptyInboxRun = runQualtricsInboxScheduled();
+  report.auditTail = runEdmAuditLedgerTailSummary(1);
+  report.post = runEdmVerifyOperationalState();
+
+  var emptyOk = report.emptyInboxRun &&
+    report.emptyInboxRun.ok === true &&
+    report.emptyInboxRun.message === 'No CSV in Inbox';
+  report.ok = emptyOk &&
+    report.post.ingestEnabled &&
+    report.post.deleteSuccessfulSource &&
+    report.post.triggerCount === 1 &&
+    report.post.triggerHandlers.indexOf(EDM_QUALTRICS_SCHEDULE_HANDLER_) >= 0 &&
+    report.sourceCleanup.inbox &&
+    report.sourceCleanup.inbox.csvCount === 0;
+
+  report.phase = 'complete';
+  report.message = report.ok
+    ? 'EDM QUALTRICS V1 PRODUCTION ACTIVATION COMPLETE'
+    : 'activation post-verify failed';
+  return report;
+}
+
+/**
+ * Zero-arg editor entry for V1 production activation.
+ * @return {Object}
+ */
+function runEdmQualtricsV1ProductionActivationNow() {
+  return runEdmQualtricsV1ProductionActivation({
+    expectedChecksumPrefix: '8545dbf0510b0d55',
+    scheduleMinutes: 15
+  });
+}
+
+/**
+ * @param {string} [expectedChecksumPrefix]
+ * @return {Object}
+ */
+function runEdmVerifyFirstRealJobInLedger_(expectedChecksumPrefix) {
+  var prefix = expectedChecksumPrefix || '8545dbf0510b0d55';
+  var props = PropertiesService.getScriptProperties();
+  var ledgerId = props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID);
+  if (!ledgerId) {
+    return { ok: false, message: 'ledger not configured' };
+  }
+  var sheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+  var rows = EdmAuditLedgerSheet.readAllJobs(sheet);
+  var successes = rows.filter(function (r) {
+    return r.overall_status === EdmJobTypes.JobStatus.SUCCESS &&
+      String(r.source_checksum || '').slice(0, prefix.length) === prefix;
+  });
+  return {
+    ok: successes.length >= 1,
+    ledgerSuccessMatches: successes.length,
+    checksumPrefix: prefix.slice(0, 16)
+  };
+}
+
 function runEdmV1bControlledInfrastructureSetup(
   parentFolderId,
   hcSpreadsheetId,

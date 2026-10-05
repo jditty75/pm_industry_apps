@@ -1,114 +1,81 @@
 # EDM Qualtrics V1 — operations runbook
 
-Standalone orchestration project: `solutions/External_Data_Manager`. Destinations: **HC_DM**, **SLG_DM**, **HENP_DM** (CoreLib **144**). **EVI_DM / PDX_DM / HS_DM** stay on CoreLib **139** and are not Qualtrics V1 destinations.
+**Status: PRODUCTION ACTIVE** (activated 2026-10-05). Standalone orchestration: `solutions/External_Data_Manager` (CoreLib **145**). Qualtrics destinations: **HC_DM**, **SLG_DM**, **HENP_DM** (CoreLib **144**). **EVI_DM / PDX_DM / HS_DM** remain CoreLib **139** — not Qualtrics V1 destinations.
 
-## Normal user workflow (post–V1 activation)
+## Normal user workflow
 
-1. In Qualtrics, export the **PGL and MDS Survey Dashboard** as **CSV** (full dashboard export, not a filtered sub-region slice).
-2. Upload the CSV to **Google Drive → External Data → Qualtrics → Inbox** (single active candidate; oldest unprocessed file wins unless `sourceFileName` is specified).
-3. Wait for the scheduled job (or ask an operator to run **Process Now** once if triggers are not yet installed).
+1. In Qualtrics, export the **PGL and MDS Survey Dashboard** as **CSV** (full dashboard export — the supported V1 source).
+2. Upload the CSV to **Google Drive → GOV PS PMO → GAS_apps → External Data → Qualtrics → Inbox**.
+3. **Done.** No Python, transformed Healthcare/SLED CSVs, Deployment Manager File Upload tabs, Apps Script, Cursor, Git, or CLASP required.
 
-Users do **not** need Python, transformed CSVs, Deployment Manager upload screens, Apps Script, Cursor, Git, or CLASP.
+### What happens automatically
 
-### Failure behavior
+| Topic | Behavior |
+|--------|----------|
+| Processing latency | Approximately **15 minutes** (time-driven trigger on `runQualtricsInboxScheduled`) |
+| Successful files | Removed from Inbox after validated transform, all destination ingests, verification, and audit persistence (`EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE=true`) |
+| Failed files | Remain in **Inbox** or move to **Qualtrics → Failed** for investigation (ingest enabled, non–dry-run failures) |
+| Job status | **Audit ledger** spreadsheet (counts, checksum, per-destination status — **no row-level PII**) |
+| Supported input | Full-dashboard Qualtrics CSV only |
+| Unsupported input | Shorter exports with extra/unexpected **Sub Region** values (not the V1 contract) |
+| Emergency fallback | Existing DM **manual CSAT upload** on HC/SLG/HENP workbooks |
 
-- Invalid or partial jobs move the source to **External Data → Qualtrics → Failed** when ingest is enabled and the job fails (not on dry-run).
-- With **ingest disabled**, sources stay in **Inbox**.
-- The **Job Ledger** spreadsheet records job id, status, counts, checksum, per-destination status, and error category — **no row-level PII**.
-- Operators use the ledger and destination `CSAT_InFlight` backups under **`DHM_CSAT_Imports`** for recovery.
+Operators may run **Process Now** once via the EDM project (`processQualtricsInboxNow`) if a file must land before the next scheduled pass — same processor, locks, checksum, stale, audit, and deletion rules as the trigger.
 
-## Pre–first-ingestion checklist (operator)
+## Architecture (production)
 
-| Control | Required state |
-|--------|----------------|
-| EDM `appsscript.json` | CoreLib **144**, `developmentMode: false` |
-| `EDM_QUALTRICS_INGEST_ENABLED` | **unset** or not `true` |
-| `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` | **unset** or not `true` |
-| Time-driven trigger | **none** (`runQualtricsInboxScheduled`) |
-| Qualtrics Inbox | Intended **full-dashboard** CSV present |
-| Audit ledger | Configured and append-only |
-| Destinations | `EDM_DEST_*_SPREADSHEET_ID` set for HC / SLG / HENP |
-
-Local validation before upload:
-
-```powershell
-node solutions/External_Data_Manager/scripts/validate-qualtrics-csv.js "C:\path\to\export.csv"
+```text
+Qualtrics full-dashboard CSV
+  → Drive Inbox
+  → EDM scheduled processor (runQualtricsInboxScheduled / processQualtricsInboxNow)
+  → schema validation (source contract)
+  → canonical normalization
+  → QualtricsRoutingConfig (configuration-driven routing)
+  → CoreLib 145 ingestCsatInFlight (destination adapter)
+  → HC / SLG / HENP filtering per workbook
+  → safe CSAT_InFlight replacement + verification
+  → audit ledger
+  → successful source deletion (when enabled)
 ```
 
-Expect `jobStatus: READY_FOR_INGESTION`, routing ok, and destination `inputRows` matching healthcare/sled counts.
+Separation preserved for future pipelines (e.g. **SLG_Capacity** as another EDM adapter): **source contract → canonical model → routing config → destination adapter**.
 
-## First real ingestion (authorization required)
+## Production controls (normal state)
 
-**Do not** set ingest enabled or run non–dry-run ingest without explicit authorization in the current session.
+| Control | Value |
+|--------|--------|
+| `EDM_QUALTRICS_INGEST_ENABLED` | `true` |
+| `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` | `true` |
+| EDM CoreLib pin | **145** (`developmentMode: false`) |
+| Schedule | **One** time-driven trigger: `runQualtricsInboxScheduled`, ~**15** minutes |
+| DM CoreLib pins | SLG / HC / HENP **144**; EVI / PDX / HS **139** (unchanged for Qualtrics V1) |
 
-### Minimal steps after authorization
+Activation entry point (one-time, editor or API): `runEdmQualtricsV1ProductionActivationNow()`.
 
-1. Confirm the canonical source file is in **Qualtrics → Inbox** (recommended name pattern: `PGLandMDSSurveyDashboard-…-UR_….csv` full export).
-2. In the EDM Apps Script project, set Script Property `EDM_QUALTRICS_INGEST_ENABLED` = `true`.
-3. Run **`processQualtricsInboxNow({ dryRun: false, ingestEnabled: true })`** (or equivalent clasp-run with those options).
-4. Verify success criteria below; capture baselines if not already done via `runEdmDestinationCsatBaselineSummary()`.
-5. Set `EDM_QUALTRICS_INGEST_ENABLED` back to `false` until V1 activation (trigger + optional delete) is authorized.
+## Failure / recovery (no intentional prod failures)
 
-### Exact authorization phrase (Jeff)
+- **Duplicate successful checksum** → job rejected (`DUPLICATE_SUCCESS_CHECKSUM`); source stays in Inbox (not moved to Failed).
+- **Invalid source** → failed job; source available for recovery (Failed folder when move succeeds).
+- **Partial destination failure** → overall **PARTIAL_FAILURE**; source **not** deleted.
+- **Lock** → concurrent scheduled/manual runs serialize on `EDM_QUALTRICS_INGEST`.
+- **Stale guard** → active when a trustworthy export timestamp exists on the source/ledger.
+- **Failed folder move** → shared-drive safe fallback; move failure cannot mask the original processing failure (logged; source may remain in Inbox).
+- **Ledger / logs** → metadata only; no row-level PII in operational records.
 
-> **Authorize EDM Qualtrics V1 first real ingestion:** run production ingest for the full-dashboard CSV in Qualtrics Inbox into HC_DM, SLG_DM, and HENP_DM with ingest enabled, deletion off, and trigger off.
+### Data rollback
 
-## First-ingestion success criteria
+1. Use pre-ingestion backup under **`DHM_CSAT_Imports`** or Sheet version history on `CSAT_InFlight`.
+2. Restore prior sheet content before re-running ingest.
 
-- Source validates (`QualtricsPipeline.validateSource` ok).
-- Normalization counts match dry-run (source rows, canonical rows, healthcare, sled).
-- **HC_DM**, **SLG_DM**, and **HENP_DM** ingest each succeed (no `PARTIAL_FAILURE` / `FAILED` overall).
-- DepMngr deployment-universe filtering applied per destination workbook.
-- `CSAT_InFlight` headers match canonical 16-column schema; written data row counts match returned eligible counts per destination.
-- Backup CSV created under **`DHM_CSAT_Imports`** per destination ingest.
-- Caches cleared only after successful replacement (CoreLib behavior).
-- Audit ledger row appended with all three destination outcomes and checksum.
-- Source remains in **Inbox** (delete property still off).
-- No EDM schedule trigger installed.
-
-If **any** destination fails, overall job must be **PARTIAL_FAILURE** or **FAILED**; source must remain available in Inbox/Failed for recovery; do not enable source deletion.
-
-## Recovery / rollback
-
-### Data-ingestion rollback
-
-1. Identify the pre-ingestion backup in **`DHM_CSAT_Imports`** (filename includes app id and timestamp) or use Sheet version history on `CSAT_InFlight`.
-2. Restore prior `CSAT_InFlight` content for affected workbook(s) using the canonical safe-replace recovery path (operator restores sheet data; do not re-run ingest until root cause is understood).
-3. Record the incident in the job ledger notes / operator log.
-
-### CoreLib rollback (only if ingest implementation is defective)
-
-Re-pin consumers **144 → 143** and repoint production deployments only with explicit deploy authorization:
-
-| App | Rollback GAS version |
-|-----|----------------------|
-| SLG_DM | @194 |
-| HC_DM | @86 |
-| HENP_DM | @106 |
-
-Do not roll back CoreLib for bad source data or a single failed destination—use data rollback first.
-
-## Post–first-ingestion V1 activation (after verified success)
-
-Execute only after the first real job is verified end-to-end:
-
-1. Mark first real ingestion verified in operator log / ledger annotation.
-2. Set `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` = `true`.
-3. Test deletion on a **controlled** safe file (or next authorized export) — confirm Inbox file removed only on full success.
-4. Install **one** time-driven trigger on `runQualtricsInboxScheduled`.
-5. **Recommended cadence:** every **15 minutes** (balance of latency vs. avoiding redundant runs when uploads are manual). Alternative: **30 minutes** if exports are weekly batch.
-6. Confirm exactly **one** EDM Qualtrics trigger exists.
-7. Communicate the [normal user workflow](#normal-user-workflow-postv1-activation) to PMO.
-8. Close V1: update this runbook status, archive bootstrap artifacts, keep ledger.
-
-## GAS read-only helpers (editor or API when enabled)
+## GAS read-only helpers
 
 | Function | Purpose |
 |----------|---------|
-| `runEdmVerifyOperationalState()` | Properties, destinations resolved, ingest/delete flags, trigger count |
-| `runEdmDestinationCsatBaselineSummary()` | Pre/post `CSAT_InFlight` row counts and header check |
-| `runEdmQualtricsInboxDryRunSummary()` | Drive Inbox dry-run summary (no PII) |
-| `runEdmQualtricsDryRunTwice()` | Synthetic duplicate-behavior check |
+| `runEdmVerifyOperationalState()` | Properties, destinations, ingest/delete flags, trigger inventory |
+| `runEdmDestinationCsatBaselineSummary()` | `CSAT_InFlight` row counts and header check |
+| `runEdmQualtricsInboxDryRunSummary()` | Inbox dry-run (no PII) |
+| `runEdmQualtricsInboxInventory()` | Inbox CSV count/names only |
+| `runEdmAuditLedgerTailSummary(n)` | Last ledger rows (sanitized) |
 
 ## Local / CI tests
 
@@ -118,6 +85,8 @@ cd libraries/DepMngr; npm test
 python skills/gas-monorepo-engineer/scripts/preview_selftest.py
 ```
 
-## Architecture (unchanged)
+## First real ingestion (historical — completed 2026-10-05)
 
-Qualtrics CSV → canonical normalized model → **QualtricsRoutingConfig** populations → destination registry → `CoreLib.CoreData.ingestCsatInFlight`. Normalization does not hard-code HC/SLG/HENP; Capacity remains a future adapter under the same EDM framework.
+Verified production job (full-dashboard export): **596** source rows → **220** normalized populations (**86** healthcare / **134** SLED); **HC_DM** 40 written, **SLG_DM** 19, **HENP_DM** 37; overall **SUCCESS**; checksum prefix `8545dbf0510b0d55`. HENP CSAT tab enabled and visually verified separately.
+
+Pre–activation checklist items (ingest off, delete off, no trigger) applied only to the controlled first ingest; normal production state is documented above.

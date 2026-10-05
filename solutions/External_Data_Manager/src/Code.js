@@ -83,7 +83,9 @@ function processQualtricsInboxNow(options) {
     });
 
     var disposition = 'INBOX';
-    if (!outcome.result.ok && !dryRun) {
+    var duplicateBlocked = outcome.job &&
+      outcome.job.errorCategory === 'DUPLICATE_SUCCESS_CHECKSUM';
+    if (!outcome.result.ok && !dryRun && !duplicateBlocked) {
       var failedId = props.getProperty(EdmProperties.QUALTRICS_FAILED_FOLDER_ID);
       if (failedId) {
         try {

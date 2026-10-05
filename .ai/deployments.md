@@ -2,6 +2,19 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — External_Data_Manager — Qualtrics V1 production activation (partial)
+
+- Authorization: user (EDM Qualtrics V1 final production activation, 2026-10-05)
+- Git source: pending commit (activation helpers + duplicate Failed-folder guard + runbook)
+- GAS: `clasp push --force` to EDM HEAD (CoreLib **145** pin unchanged)
+- Entry point: `runEdmQualtricsV1ProductionActivationNow()` — sets ingest + delete properties, idempotent 15-minute trigger, verified first-source cleanup, synthetic fixture removal, empty-Inbox no-op
+- Remote execution: **not completed** — Apps Script `scripts.run` and `clasp run` return **403 PERMISSION_DENIED** (API executable / Execution API not usable from automation)
+- Drive preflight (read-only): Qualtrics Inbox contains the verified full-dashboard export plus `synthetic-qualtrics-dryrun.csv` (activation removes both after duplicate guard)
+- First real ingest + HENP CSAT: user-verified in prior session (596→220 populations; HC 40 / SLG 19 / HENP 37 written)
+- Production script properties / trigger / post-activation Inbox empty: **requires one GAS editor run** of activation entry point
+- Result: **partial** (source pushed; runtime activation pending editor)
+- Not performed: CoreLib 146; DM pin bump to 145; second real Qualtrics ingest; EVI/PDX/HS changes
+
 ### 2026-10-05 — HENP_DM — deploy
 
 - Git source: `aa22987` (HENP CSAT tab UI config only; CoreLib pin unchanged @144)

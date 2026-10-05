@@ -1,21 +1,22 @@
 # External Data Manager (EDM)
 
-Standalone Google Apps Script project for shared **external-data orchestration** (Qualtrics first, Capacity later). Lives at `solutions/External_Data_Manager`.
+Standalone Google Apps Script project for shared **external-data orchestration** (Qualtrics V1 production active). Lives at `solutions/External_Data_Manager`.
 
-## V1B scope (current)
+## Qualtrics V1 (production)
 
-| In scope | Out of scope (until authorized) |
-|----------|----------------------------------|
-| Drive folder setup (idempotent) under `External Data/Qualtrics/Inbox` + `Failed` | Real Qualtrics ingest into HC/SLG/HENP production workbooks |
-| Destination registry (logical `HC_DM` / `SLG_DM` / `HENP_DM` → Script Properties) | DepMngr CoreLib version cut / consumer pin changes |
-| `processQualtricsInboxNow` + `runQualtricsInboxScheduled` (trigger **not installed**) | Scheduled trigger installation |
-| Dry-run default (`dryRun: true`) | Deleting successful Inbox sources (default **off**) |
-| Sheet-backed job audit ledger (counts/metadata only) | Production DM deployment |
-| CoreLib **144** immutable pin (`developmentMode: false`) | First real Qualtrics ingest (explicit authorization) |
+| Component | State |
+|-----------|--------|
+| CoreLib pin (EDM) | **145** immutable |
+| DM destinations (HC / SLG / HENP) | CoreLib **144** |
+| EVI / PDX / HS | CoreLib **139** (not Qualtrics destinations) |
+| Ingest | `EDM_QUALTRICS_INGEST_ENABLED=true` (normal ops) |
+| Successful-source delete | `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE=true` |
+| Schedule | One trigger: `runQualtricsInboxScheduled` (~15 min) |
+| User workflow | Drop full-dashboard Qualtrics CSV in Drive **Qualtrics → Inbox** |
 
-**V1A** remains: local normalize/route tests, `EdmOrchestrator.processQualtricsCsvJob` (stops at `READY_FOR_INGESTION`).
+**Operations runbook:** [edm-qualtrics-v1-runbook.md](./edm-qualtrics-v1-runbook.md)
 
-**V1 operations:** [edm-qualtrics-v1-runbook.md](./edm-qualtrics-v1-runbook.md)
+**One-time activation (after first verified ingest):** run `runEdmQualtricsV1ProductionActivationNow()` in the EDM Apps Script project (sets properties, idempotent trigger, verified source cleanup, empty-Inbox no-op).
 
 ## Architecture decision: EDM → DepMngr
 
@@ -37,8 +38,8 @@ flowchart LR
 
 - **EDM** owns orchestration, Drive, checksum/duplicate/stale guards, locking, audit, routing config.
 - **DepMngr** owns tenant/deployment-universe filtering and `CSAT_InFlight` replacement (`ingestCsatInFlight`).
-- **Manual UI** still calls `uploadCsatInFlightCsvForUI` → parse CSV → same canonical ingest path.
-- **Library pin:** EDM uses immutable CoreLib **144** (`developmentMode: false`) with `ingestCsatInFlight` on the executing library version.
+- **Manual UI** still calls `uploadCsatInFlightCsvForUI` → parse CSV → same canonical ingest path (emergency fallback).
+- **Library pin:** EDM **145**; destination DMs **144** for Qualtrics CSAT path.
 
 ## Routing (authoritative)
 
@@ -64,78 +65,38 @@ Healthcare is not routed to HENP. Routing lives in `QualtricsRoutingConfig`, not
 
 Never commit property **values** or `.clasp.json`.
 
-### One-time setup (GAS editor or API)
-
-1. `EdmSetup.setupQualtricsDriveFolders('<parent External Data folder id>')`
-2. `EdmSetup.ensureAuditLedger()`
-3. Resolve destination spreadsheet IDs (read-only):  
-   `python solutions/External_Data_Manager/scripts/resolve-edm-destinations.py`  
-   then `EdmSetup.setDestinationSpreadsheetId('HC_DM', '...')` (etc.)
-
-### Remote GAS project
-
-Create standalone project: `cd solutions/External_Data_Manager && clasp create --type standalone --title "External Data Manager"`  
-Add gitignored `.clasp.json`, then `npm run push` after local tests pass.
-
-## Process Now / dry-run
+## Process Now / scheduled
 
 ```javascript
-// Default: dry-run (no workbook mutation, no delete)
+// Same processor as the production trigger (default dry-run when called manually without ingest flag)
 processQualtricsInboxNow({ dryRun: true });
 
-// Controlled validation on Drive (still no ingest unless enabled)
-processQualtricsInboxNow({ dryRun: false, ingestEnabled: false });
+// Production trigger entry (installed once at V1 activation)
+runQualtricsInboxScheduled();
 ```
-
-Future trigger calls the same processor: `runQualtricsInboxScheduled()` — **do not install** until operations sign-off.
 
 ## Duplicate / stale / concurrency
 
 - Script lock: `EdmLocking.QUALTRICS_INGEST_LOCK_KEY`
-- Duplicate successful checksum → reject (`DUPLICATE_SUCCESS_CHECKSUM`); override via `allowDuplicateOverride` (audited).
+- Duplicate successful checksum → reject (`DUPLICATE_SUCCESS_CHECKSUM`); source stays in Inbox (not moved to Failed).
 - Stale export timestamp → reject when a newer successful job exists; override via `allowStaleOverride`.
 - Without trustworthy export timestamp, stale guard does not use Drive upload time.
 
+## Successful-source deletion (production)
+
+Deletion requires explicit `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE=true` **and** processor flag on the run. `EdmDriveFolders.sourceDeletionPolicy()` documents: transform success, all intended ingestions success, verification success, audit persistence — enforced via `computeDeleteAllowed_` on **SUCCESS** jobs only.
+
 ## Retry (partial failure)
 
-Ingest is **replacement-based** per destination. On `PARTIAL_FAILURE`, retry with `processQualtricsInboxNow({ retryDestinationAppIds: ['HENP_DM'], ... })` (planned) or re-run full job when all destinations are idempotent-safe. Ledger stores per-destination status in `destination_statuses`.
+Pass `retryDestinationAppIds` to re-ingest only failed destinations without re-transforming (orchestrator support).
 
-## Source deletion invariant
-
-Deletion requires: validation + transform + **all** destination ingestions + verification + audit persist.  
-Default: `deleteSuccessfulSource` false and `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` unset/false.
-
-## Safer CSAT_InFlight (DepMngr)
-
-`CoreData.ingestCsatInFlight` / `_replaceCsatInFlightSafely_`:
-
-1. Build full payload in memory  
-2. Document lock  
-3. Single `setValues` for header + rows; clear trailing rows only  
-4. Verify headers/row count; restore prior range on failure  
-5. Clear caches only after success  
-
-Optional explicit `context.spreadsheetId` for EDM; container UI uses active spreadsheet.
-
-## Local tests
+## Local validation
 
 ```powershell
-cd solutions/External_Data_Manager
-npm test
-node scripts/validate-qualtrics-csv.js "<absolute-path-to-export.csv>"
-
-cd libraries/DepMngr
-npm test
-
-python skills/gas-monorepo-engineer/scripts/preview_selftest.py
+node solutions/External_Data_Manager/scripts/validate-qualtrics-csv.js "C:\path\to\export.csv"
+cd solutions/External_Data_Manager; npm test
 ```
-
-## Production authorization boundary
-
-Code/infrastructure setup (EDM project, folders, ledger, properties, dry-run) is separate from **first real Qualtrics ingest** into HC/SLG/HENP. The latter requires explicit authorization after review.
 
 ## Related analysis
 
-- [Qualtrics discovery index](../analysis/external-data/qualtrics/README.md)
-- [Ingestion contract](../analysis/external-data/qualtrics/ingestion-contract.md)
-- [DM family](../analysis/dm-family/README.md)
+- [docs/analysis/external-data/qualtrics/](../analysis/external-data/qualtrics/README.md)

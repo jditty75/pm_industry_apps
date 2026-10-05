@@ -1,6 +1,8 @@
 # Qualtrics external data — discovery index
 
-Discovery-only analysis (2026-10-05). No automation implemented. No production data in these files.
+**Production (2026-10-05):** Qualtrics V1 is live via `solutions/External_Data_Manager` — Drive Inbox drop, ~15-minute schedule, CoreLib **145** on EDM, HC/SLG/HENP on CoreLib **144**. Operator runbook: [docs/agent/edm-qualtrics-v1-runbook.md](../../agent/edm-qualtrics-v1-runbook.md).
+
+Discovery analysis below remains valid for source contract and architecture; automation is implemented in EDM + DepMngr 144/145.
 
 ## Business problem (summary)
 
@@ -22,7 +24,7 @@ Jeff manually exports Qualtrics → runs local Python → uploads per-app `surve
 - **GAS ingestion:** Single shared implementation: `CoreLib.CoreData.uploadCsatInFlightCsvForUI` (container wrappers in each `*_DM` `WebAppCode.js`).
 - **Split routing:** Python splits on Qualtrics `Sub Region` → `app`: `US Healthcare` → Healthcare population / **HC_DM**; `US SLED` → SLED population / **SLG_DM** + **HENP_DM** (downstream DepMngr tenant filter per workbook). HENP does **not** consume the Healthcare population.
 - **V1A implementation:** `solutions/External_Data_Manager` — CSV normalizer + orchestrator through `READY_FOR_INGESTION` only.
-- **V1B implementation:** Drive Inbox processor, destination registry, audit ledger, dry-run Process Now, DepMngr `ingestCsatInFlight` (Git; library release pending). See [external-data-manager.md](../../agent/external-data-manager.md).
+- **V1B / V1 production:** Drive Inbox processor, audit ledger, scheduled ingest, successful-source deletion — [external-data-manager.md](../../agent/external-data-manager.md) and [edm-qualtrics-v1-runbook.md](../../agent/edm-qualtrics-v1-runbook.md).
 - **Portability:** Transformation logic is implemented in GAS (`QualtricsTransform.js`); production source format is **CSV** (no XLSX pipeline).
 - **Canonical boundary:** `CoreData.ingestCsatInFlight(config, normalizedRows, metadata, context)` shared by manual UI (`uploadCsatInFlightCsvForUI`) and EDM.
 

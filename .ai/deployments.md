@@ -2,6 +2,14 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — DepMngr CoreLib 143 (Notable Active+Complete) — production verification
+
+- Library: CoreLib **143** (git `9c429a0`)
+- Consumers verified in production: **SLG_DM @194**, **HC_DM @86**, **HENP_DM @106**
+- Verification: **PRODUCTION VERIFIED** — Notable Active+Complete release (user attestation, 2026-10-05)
+- Result: success
+- Ledger: appended `production_verified` to `.ai/library-releases/depmngr.jsonl`
+
 ### 2026-10-05 — HENP_DM — deploy
 
 - Git source: `9c429a0` (CoreLib 143 Notable Active+Complete pin + push; clasp push `--force` after skip)
@@ -10,7 +18,7 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 - Live GAS version: 106
 - Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ/exec
 - Description: Notable Active+Complete CoreLib 143 (git 9c429a0)
-- Verification: pre-release automated Notable + visual acceptance; live production Notable smoke not performed
+- Verification: pre-release automated Notable + visual acceptance; **production verification passed** (Notable Active+Complete, user attestation 2026-10-05)
 - Result: success
 - Authorized by: User (Execute notable active plus complete release plan CoreLib 143, 2026-10-05)
 - CLASP user: jeffrey.ditty@workday.com
@@ -23,7 +31,7 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 - Live GAS version: 86
 - Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA/exec
 - Description: Notable Active+Complete CoreLib 143 (git 9c429a0)
-- Verification: pre-release automated Notable + visual acceptance; live production Notable smoke not performed
+- Verification: pre-release automated Notable + visual acceptance; **production verification passed** (Notable Active+Complete, user attestation 2026-10-05)
 - Result: success
 - Authorized by: User (Execute notable active plus complete release plan CoreLib 143, 2026-10-05)
 - CLASP user: jeffrey.ditty@workday.com
@@ -36,7 +44,7 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 - Live GAS version: 194
 - Production URL: https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec
 - Description: Notable Active+Complete CoreLib 143 (git 9c429a0)
-- Verification: pre-release automated Notable + visual acceptance; live production Notable smoke not performed
+- Verification: pre-release automated Notable + visual acceptance; **production verification passed** (Notable Active+Complete, user attestation 2026-10-05)
 - Result: success
 - Authorized by: User (Execute notable active plus complete release plan CoreLib 143, 2026-10-05)
 - CLASP user: jeffrey.ditty@workday.com

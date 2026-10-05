@@ -11,9 +11,13 @@ test('Responses folder layout creates Qualtrics/Responses/Inbox+Failed', () => {
       getId: () => folderId,
       getFoldersByName: (name) => {
         const childId = tree[folderId] && tree[folderId][name];
+        let consumed = false;
         return {
-          hasNext: () => !!childId,
-          next: () => ({ getId: () => childId })
+          hasNext: () => !!childId && !consumed,
+          next: () => {
+            consumed = true;
+            return { getId: () => childId };
+          }
         };
       },
       createFolder: (name) => {

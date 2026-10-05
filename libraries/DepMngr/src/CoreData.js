@@ -11869,6 +11869,267 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
   }
 
   /**
+   * @param {string} text
+   * @return {string}
+   * @private
+   */
+  function _sha256Hex_(text) {
+    var digest = Utilities.computeDigest(
+      Utilities.DigestAlgorithm.SHA_256,
+      String(text || ''),
+      Utilities.Charset.UTF_8
+    );
+    return digest.map(function (b) {
+      var n = b < 0 ? b + 256 : b;
+      var h = n.toString(16);
+      return h.length === 1 ? '0' + h : h;
+    }).join('');
+  }
+
+  /**
+   * Active + Complete deployment universe for historical CSAT Responses (Notable-eligible union).
+   * @param {AppConfig} cfg
+   * @return {Object<string, boolean>}
+   * @private
+   */
+  function _csatResponsesEligibleDeploymentIds_(cfg) {
+    var allowedIds = {};
+    var rows = getNotableEligibleDeployments(cfg) || [];
+    rows.forEach(function (r) {
+      var id = _canonicalId_(r.deploymentId || r.deployment_id);
+      if (id) {
+        allowedIds[id] = true;
+      }
+    });
+    return allowedIds;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {GoogleAppsScript.Spreadsheet.Sheet|null}
+   * @private
+   */
+  function _getCsatResponsesSheet_(cfg) {
+    var ss = getSpreadsheet_();
+    var sheetName = (cfg.sheets && cfg.sheets.csatResponses) ||
+      CoreCsatResponses.SHEET_NAME_DEFAULT;
+    return ss.getSheetByName(sheetName);
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {GoogleAppsScript.Spreadsheet.Sheet}
+   * @private
+   */
+  function _getOrCreateCsatResponsesSheet_(cfg) {
+    var ss = getSpreadsheet_();
+    var sheetName = (cfg.sheets && cfg.sheets.csatResponses) ||
+      CoreCsatResponses.SHEET_NAME_DEFAULT;
+    var sheet = ss.getSheetByName(sheetName);
+    var cols = CoreCsatResponses.CSAT_RESPONSES_COLUMNS;
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
+      sheet.setFrozenRows(1);
+    }
+    return sheet;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {Object[]}
+   * @private
+   */
+  function _readCsatResponsesRows_(cfg) {
+    var sheet = _getCsatResponsesSheet_(cfg);
+    if (!sheet) {
+      return [];
+    }
+    var lastRow = sheet.getLastRow();
+    var cols = CoreCsatResponses.CSAT_RESPONSES_COLUMNS;
+    if (lastRow < 2) {
+      return [];
+    }
+    var width = Math.max(cols.length, sheet.getLastColumn());
+    var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    var headers = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (h) {
+      return String(h || '').trim();
+    });
+    return values.map(function (row) {
+      var obj = {};
+      for (var i = 0; i < headers.length; i++) {
+        if (headers[i]) {
+          obj[headers[i]] = row[i];
+        }
+      }
+      if (obj.deployment_id) {
+        obj.deployment_id = _canonicalId_(obj.deployment_id);
+      }
+      return obj;
+    });
+  }
+
+  /**
+   * Historical upsert into CSAT_Responses with verify + restore on failure.
+   * @param {AppConfig} cfg
+   * @param {Object[]} inboundEligible
+   * @param {Object} metadata
+   * @return {{ inserted: number, updated: number, unchanged: number, verification: Object }}
+   * @private
+   */
+  function _upsertCsatResponsesSafely_(cfg, inboundEligible, metadata) {
+    var sheet = _getOrCreateCsatResponsesSheet_(cfg);
+    var cols = CoreCsatResponses.CSAT_RESPONSES_COLUMNS;
+    var existingRows = _readCsatResponsesRows_(cfg);
+    var existingById = CoreCsatResponses.indexExistingByResponseId(existingRows);
+    var jobId = metadata.jobId || '';
+    var nowIso = new Date().toISOString();
+    var deps = {
+      jobId: jobId,
+      nowIso: nowIso,
+      hashFn: _sha256Hex_
+    };
+    var plan = CoreCsatResponses.planUpsert(inboundEligible, existingById, deps);
+
+    var mergedMap = {};
+    existingRows.forEach(function (row) {
+      var id = String(row.response_id || '').trim();
+      if (id) {
+        mergedMap[id] = row;
+      }
+    });
+    plan.updates.forEach(function (u) {
+      mergedMap[u.row.response_id] = u.row;
+    });
+    plan.inserts.forEach(function (row) {
+      mergedMap[row.response_id] = row;
+    });
+    var finalRows = Object.keys(mergedMap).map(function (k) {
+      return mergedMap[k];
+    });
+    var matrix = finalRows.map(function (r) {
+      return CoreCsatResponses.rowToStorageArray(r);
+    });
+    var priorLastRow = sheet.getLastRow();
+    var priorData = null;
+    if (priorLastRow >= 2) {
+      priorData = sheet.getRange(2, 1, priorLastRow, cols.length).getValues();
+    }
+
+    var lock = _acquireCsatInFlightReplaceLock_();
+    try {
+      var fullMatrix = [cols].concat(matrix);
+      sheet.getRange(1, 1, fullMatrix.length, cols.length).setValues(fullMatrix);
+      var planClear = CoreCsatIngest.planTrailingClear(priorLastRow, matrix.length);
+      if (planClear.clearFromRow != null && planClear.clearThroughRow >= planClear.clearFromRow) {
+        sheet.getRange(planClear.clearFromRow, 1, planClear.clearThroughRow, cols.length).clearContent();
+      }
+      var hdr = sheet.getRange(1, 1, 1, cols.length).getValues()[0];
+      var verify = CoreCsatResponses.verifyHeaders(hdr);
+      if (!verify.ok) {
+        throw new Error('CSAT_Responses verification failed: ' + (verify.errors || []).join(', '));
+      }
+      return {
+        inserted: plan.inserted,
+        updated: plan.updated,
+        unchanged: plan.unchanged,
+        verification: { ok: true, headerOk: true, rowCount: matrix.length }
+      };
+    } catch (writeErr) {
+      Logger.log('CoreData._upsertCsatResponsesSafely_: restore after failure: ' + writeErr);
+      try {
+        if (priorData) {
+          sheet.getRange(2, 1, 1 + priorData.length, cols.length).setValues(priorData);
+        }
+      } catch (restoreErr) {
+        Logger.log('CoreData._upsertCsatResponsesSafely_: restore failed: ' + restoreErr);
+      }
+      throw writeErr;
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  /**
+   * Canonical CSAT Responses ingest (EDM-normalized csat-response-v1 rows).
+   *
+   * @param {AppConfig} config
+   * @param {Array<Object>} canonicalRows
+   * @param {Object=} metadata { source, contractVersion, jobId, transformerVersion, skipBackup }
+   * @param {Object=} context { spreadsheetId }
+   * @return {Object}
+   */
+  function ingestCsatResponses(config, canonicalRows, metadata, context) {
+    metadata = metadata || {};
+    context = context || {};
+    var cfg = CoreConfig.withDefaults(config);
+    if (metadata.contractVersion &&
+        metadata.contractVersion !== CoreCsatResponses.CONTRACT_VERSION) {
+      return {
+        success: false,
+        contractVersion: CoreCsatResponses.CONTRACT_VERSION,
+        message: 'Unsupported contractVersion',
+        totalInput: (canonicalRows || []).length,
+        rejected: (canonicalRows || []).length
+      };
+    }
+
+    function runIngest_() {
+      var eligibleIds = _csatResponsesEligibleDeploymentIds_(cfg);
+      var jobId = metadata.jobId || '';
+      var prepared = CoreCsatResponses.filterAndPrepareInbound(
+        canonicalRows || [],
+        eligibleIds,
+        {
+          canonicalId: _canonicalId_,
+          hashFn: _sha256Hex_,
+          jobId: jobId,
+          nowIso: new Date().toISOString()
+        }
+      );
+      if (!prepared.eligible.length && prepared.totalInput > 0 && !prepared.rejected) {
+        Logger.log('CoreData.ingestCsatResponses: all rows excluded appId=' + cfg.appId);
+      }
+      var upsert = _upsertCsatResponsesSafely_(cfg, prepared.eligible, metadata);
+      _clearCache(cfg);
+      return { prepared: prepared, upsert: upsert };
+    }
+
+    try {
+      var outcome = context.spreadsheetId
+        ? _runWithOptionalSpreadsheetId_(context.spreadsheetId, runIngest_)
+        : runIngest_();
+      var prepared = outcome.prepared;
+      var upsert = outcome.upsert;
+      Logger.log('CoreData.ingestCsatResponses [' + cfg.appId + ']: input=' + prepared.totalInput +
+        ' inserted=' + upsert.inserted + ' updated=' + upsert.updated);
+      return {
+        success: true,
+        contractVersion: CoreCsatResponses.CONTRACT_VERSION,
+        totalInput: prepared.totalInput,
+        eligible: prepared.eligible.length,
+        inserted: upsert.inserted,
+        updated: upsert.updated,
+        unchanged: upsert.unchanged,
+        rejected: prepared.rejected,
+        excluded: prepared.excluded,
+        warnings: metadata.warningCounts || {},
+        verification: upsert.verification,
+        message: 'Responses ingest counts only'
+      };
+    } catch (e) {
+      Logger.log('CoreData.ingestCsatResponses: failed appId=' + cfg.appId + ': ' + e);
+      return {
+        success: false,
+        contractVersion: CoreCsatResponses.CONTRACT_VERSION,
+        totalInput: (canonicalRows || []).length,
+        message: 'CSAT Responses ingest failed',
+        verification: { ok: false, error: String(e) }
+      };
+    }
+  }
+
+  /**
    * Canonical CSAT in-flight ingest (normalized Qualtrics rows or pre-parsed CSV rows).
    *
    * @param {AppConfig} config
@@ -15559,6 +15820,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
     // V2.8: CSAT in-flight surveys + unified tab payload
     ingestCsatInFlight:          ingestCsatInFlight,
+    ingestCsatResponses:         ingestCsatResponses,
     uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,
     getCsatTabDataForUI:         getCsatTabDataForUI,
     getDistributionLogDataForUI: getDistributionLogDataForUI,

@@ -1,0 +1,34 @@
+{
+  "$id": "csat-response-v1",
+  "title": "Canonical CSAT Response row (sheet CSAT_Responses)",
+  "type": "object",
+  "required": [
+    "response_id",
+    "survey_id",
+    "survey_type",
+    "response_ts_utc",
+    "deployment_id",
+    "contract_version"
+  ],
+  "properties": {
+    "response_id": { "type": "string", "pattern": "^R_[A-Za-z0-9]+$" },
+    "survey_id": { "type": "string" },
+    "survey_type": { "enum": ["MDS", "PGL"] },
+    "response_ts_utc": { "type": "string" },
+    "deployment_id": { "type": "string", "maxLength": 18 },
+    "contract_version": { "const": "csat-response-v1" },
+    "overall_satisfaction": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+    "pgl_satisfaction": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+    "mds_satisfaction": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
+    "nps_score": { "type": ["integer", "null"], "minimum": 0, "maximum": 10 },
+    "product_areas": { "type": "string" },
+    "product_area_groups": { "type": "string" },
+    "comment_reasons": { "type": "string", "maxLength": 49000 },
+    "comment_improve": { "type": "string", "maxLength": 49000 },
+    "comment_working_well": { "type": "string", "maxLength": 49000 },
+    "comment_additional": { "type": "string", "maxLength": 49000 },
+    "row_hash": { "type": "string" },
+    "revision": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": true
+}

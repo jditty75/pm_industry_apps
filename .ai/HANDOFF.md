@@ -4,8 +4,8 @@
 
 - Architecture: [`docs/architecture/services-signal-platform/README.md`](../docs/architecture/services-signal-platform/README.md)
 - Human validation: [`docs/architecture/services-signal-platform/human-validation-package.md`](../docs/architecture/services-signal-platform/human-validation-package.md)
-- Open data questions: run `node scripts/diagnose-deployment-trajectory-pf-history.js` on gitignored CSV exports under `.ai/signal-exports/`
+- Live workbook validation: `python scripts/validate-deployment-trajectory-workbook.py --workbook ".ai/signal-exports/SLG DeploymentHealth_v1.xlsx"` → local HTML under `.ai/signal-exports/`
 
-**Next:** ten-deployment human validation in SLG workbook → freeze trajectory v2 → Context Assembler (not started).
+**Next:** Jeff reviews `deployment-trajectory-human-validation.html` → freeze trajectory v2 → Context Assembler (not started).
 
 No production deployment authorization. Exec Summary Sauna agent unchanged.

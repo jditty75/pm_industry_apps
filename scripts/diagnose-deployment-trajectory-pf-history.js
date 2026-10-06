@@ -9,6 +9,9 @@
  *
  * Optional:
  *   --mtp-events path/to/Deployment_Trajectory_MtpEvents.csv
+ *
+ * For a full SLG workbook (XLSX), use:
+ *   python scripts/validate-deployment-trajectory-workbook.py --workbook ".ai/signal-exports/<file>.xlsx"
  */
 
 'use strict';

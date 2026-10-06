@@ -38,8 +38,10 @@ Format reference: `libraries/DepMngr/test/fixtures/deployment-validation-profile
 
 ## Generating a real package (local, read-only)
 
-1. Export tabs to CSV under a **gitignored** folder (e.g. `.ai/signal-exports/`).  
-2. Run PF history diagnostic if schedule questions remain:  
+1. Place a read-only SLG workbook under **gitignored** `.ai/signal-exports/` (or export tabs to CSV there).  
+2. Preferred: full workbook validation and human-validation HTML:  
+   `python scripts/validate-deployment-trajectory-workbook.py --workbook ".ai/signal-exports/<workbook>.xlsx"`  
+3. PF history-only CSV diagnostic:  
    `node scripts/diagnose-deployment-trajectory-pf-history.js --history ... --product-functions ... --mtp-events ...`  
 3. In SLG Apps Script editor, run `debugDeploymentTrajectoryForDeployment('<deploymentId>')` for deep JSON (no sheet mutation).  
 4. Assemble a short markdown or spreadsheet review tab from exports — **do not commit** customer exports.

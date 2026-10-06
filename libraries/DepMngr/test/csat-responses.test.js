@@ -48,6 +48,35 @@ test('hash changes when score changes', () => {
   assert.notEqual(C.computeRowHash(a, hashFn), C.computeRowHash(b, hashFn));
 });
 
+test('eligibility reason summary counts universe exclusions only', () => {
+  const summary = C.summarizeInboundEligibilityReasons(
+    [sampleRow(), sampleRow({ deployment_id: '001UNKNOWN0000001AA' })],
+    { '001DEP000000001': true },
+    (id) => id.slice(0, 15)
+  );
+  assert.equal(summary.eligible, 1);
+  assert.equal(summary.excluded_deployment_not_in_universe, 1);
+});
+
+test('stored row audit flags formula-risk comments and missing lineage', () => {
+  const audit = C.auditStoredRowsSanitized([{
+    revision: 1,
+    row_hash: 'abc',
+    first_job_id: 'j1',
+    updated_job_id: 'j1',
+    first_imported_at: 't',
+    updated_at: 't',
+    comment_reasons: '=HYPERLINK("x")'
+  }, {
+    revision: 2,
+    row_hash: '',
+    comment_reasons: 'ok'
+  }]);
+  assert.equal(audit.commentFormulaRisk, 1);
+  assert.equal(audit.revisionAboveOne, 1);
+  assert.ok(audit.hashMissing >= 1);
+});
+
 test('eligible filter excludes unknown deployment', () => {
   const prepared = C.filterAndPrepareInbound(
     [sampleRow()],

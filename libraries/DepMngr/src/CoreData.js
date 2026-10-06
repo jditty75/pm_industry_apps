@@ -756,6 +756,15 @@ var CoreData = (function () {
   }
 
   /**
+   * Workbook for sheet-tab reads (container-bound active sheet, or EDM override).
+   * @param {AppConfig=} config reserved for future per-app routing
+   * @return {GoogleAppsScript.Spreadsheet.Spreadsheet|null}
+   */
+  function getWorkbookSpreadsheet(config) {
+    return getSpreadsheet_();
+  }
+
+  /**
    * Runs fn with SpreadsheetApp bound to spreadsheetId (container-bound callers omit id).
    * @param {string} [spreadsheetId]
    * @param {function(): *} fn
@@ -12085,6 +12094,11 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           nowIso: new Date().toISOString()
         }
       );
+      var reasonCounts = CoreCsatResponses.summarizeInboundEligibilityReasons(
+        canonicalRows || [],
+        eligibleIds,
+        _canonicalId_
+      );
       return {
         success: true,
         contractVersion: CoreCsatResponses.CONTRACT_VERSION,
@@ -12092,7 +12106,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         eligible: prepared.eligible.length,
         excluded: prepared.excluded,
         rejected: prepared.rejected,
-        deploymentUniverseSize: universeSize
+        deploymentUniverseSize: universeSize,
+        exclusionReasonCounts: reasonCounts
       };
     }
 
@@ -12149,6 +12164,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       var forbiddenPresent = forbiddenCols.some(function (c) {
         return hdr.indexOf(c) >= 0;
       });
+      var quality = CoreCsatResponses.auditStoredRowsSanitized(rows);
       return {
         success: headerCheck.ok,
         contractVersion: CoreCsatResponses.CONTRACT_VERSION,
@@ -12158,6 +12174,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         duplicateResponseIds: dup,
         revisionDistribution: revDist,
         forbiddenColumnsPresent: forbiddenPresent,
+        storageQuality: quality,
         message: 'counts_only'
       };
     }
@@ -15958,6 +15975,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Phase 1 surface — preserved unchanged for backward compatibility
     getActiveDeployments:                getActiveDeployments,
     getAllEffectiveDeployments:          getAllEffectiveDeployments,
+    getWorkbookSpreadsheet:              getWorkbookSpreadsheet,
     getNotableEligibleDeployments:       getNotableEligibleDeployments,
     debugNotableEligibleResolutionByShortId: debugNotableEligibleResolutionByShortId,
     getActiveCountDeployments:           getActiveCountDeployments,

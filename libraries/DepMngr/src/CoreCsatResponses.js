@@ -156,6 +156,106 @@ var CoreCsatResponses = (function () {
    *   totalInput: number
    * }}
    */
+  var COMMENT_FIELD_NAMES = [
+    'comment_reasons', 'comment_improve', 'comment_working_well', 'comment_additional'
+  ];
+
+  var LINEAGE_FIELD_NAMES = [
+    'first_job_id', 'updated_job_id', 'first_imported_at', 'updated_at', 'row_hash'
+  ];
+
+  /**
+   * Sanitized eligibility reason buckets (counts only; no row payloads).
+   *
+   * @param {Object[]} inboundRows
+   * @param {Object<string, boolean>} eligibleDeploymentIds
+   * @param {function(string): string} canonicalId
+   * @return {Object}
+   */
+  function summarizeInboundEligibilityReasons(inboundRows, eligibleDeploymentIds, canonicalId) {
+    var counts = {
+      rejected_missing_response_id: 0,
+      rejected_missing_deployment_id: 0,
+      rejected_missing_survey_type: 0,
+      rejected_missing_response_ts: 0,
+      rejected_malformed_or_other: 0,
+      excluded_deployment_not_in_universe: 0,
+      eligible: 0
+    };
+    (inboundRows || []).forEach(function (row) {
+      var errs = validationErrors(row);
+      if (errs.length) {
+        if (errs.indexOf('missing_response_id') >= 0) {
+          counts.rejected_missing_response_id++;
+        } else if (errs.indexOf('missing_deployment_id') >= 0) {
+          counts.rejected_missing_deployment_id++;
+        } else if (errs.indexOf('missing_survey_type') >= 0) {
+          counts.rejected_missing_survey_type++;
+        } else if (errs.indexOf('missing_response_ts_utc') >= 0) {
+          counts.rejected_missing_response_ts++;
+        } else {
+          counts.rejected_malformed_or_other++;
+        }
+        return;
+      }
+      var normalized = normalizeInboundRow(row, canonicalId);
+      if (!normalized) {
+        counts.rejected_malformed_or_other++;
+        return;
+      }
+      var depId = normalized.deployment_id;
+      if (!depId || !eligibleDeploymentIds[depId]) {
+        counts.excluded_deployment_not_in_universe++;
+        return;
+      }
+      counts.eligible++;
+    });
+    return counts;
+  }
+
+  /**
+   * Sanitized stored-row quality audit (counts only).
+   *
+   * @param {Object[]} rows stored CSAT_Responses rows
+   * @return {Object}
+   */
+  function auditStoredRowsSanitized(rows) {
+    var commentFormulaRisk = 0;
+    var lineageFieldMissing = 0;
+    var revisionAboveOne = 0;
+    var hashMissing = 0;
+    (rows || []).forEach(function (r) {
+      var rev = Number(r.revision) || 1;
+      if (rev > 1) {
+        revisionAboveOne++;
+      }
+      LINEAGE_FIELD_NAMES.forEach(function (field) {
+        if (r[field] === undefined || r[field] === null || String(r[field]).trim() === '') {
+          lineageFieldMissing++;
+        }
+      });
+      if (!r.row_hash) {
+        hashMissing++;
+      }
+      COMMENT_FIELD_NAMES.forEach(function (field) {
+        var v = r[field];
+        if (v === undefined || v === null || v === '') {
+          return;
+        }
+        var s = String(v);
+        if (s.length && /^[=+\-@]/.test(s.charAt(0))) {
+          commentFormulaRisk++;
+        }
+      });
+    });
+    return {
+      commentFormulaRisk: commentFormulaRisk,
+      lineageFieldMissing: lineageFieldMissing,
+      revisionAboveOne: revisionAboveOne,
+      hashMissing: hashMissing
+    };
+  }
+
   function filterAndPrepareInbound(inboundRows, eligibleDeploymentIds, deps) {
     var eligible = [];
     var rejected = 0;
@@ -316,6 +416,8 @@ var CoreCsatResponses = (function () {
     normalizeInboundRow: normalizeInboundRow,
     computeRowHash: computeRowHash,
     prepareTextForSheetWrite: prepareTextForSheetWrite,
+    summarizeInboundEligibilityReasons: summarizeInboundEligibilityReasons,
+    auditStoredRowsSanitized: auditStoredRowsSanitized,
     filterAndPrepareInbound: filterAndPrepareInbound,
     planUpsert: planUpsert,
     rowToStorageArray: rowToStorageArray,

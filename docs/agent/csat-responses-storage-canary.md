@@ -1,6 +1,27 @@
-# CSAT Responses — controlled storage/pipeline canary (plan)
+# CSAT Responses — controlled storage/pipeline canary
 
-Status: **AUTHORIZED** — runtime steps complete in **GAS editor** when local/agent preflight is green. See [gas-runtime-execution.md](../../skills/gas-monorepo-engineer/references/gas-runtime-execution.md).
+Status: **SLG STORAGE CANARY VERIFIED** (production editor runtime, October 2026). Local/agent hardening committed on Git `main`; CoreLib immutable cut **pending** (plan only — see release plan below).
+
+## Verified production outcomes (counts only)
+
+| Metric | Value |
+|--------|------:|
+| Real Qualtrics Responses source (canonical) | 177 |
+| HC routed candidates | 77 |
+| SLG routed candidates | 28 |
+| HENP routed candidates | 72 |
+| SLG deployment universe (Active + Complete, merged) | 637 |
+| SLG first ingest — input | 28 |
+| SLG first ingest — eligible/stored | 26 |
+| SLG first ingest — excluded | 2 |
+| SLG first ingest — inserted / updated | 26 / 0 |
+| SLG second ingest — inserted / updated | 0 / 0 |
+| SLG stored row count after second pass | 26 (derived from storage verification; not a separate job metric) |
+| Duplicate response IDs after second pass | none observed |
+
+Both production Responses jobs: **SUCCESS**. `CSAT_Responses` exists in SLG workbook. Source deletion: **OFF**. Responses scheduling: **OFF**. HC/HENP historical storage: **not ingested**. InFlight scheduler: **unchanged**.
+
+**Exclusion interpretation (SLG):** canonical transform had **no row rejects**; **2** exclusions are **consistent with** `excluded_deployment_not_in_universe` (deployment IDs not in SLG Active+Complete universe). Do not weaken eligibility to force 28/28.
 
 ## Validation split (agents vs editor)
 
@@ -25,22 +46,26 @@ Expected sanitized output:
 Do not paste: IDs, PII, comments, or source rows.
 ```
 
-### All-in-one orchestrator (optional)
+### Post-canary read-only acceptance (optional, after CoreLib 147 pin to EDM)
 
-After the validated Responses CSV is in **Responses/Inbox** and EDM HEAD includes canary helpers:
+`runEdmVerifyCsatResponsesSlgCanaryAcceptance('SLG_DM')`
+
+Expected when storage matches verified canary: `ok: true`, `checks.storedRows`, `checks.uniqueResponseIds`, `checks.noDuplicateResponseIds`, `checks.revisionsStillOne`, header/contract flags. Field `coreLibStorageQualityRequired: true` until EDM runs a CoreLib build that includes `storageQuality` on `verifyCsatResponsesStorage` (planned next immutable after Git hardening).
+
+Sanitized exclusion breakdown from live inbox (read-only): `runEdmSummarizeCsatResponsesExclusionReasons('SLG_DM')` → `exclusionReasonCounts` counts only.
+
+### All-in-one orchestrator (historical; do not re-run ingest without authorization)
 
 `runEdmCsatResponsesSlgStorageCanaryNow()`
 
 Dry-run / eligibility only (no ingest): `runEdmCsatResponsesSlgStorageCanaryNow({ skipIngest: true })`
 
-Authorization boundaries (SLG-only first write, no HC/HENP, no scheduling, no source delete) are unchanged—the orchestrator encodes them; do not weaken for tooling convenience.
-
 ## Current release/runtime graph (reference)
 
 | Component | Typical pin | Notes |
 |-----------|-------------|--------|
-| **DepMngr / CoreLib** | **146** (immutable cut) | CSAT Responses storage APIs |
-| **External Data Manager** | CoreLib **146** | HEAD includes InFlight classifier + Responses pipeline |
+| **DepMngr / CoreLib** | **146** (live immutable) | Responses storage APIs; **147** planned for workbook-context + sanitized diagnostics (not cut in this close-out) |
+| **External Data Manager** | CoreLib **146** | HEAD includes InFlight classifier + Responses pipeline + canary helpers |
 | **SLG_DM** | CoreLib per manifest | EDM invokes CoreLib **from EDM** for ingest; SLG pin bump optional until R3 UI |
 
 ## InFlight production regression gate (local — re-run before EDM push)
@@ -69,7 +94,7 @@ Persists `QUALTRICS_RESPONSES_INBOX_FOLDER_ID`, `QUALTRICS_RESPONSES_FAILED_FOLD
 - `EDM_QUALTRICS_RESPONSES_INGEST_ENABLED` — unset / not `true` until controlled ingest
 - `EDM_DELETE_SUCCESSFUL_QUALTRICS_RESPONSES_SOURCE` — unset for first write
 
-## SLG canary sequence
+## SLG canary sequence (completed)
 
 | Step | Agent (local/read-only/authorized push) | Editor (GAS runtime) |
 |------|----------------------------------------|----------------------|
@@ -92,8 +117,8 @@ Persists `QUALTRICS_RESPONSES_INBOX_FOLDER_ID`, `QUALTRICS_RESPONSES_FAILED_FOLD
 
 **Idempotency (second run, same file):**
 
-- `inserted = 0`, `updated = 0`, `unchanged = eligible count from first run`
-- Source file still in Inbox (cleanup disabled)
+- `inserted = 0`, `updated = 0` (directly logged)
+- Stored row count **26** unchanged (verified via storage read / acceptance helper; `unchanged` column not asserted from production job payload in this close-out)
 
 ## GAS dry-run expectations (step C)
 
@@ -101,10 +126,6 @@ Persists `QUALTRICS_RESPONSES_INBOX_FOLDER_ID`, `QUALTRICS_RESPONSES_FAILED_FOLD
 - Routes: HC **77**, SLG **28**, HENP **72**
 - No destination writes, no source delete, ledger `pipeline=qualtrics_responses`
 - InFlight trigger unchanged (still `runQualtricsInboxScheduled` only)
-
-**Editor — expected sanitized dry-run fields:** `ok`, `dryRun: true`, destination `inputRows` per app (77/28/72), `sourceRowCount` 177.
-
-**Editor — eligibility preview:** `routedCandidateRows: 28`, `eligible + excluded + rejected = 28`, `deploymentUniverseSize > 0`, `eligible > 0` unless clearly explained by data.
 
 ## Rollback references
 
@@ -115,13 +136,21 @@ Persists `QUALTRICS_RESPONSES_INBOX_FOLDER_ID`, `QUALTRICS_RESPONSES_FAILED_FOLD
 | SLG sheet | Delete `CSAT_Responses` tab or restore from pre-canary copy (manual) |
 | Drive | Responses folders optional; InFlight unaffected |
 
-## HC / HENP extension (after SLG proof)
+## HC + HENP combined expansion (plan only — not authorized in close-out)
 
-1. Repeat preview → bootstrap → scoped ingest for `HC_DM` (77) and `HENP_DM` (72) with separate authorization.
-2. Do not enable Responses scheduler until R3 read APIs exist.
+After **CoreLib next immutable** is cut and **EDM** `appsscript.json` pins that version:
+
+1. Local: full Responses + classifier regression (`External_Data_Manager` + DepMngr CSAT tests).
+2. Editor read-only: `runEdmPreviewCsatResponsesEligibility('HC_DM')` then `HENP_DM` — report `eligible`, `excluded`, `exclusionReasonCounts` only; **stop** if counts implausible vs routed **77** / **72**.
+3. `runEdmBootstrapCsatResponsesStorage('HC_DM')` → scoped ingest `limitDestinationAppIds: ['HC_DM']` → `runEdmVerifyCsatResponsesStorage('HC_DM')`.
+4. Repeat bootstrap → ingest → verify for `HENP_DM` only.
+5. Optional second scoped ingest per destination to prove idempotency (same source, `deleteSuccessfulSource: false`).
+6. Keep source deletion **OFF**, Responses scheduling **OFF**, InFlight scheduler **untouched**.
+
+Requires explicit Jeff authorization in the **current** interaction at execution time.
 
 ## Authorization phrases (repository semantics)
 
 - **DepMngr immutable cut:** `Execute the DepMngr release plan.` (after `.\release.ps1 DepMngr -Plan` fingerprint matches)
 - **EDM production push:** explicit production authorization for External Data Manager in the **current** interaction (classifier is production-impacting)
-- **SLG first write:** explicit authorization for SLG `CSAT_Responses` bootstrap + first historical ingest in the **current** interaction
+- **HC/HENP first write:** explicit authorization for combined or per-destination historical ingest in the **current** interaction

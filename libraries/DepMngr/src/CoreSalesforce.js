@@ -53,6 +53,22 @@ var _enrichmentCache = null;
 // D1: per-execution cache for DD-from-Contacts map.
 var _ddContactsCache = null;
 
+/**
+ * Spreadsheet for sheet-tab reads (honors CoreData EDM workbook override when set).
+ * @param {AppConfig=} config
+ * @return {GoogleAppsScript.Spreadsheet.Spreadsheet|null}
+ */
+function _resolveWorkbookSpreadsheetForSheetReads_(config) {
+  if (typeof CoreData !== 'undefined' && CoreData.getWorkbookSpreadsheet) {
+    return CoreData.getWorkbookSpreadsheet(config);
+  }
+  try {
+    return SpreadsheetApp.getActiveSpreadsheet();
+  } catch (e) {
+    return null;
+  }
+}
+
 // S1: per-execution caches for Student predicate maps.
 var _studentIdsCache = null;
 var _studentPFCache = null;
@@ -287,7 +303,12 @@ function getDdAssignmentsFromContacts_(config) {
     return cached;
   }
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = _resolveWorkbookSpreadsheetForSheetReads_(cfg);
+  if (!ss) {
+    Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_: workbook unavailable for app "' +
+               appId + '"; returning empty map.');
+    return {};
+  }
   var sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
     Logger.log('CoreSalesforce.getDdAssignmentsFromContacts_: sheet "' + sheetName +

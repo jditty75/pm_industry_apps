@@ -955,6 +955,104 @@ function runEdmSetQualtricsResponsesIngestEnabled(enable) {
 }
 
 /**
+ * Sanitized exclusion reason counts for routed Responses inbox rows (no PII).
+ * @param {string} logicalAppId
+ * @return {Object}
+ */
+function runEdmSummarizeCsatResponsesExclusionReasons(logicalAppId) {
+  if (!logicalAppId) {
+    return { ok: false, message: 'logicalAppId required' };
+  }
+  var coreLib = typeof CoreLib !== 'undefined' ? CoreLib : null;
+  if (!coreLib || !coreLib.CoreData || !coreLib.CoreData.previewCsatResponsesEligibility) {
+    return { ok: false, message: 'CoreLib.previewCsatResponsesEligibility unavailable' };
+  }
+  var props = PropertiesService.getScriptProperties();
+  var inboxId = props.getProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID);
+  if (!inboxId) {
+    return { ok: false, message: 'Responses Inbox not configured' };
+  }
+  var candidate = EdmQualtricsInbox.findCandidateCsv(inboxId, null, DriveApp);
+  if (!candidate) {
+    return { ok: false, message: 'No CSV in Responses Inbox' };
+  }
+  var csvText = EdmQualtricsInbox.readCsvText(candidate.file);
+  var built = QualtricsResponsesTransform.transformCsvText(csvText);
+  if (!built.ok) {
+    return { ok: false, message: 'transform_failed' };
+  }
+  var sliceRows = filterCanonicalRowsForDestination_(built.rows, logicalAppId);
+  var spreadsheetId = EdmDestinationRegistry.resolveSpreadsheetId(logicalAppId, props);
+  var rawCfg = EdmDmConfigResolver.resolve(logicalAppId);
+  var cfg = coreLib.CoreConfig.withDefaults(rawCfg);
+  var preview = coreLib.CoreData.previewCsatResponsesEligibility(cfg, sliceRows, {
+    spreadsheetId: spreadsheetId
+  });
+  var counts = preview.exclusionReasonCounts || null;
+  return {
+    ok: !!preview.success,
+    destinationId: logicalAppId,
+    routedCandidateRows: sliceRows.length,
+    eligible: preview.eligible || 0,
+    excluded: preview.excluded || 0,
+    rejected: preview.rejected || 0,
+    deploymentUniverseSize: preview.deploymentUniverseSize || 0,
+    exclusionReasonCounts: counts,
+    message: counts ? 'reason_counts_only' : 'reason_counts_unavailable_upgrade_corelib'
+  };
+}
+
+/**
+ * Post-canary acceptance check (counts/metadata only; read-only).
+ * @param {string} logicalAppId
+ * @param {Object=} expected
+ * @param {number} [expected.storedRows=26]
+ * @return {Object}
+ */
+function runEdmVerifyCsatResponsesSlgCanaryAcceptance(logicalAppId, expected) {
+  expected = expected || {};
+  var wantRows = expected.storedRows != null ? expected.storedRows : 26;
+  var verify = runEdmVerifyCsatResponsesStorage(logicalAppId || EdmDestinationRegistry.APP_SLG);
+  if (!verify.ok) {
+    return Object.assign({ ok: false, phase: 'storage_verify', message: 'verify_failed' }, verify);
+  }
+  var quality = verify.storageQuality || null;
+  var hasQuality = !!(quality && typeof quality === 'object');
+  var rev = verify.revisionDistribution || {};
+  var checks = {
+    sheetPresent: verify.headerOk || verify.rowCount > 0,
+    headerOk: !!verify.headerOk,
+    storedRows: verify.rowCount === wantRows,
+    uniqueResponseIds: verify.uniqueResponseIds === wantRows,
+    noDuplicateResponseIds: (verify.duplicateResponseIds || 0) === 0,
+    noForbiddenColumns: !verify.forbiddenColumnsPresent,
+    revisionsStillOne: (rev.gtOne || 0) === 0 && (rev.one || 0) === wantRows,
+    lineageComplete: hasQuality ? (quality.lineageFieldMissing || 0) === 0 : true,
+    hashComplete: hasQuality ? (quality.hashMissing || 0) === 0 : true,
+    commentFormulaSafe: hasQuality ? (quality.commentFormulaRisk || 0) === 0 : true,
+    storageQualityAudited: hasQuality
+  };
+  var ok = Object.keys(checks).every(function (k) {
+    return checks[k];
+  });
+  return {
+    ok: ok,
+    phase: 'canary_acceptance',
+    destinationId: verify.destinationId,
+    expectedStoredRows: wantRows,
+    checks: checks,
+    rowCount: verify.rowCount,
+    uniqueResponseIds: verify.uniqueResponseIds,
+    duplicateResponseIds: verify.duplicateResponseIds,
+    revisionDistribution: rev,
+    storageQuality: hasQuality ? quality : null,
+    coreLibStorageQualityRequired: !hasQuality,
+    contractVersion: verify.contractVersion,
+    message: ok ? 'slg_canary_storage_accepted' : 'slg_canary_storage_incomplete'
+  };
+}
+
+/**
  * Sanitized CSAT_Responses verification for one destination (counts/metadata only).
  * @param {string} logicalAppId
  * @return {Object}

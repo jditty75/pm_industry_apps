@@ -2,6 +2,16 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — CSAT Responses SLG storage canary — **VERIFIED (editor runtime)**
+
+- Authorization: prior SLG first-write authorization (2026-10-05)
+- Production evidence (counts only): source **177**; SLG routed **28**; stored **26**; excluded **2**; first ingest inserted **26** / updated **0**; second ingest inserted **0** / updated **0**; `CSAT_Responses` present in SLG; both jobs **SUCCESS**
+- Idempotency: second pass produced no inserts/updates; stored row count **26** unchanged (storage verification; `unchanged` not logged on job)
+- Exclusions: consistent with deployment-not-in-universe (**2**); eligibility not weakened
+- Git hardening (separate commit on `main`): workbook context for DD contacts; sanitized eligibility/storage audit APIs; SLG acceptance helper; tests/docs — **no** CoreLib 147 cut, **no** EDM push in close-out
+- Still OFF: source deletion; Responses scheduling; HC/HENP ingest; InFlight scheduler unchanged
+- See `docs/agent/csat-responses-storage-canary.md`
+
 ### 2026-10-05 — CSAT Responses SLG storage canary — **STOPPED (runtime blocked)**
 
 - Authorization: user (CSAT Responses SLG storage canary, 2026-10-05; includes EDM HEAD push)

@@ -2,6 +2,19 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — DepMngr CoreLib 146 — fleet pin + DM production deploy
+
+- Authorization: user (`Execute the DepMngr release plan`, 2026-10-05)
+- Git source: `ff86b23` (library) + manifest pin bumps (pending commit)
+- Library: DepMngr immutable **146** — CSAT Responses storage (`ingestCsatResponses`, bootstrap, Active+Complete eligibility)
+- Rollback library version: **145**
+- Consumer pins: all `*_DM` **139/144 → 146**; External_Data_Manager **145 → 146**
+- Production deployments (Deployment IDs unchanged): SLG_DM **@196**, HC_DM **@88**, HENP_DM **@109**, EVI_DM **@30**, PDX_DM **@4**, HS_DM **@21**
+- EDM: `clasp push --force` to HEAD (includes Qualtrics R1.5 InFlight classifier + Responses pipeline source); **no** new clasp deploy entry
+- Verification: DepMngr `npm test` 11/11; production browser smoke not performed
+- Result: success (library cut + DM deploys; EDM HEAD updated)
+- Not performed: Responses Drive setup; CSAT_Responses sheet bootstrap; Responses ingest
+
 ### 2026-10-05 — External_Data_Manager — Qualtrics V1 production activation (partial)
 
 - Authorization: user (EDM Qualtrics V1 final production activation, 2026-10-05)

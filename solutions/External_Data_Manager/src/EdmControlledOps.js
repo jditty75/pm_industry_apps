@@ -936,6 +936,230 @@ function runEdmPreviewCsatResponsesEligibility(logicalAppId) {
   }, preview);
 }
 
+/**
+ * Enable or disable Responses ingest flag only (does not install triggers).
+ * @param {boolean} enable
+ * @return {Object}
+ */
+function runEdmSetQualtricsResponsesIngestEnabled(enable) {
+  var props = PropertiesService.getScriptProperties();
+  if (enable === true) {
+    props.setProperty(EdmProperties.RESPONSES_INGEST_ENABLED, 'true');
+  } else {
+    props.deleteProperty(EdmProperties.RESPONSES_INGEST_ENABLED);
+  }
+  return {
+    ok: true,
+    responsesIngestEnabled: props.getProperty(EdmProperties.RESPONSES_INGEST_ENABLED) === 'true'
+  };
+}
+
+/**
+ * Sanitized CSAT_Responses verification for one destination (counts/metadata only).
+ * @param {string} logicalAppId
+ * @return {Object}
+ */
+function runEdmVerifyCsatResponsesStorage(logicalAppId) {
+  if (!logicalAppId) {
+    return { ok: false, message: 'logicalAppId required' };
+  }
+  var coreLib = typeof CoreLib !== 'undefined' ? CoreLib : null;
+  if (!coreLib || !coreLib.CoreData || !coreLib.CoreData.verifyCsatResponsesStorage) {
+    return { ok: false, message: 'CoreLib.verifyCsatResponsesStorage unavailable' };
+  }
+  var props = PropertiesService.getScriptProperties();
+  var spreadsheetId = EdmDestinationRegistry.resolveSpreadsheetId(logicalAppId, props);
+  if (!spreadsheetId) {
+    return { ok: false, message: 'destination spreadsheet not configured' };
+  }
+  var rawCfg = EdmDmConfigResolver.resolve(logicalAppId);
+  var cfg = coreLib.CoreConfig.withDefaults(rawCfg);
+  var result = coreLib.CoreData.verifyCsatResponsesStorage(cfg, { spreadsheetId: spreadsheetId });
+  return Object.assign({ ok: !!result.success, destinationId: logicalAppId }, result);
+}
+
+/**
+ * Idempotent Responses Drive setup using EXTERNAL_DATA_PARENT_FOLDER_ID property.
+ * @return {Object}
+ */
+function runEdmEnsureQualtricsResponsesDriveFromProperties() {
+  var props = PropertiesService.getScriptProperties();
+  var parentId = props.getProperty(EdmProperties.EXTERNAL_DATA_PARENT_FOLDER_ID);
+  if (!parentId) {
+    return { ok: false, message: 'EXTERNAL_DATA_PARENT_FOLDER_ID not configured' };
+  }
+  if (props.getProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID)) {
+    return { ok: true, message: 'responses_folders_already_configured' };
+  }
+  return runEdmSetupQualtricsResponsesDrive(parentId);
+}
+
+/**
+ * Authorized SLG CSAT Responses storage canary (editor / API executable).
+ * Expects validated Responses CSV already in Responses/Inbox. Counts only in output.
+ *
+ * @param {Object=} options
+ * @param {boolean} [options.skipIngest=false] dry-run + eligibility + bootstrap only
+ * @return {Object}
+ */
+function runEdmCsatResponsesSlgStorageCanaryNow(options) {
+  options = options || {};
+  var SLG = EdmDestinationRegistry.APP_SLG;
+  var report = { ok: false, phase: 'start', steps: [] };
+
+  function record_(name, result) {
+    report.steps.push({
+      step: name,
+      ok: !!result.ok,
+      summary: result.summary || result.message || ''
+    });
+    if (!result.ok) {
+      report.phase = name;
+      report.message = result.message || 'step_failed';
+      report.detail = result;
+    }
+    return !!result.ok;
+  }
+
+  var pre = runEdmVerifyOperationalState();
+  var propsPre = PropertiesService.getScriptProperties();
+  var responsesDeleteOn = propsPre.getProperty(EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE) === 'true';
+  if (!record_('operational_state', {
+    ok: pre.ok && pre.triggerCount > 0 &&
+      pre.triggerHandlers.indexOf('runQualtricsInboxScheduled') >= 0 &&
+      !pre.responsesIngestEnabled && !responsesDeleteOn,
+    message: pre.ok ? 'inflight_trigger_ok' : 'operational_read_failed',
+    summary: 'triggers=' + pre.triggerCount + ' responsesIngest=' + pre.responsesIngestEnabled
+  })) {
+    return report;
+  }
+
+  var drive = runEdmEnsureQualtricsResponsesDriveFromProperties();
+  if (!record_('responses_drive', Object.assign({ summary: drive.message || '' }, drive))) {
+    return report;
+  }
+
+  var dry = processQualtricsResponsesInboxNow({ dryRun: true });
+  var pop = (dry.outcome && dry.outcome.job && dry.outcome.job.populationCounts) || {};
+  var destMap = {};
+  (dry.destinationResults || []).forEach(function (d) {
+    destMap[d.appId] = d.inputRows;
+  });
+  var dryOk = dry.ok &&
+    (dry.outcome.job.sourceRowCount === 177) &&
+    destMap.HC_DM === 77 && destMap.SLG_DM === 28 && destMap.HENP_DM === 72;
+  if (!record_('responses_dry_run', {
+    ok: dryOk,
+    message: dryOk ? 'dry_run_counts_ok' : 'dry_run_counts_mismatch',
+    summary: 'source=' + (dry.outcome.job.sourceRowCount || 0) +
+      ' hc=' + (destMap.HC_DM || 0) + ' slg=' + (destMap.SLG_DM || 0) +
+      ' henp=' + (destMap.HENP_DM || 0)
+  })) {
+    return report;
+  }
+
+  var preview = runEdmPreviewCsatResponsesEligibility(SLG);
+  var prevTotal = (preview.eligible || 0) + (preview.excluded || 0) + (preview.rejected || 0);
+  var previewOk = preview.ok &&
+    preview.routedCandidateRows === 28 &&
+    prevTotal === 28 &&
+    (preview.deploymentUniverseSize || 0) > 0 &&
+    ((preview.eligible || 0) > 0 || preview.excluded === 28);
+  if (!record_('slg_eligibility_preview', {
+    ok: previewOk,
+    message: previewOk ? 'eligibility_ok' : 'eligibility_implausible',
+    summary: 'input=' + preview.routedCandidateRows + ' eligible=' + (preview.eligible || 0) +
+      ' excluded=' + (preview.excluded || 0) + ' universe=' + (preview.deploymentUniverseSize || 0)
+  })) {
+    return report;
+  }
+
+  if (options.skipIngest) {
+    report.ok = true;
+    report.phase = 'complete_skip_ingest';
+    return report;
+  }
+
+  var boot = runEdmBootstrapCsatResponsesStorage(SLG);
+  if (!record_('slg_bootstrap', {
+    ok: boot.ok && boot.dataRowCount === 0,
+    message: boot.ok ? 'bootstrap_ok' : 'bootstrap_failed',
+    summary: 'dataRows=' + (boot.dataRowCount || 0)
+  })) {
+    return report;
+  }
+
+  runEdmSetQualtricsResponsesIngestEnabled(true);
+  var ingest1 = processQualtricsResponsesInboxNow({
+    dryRun: false,
+    ingestEnabled: true,
+    deleteSuccessfulSource: false,
+    limitDestinationAppIds: [SLG]
+  });
+  var slg1 = (ingest1.destinationResults || []).filter(function (d) {
+    return d.appId === SLG;
+  })[0] || {};
+  var ingest1Ok = ingest1.ok && slg1.status === 'success' &&
+    (slg1.inserted || 0) > 0 && (slg1.updated || 0) === 0 && (slg1.unchanged || 0) === 0;
+  if (!record_('slg_first_ingest', {
+    ok: ingest1Ok,
+    message: ingest1Ok ? 'first_ingest_ok' : 'first_ingest_failed',
+    summary: 'inserted=' + (slg1.inserted || 0) + ' updated=' + (slg1.updated || 0) +
+      ' unchanged=' + (slg1.unchanged || 0) + ' excluded=' + (slg1.excludedCount || 0)
+  })) {
+    runEdmSetQualtricsResponsesIngestEnabled(false);
+    return report;
+  }
+
+  var verify1 = runEdmVerifyCsatResponsesStorage(SLG);
+  var verifyOk = verify1.ok && verify1.headerOk && !verify1.forbiddenColumnsPresent &&
+    verify1.rowCount === verify1.uniqueResponseIds && verify1.rowCount === (slg1.inserted || 0);
+  if (!record_('slg_storage_verify', {
+    ok: verifyOk,
+    message: verifyOk ? 'storage_ok' : 'storage_verify_failed',
+    summary: 'rows=' + (verify1.rowCount || 0) + ' uniqueIds=' + (verify1.uniqueResponseIds || 0)
+  })) {
+    runEdmSetQualtricsResponsesIngestEnabled(false);
+    return report;
+  }
+
+  var ingest2 = processQualtricsResponsesInboxNow({
+    dryRun: false,
+    ingestEnabled: true,
+    deleteSuccessfulSource: false,
+    limitDestinationAppIds: [SLG],
+    allowDuplicateOverride: true
+  });
+  var slg2 = (ingest2.destinationResults || []).filter(function (d) {
+    return d.appId === SLG;
+  })[0] || {};
+  var priorEligible = (slg1.inserted || 0) + (slg1.unchanged || 0);
+  var idemOk = ingest2.ok &&
+    (slg2.inserted || 0) === 0 && (slg2.updated || 0) === 0 &&
+    (slg2.unchanged || 0) === priorEligible;
+  if (!record_('slg_idempotency', {
+    ok: idemOk,
+    message: idemOk ? 'idempotent_ok' : 'idempotency_failed',
+    summary: 'inserted=' + (slg2.inserted || 0) + ' unchanged=' + (slg2.unchanged || 0)
+  })) {
+    runEdmSetQualtricsResponsesIngestEnabled(false);
+    return report;
+  }
+
+  runEdmSetQualtricsResponsesIngestEnabled(false);
+  var post = runEdmVerifyOperationalState();
+  record_('post_operational_state', {
+    ok: post.ok && !post.responsesIngestEnabled,
+    message: 'responses_ingest_disabled',
+    summary: 'responsesIngest=' + post.responsesIngestEnabled
+  });
+
+  report.ok = true;
+  report.phase = 'complete';
+  report.message = 'canary_complete';
+  return report;
+}
+
 function runEdmV1bControlledInfrastructureSetup(
   parentFolderId,
   hcSpreadsheetId,

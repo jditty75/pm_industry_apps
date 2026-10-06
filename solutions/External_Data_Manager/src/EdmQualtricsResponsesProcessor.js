@@ -127,9 +127,16 @@ var EdmQualtricsResponsesProcessor = (function () {
     var coreLib = deps.coreLib || (typeof CoreLib !== 'undefined' ? CoreLib : null);
     var anyFail = false;
 
+    var limitDests = options.limitDestinationAppIds || options.retryDestinationAppIds || null;
+
     destinationResults.forEach(function (plan) {
       if (!plan.enabled) {
         plan.status = 'skipped';
+        return;
+      }
+      if (limitDests && limitDests.length && limitDests.indexOf(plan.appId) < 0) {
+        plan.status = 'skipped';
+        plan.message = 'limitDestinationAppIds';
         return;
       }
       var spreadsheetId = EdmDestinationRegistry.resolveSpreadsheetId(plan.appId, props);
@@ -153,6 +160,9 @@ var EdmQualtricsResponsesProcessor = (function () {
       );
       plan.status = ingest.success ? 'success' : 'failed';
       plan.eligibleCount = ingest.eligible;
+      plan.inserted = ingest.inserted || 0;
+      plan.updated = ingest.updated || 0;
+      plan.unchanged = ingest.unchanged || 0;
       plan.writtenCount = (ingest.inserted || 0) + (ingest.updated || 0);
       plan.excludedCount = ingest.excluded;
       plan.message = ingest.message || '';

@@ -188,6 +188,8 @@ function isQualtricsResponsesIngestEnabled_() {
  * Manual Responses inbox processor (dry-run default; does not alter InFlight trigger).
  *
  * @param {Object=} options
+ * @param {string[]} [options.limitDestinationAppIds] ingest only these logical apps (HC_DM|SLG_DM|HENP_DM)
+ * @param {string[]} [options.retryDestinationAppIds] alias for limitDestinationAppIds
  * @return {Object}
  */
 function processQualtricsResponsesInboxNow(options) {
@@ -243,20 +245,110 @@ function processQualtricsResponsesInboxNow(options) {
       priorJobs: priorJobs,
       allowDuplicateOverride: options.allowDuplicateOverride,
       allowStaleOverride: options.allowStaleOverride,
-      skipDuplicateCheck: false
+      skipDuplicateCheck: options.skipDuplicateCheck === true,
+      limitDestinationAppIds: options.limitDestinationAppIds || options.retryDestinationAppIds
     });
 
+    var disposition = 'INBOX';
+    var duplicateBlocked = outcome.job &&
+      outcome.job.errorCategory === 'DUPLICATE_SUCCESS_CHECKSUM';
+    if (!outcome.result.ok && !dryRun && !duplicateBlocked) {
+      var failedId = props.getProperty(EdmProperties.QUALTRICS_RESPONSES_FAILED_FOLDER_ID);
+      if (failedId) {
+        try {
+          EdmQualtricsInbox.moveToFailed(candidate.file, failedId, DriveApp);
+          disposition = 'FAILED';
+        } catch (moveErr) {
+          Logger.log('processQualtricsResponsesInboxNow: moveToFailed skipped: ' + moveErr);
+        }
+      }
+    } else if (outcome.deleteSourceAllowed) {
+      EdmQualtricsInbox.deleteFile(candidate.file);
+      disposition = 'DELETED_AFTER_SUCCESS';
+    } else if (outcome.result.ok) {
+      disposition = dryRun ? 'INBOX' : 'INBOX_AFTER_SUCCESS';
+    }
+
+    if (ledgerId) {
+      var ledgerSheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+      EdmAuditLedgerSheet.appendJob(ledgerSheet, outcome.job, {
+        sourceDisposition: disposition,
+        overrideFlags: (outcome.overrideFlags || []).join(','),
+        hcEligible: countResponsesDestMetric_(outcome, EdmDestinationRegistry.APP_HC, 'eligibleCount'),
+        slgEligible: countResponsesDestMetric_(outcome, EdmDestinationRegistry.APP_SLG, 'eligibleCount'),
+        henpEligible: countResponsesDestMetric_(outcome, EdmDestinationRegistry.APP_HENP, 'eligibleCount')
+      });
+    }
+
+    Logger.log('processQualtricsResponsesInboxNow: ' + buildResponsesJobLogLine_(outcome));
     return {
       ok: outcome.result.ok,
       dryRun: dryRun,
       jobId: outcome.job.jobId,
+      disposition: disposition,
       diagnostics: outcome.result.diagnostics,
       warningCounts: outcome.result.warningCounts,
+      destinationResults: summarizeResponsesDestinations_(outcome),
       outcome: outcome
     };
   } finally {
     lock.release();
   }
+}
+
+/**
+ * @param {Object} outcome
+ * @return {string}
+ */
+function buildResponsesJobLogLine_(outcome) {
+  var job = outcome.job || {};
+  return [
+    'job ' + job.jobId,
+    'pipeline=' + QualtricsResponsesPipeline.PIPELINE_ID,
+    'status=' + job.status,
+    'sourceRows=' + (job.sourceRowCount || 0)
+  ].join(' ');
+}
+
+/**
+ * @param {Object} outcome
+ * @param {string} appId
+ * @param {string} field
+ * @return {number}
+ */
+function countResponsesDestMetric_(outcome, appId, field) {
+  var list = outcome.result.destinationResults || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].appId === appId) {
+      var val = list[i][field];
+      if (val != null) {
+        return val;
+      }
+      return list[i].inputRows || 0;
+    }
+  }
+  return 0;
+}
+
+/**
+ * @param {Object} outcome
+ * @return {Object[]}
+ */
+function summarizeResponsesDestinations_(outcome) {
+  var list = outcome.result.destinationResults || [];
+  return list.map(function (d) {
+    return {
+      appId: d.appId,
+      status: d.status,
+      inputRows: d.inputRows,
+      eligibleCount: d.eligibleCount,
+      excludedCount: d.excludedCount,
+      inserted: d.inserted,
+      updated: d.updated,
+      unchanged: d.unchanged,
+      message: d.message
+    };
+  });
 }
 
 /**

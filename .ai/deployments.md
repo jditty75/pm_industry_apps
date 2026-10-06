@@ -2,6 +2,18 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-05 — CSAT Responses SLG storage canary — **STOPPED (runtime blocked)**
+
+- Authorization: user (CSAT Responses SLG storage canary, 2026-10-05; includes EDM HEAD push)
+- Pre-push gates (local): EDM **63/63**; cross-feed classifier **4/4**; validated 177-row Responses CSV dry-run **177 / 77 / 28 / 72**
+- EDM GAS: `clasp push` (HEAD) — Responses SLG-scoped ingest (`limitDestinationAppIds`), Responses ledger append, verify/bootstrap helpers, `runEdmCsatResponsesSlgStorageCanaryNow`
+- API executable deployment **@4** (orchestrator); CoreLib pin **146** `developmentMode: false` (unchanged)
+- Remote execution: **blocked** — `scripts.run` / `clasp run` → **403 PERMISSION_DENIED** (GCP project / Execution API alignment; same as Qualtrics V1 activation)
+- Not performed in GAS: Responses Drive property setup; Responses Inbox CSV placement; real dry-run; SLG eligibility; `CSAT_Responses` bootstrap; first ingest; idempotency; production InFlight trigger verify
+- Editor unblock: run `runEdmCsatResponsesSlgStorageCanaryNow()` after placing validated Responses CSV in Responses/Inbox (or stepwise helpers in `docs/agent/csat-responses-storage-canary.md`)
+- Git: pending commit for EDM canary helpers
+- HC/HENP ingest, Responses scheduling, source deletion: **not performed** (per authorization)
+
 ### 2026-10-05 — DepMngr CoreLib 146 — fleet pin + DM production deploy
 
 - Authorization: user (`Execute the DepMngr release plan`, 2026-10-05)

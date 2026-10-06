@@ -138,18 +138,28 @@ def test_twelve_point_rules():
         if "needs attention" in low:
             raise AssertionError(f"combined needs attention in {fname}")
 
-        rows = re.findall(r'class="csat-sv-row"', html)
+        rows = re.findall(r'data-csat-surveys-row="compact"', html)
+        if 'data-csat-surveys-layout="compact-worklist"' not in html:
+            raise AssertionError(f"missing compact worklist layout marker in {fname}")
+        if 'class="csat-sv-row"' in html:
+            raise AssertionError(f"legacy wide grid row in {fname}")
+        if "--csat-sv-tag-col" in html or "csat-sv-survey-pill" in html:
+            raise AssertionError(f"standalone survey column styling in {fname}")
+        if 'class="csat-sv-horizon"' in html:
+            raise AssertionError(f"duplicate full-width horizon bar in {fname}")
         for row_chunk in re.findall(
-            r'<div class="csat-sv-row-wrap">.*?(?=<div class="csat-sv-row-wrap">|</section>)',
+            r'<div class="csat-sv-row-wrap".*?(?=<div class="csat-sv-row-wrap"|</section>)',
             html,
             flags=re.S,
         ):
             pills = len(re.findall(r'class="status-pill', row_chunk))
             if pills > 1:
                 raise AssertionError(f"more than one attention pill per row in {fname}")
-            tags = len(re.findall(r'class="survey-pill', row_chunk))
+            tags = len(re.findall(r'csat-sv-survey-tag', row_chunk))
             if tags != 1:
                 raise AssertionError(f"row survey tag count != 1 in {fname}")
+            if 'class="csat-sv-row-primary"' not in row_chunk:
+                raise AssertionError(f"missing compact primary row in {fname}")
 
         if "status-red" in html:
             if "All bounced" not in html and fname != "CSAT_SURVEYS_CHASE.html":
@@ -219,6 +229,22 @@ def test_launcher_http():
             raise AssertionError(f"missing proto badge in {fname}")
 
 
+def test_layout_measure_1440():
+    measure = os.path.join(SCRIPT_DIR, "preview_csat_surveys_layout_measure.mjs")
+    r = subprocess.run(
+        ["node", measure],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+        timeout=300,
+        shell=True,
+    )
+    if r.returncode != 0:
+        raise AssertionError(f"layout measure failed:\n{r.stderr or r.stdout}")
+    if "PASS preview_csat_surveys_layout_measure.mjs" not in (r.stdout or ""):
+        raise AssertionError(f"layout measure incomplete:\n{r.stdout}")
+
+
 def test_preview_ps1():
     ps1 = os.path.join(REPO, "preview.ps1")
     r = subprocess.run(
@@ -248,6 +274,7 @@ def main() -> None:
     test_twelve_point_rules()
     test_launcher_http()
     test_preview_ps1()
+    test_layout_measure_1440()
     print("PASS preview_csat_surveys_selftest.py")
 
 

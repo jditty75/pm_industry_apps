@@ -100,15 +100,18 @@ def render_row(row: Dict[str, Any]) -> str:
     deploy = inert_entity_link(row["deployment"])
     acct = row.get("account")
     if acct:
-        deploy = f'<div class="csat-sv-deploy">{deploy}<span class="csat-sv-account">{esc(acct)}</span></div>'
+        deploy_block = (
+            f'<span class="csat-sv-deploy">{deploy}'
+            f'<span class="csat-sv-account">{esc(acct)}</span></span>'
+        )
     else:
-        deploy = f'<div class="csat-sv-deploy">{deploy}</div>'
-    survey = f'<span class="survey-pill csat-sv-survey-pill">{esc(row["survey"])}</span>'
+        deploy_block = f'<span class="csat-sv-deploy">{deploy}</span>'
+    survey = f'<span class="survey-pill csat-sv-survey-tag">{esc(row["survey"])}</span>'
     date_cls = "csat-sv-date"
     if row.get("dateMuted"):
         date_cls += " is-muted"
-    date_html = f'<div class="{date_cls}">{esc(row["dateLine"])}</div>'
-    facet = f'<div class="csat-sv-row-line2">{esc(row["facetLine"])}</div>'
+    date_html = f'<span class="{date_cls}">{esc(row["dateLine"])}</span>'
+    facet = f'<div class="csat-sv-row-secondary">{esc(row["facetLine"])}</div>'
     details_html = ""
     det = row.get("details")
     if det:
@@ -119,19 +122,25 @@ def render_row(row: Dict[str, Any]) -> str:
             f'<summary>{esc(det.get("summary", "invitation detail"))}</summary>'
             f'<ul class="csat-sv-invite-list">{items}</ul></details>'
         )
-    row_inner = (
-        f'<div class="csat-sv-attn">{attn_html}</div>'
-        f"{deploy}{survey}{date_html}"
+    primary = (
+        '<div class="csat-sv-row-primary">'
+        f'<span class="csat-sv-attn">{attn_html}</span>'
+        f'<span class="csat-sv-primary-main">{deploy_block}{survey}</span>'
+        f"{date_html}"
+        "</div>"
     )
     return (
-        '<div class="csat-sv-row-wrap">'
-        f'<div class="csat-sv-row">{row_inner}</div>'
-        f"{facet}{details_html}</div>"
+        '<div class="csat-sv-row-wrap" data-csat-surveys-row="compact">'
+        f"{primary}{facet}{details_html}</div>"
     )
 
 
 def render_group_header(header_parts: List[Dict[str, str]]) -> str:
-    return f'<p class="csat-sv-group-header">{render_horizon_parts(header_parts)}</p>'
+    if not header_parts:
+        return ""
+    return (
+        f'<span class="csat-sv-group-header">{render_horizon_parts(header_parts)}</span>'
+    )
 
 
 def render_group(section_key: str, eyebrow: str, section_id: str, group: Dict[str, Any]) -> str:
@@ -157,13 +166,15 @@ def render_group(section_key: str, eyebrow: str, section_id: str, group: Dict[st
             )
     for tail_row in group.get("tailRows", []):
         extra += render_row(tail_row)
-    header = render_group_header(group.get("headerParts", []))
+    header_meta = render_group_header(group.get("headerParts", []))
     return (
-        f'<section class="trends-section csat-sv-group" id="{esc(section_id)}" '
+        f'<section class="csat-sv-panel" id="{esc(section_id)}" '
         f'data-csat-surveys-group="{esc(section_key)}" aria-labelledby="{esc(section_id)}-title">'
-        f'<p class="csat-sv-eyebrow">{esc(eyebrow)}</p>'
-        f'<h2 class="trends-section-title" id="{esc(section_id)}-title">{esc(group.get("title", ""))}</h2>'
-        f"{header}{rows_html}{extra}</section>"
+        f'<div class="csat-sv-section-head">'
+        f'<span class="csat-sv-eyebrow">{esc(eyebrow)}</span>'
+        f'<h2 class="csat-sv-section-title" id="{esc(section_id)}-title">{esc(group.get("title", ""))}</h2>'
+        f"{header_meta}</div>"
+        f'<div class="csat-sv-rowlist">{rows_html}{extra}</div></section>'
     )
 
 
@@ -201,7 +212,7 @@ def render_filter_bar(filters: Dict[str, Any]) -> str:
             for x in lit
         )
     return (
-        '<div class="csat-sv-sticky-bar">'
+        '<div class="csat-sv-sticky-bar" data-csat-surveys-controls="compact">'
         '<div class="csat-sv-filter-row">'
         f'<div class="csat-sv-phase-jump" role="group" aria-label="Phase">{"".join(phase_btns)}</div>'
         '<span class="csat-sv-filter-divider" aria-hidden="true"></span>'
@@ -268,14 +279,12 @@ def render_state_page(st: Dict[str, Any], meta: Dict[str, Any]) -> str:
     groups_html = ""
     for key, eyebrow, sid in LIFECYCLE_GROUPS:
         groups_html += render_group(key, eyebrow, sid, st[key])
-    horizon = f'<p class="csat-sv-horizon">{render_horizon_parts(st["horizonParts"])}</p>'
     return (
-        '<main class="container" id="csat-surveys-app">'
+        '<main class="container" id="csat-surveys-app" data-csat-surveys-layout="compact-worklist">'
         + render_shell_start(shell, st.get("dataAsOf", "Oct 2026"))
         + render_csat_subnav(st["scopeMenu"])
         + '<div class="csat-sv-layout">'
         + render_filter_bar(st.get("filters", {}))
-        + horizon
         + groups_html
         + "</div></main>"
         + f'<div class="csat-sv-proto-badge" role="status">LOCAL PROTOTYPE · {esc(st["protoLabel"])} · '

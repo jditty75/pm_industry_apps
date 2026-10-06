@@ -48,6 +48,19 @@ function screenshot(url, outPath) {
   }
 }
 
+function runLayoutMeasure() {
+  const r = spawnSync("node", [path.join(__dirname, "preview_csat_surveys_layout_measure.mjs")], {
+    cwd: REPO,
+    encoding: "utf-8",
+    shell: true,
+  });
+  if (r.status !== 0) {
+    console.error(r.stderr || r.stdout);
+    process.exit(1);
+  }
+  process.stdout.write(r.stdout || "");
+}
+
 function main() {
   const base = launchPreview();
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -62,6 +75,7 @@ function main() {
     }
     console.log(`screenshot: ${outPath} (${size} bytes)`);
   }
+  runLayoutMeasure();
   console.log("PASS preview_csat_surveys_visual_smoke.mjs");
 }
 

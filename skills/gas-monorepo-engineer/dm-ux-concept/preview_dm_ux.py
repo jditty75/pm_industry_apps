@@ -41,12 +41,15 @@ def main() -> None:
         sys.exit(1)
     print("validate: PASS")
 
-    base_url, _port = ensure_server(out_dir)
-    url = base_url + "/DM_UX.html"
+    # ensure_server returns base URL str (no trailing slash) — same contract as preview_engine.py
+    base = ensure_server(out_dir)
+    url = f"{base}/DM_UX.html"
     print(f"serve: {url}")
     print("controls: use the top prototype panel or hash params (see docs/analysis/dm-ux/visual-review-guide.md)")
+    print(f"preview server: {base}  (use .\\preview.ps1 --stop to stop)")
     if not args.no_open:
         webbrowser.open(url)
+        print(f"opened {url}")
 
 
 if __name__ == "__main__":

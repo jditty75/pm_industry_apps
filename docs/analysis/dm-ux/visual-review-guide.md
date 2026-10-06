@@ -4,7 +4,7 @@ Interactive **localhost-only** prototypes for Baseline, Concept A, and Concept B
 
 ## Launch
 
-From repo root (`C:\JD`):
+From repo root (`C:\JD`). Use **`preview.ps1`** at the repository root (there is no `preview\` subfolder launcher).
 
 ```powershell
 .\preview.ps1 DM_UX

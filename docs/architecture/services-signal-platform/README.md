@@ -13,7 +13,9 @@ Evidence quality + trace sheets
         ↓
 LLM Context Assembler (SLG pilot — deployment-signal-context-v1)
         ↓
-LLM reasoning (Sana Deployment Signals Pilot — manual portfolio step)
+Stage 1 — Sana candidate discovery (manual; 184 → 17 accepted pilot)
+        ↓
+Stage 2 — portfolio compression + Data Stewardship (deterministic harness → manual Sana)
         ↓
 Structured signals (documented contract only)
         ↓
@@ -54,6 +56,9 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 | [deployment-trajectory-v2-pilot-freeze.md](./deployment-trajectory-v2-pilot-freeze.md) | Pilot-frozen trajectory v2 contract |
 | [deployment-signal-context-v1.md](./deployment-signal-context-v1.md) | Context packet schema |
 | [context-assembler.md](./context-assembler.md) | Assembler architecture and portfolio workflow |
+| [stage-2-portfolio-compression.md](./stage-2-portfolio-compression.md) | Stage 2 compression, stewardship lane, workflow |
+| [deployment-signal-candidate-v1.md](./deployment-signal-candidate-v1.md) | Normalized Stage-1 candidate contract |
+| [deployment-data-stewardship-v1.md](./deployment-data-stewardship-v1.md) | Data Stewardship condition contract |
 | [human-validation-package.md](./human-validation-package.md) | Ten-deployment review format |
 | [engineering-baseline-2026-10.md](./engineering-baseline-2026-10.md) | Reconciliation matrix and Git/runtime ownership |
 
@@ -64,7 +69,8 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 | Trajectory engine | `libraries/DepMngr/src/CoreDeploymentTrajectory*.js` |
 | Context Assembler | `libraries/DepMngr/src/CoreDeploymentSignalContext.js` |
 | Defaults / gating | `libraries/DepMngr/src/CoreConfig.js` (`deploymentSignal`, schema version **2**) |
-| Local packet / harness | `scripts/generate-deployment-signal-context-packets.py`, `scripts/deployment-signal-portfolio-pilot-harness.py` |
+| Local packet / harness | `scripts/generate-deployment-signal-context-packets.py`, `scripts/deployment-signal-portfolio-pilot-harness.py`, `scripts/deployment-signal-stage2-harness.py` |
+| Data Stewardship | `CoreDeploymentDataStewardship.js`, `deployment_trajectory_validation/data_stewardship.py` |
 | SLG pilot enablement | `solutions/SLG_DM/src/Config_SLG.js`, `Code.js` (`refreshDeploymentTrajectory`) |
 | Tests | `libraries/DepMngr/test/deployment-trajectory-*.test.js`, `pf-history-export-analysis.test.js` |
 | Local PF history diagnostic | `scripts/diagnose-deployment-trajectory-pf-history.js` |

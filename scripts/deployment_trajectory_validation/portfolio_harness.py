@@ -132,8 +132,8 @@ def write_portfolio_artifacts(
         "batching_strategy": {
             "stage_1": "Evaluate deterministic batches for candidate per-deployment Signals.",
             "stage_2": (
-                "Provide candidate Signals together for portfolio-level prioritization "
-                "and attention compression (not implemented in this harness)."
+                "Provide normalized Stage-1 candidates together for portfolio-level "
+                "prioritization via deployment-signal-stage2-harness.py."
             ),
             "max_batch_bytes": max_batch_bytes,
         },

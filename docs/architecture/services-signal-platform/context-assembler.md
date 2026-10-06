@@ -22,9 +22,15 @@ Deterministic layer between **Deployment Trajectory v2** and **Sana reasoning**.
 1. Generate packets: `python scripts/generate-deployment-signal-context-packets.py`
 2. Inspect: `.ai/signal-exports/context-packet-review.html`
 3. Build Sana input (no LLM): `python scripts/deployment-signal-portfolio-pilot-harness.py`
-4. Manually run unchanged **Sana Deployment Signals Pilot** agent with `.ai/signal-exports/sana-portfolio-pilot-input*.txt`
+4. Manually run unchanged **Sana Deployment Signals Pilot** agent with `.ai/signal-exports/sana-portfolio-pilot-input*.txt` (**Stage 1**)
+5. Store verbatim Stage-1 Sana outputs in `.ai/signal-exports/stage1/`
+6. `python scripts/deployment-signal-stage2-harness.py` → inspect review HTML → paste `sana-stage2-portfolio-compression-input.txt` (**Stage 2**)
 
 Production-derived artifacts remain under `.ai/signal-exports/` only (gitignored).
+
+## Stage 1 result (accepted)
+
+184 deployments evaluated → **17** candidate Signals → **167** NO_SIGNAL (~90.8% compressed). See [stage-2-portfolio-compression.md](./stage-2-portfolio-compression.md).
 
 ## Pilot calibration acceptance (patterns — not rules)
 
@@ -38,4 +44,4 @@ Automatic reproduction: `context-packets/calibration-comparison-report.json` fro
 
 ## Batching strategy
 
-When portfolio payload size exceeds limits, the harness emits deterministic batches (stable `deployment_id` order). **Stage 1:** per-batch candidate Signals. **Stage 2 (future):** portfolio-level attention compression across candidates — not implemented in this repo task.
+When portfolio payload size exceeds limits, the harness emits deterministic batches (stable `deployment_id` order). **Stage 1:** per-batch candidate Signals. **Stage 2:** portfolio-level attention compression across normalized candidates — see `scripts/deployment-signal-stage2-harness.py` and [stage-2-portfolio-compression.md](./stage-2-portfolio-compression.md).

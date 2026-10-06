@@ -1,0 +1,19 @@
+Deployment: Sanitized County — Initial Deployment (DEP_SANITIZED_001)
+
+Attention: Watch
+
+Signal Type: COMPOUND
+
+Observation: Sanitized observation for unit test.
+
+Historical Evidence: Recent schedule movement with stable current health.
+
+Interpretation: Sanitized interpretation — not production data.
+
+Why This Matters: Illustrates compound pattern detection in parser tests only.
+
+Leadership Question: What sanitized question would leadership ask?
+
+Confidence: Medium
+
+Evidence Limitations: Synthetic fixture only.

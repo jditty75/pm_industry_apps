@@ -1,5 +1,7 @@
 # CSAT Subsystem — Information Architecture, UX, Access, Gates, Preview, Scale
 
+> **Status 2026-10-06:** §1 (sub-area shape) is superseded by the navigation in [../dm-ux/csat-reconciled-architecture/navigation-and-overview.md](../dm-ux/csat-reconciled-architecture/navigation-and-overview.md). §3–§9 (deployment experience, feedback, access tiers, gates, preview, API, scale) remain authoritative.
+
 ## 1. Shape
 CSAT becomes a small subsystem with one shared data-access layer and four sub-areas (labels not final):
 

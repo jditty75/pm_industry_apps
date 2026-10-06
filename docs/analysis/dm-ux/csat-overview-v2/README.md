@@ -1,5 +1,7 @@
 # CSAT Overview v2 — one Overview designed from the approved product model (2026-10-06)
 
+> **Status update 2026-10-06: historical — superseded** by [../csat-reconciled-architecture/](../csat-reconciled-architecture/README.md). Its structure, risk triggers (OV-2), deployment-weighted mean headline (OV-1), tertiary Survey Operations strip (OV-5) and seven states are superseded or invalidated by the VoC guidebook (see [decision-reconciliation.md §4](../csat-reconciled-architecture/decision-reconciliation.md#4-csat-overview-v2)). Still useful: the Workday-led default lens and partner-led reference rules, safe/unsafe comparison language, and the visual-language/accessibility guidance in [overview-information-design.md §6–8](overview-information-design.md). The prototype is retained and is not a baseline for the next visual task.
+
 Status: **design specification + localhost visual prototype for Jeff's review.** Production DepMngr UI/CSS/JS is unchanged. The V2 prototype lives under `skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/` and builds to gitignored `.preview-out/CSAT_OVERVIEW_*.html`.
 
 This folder specifies **one** CSAT → Overview for Deployment Manager. It is not a set of alternatives. It is derived from the approved [Customer Satisfaction product model](../csat-product-model/README.md) and Jeff's resolved decisions P1–P10. It adds one new authoritative requirement: **Workday-led CSAT is the primary management lens.** Partner-led CSAT provides comparative and portfolio context.

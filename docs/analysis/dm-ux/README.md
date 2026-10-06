@@ -48,6 +48,14 @@ The focused Overview compositions A/B/C in `csat-overview-design/` are **rejecte
 |-----|-----------|
 | [csat-overview-v2/README.md](csat-overview-v2/README.md) | **Current CSAT Overview design.** One Overview from the approved product model: Workday-led default lens with partner-led/all-deployments context, satisfaction + evidence unit, explainable risk, delivery ratings, journey, seven states, drill-down map, Composer handoff for seven static pages |
 
+## CSAT reconciled architecture — VoC guidebook × deployment-centric DM (2026-10-06)
+
+| Doc | Read when |
+|-----|-----------|
+| [csat-reconciled-architecture/README.md](csat-reconciled-architecture/README.md) | **Current CSAT architecture (proposed, pending Jeff's product review).** Reconciles the VoC *PGL and MDS Deployment Surveys Guidebook* with the CSAT data foundation: survey lifecycle (prepare → in flight → responded → follow-up), Top-2 Box / Detractor rules, deployment and portfolio CSAT models, SFDC/Qualtrics/EDM/DM boundaries, data gaps, V1 scope, navigation **Overview · Surveys · Responses**, portable DM design principles |
+
+Status of earlier CSAT design folders: `csat-product-model/` is **still authoritative for areas marked KEEP** in [decision-reconciliation.md](csat-reconciled-architecture/decision-reconciliation.md) (semantics, tiers, small-n rules, journey, feedback placement). It is **superseded** on headline metric, risk thresholds, navigation and hierarchy. `csat-overview-v2/` and its prototype are **historical**: the visual-language guidance is reusable, but its structure and thresholds are superseded. `csat-overview-design/` stays rejected/historical.
+
 ## Headline findings
 
 1. **The "original Workday assets" are brand-guideline docs plus recipes, not a UI kit.** No CSS file, HTML template, component library or screenshots exist in the repo. The core of Chris's skill (`SKILL.md` Steps 1-6: skeleton, tokens, "Cards and surfaces", gradient library) is **absent**; surviving references still point at it.

@@ -1,5 +1,7 @@
 # Next visual-design task — handoff (do not start until Jeff approves this product model)
 
+> **Superseded 2026-10-06** by [../csat-reconciled-architecture/visual-design-handoff.md](../csat-reconciled-architecture/visual-design-handoff.md). Retained for history.
+
 ## Task
 
 Design **one** CSAT → Overview, in current production DM visual language, that expresses the semantic definition in [navigation-model.md §5](navigation-model.md). One composition, iterated. Not three alternatives.

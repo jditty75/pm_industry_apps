@@ -70,3 +70,33 @@ From `canonical-response-model.md` §2 and `csat-ui-architecture.md` §2 — bin
 ## Approval chain
 
 Unchanged from `preview-concept-spec.md` §11: this document and its siblings → Composer builds the three narrow Overview previews → Jeff reviews screenshots at 1440×900 → iteration → explicit **CSAT OVERVIEW VISUALLY APPROVED** → only then does the deployment drawer, Responses, Customer Feedback, or any production implementation get designed/built. Nothing here authorizes a next step beyond this visual spec.
+
+## Visual review sequence (localhost prototypes)
+
+Launch:
+
+```powershell
+.\preview.ps1 DM_UX_CSAT
+```
+
+Compare at **1440×900** in this order:
+
+1. **Overview A** — `DM_UX_CSAT_A.html`
+2. **Overview B** — `DM_UX_CSAT_B.html`
+3. **Overview C** — `DM_UX_CSAT_C.html`
+4. Return to **Overview A**
+
+Use the `Overview A | B | C` links above the shell to switch; do not use the Phase-1 `DM_UX` prototype for this pass.
+
+**Out of scope for this review:** branding experiments, deployment drawer, Responses page, Customer Feedback, Survey Tracking detail, production implementation.
+
+**Questions for Jeff only:**
+
+- Which screen establishes the clearest CSAT hierarchy?
+- Which feels most naturally like today's Deployment Manager?
+- Which makes it easiest to understand portfolio health?
+- Which makes it easiest to know where to investigate?
+- Is information density appropriate?
+- What feels visually wrong or unnecessary?
+
+Implementation details: [composer-preview-spec.md](composer-preview-spec.md) §8.

@@ -73,3 +73,29 @@ Optional, only if useful to show the n<5/low-n treatment in context (not require
 ## 7. What not to touch (restated from README)
 
 No production DepMngr runtime/CSS/markup/JS/config, no CLASP, no deploy, no modification to `skills/gas-monorepo-engineer/dm-ux-concept/` (the Phase-1 broad prototype — build these three pages alongside it, not inside or over it), no API/EDM/workbook changes.
+
+## 8. Implementation (Composer, 2026-10-05)
+
+**Code:** `skills/gas-monorepo-engineer/dm-ux-csat-overview/` — build script inlines production DepMngr CSS via the same `gas_bundle_extract.mjs` path as `dm-ux-concept`; prototype-only layout CSS in `src/csat-overview.css`. Shared synthetic fixture: `fixtures/csat-overview-fixture.json` (`fixtureId`: `csat-overview-slg-v1-20261005`).
+
+**Build output (gitignored):** `.preview-out/DM_UX_CSAT_A.html`, `DM_UX_CSAT_B.html`, `DM_UX_CSAT_C.html`.
+
+**Launch from repo root:**
+
+```powershell
+.\preview.ps1 DM_UX_CSAT
+```
+
+Opens **Overview A** by default. Alias: `CSAT_OVERVIEW`. No browser: `.\preview.ps1 DM_UX_CSAT -NoOpen`. Stop server: `.\preview.ps1 --stop`.
+
+**Stable URLs** (host/port from console `serve:` line; default port often `18765`):
+
+- `http://127.0.0.1:<port>/DM_UX_CSAT_A.html`
+- `http://127.0.0.1:<port>/DM_UX_CSAT_B.html`
+- `http://127.0.0.1:<port>/DM_UX_CSAT_C.html`
+
+**Chrome:** corner badge `LOCAL PROTOTYPE — NOT PRODUCTION` plus `Overview A | Overview B | Overview C` links above the app shell only — no Phase-1 control bar.
+
+**Regression:** `python skills/gas-monorepo-engineer/dm-ux-csat-overview/preview_dm_ux_csat_selftest.py` (also run via `preview_selftest.py`).
+
+**Visual review sequence:** see [README.md](README.md) § Visual review sequence.

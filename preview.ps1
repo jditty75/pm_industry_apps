@@ -16,6 +16,7 @@ param(
 
 $Engine = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\scripts\preview_engine.py"
 $DmUx = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-concept\preview_dm_ux.py"
+$DmUxCsat = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-overview\preview_dm_ux_csat.py"
 if (-not (Test-Path $Engine)) {
     Write-Error "Preview engine not found: $Engine"
     exit 1
@@ -39,6 +40,18 @@ if ($App -eq "DM_UX" -or $App -eq "UX") {
     if ($NoOpen) { $uxArgs += "--no-open" }
     if ($Stop) { $uxArgs += "--stop" }
     & python $DmUx @uxArgs
+    exit $LASTEXITCODE
+}
+
+if ($App -eq "DM_UX_CSAT" -or $App -eq "CSAT_OVERVIEW") {
+    if (-not (Test-Path $DmUxCsat)) {
+        Write-Error "CSAT Overview preview not found: $DmUxCsat"
+        exit 1
+    }
+    $csatArgs = @()
+    if ($NoOpen) { $csatArgs += "--no-open" }
+    if ($Stop) { $csatArgs += "--stop" }
+    & python $DmUxCsat @csatArgs
     exit $LASTEXITCODE
 }
 

@@ -1,0 +1,15 @@
+{
+  "patterns": [
+    "@workday.com",
+    "@gmail.com",
+    "script.google.com/macros",
+    "AKIA",
+    "-----BEGIN"
+  ],
+  "forbiddenChrome": [
+    "ux-proto-panel",
+    "ux-proto-controls",
+    "PROTOTYPE CONTROLS",
+    "AI Insights"
+  ]
+}

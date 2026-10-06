@@ -1,0 +1,116 @@
+{
+  "fixtureId": "csat-overview-slg-v1-20261005",
+  "app": "SLG",
+  "periodLabel": "Last 90 days",
+  "headline": {
+    "overall": 4.2,
+    "overallDelta": 0.3,
+    "overallFavorablePct": 72,
+    "overallN": 238,
+    "pgl": 4.0,
+    "pglN": 142,
+    "mds": 3.8,
+    "mdsN": 96,
+    "nps": 42,
+    "npsN": 61
+  },
+  "heroSparkline": [3.9, 4.0, 4.1, 3.95, 4.15, 4.2],
+  "surveyContext": {
+    "sent": 32,
+    "completionPct": 68,
+    "awaiting": 4,
+    "upcoming3mo": 12,
+    "bouncedFailed": 0
+  },
+  "trendMonths": [
+    { "label": "Nov", "overall": 3.9, "pgl": 3.85, "mds": 3.7, "volume": 14, "lowN": false },
+    { "label": "Dec", "overall": 4.0, "pgl": 3.9, "mds": 3.75, "volume": 18, "lowN": false },
+    { "label": "Jan", "overall": 4.05, "pgl": 3.95, "mds": 3.8, "volume": 22, "lowN": false },
+    { "label": "Feb", "overall": 3.95, "pgl": 3.88, "mds": 3.72, "volume": 16, "lowN": false },
+    { "label": "Mar", "overall": 4.1, "pgl": 4.0, "mds": 3.85, "volume": 24, "lowN": false },
+    { "label": "Apr", "overall": 4.15, "pgl": 4.05, "mds": 3.9, "volume": 20, "lowN": false },
+    { "label": "May", "overall": 4.0, "pgl": 3.92, "mds": 3.78, "volume": 19, "lowN": false },
+    { "label": "Jun", "overall": 4.08, "pgl": 3.98, "mds": 3.82, "volume": 21, "lowN": false },
+    { "label": "Jul", "overall": 4.12, "pgl": 4.02, "mds": 3.88, "volume": 17, "lowN": false },
+    { "label": "Aug", "overall": 4.18, "pgl": 4.08, "mds": 3.9, "volume": 23, "lowN": false },
+    { "label": "Sep", "overall": 3.6, "pgl": 3.5, "mds": 3.4, "volume": 3, "lowN": true },
+    { "label": "Oct", "overall": 4.2, "pgl": 4.0, "mds": 3.8, "volume": 26, "lowN": false }
+  ],
+  "productAreas": [
+    { "name": "Core HCM", "score": 4.3, "n": 88 },
+    { "name": "Payroll", "score": 3.9, "n": 44 },
+    { "name": "Benefits", "score": null, "n": 3, "suppressed": true },
+    { "name": "Talent", "score": 4.1, "n": 22 },
+    { "name": "Student", "score": 4.0, "n": 18 },
+    { "name": "Financials", "score": 3.7, "n": 31 }
+  ],
+  "attention": [
+    {
+      "deployment": "Example County",
+      "detail": "Core HCM",
+      "reason": "Overall 2.1 ↓",
+      "meta": "3 responses",
+      "scoreLabel": "Overall",
+      "score": 2.1,
+      "trend": "down",
+      "area": "Core HCM",
+      "hasFeedback": true
+    },
+    {
+      "deployment": "City of Hagerstown",
+      "detail": "",
+      "reason": "PGL 1.8",
+      "meta": "negative feedback",
+      "scoreLabel": "PGL",
+      "score": 1.8,
+      "trend": "down",
+      "area": "Payroll",
+      "hasFeedback": true
+    },
+    {
+      "deployment": "Clark County (WA)",
+      "detail": "",
+      "reason": "Declining",
+      "meta": "3 surveys running",
+      "scoreLabel": "Overall",
+      "score": 2.6,
+      "trend": "down",
+      "area": "Benefits",
+      "hasFeedback": false
+    },
+    {
+      "deployment": "Broward Co. Sheriff",
+      "detail": "",
+      "reason": "Overall 3.0",
+      "meta": "mixed trend",
+      "scoreLabel": "Overall",
+      "score": 3.0,
+      "trend": "mixed",
+      "area": "Core HCM",
+      "hasFeedback": false
+    },
+    {
+      "deployment": "Anoka County",
+      "detail": "",
+      "reason": "Overall 2.9",
+      "meta": "recent drop",
+      "scoreLabel": "Overall",
+      "score": 2.9,
+      "trend": "down",
+      "area": "Multiple",
+      "hasFeedback": false
+    },
+    {
+      "deployment": "Metro Wash. Airports",
+      "detail": "",
+      "reason": "Overall 3.1",
+      "meta": "stable",
+      "scoreLabel": "Overall",
+      "score": 3.1,
+      "trend": "flat",
+      "area": "Payroll",
+      "hasFeedback": false
+    }
+  ],
+  "deploymentCount": 34
+}

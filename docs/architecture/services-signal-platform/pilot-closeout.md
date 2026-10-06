@@ -74,7 +74,7 @@ The Deployment Signals pilot demonstrates that a deterministic GAS evidence laye
 
 A separate deterministic Data Stewardship capability is valuable but needs rule-precision validation before accountability use.
 
-**Recommended next milestone:** Design and implement controlled Signal normalization/persistence + lifecycle tracking, keeping AI reasoning flexible and evidence-grounded — **not started in this closeout.**
+**Recommended next milestone:** Design and implement controlled Signal normalization/persistence + lifecycle tracking + weekly governed approval transaction ([weekly-operating-governance-model.md](./weekly-operating-governance-model.md)), keeping AI reasoning flexible and evidence-grounded — **not started in this closeout.**
 
 ## Local evidence (gitignored)
 

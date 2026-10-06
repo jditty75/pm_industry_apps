@@ -18,6 +18,7 @@ Preserve original AI prose in an audit field where useful.
 |-------|---------|
 | `schema_version` | `deployment-signal-v1` |
 | `deployment_id` | Deployment identifier |
+| `reasoning_run_id` | Stable id for the weekly (or event) Signal Agent run that produced this record |
 | `generated_at` | ISO timestamp |
 | `attention` | `HIGH` \| `WATCH` \| `INFORMATIONAL` \| `POSITIVE` (portfolio-relative) |
 | `signal_type` | Category: HEALTH, SCHEDULE, LIFECYCLE, INTERVENTION, COMPOUND, POSITIVE, etc. |

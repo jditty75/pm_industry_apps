@@ -34,12 +34,14 @@ Consider deterministic inputs:
 
 ## Consumption channels (future)
 
-Both consume the same underlying lifecycle store:
+Both consume the same underlying lifecycle store after **one weekly human approval** (authorization only — see [weekly-operating-governance-model.md](./weekly-operating-governance-model.md)):
 
-1. **Deployment Manager landing intelligence** — interactive portfolio Signals; "What changed, what deserves attention, what is improving?"
-2. **Weekly leadership brief** — editorial emphasis on new, escalated, continuing material conditions, resolved, and positive Signals.
+1. **Deployment Manager landing intelligence** — interactive portfolio Signals; "What changed, what deserves attention, and what is improving?"
+2. **Weekly leadership email** — lifecycle-driven emphasis (`NEW`, `ESCALATED`, materially `CONTINUING`, `DE_ESCALATED`, `POSITIVE`, `RESOLVED`); not a second AI pass.
 
 Deployment Manager remains the **investigation surface**. Signals deep-link into DM context; do not duplicate full DM inside Signal output.
+
+Brief content should be driven by **lifecycle state**, not merely by the current Signal population — exact semantics belong in the lifecycle implementation phase.
 
 ## Forecasting boundary
 

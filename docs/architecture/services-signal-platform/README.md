@@ -23,7 +23,6 @@ Signal lifecycle → leadership experiences / drill-down in DM
 ```
 
 **Pilot closeout:** [pilot-closeout.md](./pilot-closeout.md) (184 → 17 → 11 accepted result).
-```
 
 ## Principles
 
@@ -34,7 +33,7 @@ Signal lifecycle → leadership experiences / drill-down in DM
 | Intervention | **Why** patterns may matter (DHP + Action History narrative at source). |
 | Attention | The platform decides **what deserves attention**, not every row. |
 
-**GAS calculates facts. The LLM interprets evidence.** Do not move date math, health ranks, or schedule volatility into Sauna.
+**GAS calculates facts. The LLM interprets evidence.** Do not move date math, health ranks, or schedule volatility into the reasoning model.
 
 ## Deterministic vs LLM
 
@@ -58,6 +57,7 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 | [deployment-signal-domain.md](./deployment-signal-domain.md) | Trajectory v2 sheets, sources, grain, limitations |
 | [structured-signals-contract.md](./structured-signals-contract.md) | `deployment-signal-v1` planned shape (no storage yet) |
 | [signal-lifecycle-roadmap.md](./signal-lifecycle-roadmap.md) | NEW/CONTINUING/ESCALATED/… design |
+| [weekly-operating-governance-model.md](./weekly-operating-governance-model.md) | Daily/weekly cadence, approval boundary, email + DM consumption |
 | [llm-guardrails.md](./llm-guardrails.md) | Evidence/safety guardrails (companion to AI contract) |
 | [data-stewardship-rule-audit.md](./data-stewardship-rule-audit.md) | Stewardship rule precision audit |
 | [stage-2-legacy-embedded-contract.md](./stage-2-legacy-embedded-contract.md) | Superseded embedded Stage-2 rubric (audit) |

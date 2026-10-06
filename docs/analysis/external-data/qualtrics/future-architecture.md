@@ -80,7 +80,7 @@ External Data/Qualtrics/Failed/<jobId>/
 
 - Obtain file: Drive API download or manual artifact upload to workflow (awkward for “drop in folder” UX).
 - Secrets: service account JSON (policy unknown).
-- Return path: upload normalized CSVs to Processing/Archive folders; trigger GAS `Process Ingest` or call Apps Script Execution API.
+- Return path: upload normalized CSVs to Processing/Archive folders; trigger GAS ingest via **installed trigger or editor** (not Execution API from CI—see [gas-runtime-execution.md](../../../../skills/gas-monorepo-engineer/references/gas-runtime-execution.md)).
 - **Justification vs GAS:** bulk pandas on huge files, or banned Drive conversion — not demonstrated for current transform.
 
 ## Testing strategy (GAS transform migration)

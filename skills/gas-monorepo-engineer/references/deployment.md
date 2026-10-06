@@ -1,5 +1,11 @@
 # Deployment, rollback, ledger, and reconciliation
 
+## GAS runtime vs Execution API
+
+`clasp push`, `version`, and `deploy` are in scope when authorized (below). **`clasp run` and `scripts.run` are not** the standard way to validate GAS behavior in Jeff's Workday environment—they are often blocked with `403 PERMISSION_DENIED` while editor execution and installed triggers work fine.
+
+See [gas-runtime-execution.md](./gas-runtime-execution.md) for the validation hierarchy and editor handoff template. Production apps (including External Data Manager) do not require Execution API for normal operation.
+
 ## Classification first
 
 Before any Apps Script mutation (`clasp push`, `deploy`, `version`, or equivalent), classify the target:

@@ -6,6 +6,6 @@ alwaysApply: true
 # Monorepo agent routing
 
 1. Read [AGENTS.md](../../AGENTS.md) first for Git ownership, secrets, and production authorization boundaries.
-2. For Google Apps Script work (CLASP, libraries, solutions, deploy/rollback), follow [skills/gas-monorepo-engineer/SKILL.md](../../skills/gas-monorepo-engineer/SKILL.md) and load skill references only when needed.
+2. For Google Apps Script work (CLASP, libraries, solutions, deploy/rollback), follow [skills/gas-monorepo-engineer/SKILL.md](../../skills/gas-monorepo-engineer/SKILL.md) and load skill references only when needed. For GAS **runtime** validation, read [gas-runtime-execution.md](../../skills/gas-monorepo-engineer/references/gas-runtime-execution.md)—do not default to `clasp run` / `scripts.run`.
 3. Load [docs/agent/monorepo-reference.md](../../docs/agent/monorepo-reference.md) and [config/apps.json](../../config/apps.json) when you need application maps, commands, or portal metadata — not for every trivial edit.
 4. Keep [.cursorrules](../../.cursorrules) coding conventions; do not duplicate the full skill or monorepo documentation here.

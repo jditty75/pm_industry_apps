@@ -50,7 +50,7 @@ Separation preserved for future pipelines (e.g. **SLG_Capacity** as another EDM 
 | Schedule | **One** time-driven trigger: `runQualtricsInboxScheduled`, ~**15** minutes |
 | DM CoreLib pins | SLG / HC / HENP **144**; EVI / PDX / HS **139** (unchanged for Qualtrics V1) |
 
-Activation entry point (one-time, editor or API): `runEdmQualtricsV1ProductionActivationNow()`.
+Activation entry point (one-time, **Apps Script editor**): `runEdmQualtricsV1ProductionActivationNow()`. Remote Execution API / `clasp run` is not used in this environment—see [gas-runtime-execution.md](../../skills/gas-monorepo-engineer/references/gas-runtime-execution.md).
 
 ## Failure / recovery (no intentional prod failures)
 
@@ -67,7 +67,9 @@ Activation entry point (one-time, editor or API): `runEdmQualtricsV1ProductionAc
 1. Use pre-ingestion backup under **`DHM_CSAT_Imports`** or Sheet version history on `CSAT_InFlight`.
 2. Restore prior sheet content before re-running ingest.
 
-## GAS read-only helpers
+## GAS read-only helpers (Apps Script editor)
+
+Run in the EDM project editor. Return **sanitized** JSON/logs to agents (counts and flags only—no IDs, PII, or row payloads). Do not rely on `clasp run` / `scripts.run` from automation.
 
 | Function | Purpose |
 |----------|---------|

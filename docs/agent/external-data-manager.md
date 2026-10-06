@@ -2,6 +2,23 @@
 
 Standalone Google Apps Script project for shared **external-data orchestration** (Qualtrics V1 production active). Lives at `solutions/External_Data_Manager`.
 
+## Runtime dependencies (production)
+
+EDM production operation relies on:
+
+- Apps Script runtime (standalone project)
+- Installed time-driven triggers (Qualtrics InFlight schedule)
+- Google Drive (Inbox / Failed / Responses folders)
+- Google Sheets (destination workbooks, audit ledger)
+- Script Properties (folder ids, flags, destination registry)
+- Immutable **CoreLib** versions referenced from `appsscript.json`
+
+It does **not** require a developer machine, Cursor, `scripts.run`, or `clasp run`. The Apps Script **Execution API** is optional developer tooling only—not an EDM runtime dependency.
+
+**Agent validation:** [`skills/gas-monorepo-engineer/references/gas-runtime-execution.md`](../../skills/gas-monorepo-engineer/references/gas-runtime-execution.md). Use local EDM tests and read-only CLASP/API inspection; hand off controlled ops to the **GAS editor** when runtime proof is needed.
+
+**CSAT Responses canary:** [csat-responses-storage-canary.md](./csat-responses-storage-canary.md)
+
 ## Qualtrics V1 (production)
 
 | Component | State |
@@ -16,7 +33,7 @@ Standalone Google Apps Script project for shared **external-data orchestration**
 
 **Operations runbook:** [edm-qualtrics-v1-runbook.md](./edm-qualtrics-v1-runbook.md)
 
-**One-time activation (after first verified ingest):** run `runEdmQualtricsV1ProductionActivationNow()` in the EDM Apps Script project (sets properties, idempotent trigger, verified source cleanup, empty-Inbox no-op).
+**One-time activation (after first verified ingest):** run `runEdmQualtricsV1ProductionActivationNow()` in the **EDM Apps Script editor** (sets properties, idempotent trigger, verified source cleanup, empty-Inbox no-op). Not via `clasp run` / Execution API.
 
 ## Architecture decision: EDM → DepMngr
 

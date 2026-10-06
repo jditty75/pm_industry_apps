@@ -66,11 +66,24 @@ Repo helpers: `C:\JD\preview.ps1` (local UI), `C:\JD\verify.ps1` (clasp status; 
 
 V8 runtime; JSDoc on public functions; `Logger.log` prefixed with function name; batch `getValues`/`setValues`; try/catch on external calls; no committed scriptIds (`.clasp.json` stays local); private helpers use trailing `_`.
 
-## Testing (manual)
+## Testing and GAS runtime validation
+
+Follow the hierarchy in [`skills/gas-monorepo-engineer/references/gas-runtime-execution.md`](../../skills/gas-monorepo-engineer/references/gas-runtime-execution.md):
+
+1. **Local** — per-project `npm test`, EDM validators, `preview_selftest.py`, contract fixtures.
+2. **Read-only remote** — `verify.ps1` (`clasp status`), `clasp deployments`, Drive/Script API reads where OAuth permits.
+3. **Authorized CLASP mutations** — `push` / `version` / `deploy` only with explicit production authorization.
+4. **Editor** — one-off functions when GAS runtime is required; agents provide exact function names and expected sanitized output.
+5. **Production** — installed triggers and normal GAS runtime (not Execution API from automation).
+
+Do **not** treat `clasp run` or `scripts.run` as required for EDM or DM validation.
+
+### Manual / editor examples
 
 - `SLED_Marketing`: `runSelfTest()` in Apps Script editor.
 - `SLG_Capacity`: `Diagnostics.js` helpers.
 - `*_DM`: Debug menu items in `onOpen()`.
+- **EDM:** `runEdmVerifyOperationalState()`, Qualtrics/Responses controlled ops — editor only unless Jeff enables Execution API.
 - Otherwise: exercise web app / menu, `npm run logs`.
 
 ## Known structural exceptions

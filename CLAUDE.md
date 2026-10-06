@@ -33,6 +33,7 @@ Do not duplicate the GAS skill in this file.
 
 | Need | Document |
 |------|----------|
+| GAS runtime vs Execution API (`clasp run` not default) | `skills/gas-monorepo-engineer/references/gas-runtime-execution.md` |
 | App discovery / teams / portal names | `config/apps.json` |
 | Local UI preview (before push) | `docs/agent/ui-preview.md` |
 | Layout, commands, patterns, testing | `docs/agent/monorepo-reference.md` |

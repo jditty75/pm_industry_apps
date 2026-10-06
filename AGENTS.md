@@ -23,6 +23,7 @@ Agents handle routine Git work: status, branches, staging, meaningful **Conventi
 
 - Follow the GAS skill for all Apps Script work in this repository.
 - Load skill references and monorepo docs **only when the task needs them**; do not duplicate skill content into other entry-point files.
+- **Runtime validation:** Do not default to `scripts.run` or `clasp run` here—they are often unavailable (`403`). Use local tests and read-only API inspection first; for GAS runtime proof, hand off named editor functions per [`skills/gas-monorepo-engineer/references/gas-runtime-execution.md`](skills/gas-monorepo-engineer/references/gas-runtime-execution.md).
 
 ## Production deployment
 

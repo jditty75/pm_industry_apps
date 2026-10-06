@@ -21,6 +21,7 @@ Act as the developer/operator. The user supplies product intent and production a
 10. Never expose or commit OAuth tokens, CLASP credentials, private keys, or `.clasp.json` Script IDs. Keep `.clasp.json` ignored.
 11. Never claim validation/testing that was not actually performed.
 12. Treat production rollback as a deployment-state operation by default. Do not revert Git, push source, or rewrite development state unless separately required and authorized by the task.
+13. **GAS runtime from automation:** In Jeff's Workday environment, `scripts.run` and `clasp run` are **not** reliable defaults (repeated `403 PERMISSION_DENIED`). Do not use them for routine validation. Follow [references/gas-runtime-execution.md](references/gas-runtime-execution.md): local tests → read-only remote → authorized CLASP mutations → **GAS editor** for runtime proof → production triggers. On Execution API 403, record once and hand off to the editor; do not retry OAuth/GCP/deploy loops unless Jeff explicitly asks to enable remote execution.
 
 ## Start every task
 
@@ -35,7 +36,7 @@ Act as the developer/operator. The user supplies product intent and production a
 1. Preserve unrelated local work; do not routinely pull from Apps Script.
 2. Edit authoritative local source using the project's actual CLASP `rootDir`.
 3. Follow existing architecture/conventions and make targeted changes.
-4. Run validation that actually exists for that app. Do not invent a passing test suite.
+4. Run validation that actually exists for that app. Do not invent a passing test suite. Prefer the hierarchy in [references/gas-runtime-execution.md](references/gas-runtime-execution.md); never default to `clasp run` / `scripts.run`.
 5. For **UI changes** on apps with local preview support (`docs/agent/ui-preview.md`, `config/ui-preview.json`), run `.\preview.ps1 <app>` before push. For `*_DM`, use `-Scenario` as needed; see `references/ui-preview-dm.md`. Confirm **structural validation PASS** and inspect the **localhost** preview URL in a browser when possible — not merely that HTML was generated. Preview is layout/client only — not production verification.
 6. Inspect the diff for unrelated changes, IDs/secrets, and accidental generated content.
 7. Commit the completed logical change with a meaningful Conventional Commit and push automatically, subject to pre-push audit.

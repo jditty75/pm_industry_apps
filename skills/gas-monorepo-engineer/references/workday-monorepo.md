@@ -37,6 +37,8 @@ Historical `snapshots/` and `DHLibrary_v52/` were intentionally removed from the
 
 This monorepo historically has no universal root test framework. Use only real app-specific checks. Examples may include a GAS self-test function, diagnostic helpers, web/sheet smoke tests, and execution logs. Never translate "no test failed" into "tested" when no test actually ran.
 
+**GAS runtime from agents:** `clasp run` / `scripts.run` are not reliable in this environment. See [gas-runtime-execution.md](./gas-runtime-execution.md). Jeff runs named functions in the Apps Script editor when runtime proof is required; agents use local harnesses and read-only CLASP/API inspection first.
+
 ## Source authority
 
 The new operating model makes local/Git the sole routine source of truth. Do not perform routine `clasp pull`. Use the emergency reconciliation procedure only when the user explicitly reports a browser-side Apps Script edit that must be recovered.

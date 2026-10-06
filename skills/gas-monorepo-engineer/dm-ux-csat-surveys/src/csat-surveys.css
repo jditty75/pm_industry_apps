@@ -1,0 +1,392 @@
+/**
+ * CSAT Surveys — operational prototype (csat-sv- prefix). Tokens from production CoreUI_Css.
+ */
+
+#csat-surveys-app {
+  --csat-sv-gap: var(--space-4);
+  --csat-sv-pad-x: var(--space-5);
+  --csat-sv-rule: var(--color-border);
+  --csat-sv-attn-col: 108px;
+  --csat-sv-tag-col: 52px;
+  --csat-sv-date-col: minmax(200px, 1fr);
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 var(--csat-sv-pad-x) var(--space-6);
+}
+
+.csat-sv-proto-badge {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2000;
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  box-shadow: var(--shadow-subtle);
+  max-width: 320px;
+  text-align: right;
+  line-height: 1.35;
+}
+.csat-sv-proto-badge a {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+.csat-sv-proto-badge a:hover {
+  text-decoration: underline;
+}
+.csat-sv-proto-badge a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.csat-sv-index {
+  max-width: 640px;
+  margin: 48px auto;
+  padding: 0 var(--space-5);
+}
+.csat-sv-index h1 {
+  font-size: 20px;
+  margin-bottom: var(--space-4);
+}
+.csat-sv-index ul {
+  list-style: none;
+  padding: 0;
+}
+.csat-sv-index li {
+  margin-bottom: var(--space-2);
+  font-size: 14px;
+}
+.csat-sv-index a {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+.csat-sv-index a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+#csat-surveys-app .csat-sv-subnav-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--csat-sv-gap);
+  border-bottom: 1px solid var(--csat-sv-rule);
+  padding-bottom: 0;
+}
+#csat-surveys-app .csat-sv-subnav {
+  flex: 1 1 auto;
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+  align-self: flex-end;
+}
+#csat-surveys-app .csat-sv-scope-btn {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  cursor: default;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+}
+#csat-surveys-app .csat-sv-scope-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+#csat-surveys-app .csat-sv-caret {
+  font-size: 10px;
+}
+
+#csat-surveys-app .csat-sv-sticky-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--color-background, #fff);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--csat-sv-rule);
+  margin-bottom: var(--space-3);
+}
+#csat-surveys-app .csat-sv-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  font-size: 13px;
+  line-height: 20px;
+}
+#csat-surveys-app .csat-sv-phase-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-2);
+  align-items: center;
+}
+#csat-surveys-app .csat-sv-phase-jump .csat-sv-sep {
+  color: var(--color-text-muted);
+  user-select: none;
+}
+#csat-surveys-app .csat-sv-chip {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: default;
+}
+#csat-surveys-app .csat-sv-chip[aria-pressed="true"] {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+#csat-surveys-app .csat-sv-chip:focus-visible,
+#csat-surveys-app .csat-sv-phase-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+#csat-surveys-app .csat-sv-phase-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: default;
+  border-radius: var(--radius-sm);
+}
+#csat-surveys-app .csat-sv-phase-btn.is-active {
+  color: var(--color-text);
+  font-weight: 600;
+}
+#csat-surveys-app .csat-sv-filter-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border-subtle);
+  flex-shrink: 0;
+}
+
+#csat-surveys-app .csat-sv-horizon {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-4);
+}
+#csat-surveys-app .csat-sv-horizon a.csat-sv-link {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+#csat-surveys-app .csat-sv-horizon a.csat-sv-link:hover {
+  text-decoration: underline;
+}
+#csat-surveys-app .csat-sv-horizon a.csat-sv-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+#csat-surveys-app .csat-sv-layout .trends-section {
+  margin: 0 0 var(--csat-sv-gap);
+  box-shadow: var(--shadow-subtle);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface);
+  padding: var(--space-4) var(--space-5);
+}
+#csat-surveys-app .csat-sv-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2);
+}
+#csat-surveys-app .csat-sv-group-header {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-3);
+  font-weight: 400;
+}
+#csat-surveys-app .csat-sv-group-header a.csat-sv-link {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+#csat-surveys-app .csat-sv-group-header a.csat-sv-link:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+#csat-surveys-app .csat-sv-row {
+  display: grid;
+  grid-template-columns: var(--csat-sv-attn-col) minmax(0, 1fr) var(--csat-sv-tag-col) var(--csat-sv-date-col);
+  gap: 0 var(--space-3);
+  padding: 6px 0;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 13px;
+  line-height: 20px;
+  align-items: start;
+}
+#csat-surveys-app .csat-sv-row:first-of-type {
+  border-top: none;
+}
+#csat-surveys-app .csat-sv-row-line2 {
+  grid-column: 2 / -1;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--color-text-muted);
+  margin-top: -2px;
+  padding-bottom: 2px;
+}
+#csat-surveys-app .csat-sv-attn {
+  min-height: 20px;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 1px;
+}
+#csat-surveys-app .csat-sv-attn .status-pill {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+#csat-surveys-app .csat-sv-attn .status-pill.status-muted {
+  background: var(--color-surface-alt, #f4f5f7);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-subtle);
+}
+#csat-surveys-app .csat-sv-deploy a.csat-sv-link--entity {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: none;
+}
+#csat-surveys-app .csat-sv-deploy a.csat-sv-link--entity:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+#csat-surveys-app .csat-sv-deploy a.csat-sv-link--entity:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+#csat-surveys-app .csat-sv-account {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+#csat-surveys-app .csat-sv-survey-pill {
+  justify-self: start;
+  margin-top: 2px;
+}
+#csat-surveys-app .survey-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt, #f4f5f7);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border-subtle);
+}
+#csat-surveys-app .csat-sv-date {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+#csat-surveys-app .csat-sv-date.is-muted {
+  color: var(--color-text-muted);
+}
+
+#csat-surveys-app .csat-sv-overflow,
+#csat-surveys-app .csat-sv-subround {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+}
+#csat-surveys-app .csat-sv-overflow a,
+#csat-surveys-app .csat-sv-subround a {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+#csat-surveys-app .csat-sv-overflow a:focus-visible,
+#csat-surveys-app .csat-sv-subround a:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+#csat-surveys-app .csat-sv-empty-group {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  padding: var(--space-2) 0;
+  font-style: normal;
+}
+
+#csat-surveys-app .csat-sv-details {
+  grid-column: 2 / -1;
+  margin: 0 0 var(--space-1);
+  font-size: 12px;
+}
+#csat-surveys-app .csat-sv-details summary {
+  color: var(--color-primary);
+  cursor: default;
+  font-weight: 600;
+  list-style: none;
+}
+#csat-surveys-app .csat-sv-details summary::-webkit-details-marker {
+  display: none;
+}
+#csat-surveys-app .csat-sv-details summary::before {
+  content: "▸ ";
+  display: inline-block;
+  width: 1em;
+}
+#csat-surveys-app .csat-sv-details[open] summary::before {
+  content: "▾ ";
+}
+#csat-surveys-app .csat-sv-details summary:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+#csat-surveys-app .csat-sv-invite-list {
+  margin: var(--space-2) 0 0;
+  padding: 0 0 0 var(--space-4);
+  color: var(--color-text-muted);
+  line-height: 18px;
+}
+
+#csat-surveys-app a.csat-sv-link--inline {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+#csat-surveys-app a.csat-sv-link--inline:hover {
+  text-decoration: underline;
+}
+#csat-surveys-app a.csat-sv-link--inline:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1100px) {
+  #csat-surveys-app .csat-sv-row {
+    grid-template-columns: var(--csat-sv-attn-col) minmax(0, 1fr) var(--csat-sv-tag-col);
+  }
+  #csat-surveys-app .csat-sv-date {
+    grid-column: 2 / -1;
+    text-align: left;
+    padding-left: calc(var(--csat-sv-attn-col) + var(--space-3));
+  }
+}

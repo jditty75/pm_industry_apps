@@ -1,6 +1,8 @@
 # CSAT Surveys: deployment-centric operational design (2026-10-06)
 
-Status: **UX/interaction design — proposed, awaiting review.** Design-only. No production UI/CSS/JS, no prototype, no CLASP, no deploy. Applies the product-approved [reconciled architecture](../csat-reconciled-architecture/README.md) (J1–J6) and the provisional [CSAT Overview V3](../csat-overview-v3/README.md) visual vocabulary to the **Surveys** section.
+Status: **UX/interaction design — prototype implemented for visual review.** Localhost preview only (`.\preview.ps1 CSAT_SURVEYS`, default **Normal**). No production UI/CSS/JS, no CLASP, no deploy. Applies the product-approved [reconciled architecture](../csat-reconciled-architecture/README.md) (J1–J6) and the provisional [CSAT Overview V3](../csat-overview-v3/README.md) visual vocabulary to the **Surveys** section.
+
+**Prototype:** `skills/gas-monorepo-engineer/dm-ux-csat-surveys/` · stable URLs `CSAT_SURVEYS_*.html` in `.preview-out/` · handoff [composer-preview-spec.md](composer-preview-spec.md).
 
 Surveys owns the **operational survey lifecycle** for deployments: *Prepare → In Flight → Responded / Closed → follow-up context*. Overview is the executive lens; Surveys is where the Engagement Manager works. This document does not restate the architecture; it decides the Surveys surface.
 

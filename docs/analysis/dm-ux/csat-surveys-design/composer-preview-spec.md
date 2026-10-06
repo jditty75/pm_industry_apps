@@ -14,6 +14,8 @@ Narrow handoff for **one isolated Surveys prototype** with deterministic state p
 | Launch | `.\preview.ps1 CSAT_SURVEYS` → builds, serves, opens **Normal** by default. `-NoOpen` for CI/selftest. Equivalent: `python skills/gas-monorepo-engineer/dm-ux-csat-surveys/preview_csat_surveys.py --no-open` |
 | Output | Gitignored `.preview-out/CSAT_SURVEYS_*.html` (the `CSAT_SURVEYS` prefix keeps these from overwriting V3/V2 pages) |
 | Selftest | `python skills/gas-monorepo-engineer/dm-ux-csat-surveys/preview_csat_surveys_selftest.py` and `skills/gas-monorepo-engineer/scripts/preview_selftest.py` |
+| Visual smoke | `node skills/gas-monorepo-engineer/dm-ux-csat-surveys/preview_csat_surveys_visual_smoke.mjs` → `.preview-out/CSAT_SURVEYS_*_1440x900.png` |
+| Implementation README | `skills/gas-monorepo-engineer/dm-ux-csat-surveys/README.md` |
 
 ## 2. Pages (stable URLs)
 

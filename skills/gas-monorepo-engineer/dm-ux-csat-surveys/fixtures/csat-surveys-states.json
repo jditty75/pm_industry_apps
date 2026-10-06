@@ -1,0 +1,814 @@
+{
+  "fixtureId": "csat-surveys-states-20261006",
+  "shells": {
+    "hc": {
+      "headerTitle": "Healthcare Deployment Health Manager",
+      "headerSubtitle": "Healthcare program portfolio"
+    }
+  },
+  "states": {
+    "normal": {
+      "file": "CSAT_SURVEYS_NORMAL.html",
+      "protoLabel": "State 1 of 8: Normal",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": {
+        "activePhase": "All",
+        "attentionLit": []
+      },
+      "horizonParts": [
+        { "type": "text", "text": "Next round Wed 4 Nov · prepare by 21 Oct (12 days) · " },
+        { "type": "link", "text": "9" },
+        { "type": "text", "text": " to prepare, " },
+        { "type": "link", "text": "2" },
+        { "type": "text", "text": " with readiness issues · In flight " },
+        { "type": "link", "text": "11" },
+        { "type": "text", "text": ", " },
+        { "type": "link", "text": "1" },
+        { "type": "text", "text": " to chase · Recent " },
+        { "type": "link", "text": "6" },
+        { "type": "text", "text": " responded, " },
+        { "type": "link", "text": "2" },
+        { "type": "text", "text": " closed unanswered" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [
+          { "type": "text", "text": "Next round Wed 4 Nov · " },
+          { "type": "link", "text": "9" },
+          { "type": "text", "text": " deployments · 6 MDS · 3 PGL · Prepare by Wed 21 Oct · 12 days" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Children's Hospital",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "No Executive Sponsor contact · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": false, "severity": "neutral" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Sample University Health",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "No customer contact with email · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": false, "severity": "neutral" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Example Health Network",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present · tell the customer MDS 11-26",
+            "stateInputs": { "attentionKind": null }
+          }
+        ],
+        "blocks": [
+          { "type": "overflow", "prefix": "+ 6 more in this round · ", "linkText": "view all 9 →" },
+          { "type": "subround", "label": "Following round Wed 2 Dec ·", "linkText": "7 →" },
+          { "type": "later", "label": "Later (within horizon)", "linkText": "14 ▸" }
+        ],
+        "tailRows": [
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "MDS",
+            "dateLine": "Missing First Target MTP date",
+            "facetLine": "Can't forecast — fix dates in SFDC",
+            "attention": { "label": "Can't forecast", "severity": "muted" },
+            "dateMuted": true,
+            "stateInputs": { "attentionKind": "cant_forecast" }
+          }
+        ]
+      },
+      "inflight": {
+        "title": "In Flight",
+        "headerParts": [
+          { "type": "text", "text": "October round · closes 28 Oct · " },
+          { "type": "link", "text": "11" },
+          { "type": "text", "text": " surveys · 3 responded · 8 awaiting" }
+        ],
+        "rows": [
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · all bounced · fix email in SFDC · request resend in VoC Slack",
+            "attention": { "label": "All bounced", "severity": "red" },
+            "stateInputs": { "attentionKind": "delivery" }
+          },
+          {
+            "deployment": "Sample Regional Medical Center",
+            "survey": "MDS",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "3 invitations · 1 opened · 2 awaiting · chase with the customer",
+            "attention": { "label": "Chase", "warn": true, "severity": "yellow" },
+            "stateInputs": { "attentionKind": "chase" }
+          },
+          {
+            "deployment": "Example Children's Hospital",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · 1 of 2 responded · 1 awaiting",
+            "details": {
+              "summary": "invitation detail",
+              "open": false,
+              "items": [
+                "Customer contact · responded",
+                "Executive Sponsor role · awaiting response"
+              ]
+            },
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "recent": {
+        "title": "Recent",
+        "headerParts": [
+          { "type": "text", "text": "Current + previous round · " },
+          { "type": "link", "text": "6" },
+          { "type": "text", "text": " responded · " },
+          { "type": "link", "text": "2" },
+          { "type": "text", "text": " closed without response" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Valley Medical",
+            "survey": "MDS",
+            "dateLine": "Responded 26 Sep · 1 of 2 contacts",
+            "facetLine": "Acknowledgement expected · in Qualtrics → Responses",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Riverside Care Alliance",
+            "survey": "PGL",
+            "dateLine": "Responded 21 Sep · Detractor",
+            "facetLine": "Detractor follow-up expected: Deployment Sponsor · in Qualtrics → Responses",
+            "attention": { "label": "Follow-up expected", "severity": "neutral" },
+            "stateInputs": { "attentionKind": "follow_up" }
+          },
+          {
+            "deployment": "Sample County Services",
+            "survey": "MDS",
+            "dateLine": "Closed 24 Sep · no response",
+            "facetLine": "Silence isn't a verdict · tracked in Qualtrics",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      }
+    },
+    "heavy": {
+      "file": "CSAT_SURVEYS_HEAVY.html",
+      "protoLabel": "State 2 of 8: Heavy upcoming",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": { "activePhase": "Upcoming", "attentionLit": ["Prepare now"] },
+      "horizonParts": [
+        { "type": "text", "text": "Next round Wed 4 Nov · prepare by 21 Oct (5 days) · " },
+        { "type": "link", "text": "14" },
+        { "type": "text", "text": " to prepare, " },
+        { "type": "link", "text": "4" },
+        { "type": "text", "text": " with readiness issues · In flight " },
+        { "type": "link", "text": "6" },
+        { "type": "text", "text": " · Recent " },
+        { "type": "link", "text": "3" },
+        { "type": "text", "text": " responded" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [
+          { "type": "text", "text": "Next round Wed 4 Nov · " },
+          { "type": "link", "text": "14" },
+          { "type": "text", "text": " deployments · Prepare by Wed 21 Oct · 5 days" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Children's Hospital",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 5 days",
+            "facetLine": "No Executive Sponsor contact · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": true, "severity": "yellow" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Sample University Health",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 5 days",
+            "facetLine": "No customer contact with email · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": true, "severity": "yellow" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 5 days",
+            "facetLine": "Missing First Target MTP date · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": true, "severity": "yellow" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Example Health Network",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 5 days",
+            "facetLine": "Dates and contacts present · tell the customer PGL 11-26",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "MDS",
+            "dateLine": "Forecast MDS 11-26 · Prepare by 21 Oct · 5 days",
+            "facetLine": "Dates and contacts present",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Riverside Care Alliance",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 5 days",
+            "facetLine": "Dates and contacts present · tell the customer PGL 11-26",
+            "stateInputs": { "attentionKind": null }
+          }
+        ],
+        "blocks": [
+          { "type": "overflow", "prefix": "+ 8 more in this round · ", "linkText": "view all 14 →" },
+          { "type": "subround", "label": "Following round Wed 2 Dec ·", "linkText": "9 →" },
+          { "type": "later", "label": "Later (within horizon)", "linkText": "22 ▸" }
+        ],
+        "tailRows": []
+      },
+      "inflight": {
+        "title": "In Flight",
+        "headerParts": [
+          { "type": "text", "text": "October round · closes 28 Oct · " },
+          { "type": "link", "text": "6" },
+          { "type": "text", "text": " surveys · routine volume" }
+        ],
+        "rows": [
+          {
+            "deployment": "Sample Regional Medical Center",
+            "survey": "MDS",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · 2 awaiting",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "recent": {
+        "title": "Recent",
+        "headerParts": [
+          { "type": "text", "text": "Current + previous round · " },
+          { "type": "link", "text": "3" },
+          { "type": "text", "text": " responded" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Valley Medical",
+            "survey": "MDS",
+            "dateLine": "Responded 30 Sep · 2 of 2 contacts",
+            "facetLine": "Follow-up status in Qualtrics → Responses",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      }
+    },
+    "prep": {
+      "file": "CSAT_SURVEYS_PREP.html",
+      "protoLabel": "State 3 of 8: Preparation issues",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": {
+        "activePhase": "Upcoming",
+        "attentionLit": ["Prepare now", "Can't forecast"]
+      },
+      "horizonParts": [
+        { "type": "text", "text": "Next round Wed 4 Nov · " },
+        { "type": "link", "text": "11" },
+        { "type": "text", "text": " to prepare, " },
+        { "type": "link", "text": "7" },
+        { "type": "text", "text": " with readiness issues · " },
+        { "type": "link", "text": "3" },
+        { "type": "text", "text": " can't forecast" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [
+          { "type": "text", "text": "Next round Wed 4 Nov · readiness issues first" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Children's Hospital",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "No Executive Sponsor contact · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": false, "severity": "neutral" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Sample University Health",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "No customer contact with email · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": false, "severity": "neutral" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Missing First Target MTP date · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": false, "severity": "neutral" },
+            "stateInputs": { "attentionKind": "prepare" }
+          },
+          {
+            "deployment": "Sample Regional Medical Center",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "No Project Manager contact · fix in SFDC",
+            "attention": { "label": "Prepare", "warn": false, "severity": "neutral" },
+            "stateInputs": { "attentionKind": "prepare" }
+          }
+        ],
+        "tailRows": [
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "MDS",
+            "dateLine": "Missing First Target MTP date",
+            "facetLine": "Can't forecast — fix dates in SFDC",
+            "attention": { "label": "Can't forecast", "severity": "muted" },
+            "dateMuted": true,
+            "stateInputs": { "attentionKind": "cant_forecast" }
+          },
+          {
+            "deployment": "Riverside Care Alliance",
+            "survey": "PGL",
+            "dateLine": "Missing go-live date",
+            "facetLine": "Can't forecast — fix dates in SFDC",
+            "attention": { "label": "Can't forecast", "severity": "muted" },
+            "dateMuted": true,
+            "stateInputs": { "attentionKind": "cant_forecast" }
+          }
+        ]
+      },
+      "inflight": {
+        "title": "In Flight",
+        "emptyMessage": "Nothing to chase in the current round.",
+        "headerParts": [{ "type": "text", "text": "October round · quiet" }],
+        "rows": []
+      },
+      "recent": {
+        "title": "Recent",
+        "emptyMessage": "No responses in the recent window for this scope.",
+        "headerParts": [{ "type": "text", "text": "Current + previous round" }],
+        "rows": []
+      }
+    },
+    "inflight": {
+      "file": "CSAT_SURVEYS_INFLIGHT.html",
+      "protoLabel": "State 4 of 8: Active in-flight",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": { "activePhase": "In Flight", "attentionLit": [] },
+      "horizonParts": [
+        { "type": "text", "text": "In flight " },
+        { "type": "link", "text": "15" },
+        { "type": "text", "text": " · " },
+        { "type": "link", "text": "4" },
+        { "type": "text", "text": " responded while open · Next round prepare by 21 Oct · " },
+        { "type": "link", "text": "5" },
+        { "type": "text", "text": " to prepare" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [
+          { "type": "text", "text": "Next round Wed 4 Nov · " },
+          { "type": "link", "text": "5" },
+          { "type": "text", "text": " deployments · no readiness issues found (dates and contacts present)" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Health Network",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present · tell the customer MDS 11-26",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "inflight": {
+        "title": "In Flight",
+        "headerParts": [
+          { "type": "text", "text": "October round · closes 28 Oct · " },
+          { "type": "link", "text": "15" },
+          { "type": "text", "text": " surveys" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Children's Hospital",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "3 invitations · 1 opened · 1 started · 1 awaiting",
+            "details": {
+              "summary": "invitation detail",
+              "open": true,
+              "items": [
+                "Customer contact · opened",
+                "Executive Sponsor role · started",
+                "Project Manager role · awaiting response"
+              ]
+            },
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Sample Regional Medical Center",
+            "survey": "MDS",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · 2 awaiting",
+            "details": {
+              "summary": "invitation detail",
+              "open": false,
+              "items": [
+                "Customer contact · awaiting response",
+                "Executive Sponsor role · awaiting response"
+              ]
+            },
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "MDS",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · 2 of 2 responded while open",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "1 invitation · 1 awaiting",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "recent": {
+        "title": "Recent",
+        "headerParts": [
+          { "type": "text", "text": "September round · " },
+          { "type": "link", "text": "4" },
+          { "type": "text", "text": " responded" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Valley Medical",
+            "survey": "MDS",
+            "dateLine": "Responded 26 Sep · 1 of 2 contacts",
+            "facetLine": "Follow-up status in Qualtrics → Responses",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      }
+    },
+    "chase": {
+      "file": "CSAT_SURVEYS_CHASE.html",
+      "protoLabel": "State 5 of 8: Chase / bounce",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": {
+        "activePhase": "In Flight",
+        "attentionLit": ["Chase now", "Delivery problem"]
+      },
+      "horizonParts": [
+        { "type": "text", "text": "In flight " },
+        { "type": "link", "text": "9" },
+        { "type": "text", "text": ", " },
+        { "type": "link", "text": "2" },
+        { "type": "text", "text": " to chase, " },
+        { "type": "link", "text": "2" },
+        { "type": "text", "text": " delivery problems" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [
+          { "type": "text", "text": "Next round Wed 4 Nov · routine preparation" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Health Network",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present · tell the customer MDS 11-26",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "inflight": {
+        "title": "In Flight",
+        "headerParts": [
+          { "type": "text", "text": "October round · closes 28 Oct · 6 days" }
+        ],
+        "rows": [
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · all bounced · fix email in SFDC · request resend in VoC Slack",
+            "attention": { "label": "All bounced", "severity": "red" },
+            "stateInputs": { "attentionKind": "delivery" }
+          },
+          {
+            "deployment": "Sample Regional Medical Center",
+            "survey": "MDS",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "3 invitations · 0 responded · chase with the customer",
+            "attention": { "label": "Chase", "warn": true, "severity": "yellow" },
+            "stateInputs": { "attentionKind": "chase" }
+          },
+          {
+            "deployment": "Riverside Care Alliance",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · 1 bounced · fix email in SFDC · request resend in VoC Slack",
+            "attention": { "label": "Some bounced", "severity": "neutral" },
+            "stateInputs": { "attentionKind": "delivery" }
+          },
+          {
+            "deployment": "Example Children's Hospital",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "2 invitations · 1 of 2 responded · 1 awaiting",
+            "details": {
+              "summary": "invitation detail",
+              "open": true,
+              "items": [
+                "Customer contact · responded",
+                "Executive Sponsor role · awaiting response"
+              ]
+            },
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "recent": {
+        "title": "Recent",
+        "headerParts": [{ "type": "text", "text": "One recent response" }],
+        "rows": [
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "MDS",
+            "dateLine": "Responded 18 Sep",
+            "facetLine": "Acknowledgement expected · in Qualtrics → Responses",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      }
+    },
+    "responded": {
+      "file": "CSAT_SURVEYS_RESPONDED.html",
+      "protoLabel": "State 6 of 8: Recently responded",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": {
+        "activePhase": "Recent",
+        "attentionLit": ["Follow-up expected"]
+      },
+      "horizonParts": [
+        { "type": "text", "text": "Recent " },
+        { "type": "link", "text": "8" },
+        { "type": "text", "text": " responded · " },
+        { "type": "link", "text": "3" },
+        { "type": "text", "text": " with follow-up expected · tracked in Qualtrics" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [{ "type": "text", "text": "Next round Wed 4 Nov · calm preparation" }],
+        "rows": [
+          {
+            "deployment": "Example Health Network",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "inflight": {
+        "title": "In Flight",
+        "headerParts": [{ "type": "text", "text": "October round · winding down" }],
+        "rows": [
+          {
+            "deployment": "Sample Regional Medical Center",
+            "survey": "MDS",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "1 invitation · 1 responded while open",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "recent": {
+        "title": "Recent",
+        "headerParts": [
+          { "type": "text", "text": "Current + previous round · " },
+          { "type": "link", "text": "8" },
+          { "type": "text", "text": " responded · " },
+          { "type": "link", "text": "2" },
+          { "type": "text", "text": " closed without response" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Valley Medical",
+            "survey": "MDS",
+            "dateLine": "Responded 26 Sep · 1 of 2 contacts",
+            "facetLine": "Acknowledgement expected · in Qualtrics → Responses",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Riverside Care Alliance",
+            "survey": "PGL",
+            "dateLine": "Responded 21 Sep · Detractor",
+            "facetLine": "Detractor follow-up expected: Deployment Sponsor · in Qualtrics → Responses",
+            "attention": { "label": "Follow-up expected", "severity": "neutral" },
+            "stateInputs": { "attentionKind": "follow_up" }
+          },
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "MDS",
+            "dateLine": "Responded 19 Sep · 2 of 2 contacts",
+            "facetLine": "Follow-up expected · tracked in Qualtrics → Responses",
+            "attention": { "label": "Follow-up expected", "severity": "neutral" },
+            "stateInputs": { "attentionKind": "follow_up" }
+          },
+          {
+            "deployment": "Sample County Services",
+            "survey": "MDS",
+            "dateLine": "Closed 24 Sep · no response",
+            "facetLine": "Silence isn't a verdict · tracked in Qualtrics",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "PGL",
+            "dateLine": "Closed 20 Sep · no response",
+            "facetLine": "Silence isn't a verdict · tracked in Qualtrics",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      }
+    },
+    "noforecast": {
+      "file": "CSAT_SURVEYS_NOFORECAST.html",
+      "protoLabel": "State 7 of 8: Cannot forecast",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": {
+        "activePhase": "Upcoming",
+        "attentionLit": ["Can't forecast"]
+      },
+      "horizonParts": [
+        { "type": "text", "text": "Next round Wed 4 Nov · " },
+        { "type": "link", "text": "4" },
+        { "type": "text", "text": " to prepare · " },
+        { "type": "link", "text": "5" },
+        { "type": "text", "text": " can't forecast (missing dates)" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [
+          { "type": "text", "text": "Next round Wed 4 Nov · clean rows then can't-forecast tail" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Health Network",
+            "survey": "MDS",
+            "dateLine": "Forecast MDS 11-26 · Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present · tell the customer MDS 11-26",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Sample University Health",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present",
+            "stateInputs": { "attentionKind": null }
+          }
+        ],
+        "tailRows": [
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "MDS",
+            "dateLine": "Missing First Target MTP date",
+            "facetLine": "Can't forecast — fix dates in SFDC",
+            "attention": { "label": "Can't forecast", "severity": "muted" },
+            "dateMuted": true,
+            "stateInputs": { "attentionKind": "cant_forecast" }
+          },
+          {
+            "deployment": "Riverside Care Alliance",
+            "survey": "PGL",
+            "dateLine": "Missing go-live date",
+            "facetLine": "Can't forecast — fix dates in SFDC",
+            "attention": { "label": "Can't forecast", "severity": "muted" },
+            "dateMuted": true,
+            "stateInputs": { "attentionKind": "cant_forecast" }
+          },
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "MDS",
+            "dateLine": "Missing First Target MTP date",
+            "facetLine": "Can't forecast — fix dates in SFDC",
+            "attention": { "label": "Can't forecast", "severity": "muted" },
+            "dateMuted": true,
+            "stateInputs": { "attentionKind": "cant_forecast" }
+          }
+        ]
+      },
+      "inflight": {
+        "title": "In Flight",
+        "emptyMessage": "Nothing to chase in the current round.",
+        "headerParts": [{ "type": "text", "text": "October round · quiet" }],
+        "rows": []
+      },
+      "recent": {
+        "title": "Recent",
+        "emptyMessage": "Routine acknowledgements only — open Responses for analysis.",
+        "headerParts": [{ "type": "text", "text": "Current + previous round" }],
+        "rows": []
+      }
+    },
+    "quiet": {
+      "file": "CSAT_SURVEYS_QUIET.html",
+      "protoLabel": "State 8 of 8: Quiet",
+      "shell": "hc",
+      "dataAsOf": "Thu 9 Oct 2026",
+      "scopeMenu": "My deployments · Workday-led · Next 6 months",
+      "stateInputs": { "mustNotSumAttention": true },
+      "filters": { "activePhase": "All", "attentionLit": [] },
+      "horizonParts": [
+        { "type": "text", "text": "Next round Wed 4 Nov · " },
+        { "type": "link", "text": "2" },
+        { "type": "text", "text": " to prepare · In flight " },
+        { "type": "link", "text": "1" },
+        { "type": "text", "text": " · Recent acknowledgements only" }
+      ],
+      "upcoming": {
+        "title": "Upcoming",
+        "headerParts": [
+          { "type": "text", "text": "Next round Wed 4 Nov · no readiness issues found (dates and contacts present)" }
+        ],
+        "rows": [
+          {
+            "deployment": "Example Health Network",
+            "survey": "MDS",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present · tell the customer MDS 11-26",
+            "stateInputs": { "attentionKind": null }
+          },
+          {
+            "deployment": "Sample University Health",
+            "survey": "PGL",
+            "dateLine": "Prepare by 21 Oct · 12 days",
+            "facetLine": "Dates and contacts present",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "inflight": {
+        "title": "In Flight",
+        "emptyMessage": "Nothing to chase — current round is quiet.",
+        "headerParts": [{ "type": "text", "text": "October round · closes 28 Oct" }],
+        "rows": [
+          {
+            "deployment": "Northview Specialty Clinics",
+            "survey": "PGL",
+            "dateLine": "Closes 28 Oct · 6 days",
+            "facetLine": "1 invitation · 1 awaiting",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      },
+      "recent": {
+        "title": "Recent",
+        "headerParts": [{ "type": "text", "text": "Routine acknowledgements" }],
+        "rows": [
+          {
+            "deployment": "Lakeside Community Health",
+            "survey": "MDS",
+            "dateLine": "Responded 8 Sep",
+            "facetLine": "Follow-up status in Qualtrics → Responses",
+            "stateInputs": { "attentionKind": null }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -99,7 +99,7 @@ def render_sentence_c(parts: List[Dict[str, str]]) -> str:
             if href == "#csat-v3-concerns":
                 bits.append(working_link(p["text"], href))
             else:
-                bits.append(inert_link(p["text"], href))
+                bits.append(inert_link(p["text"], href, role="prose"))
     return "".join(bits)
 
 

@@ -1,6 +1,6 @@
 # CSAT Overview V3: executive-first visual design (2026-10-06)
 
-Status: **Information architecture approved; visual polish in progress.** Jeff approved the V3 Healthy prototype's level of information ("From here I think it's just CSS refining"). The content, region order and composition are frozen. The art-direction spec is [visual-polish-spec.md](visual-polish-spec.md), and its implementation on the prototype is pending. V3 is **not** superseded. Production DepMngr UI/CSS/JS is unchanged. The V3 prototype lives under `skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/` and builds to gitignored `.preview-out/CSAT_OVERVIEW_V3_*.html`.
+Status: **Information architecture approved; visual polish implemented — awaiting visual approval.** Jeff approved the V3 Healthy prototype's level of information ("From here I think it's just CSS refining"). Content, region order and composition remain frozen. Art direction: [visual-polish-spec.md](visual-polish-spec.md) (commit `40a8833`). Implementation notes and measurements: [visual-polish-review.md](visual-polish-review.md). Prototype-only header badge containment: [production-badge-observation.md](production-badge-observation.md). V3 is **not** superseded. Production DepMngr UI/CSS/JS is unchanged. The V3 prototype lives under `skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/` and builds to gitignored `.preview-out/CSAT_OVERVIEW_V3_*.html`.
 
 This folder specifies **one** CSAT → Overview. It applies the product-approved [reconciled architecture](../csat-reconciled-architecture/README.md) (commit `d31efef`, J1–J6 approved) to a calmer, executive-first composition. It replaces the V2 visual design ([../csat-overview-v2/](../csat-overview-v2/README.md)), which is kept for history.
 
@@ -21,6 +21,8 @@ Overview opens with **one plain-language message**: a single Top-2 Box figure an
 | [composer-preview-spec.md](composer-preview-spec.md) | Narrow prototype handoff: one composition, eight static state pages, stable URLs, self-test, visual acceptance questions |
 | [whole-app-lessons.md](whole-app-lessons.md) | What this Overview teaches about the rest of DM (recorded, not acted on) |
 | [visual-polish-spec.md](visual-polish-spec.md) | **Art direction for the approved screen:** screenshot diagnosis, frozen content, tokens, typography, rhythm, grid, surfaces, pills, links, per-region spec, eight-state resilience, Composer handoff, acceptance criteria |
+| [visual-polish-review.md](visual-polish-review.md) | **Post-implementation:** review command, measurements, fixture/Chase decisions, prototype badge note |
+| [production-badge-observation.md](production-badge-observation.md) | Header freshness badge stretch (production out of scope; prototype containment only) |
 
 ## Approved inputs applied
 

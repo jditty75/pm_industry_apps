@@ -77,6 +77,17 @@ def _visible_text_html(html: str) -> str:
     return out
 
 
+def _word_sequence(html: str) -> list[str]:
+    visible = _visible_text_html(html)
+    visible = re.sub(r"<[^>]+>", " ", visible)
+    visible = re.sub(r"\s+", " ", visible).strip()
+    t = visible.replace("·", " ").replace("→", " ")
+    return [w for w in t.split() if w]
+
+
+BASELINE_PATH = os.path.join(SCRIPT_DIR, "fixtures", "csat-overview-v3-visible-words.json")
+
+
 def _check_message_rules(st: dict) -> None:
     from csat_overview_v3_render import validate_message_inputs
 
@@ -151,6 +162,55 @@ def test_page_content():
         raise AssertionError("partner footer sentence missing")
 
 
+def test_visible_word_baseline():
+    if not os.path.isfile(BASELINE_PATH):
+        raise AssertionError(f"missing baseline {BASELINE_PATH}")
+    baseline = json.load(open(BASELINE_PATH, encoding="utf-8"))["pages"]
+    for fname in PAGES[1:]:
+        html = open(os.path.join(OUT_DIR, fname), encoding="utf-8").read()
+        got = _word_sequence(html)
+        want = baseline.get(fname)
+        if want is None:
+            raise AssertionError(f"no baseline for {fname}")
+        if got != want:
+            raise AssertionError(
+                f"visible word sequence changed in {fname} "
+                f"(got {len(got)} words, want {len(want)})"
+            )
+
+
+def test_visual_polish_structure():
+    healthy = open(os.path.join(OUT_DIR, "CSAT_OVERVIEW_V3_HEALTHY.html"), encoding="utf-8").read()
+    clear = open(os.path.join(OUT_DIR, "CSAT_OVERVIEW_V3_CLEAR.html"), encoding="utf-8").read()
+    healthy_body = _visible_text_html(healthy)
+    clear_body = _visible_text_html(clear)
+    if '<div class="csat-v3-prep-warning">' not in healthy_body:
+        raise AssertionError("Healthy missing prep-warning markup")
+    if '<div class="csat-v3-prep-warning">' in clear_body:
+        raise AssertionError("Clear must not show prep-warning")
+    if re.search(r">→</a>", healthy):
+        raise AssertionError("bare arrow link in Healthy")
+    if healthy.count('aria-hidden="true">→</span>') < 2:
+        raise AssertionError("expected aria-hidden arrows in Healthy")
+    r1 = healthy.split('data-csat-region="R1"', 1)[1].split('data-csat-region="R2"', 1)[0]
+    r3 = healthy.split('data-csat-region="R3"', 1)[1].split('data-csat-region="R4"', 1)[0]
+    r4 = healthy.split('data-csat-region="R4"', 1)[1].split("</main>", 1)[0]
+    if re.search(r"status-pill", r1) or re.search(r"status-pill", r3) or re.search(r"status-pill", r4):
+        raise AssertionError("status-pill outside R2")
+    for row in re.findall(r"csat-v3-concern-row", healthy):
+        pass
+    concern_rows = healthy.count("csat-v3-concern-row")
+    pills = len(re.findall(r'class="status-pill', healthy.split('data-csat-region="R2"', 1)[1].split('data-csat-region="R3"', 1)[0]))
+    if pills > concern_rows:
+        raise AssertionError("more than one pill per concern row")
+    if healthy.count("csat-v3-region-foot") < 2:
+        raise AssertionError("R2/R3 pinned footers expected in Healthy")
+    if "csat-v3-learn-grid" not in healthy or "csat-v3-fact-key" not in healthy:
+        raise AssertionError("Learn strip markers missing")
+    if "csat-v3-rail-row" not in healthy:
+        raise AssertionError("time rail missing in Healthy")
+
+
 def test_launcher_http():
     launcher = os.path.join(SCRIPT_DIR, "preview_csat_overview_v3.py")
     r = subprocess.run(
@@ -205,6 +265,8 @@ def test_preview_ps1():
 def main() -> None:
     test_build_all_pages()
     test_page_content()
+    test_visible_word_baseline()
+    test_visual_polish_structure()
     test_launcher_http()
     test_preview_ps1()
     print("PASS preview_csat_overview_v3_selftest.py")

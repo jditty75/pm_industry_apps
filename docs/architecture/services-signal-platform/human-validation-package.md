@@ -53,8 +53,8 @@ Three cases exercise one frozen Sauna agent contract (no per-case prompt tuning)
 | Id | Scenario | Ground truth |
 |----|----------|--------------|
 | CAL-01 | Historical health/schedule volatility, quiet recent trajectory, Green now | **NO_SIGNAL** — confirmed correct by deployment leader |
-| CAL-02 | Green + lifecycle/production exposure with historical instability | PENDING |
-| CAL-03 | Green + open Health Plan / Action History | PENDING |
+| CAL-02 | Green + lifecycle/production exposure with historical instability | WATCH / COMPOUND (pilot) |
+| CAL-03 | Green + open Health Plan / Action History | WATCH / INTERVENTION (pilot) |
 
 Evidence packets for CAL-02/03 are generated locally (`scripts/generate-sana-calibration-packets.py`) into gitignored `.ai/signal-exports/`. Do not commit customer exports or narrative.
 

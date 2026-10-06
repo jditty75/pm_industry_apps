@@ -55,10 +55,10 @@ Do not predict failure, escalation, or missed production.
 
 Use leadership questions rather than unsupported prescriptions.
 
-For every retained Deployment Intelligence Signal, include mandatory field:
-Incremental Value Beyond Current Health — what this tells leadership that current health/status alone does not."""
+Separate Deployment Intelligence from Data Stewardship in your analysis.
+Post-reasoning normalization will structure outputs; prioritize reasoning quality over storage-shaped prose."""
 
-STAGE2_OUTPUT_CONTRACT = """
+STAGE2_OUTPUT_CONTRACT_LEGACY = """
 STAGE 2 OUTPUT CONTRACT (required sections)
 -----------------------------------------
 Portfolio:
@@ -80,7 +80,16 @@ Material conditions: Deployment, condition, deterministic evidence, why reliable
 review target without assigning blame.
 
 Compressed Stage-1 candidates: deployment, Stage-1 category, one-line reason it did not merit portfolio-level leadership attention.
+
+NOTE (pilot): This embedded contract was rejected by Sana as over-prescriptive. Superseded by
+docs/architecture/services-signal-platform/ai-reasoning-contract.md — retained only for audit reproduction.
 """
+
+STAGE2_REASONING_POINTER = (
+    "Follow the Deployment Signals Pilot agent instructions plus "
+    "docs/architecture/services-signal-platform/ai-reasoning-contract.md "
+    "(role, objective, evidence, guardrails). Do not treat embedded output rubrics as authoritative."
+)
 
 
 def load_packets_jsonl(jsonl_path: Path) -> List[Dict[str, Any]]:
@@ -230,20 +239,24 @@ def portfolio_stage2_payload(
             ),
         },
         "stage2_instruction": STAGE2_INSTRUCTION,
-        "stage2_output_contract": STAGE2_OUTPUT_CONTRACT,
+        "stage2_reasoning_pointer": STAGE2_REASONING_POINTER,
         "candidates": enriched,
     }
 
 
-def render_stage2_sana_input(payload: Dict[str, Any]) -> str:
+def render_stage2_sana_input(payload: Dict[str, Any], include_legacy_contract: bool = False) -> str:
     lines = [
         "SANA DEPLOYMENT SIGNALS PILOT — STAGE 2 PORTFOLIO COMPRESSION",
         f"Schema: {payload.get('schema_version')}",
         "",
         payload["stage2_instruction"],
         "",
-        payload["stage2_output_contract"],
+        payload.get("stage2_reasoning_pointer") or STAGE2_REASONING_POINTER,
         "",
+    ]
+    if include_legacy_contract and payload.get("stage2_output_contract_legacy"):
+        lines.extend([payload["stage2_output_contract_legacy"], ""])
+    lines.extend([
         "PORTFOLIO CONTEXT",
         "-----------------",
         json.dumps(payload["portfolio_context"], indent=2, ensure_ascii=False),
@@ -252,7 +265,7 @@ def render_stage2_sana_input(payload: Dict[str, Any]) -> str:
         "-----------------------------------------------------------",
         json.dumps(payload["candidates"], indent=2, ensure_ascii=False),
         "",
-    ]
+    ])
     return "\n".join(lines)
 
 
@@ -263,8 +276,8 @@ def validate_stage2_payload(payload: Dict[str, Any]) -> List[str]:
         errors.append("deployments_evaluated must be 184 for SLG pilot")
     if pc.get("stage1_candidates") != EXPECTED_CANDIDATE_COUNT:
         errors.append(f"stage1_candidates must be {EXPECTED_CANDIDATE_COUNT}")
-    if "Incremental Value Beyond Current Health" not in payload.get("stage2_instruction", ""):
-        errors.append("stage2_instruction missing incremental-value gate")
+    if not payload.get("stage2_reasoning_pointer"):
+        errors.append("stage2_reasoning_pointer missing")
     for cand in payload.get("candidates") or []:
         if cand.get("schema_version") != CANDIDATE_SCHEMA_VERSION:
             errors.append("candidate schema_version mismatch")
@@ -465,6 +478,7 @@ def write_stage2_artifacts(
     stage1_manifest: Dict[str, Any],
     stewardship_rows: List[Dict[str, Any]],
     stewardship_summary: Dict[str, Any],
+    include_legacy_stage2_contract: bool = False,
 ) -> Dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     packets_map = packets_by_id(packets)
@@ -481,11 +495,16 @@ def write_stage2_artifacts(
         stewardship_summary,
         dep_pops,
     )
+    payload["stage2_output_contract_legacy"] = (
+        STAGE2_OUTPUT_CONTRACT_LEGACY if include_legacy_stage2_contract else None
+    )
     validation_errors = validate_stage2_payload(payload)
     if validation_errors:
         raise ValueError("Stage-2 payload validation failed: " + "; ".join(validation_errors))
 
-    sana_text = render_stage2_sana_input(payload)
+    sana_text = render_stage2_sana_input(
+        payload, include_legacy_contract=include_legacy_stage2_contract
+    )
     sana_path = out_dir / "sana-stage2-portfolio-compression-input.txt"
     sana_path.write_text(sana_text, encoding="utf-8")
 

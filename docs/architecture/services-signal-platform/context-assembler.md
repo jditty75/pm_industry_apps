@@ -24,7 +24,9 @@ Deterministic layer between **Deployment Trajectory v2** and **Sana reasoning**.
 3. Build Sana input (no LLM): `python scripts/deployment-signal-portfolio-pilot-harness.py`
 4. Manually run unchanged **Sana Deployment Signals Pilot** agent with `.ai/signal-exports/sana-portfolio-pilot-input*.txt` (**Stage 1**)
 5. Store verbatim Stage-1 Sana outputs in `.ai/signal-exports/stage1/`
-6. `python scripts/deployment-signal-stage2-harness.py` → inspect review HTML → paste `sana-stage2-portfolio-compression-input.txt` (**Stage 2**)
+6. `python scripts/deployment-signal-stage2-harness.py` → inspect review HTML → paste `sana-stage2-portfolio-compression-input.txt` (**Stage 2**) → save response to `stage2/Sana-stage2-output.txt`
+
+Pilot accepted: 184 → 17 → 11. AI contract: [ai-reasoning-contract.md](./ai-reasoning-contract.md).
 
 Production-derived artifacts remain under `.ai/signal-exports/` only (gitignored).
 

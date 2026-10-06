@@ -2,14 +2,23 @@
 
 Deterministic system-of-record QA lane — separate from Deployment Intelligence (Sana trajectory interpretation).
 
+## Product split
+
+| Output | Question |
+|--------|----------|
+| **Deployment Intelligence** (AI Signals) | What deserves strategic leadership attention? |
+| **Data Stewardship** (deterministic) | Is the deployment system of record sufficiently complete, current, consistent, and trustworthy? |
+
+Lanes may overlap on one deployment; they are not the same product.
+
 ## Lanes
 
 | Lane | Question |
 |------|----------|
-| `DEPLOYMENT_DATA_STEWARDSHIP` | Is system-of-record data complete, current, consistent, and trustworthy? |
-| `PLATFORM_EVIDENCE_LIMITATION` | Is evidence missing because of extract/source capability (not EM maintenance)? |
+| `DEPLOYMENT_DATA_STEWARDSHIP` | Actionable or contextual system-of-record QA |
+| `PLATFORM_EVIDENCE_LIMITATION` | Extract/source capability limits (not EM maintenance) |
 
-A deployment may have stewardship conditions, platform limitations, Stage-1 candidates, or none — lanes are not mutually exclusive.
+Rule-level precision audit: [data-stewardship-rule-audit.md](./data-stewardship-rule-audit.md).
 
 ## Impact (operational, not AI risk)
 

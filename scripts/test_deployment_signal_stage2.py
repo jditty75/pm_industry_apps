@@ -176,6 +176,15 @@ class StewardshipTests(unittest.TestCase):
         codes = [r["condition_code"] for r in detect_stewardship_conditions(pkt)]
         self.assertIn("HEALTH_STATE_RECONCILIATION_MISMATCH", codes)
 
+    def test_parent_reconstruction_is_platform_not_stewardship(self):
+        pkt = _packet(
+            schedule_trajectory={"parent_reconciliation_status": "RECONSTRUCTED_BLANK_CURRENT_POPULATED"}
+        )
+        plat_codes = [r["condition_code"] for r in detect_platform_limitations(pkt)]
+        stew_codes = [r["condition_code"] for r in detect_stewardship_conditions(pkt)]
+        self.assertIn("PARENT_MTP_RECONSTRUCTION_LIMITATION", plat_codes)
+        self.assertNotIn("PARENT_MTP_RECONCILIATION_MISMATCH", stew_codes)
+
     def test_pf_rollup_stewardship(self):
         pkt = _packet(
             product_function={

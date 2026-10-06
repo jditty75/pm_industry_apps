@@ -49,6 +49,18 @@ var CoreDeploymentDataStewardship = {
     var ht = packet.health_trajectory || {};
     var recon = ht.reconciliation || {};
     var health = String((packet.current_state || {}).current_health || '').trim();
+    var stEarly = packet.schedule_trajectory || {};
+    var parentReconEarly = String(stEarly.parent_reconciliation_status || '').trim();
+    if (parentReconEarly === 'RECONSTRUCTED_BLANK_CURRENT_POPULATED' ||
+        parentReconEarly === 'RECONSTRUCTED_POPULATED_CURRENT_BLANK') {
+      out.push(CoreDeploymentDataStewardship._condition_(
+        'PARENT_MTP_RECONSTRUCTION_LIMITATION', 'SCHEDULE',
+        'Parent MTP reconciliation status is ' + parentReconEarly + '; baseline/history reconstruction ' +
+        'cannot fully verify parent target lineage in the current extract.',
+        ['schedule_trajectory.parent_reconciliation_status'],
+        'context_packet:schedule_trajectory', CoreDeploymentDataStewardship.IMPACT_ADVISORY,
+        CoreDeploymentDataStewardship.LANE_PLATFORM, depId, null));
+    }
     if (recon.health_history_available === false && health) {
       out.push(CoreDeploymentDataStewardship._condition_(
         'HEALTH_EVENT_HISTORY_SPARSE', 'HEALTH',
@@ -121,10 +133,10 @@ var CoreDeploymentDataStewardship = {
 
     var st = packet.schedule_trajectory || {};
     var parentRecon = String(st.parent_reconciliation_status || '').trim();
-    if (parentRecon === 'DATE_MISMATCH' || parentRecon === 'RECONSTRUCTED_BLANK_CURRENT_POPULATED') {
+    if (parentRecon === 'DATE_MISMATCH') {
       out.push(CoreDeploymentDataStewardship._condition_(
         'PARENT_MTP_RECONCILIATION_MISMATCH', 'SCHEDULE',
-        'Parent MTP reconciliation status is ' + parentRecon + '.',
+        'Parent MTP reconciliation status is DATE_MISMATCH between reconstructed history and current parent target.',
         ['schedule_trajectory.parent_reconciliation_status'],
         'context_packet:schedule_trajectory', CoreDeploymentDataStewardship.IMPACT_REVIEW,
         CoreDeploymentDataStewardship.LANE_STEWARDSHIP, depId, null));
@@ -152,6 +164,14 @@ var CoreDeploymentDataStewardship = {
           CoreDeploymentDataStewardship.LANE_STEWARDSHIP, depId, dhpDays));
       }
       var ahHealth = String(iv.action_history_latest_health_status || '').trim();
+      if (CoreDeploymentDataStewardship._asInt_(iv.action_history_count) === 0 && pfCount > 0) {
+        out.push(CoreDeploymentDataStewardship._condition_(
+          'OPEN_PLAN_WITHOUT_ACTION_HISTORY', 'INTERVENTION',
+          'Open Health Plan with no Action History records in context.',
+          ['intervention.has_open_health_plan', 'intervention.action_history_count'],
+          'context_packet:intervention', CoreDeploymentDataStewardship.IMPACT_ADVISORY,
+          CoreDeploymentDataStewardship.LANE_STEWARDSHIP, depId, null));
+      }
       if (health && ahHealth && health.toLowerCase() !== ahHealth.toLowerCase()) {
         out.push(CoreDeploymentDataStewardship._condition_(
           'INTERVENTION_HEALTH_STATUS_DIVERGENCE', 'INTERVENTION',
@@ -161,6 +181,19 @@ var CoreDeploymentDataStewardship = {
           CoreDeploymentDataStewardship.LANE_STEWARDSHIP, depId,
           iv.days_since_action_history_update));
       }
+    }
+
+    var terminalStages = {
+      'post prod': true, 'post production': true, production: true,
+      closed: true, complete: true, completed: true, hypercare: true
+    };
+    if (terminalStages[stage] && iv.has_open_health_plan) {
+      out.push(CoreDeploymentDataStewardship._condition_(
+        'OPEN_INTERVENTION_AFTER_APPARENT_COMPLETION', 'LIFECYCLE',
+        'Deployment stage is ' + cs.deployment_stage + ' while a Health Plan remains open.',
+        ['current_state.deployment_stage', 'intervention.has_open_health_plan'],
+        'context_packet:lifecycle', CoreDeploymentDataStewardship.IMPACT_ADVISORY,
+        CoreDeploymentDataStewardship.LANE_STEWARDSHIP, depId, null));
     }
     return out;
   },

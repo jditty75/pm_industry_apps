@@ -22,6 +22,29 @@ PRE_TERMINAL_STAGES = frozenset({"deploy", "test", "build", "plan", "initiate", 
 STALE_DHP_DAYS = 90
 STALE_ACTION_DAYS = 90
 
+# Rule-precision taxonomy (documentation + population metrics; not trajectory semantics).
+RULE_CLASS_ACTIONABLE = "ACTIONABLE_STEWARDSHIP"
+RULE_CLASS_CONTEXTUAL = "CONTEXTUAL_STEWARDSHIP"
+RULE_CLASS_PLATFORM = "PLATFORM_LIMITATION"
+RULE_CLASS_REFINEMENT = "NEEDS_RULE_REFINEMENT"
+
+CONDITION_RULE_CLASS: Dict[str, str] = {
+    "CURRENT_MTP_MISSING": RULE_CLASS_ACTIONABLE,
+    "HEALTH_STATE_RECONCILIATION_MISMATCH": RULE_CLASS_ACTIONABLE,
+    "PF_ROLLUP_RECONCILIATION_MISMATCH": RULE_CLASS_REFINEMENT,
+    "PF_COMPLETE_STAGE_NOT_TERMINAL": RULE_CLASS_ACTIONABLE,
+    "PARENT_MTP_RECONCILIATION_MISMATCH": RULE_CLASS_ACTIONABLE,
+    "MTP_PASSED_REMAINING_PF_WORK": RULE_CLASS_CONTEXTUAL,
+    "OPEN_HEALTH_PLAN_STALE_MAINTENANCE": RULE_CLASS_ACTIONABLE,
+    "INTERVENTION_HEALTH_STATUS_DIVERGENCE": RULE_CLASS_ACTIONABLE,
+    "OPEN_PLAN_WITHOUT_ACTION_HISTORY": RULE_CLASS_CONTEXTUAL,
+    "OPEN_INTERVENTION_AFTER_APPARENT_COMPLETION": RULE_CLASS_CONTEXTUAL,
+    "PF_TARGET_DATE_HISTORY_UNAVAILABLE": RULE_CLASS_PLATFORM,
+    "PLATFORM_EVIDENCE_GAP": RULE_CLASS_PLATFORM,
+    "HEALTH_EVENT_HISTORY_SPARSE": RULE_CLASS_PLATFORM,
+    "PARENT_MTP_RECONSTRUCTION_LIMITATION": RULE_CLASS_PLATFORM,
+}
+
 
 def _str(v: Any) -> str:
     return str(v or "").strip()
@@ -78,6 +101,29 @@ def detect_platform_limitations(packet: Dict[str, Any]) -> List[Dict[str, Any]]:
         )
     ht = packet.get("health_trajectory") or {}
     recon = ht.get("reconciliation") or {}
+    st = packet.get("schedule_trajectory") or {}
+    parent_recon = _str(st.get("parent_reconciliation_status"))
+    if parent_recon in (
+        "RECONSTRUCTED_BLANK_CURRENT_POPULATED",
+        "RECONSTRUCTED_POPULATED_CURRENT_BLANK",
+    ):
+        out.append(
+            _condition(
+                code="PARENT_MTP_RECONSTRUCTION_LIMITATION",
+                domain="SCHEDULE",
+                observation=(
+                    f"Parent MTP reconciliation status is {parent_recon}; "
+                    "baseline/history reconstruction cannot fully verify parent target lineage "
+                    "in the current extract."
+                ),
+                source_fields=["schedule_trajectory.parent_reconciliation_status"],
+                trace_ref="context_packet:schedule_trajectory",
+                impact=IMPACT_ADVISORY,
+                lane=LANE_PLATFORM,
+                deployment_id=dep_id,
+            )
+        )
+
     if recon.get("health_history_available") is False and _str(
         (packet.get("current_state") or {}).get("current_health")
     ):
@@ -175,6 +221,9 @@ def detect_stewardship_conditions(
             )
         )
 
+    st = packet.get("schedule_trajectory") or {}
+    parent_recon = _str(st.get("parent_reconciliation_status"))
+
     if pf_count > 0 and remaining == 0 and completed >= pf_count and stage in PRE_TERMINAL_STAGES:
         out.append(
             _condition(
@@ -192,14 +241,15 @@ def detect_stewardship_conditions(
             )
         )
 
-    st = packet.get("schedule_trajectory") or {}
-    parent_recon = _str(st.get("parent_reconciliation_status"))
-    if parent_recon in ("DATE_MISMATCH", "RECONSTRUCTED_BLANK_CURRENT_POPULATED"):
+    if parent_recon == "DATE_MISMATCH":
         out.append(
             _condition(
                 code="PARENT_MTP_RECONCILIATION_MISMATCH",
                 domain="SCHEDULE",
-                observation=f"Parent MTP reconciliation status is {parent_recon}.",
+                observation=(
+                    "Parent MTP reconciliation status is DATE_MISMATCH between "
+                    "reconstructed history and current parent target."
+                ),
                 source_fields=["schedule_trajectory.parent_reconciliation_status"],
                 trace_ref="context_packet:schedule_trajectory",
                 impact=IMPACT_REVIEW,
@@ -419,6 +469,32 @@ def compute_stewardship_deployment_populations(
         if d not in deps_stewardship_any
     }
 
+    deps_actionable: set = set()
+    deps_contextual_only: set = set()
+    for dep, dep_rows in by_dep_rows.items():
+        stew = [r for r in dep_rows if r.get("lane") == LANE_STEWARDSHIP]
+        if not stew:
+            continue
+        classes = {
+            CONDITION_RULE_CLASS.get(r.get("condition_code", ""), RULE_CLASS_ACTIONABLE)
+            for r in stew
+        }
+        if RULE_CLASS_ACTIONABLE in classes or RULE_CLASS_REFINEMENT in classes:
+            deps_actionable.add(dep)
+        elif RULE_CLASS_CONTEXTUAL in classes:
+            deps_contextual_only.add(dep)
+
+    stage_dist: Dict[str, int] = {}
+    health_dist_all: Dict[str, int] = {}
+    for p in packets:
+        cs = p.get("current_state") or {}
+        dep = _str((p.get("metadata") or {}).get("deployment_id"))
+        stage = _str(cs.get("deployment_stage")) or "unknown"
+        stage_dist[stage] = stage_dist.get(stage, 0) + 1
+        if dep in deps_actionable:
+            h = _health_bucket(p)
+            health_dist_all[h] = health_dist_all.get(h, 0) + 1
+
     overlap_candidates = deps_stewardship_any & candidate_ids
     no_signal_ids = all_dep_ids - candidate_ids
     overlap_no_signal = deps_stewardship_any & no_signal_ids
@@ -449,9 +525,8 @@ def compute_stewardship_deployment_populations(
             )
         elif code == "PARENT_MTP_RECONCILIATION_MISMATCH":
             rule_ambiguity_notes.append(
-                f"{code}: DEPLOYMENT_DATA_STEWARDSHIP when parent reconciliation flags mismatch; "
-                f"baseline-only net movement without logged events remains PLATFORM/context caveat "
-                f"({count} condition rows). Review if source cannot reconstruct parent MTP."
+                f"{code}: DATE_MISMATCH only — actionable SoR review ({count} condition rows). "
+                "RECONSTRUCTED_* parent statuses emit PARENT_MTP_RECONSTRUCTION_LIMITATION (platform)."
             )
         elif code == "PF_ROLLUP_RECONCILIATION_MISMATCH":
             rule_ambiguity_notes.append(
@@ -488,6 +563,13 @@ def compute_stewardship_deployment_populations(
             [d for d in deps_stewardship_any if _health_bucket(packets_by_id.get(d) or {}) == "red"]
         ),
         "rule_ownership_notes": rule_ambiguity_notes,
+        "deployment_count_actionable_stewardship": len(deps_actionable),
+        "deployment_count_contextual_stewardship_only": len(deps_contextual_only),
+        "deployment_count_actionable_or_contextual_stewardship": len(
+            deps_actionable | deps_contextual_only
+        ),
+        "portfolio_stage_distribution": stage_dist,
+        "actionable_stewardship_health_distribution": health_dist_all,
     }
 
 

@@ -1,6 +1,6 @@
 # LLM guardrails (documentation only)
 
-Apply when the Sauna **signal pilot** is authorized — not to production **HENP Exec Summary_GAS**.
+Companion to the concise instruction in [ai-reasoning-contract.md](./ai-reasoning-contract.md). Apply for Deployment Signals reasoning — not production **HENP Exec Summary_GAS**.
 
 - Use only supplied evidence; distinguish fact from interpretation.
 - No causal inference from sequence or correlation alone.

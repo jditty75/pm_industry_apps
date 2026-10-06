@@ -51,6 +51,16 @@ test('health reconciliation mismatch is stewardship', () => {
   assert.ok(codes.includes('HEALTH_STATE_RECONCILIATION_MISMATCH'));
 });
 
+test('parent reconstruction limitation is platform not stewardship', () => {
+  var p = packet({
+    schedule_trajectory: { parent_reconciliation_status: 'RECONSTRUCTED_BLANK_CURRENT_POPULATED' }
+  });
+  var plat = S.detectPlatformLimitations(p).map(function (r) { return r.condition_code; });
+  var stew = S.detectStewardshipConditions(p).map(function (r) { return r.condition_code; });
+  assert.ok(plat.includes('PARENT_MTP_RECONSTRUCTION_LIMITATION'));
+  assert.ok(!stew.includes('PARENT_MTP_RECONCILIATION_MISMATCH'));
+});
+
 test('PF rollup mismatch detected', () => {
   var p = packet({
     product_function: {

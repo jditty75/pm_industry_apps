@@ -44,6 +44,11 @@ def main() -> int:
         type=int,
         default=17,
     )
+    parser.add_argument(
+        "--legacy-embedded-contract",
+        action="store_true",
+        help="Include superseded Stage-2 output rubric (pilot audit reproduction only).",
+    )
     args = parser.parse_args()
 
     jsonl_path = Path(args.jsonl)
@@ -85,6 +90,7 @@ def main() -> int:
         stage1_manifest,
         stewardship_rows,
         stewardship_summary,
+        include_legacy_stage2_contract=args.legacy_embedded_contract,
     )
     print(json.dumps(manifest, indent=2))
     return 0

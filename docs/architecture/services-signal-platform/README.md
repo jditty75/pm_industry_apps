@@ -17,9 +17,12 @@ Stage 1 — Sana candidate discovery (manual; 184 → 17 accepted pilot)
         ↓
 Stage 2 — portfolio compression + Data Stewardship (deterministic harness → manual Sana)
         ↓
-Structured signals (documented contract only)
+Post-reasoning normalization → deployment-signal-v1 (documented only)
         ↓
-Attention compression → leadership experience / drill-down in DM
+Signal lifecycle → leadership experiences / drill-down in DM
+```
+
+**Pilot closeout:** [pilot-closeout.md](./pilot-closeout.md) (184 → 17 → 11 accepted result).
 ```
 
 ## Principles
@@ -50,9 +53,14 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 
 | Document | Purpose |
 |----------|---------|
+| [pilot-closeout.md](./pilot-closeout.md) | Accepted pilot outcome, scorecard, conclusion |
+| [ai-reasoning-contract.md](./ai-reasoning-contract.md) | Preferred concise AI instruction + boundary |
 | [deployment-signal-domain.md](./deployment-signal-domain.md) | Trajectory v2 sheets, sources, grain, limitations |
-| [structured-signals-contract.md](./structured-signals-contract.md) | Planned signal shape (no storage yet) |
-| [llm-guardrails.md](./llm-guardrails.md) | Agreed Sauna constraints (no prompt yet) |
+| [structured-signals-contract.md](./structured-signals-contract.md) | `deployment-signal-v1` planned shape (no storage yet) |
+| [signal-lifecycle-roadmap.md](./signal-lifecycle-roadmap.md) | NEW/CONTINUING/ESCALATED/… design |
+| [llm-guardrails.md](./llm-guardrails.md) | Evidence/safety guardrails (companion to AI contract) |
+| [data-stewardship-rule-audit.md](./data-stewardship-rule-audit.md) | Stewardship rule precision audit |
+| [stage-2-legacy-embedded-contract.md](./stage-2-legacy-embedded-contract.md) | Superseded embedded Stage-2 rubric (audit) |
 | [deployment-trajectory-v2-pilot-freeze.md](./deployment-trajectory-v2-pilot-freeze.md) | Pilot-frozen trajectory v2 contract |
 | [deployment-signal-context-v1.md](./deployment-signal-context-v1.md) | Context packet schema |
 | [context-assembler.md](./context-assembler.md) | Assembler architecture and portfolio workflow |

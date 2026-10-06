@@ -1,10 +1,10 @@
 # CSAT Product Model — Customer Satisfaction information architecture reset (2026-10-05)
 
-Status: **proposal for Jeff's information-architecture review.** Documentation only. No UI, CSS, markup, JS, prototype, API, EDM, workbook, CLASP or deployment change was made.
+Status: **approved by Jeff as the basis for CSAT design (2026-10-06)**, with decisions P1–P10 resolved as recorded in [../csat-overview-v2/README.md](../csat-overview-v2/README.md#resolved-decisions-applied). Where a resolved decision differs from a recommendation below (notably P1 mean headline, P3 deployment-aware aggregation, P4 Workday-led default lens), the resolved decision wins. The one Overview design built from this model is [../csat-overview-v2/](../csat-overview-v2/README.md). Documentation only. No UI, CSS, markup, JS, prototype, API, EDM, workbook, CLASP or deployment change was made.
 
 CSAT = **Customer Satisfaction**. The top-level DM feature stays **CSAT**. This folder defines *what CSAT should tell a Deployment Manager user* before any further visual design.
 
-Supersedes for direction: the focused Overview compositions in [../csat-overview-design/](../csat-overview-design/README.md) (A/B/C) — **not selected — product information model under redesign.** They are retained, not deleted.
+Supersedes for direction: the focused Overview compositions in [../csat-overview-design/](../csat-overview-design/README.md) (A/B/C) — **rejected for visual/information design — superseded by approved product model.** They are retained, not deleted.
 
 ## Evidence basis
 
@@ -40,6 +40,8 @@ Resulting CSAT navigation: **Overview | Responses | Survey Operations**, plus a 
 | [visual-design-handoff.md](visual-design-handoff.md) | What the next visual-design task should design, and with what inputs and acceptance criteria |
 
 ## Decisions required from Jeff
+
+**Resolved 2026-10-06.** The table below keeps the original recommendations for traceability. The resolved outcomes, plus the new Workday-led management-lens requirement, are in [../csat-overview-v2/README.md](../csat-overview-v2/README.md#resolved-decisions-applied). On Overview, "drivers" are labelled **Delivery ratings**.
 
 These are business and product decisions only. Each one has a recommendation. Earlier decisions D1–D7 in [implementation-plan.md](../../csat-subsystem/implementation-plan.md) still stand; this model settles D1 (Overall is the headline) and depends on D2 (Product Area groups) and D6 (T2 audience).
 

@@ -1,5 +1,7 @@
 # Composer preview specification — CSAT Overview A/B/C only
 
+> **Status: rejected for visual/information design — superseded by approved product model.** The A/B/C prototype pages remain buildable for reference. Current handoff: [../csat-overview-v2/composer-preview-spec.md](../csat-overview-v2/composer-preview-spec.md).
+
 Narrow handoff. This spec authorizes building **three static/interactive localhost pages only** — one CSAT Overview composition each — for a fair side-by-side visual comparison. It does not authorize the deployment drawer, Responses, Customer Feedback, production code, CLASP, or deploy.
 
 ## 1. What to build

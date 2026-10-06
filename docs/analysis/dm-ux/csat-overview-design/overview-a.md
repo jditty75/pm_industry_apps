@@ -1,6 +1,6 @@
 # Overview A — Executive signal first
 
-> **Status: not selected — product information model under redesign.** See [../csat-product-model/](../csat-product-model/README.md).
+> **Status: rejected for visual/information design — superseded by approved product model.** Current Overview design: [../csat-overview-v2/](../csat-overview-v2/README.md). Product model: [../csat-product-model/](../csat-product-model/README.md).
 
 Design-spec document. No runtime changed. Reference viewport: **1440×900**, content container `max-width:1400px` centered (matches current DM, per `../current-design-system.md`).
 

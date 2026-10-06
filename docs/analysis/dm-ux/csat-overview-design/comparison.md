@@ -1,6 +1,6 @@
 # Comparison and recommendation
 
-> **Status: not selected — product information model under redesign.** See [../csat-product-model/](../csat-product-model/README.md).
+> **Status: rejected for visual/information design — superseded by approved product model.** Current Overview design: [../csat-overview-v2/](../csat-overview-v2/README.md). Product model: [../csat-product-model/](../csat-product-model/README.md).
 
 ## Preserved / Evolved / New / Removed
 

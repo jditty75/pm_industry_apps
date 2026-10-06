@@ -38,9 +38,15 @@ Grounded in the discovery above and in `docs/analysis/csat-subsystem/`; does not
 
 | Doc | Read when |
 |-----|-----------|
-| [csat-product-model/README.md](csat-product-model/README.md) | **Current CSAT direction.** What CSAT should tell a DM user: question hierarchy, metric semantics, MDS→PGL journey, attention taxonomy, information hierarchy, navigation (Overview / Responses / Survey Operations), workflows, next visual-design handoff. Awaiting Jeff's IA review |
+| [csat-product-model/README.md](csat-product-model/README.md) | **Current CSAT direction (approved 2026-10-06).** What CSAT should tell a DM user: question hierarchy, metric semantics, MDS→PGL journey, attention taxonomy, information hierarchy, navigation (Overview / Responses / Survey Operations), workflows, next visual-design handoff |
 
-The focused Overview compositions A/B/C in `csat-overview-design/` are **not selected — product information model under redesign.** They are retained for reference.
+The focused Overview compositions A/B/C in `csat-overview-design/` are **rejected for visual/information design — superseded by approved product model.** They are retained for reference.
+
+## CSAT Overview v2 — single design (2026-10-06)
+
+| Doc | Read when |
+|-----|-----------|
+| [csat-overview-v2/README.md](csat-overview-v2/README.md) | **Current CSAT Overview design.** One Overview from the approved product model: Workday-led default lens with partner-led/all-deployments context, satisfaction + evidence unit, explainable risk, delivery ratings, journey, seven states, drill-down map, Composer handoff for seven static pages |
 
 ## Headline findings
 

@@ -286,6 +286,35 @@ function sendMonthlyReportTestNew() {
 }
 
 // ============================================================================
+// 3b. DEPLOYMENT TRAJECTORY (SLG pilot — manual refresh only)
+// ============================================================================
+
+/**
+ * Rebuilds Deployment_Trajectory and validation detail sheets from SFDC sources.
+ * Requires deploymentSignal.enabled in APP_CONFIG and CoreLib with trajectory support.
+ *
+ * @return {Object}
+ */
+function refreshDeploymentTrajectory() {
+  var summary = CoreLib.CoreDeploymentTrajectory.refresh(APP_CONFIG);
+  Logger.log('refreshDeploymentTrajectory: ' + JSON.stringify(summary));
+  return summary;
+}
+
+/**
+ * Structured debug for one Active deployment across trajectory sources.
+ *
+ * @param {string} deploymentId Salesforce deployment Id (15 or 18 char)
+ * @return {Object}
+ */
+function debugDeploymentTrajectoryForDeployment(deploymentId) {
+  var result = CoreLib.CoreDeploymentTrajectory.debugForDeployment(
+    APP_CONFIG, deploymentId);
+  Logger.log('debugDeploymentTrajectoryForDeployment: ' + JSON.stringify(result.summary || {}));
+  return result;
+}
+
+// ============================================================================
 // 4. DEBUG HELPERS (OPTIONAL, LOCAL IMPLEMENTATIONS)
 // ============================================================================
 

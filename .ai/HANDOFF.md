@@ -1,7 +1,11 @@
 # Agent handoff
 
-**No active handoff.**
+**Deployment Signal Platform — deterministic baseline reconciled in Git (2026-10-06).**
 
-Use this file only for meaningful **unfinished** work when switching between agents. When work is done, commit and push to Git; clear or refresh this file.
+- Architecture: [`docs/architecture/services-signal-platform/README.md`](../docs/architecture/services-signal-platform/README.md)
+- Human validation: [`docs/architecture/services-signal-platform/human-validation-package.md`](../docs/architecture/services-signal-platform/human-validation-package.md)
+- Open data questions: run `node scripts/diagnose-deployment-trajectory-pf-history.js` on gitignored CSV exports under `.ai/signal-exports/`
 
-Handoff content must not include production deployment authorization, credentials, or secrets.
+**Next:** ten-deployment human validation in SLG workbook → freeze trajectory v2 → Context Assembler (not started).
+
+No production deployment authorization. Exec Summary Sauna agent unchanged.

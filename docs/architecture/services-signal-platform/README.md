@@ -1,0 +1,66 @@
+# Services Signal Platform
+
+Operational layer above Deployment Manager dashboards: compress leadership attention onto deployments that merit investigation, with traceable evidence.
+
+## Platform flow
+
+```text
+Operational source data (Salesforce sheets, Health Plans, Action History)
+        ↓
+Deterministic derived trajectory (GAS / DepMngr)
+        ↓
+Evidence quality + trace sheets
+        ↓
+LLM Context Assembler (planned — not implemented)
+        ↓
+LLM reasoning (Sauna pilot — not implemented)
+        ↓
+Structured signals (documented contract only)
+        ↓
+Attention compression → leadership experience / drill-down in DM
+```
+
+## Principles
+
+| Principle | Meaning |
+|-----------|---------|
+| State | Where the deployment **is** today (health, stage, current MTP). |
+| Trajectory | Where it is **going** and how schedule/health **changed**. |
+| Intervention | **Why** patterns may matter (DHP + Action History narrative at source). |
+| Attention | The platform decides **what deserves attention**, not every row. |
+
+**GAS calculates facts. The LLM interprets evidence.** Do not move date math, health ranks, or schedule volatility into Sauna.
+
+## Deterministic vs LLM
+
+- **Deterministic (now):** health/schedule metrics, Product Function grain, joins, trace rows, warning tokens, counts/recency for DHP and Action History.
+- **LLM (later):** compound patterns, leadership relevance, careful interpretation, leadership questions — only after human validation of trajectory v2.
+
+## Production isolation
+
+The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industry current-state analysis) stays **unchanged** during the Deployment pilot. The pilot is config-gated (`deploymentSignal.enabled`) and **SLG-only** in `Config_SLG.js`. No `CoreExecSummary` or trajectory coupling in library code.
+
+## Domain strategy
+
+**Deployment** is the first pilot domain. Do not generalize implementation into a shared framework until the pilot proves value. Reuse this **pattern** in documentation for future domains.
+
+## Engineering references
+
+| Document | Purpose |
+|----------|---------|
+| [deployment-signal-domain.md](./deployment-signal-domain.md) | Trajectory v2 sheets, sources, grain, limitations |
+| [structured-signals-contract.md](./structured-signals-contract.md) | Planned signal shape (no storage yet) |
+| [llm-guardrails.md](./llm-guardrails.md) | Agreed Sauna constraints (no prompt yet) |
+| [context-assembler.md](./context-assembler.md) | Next-stage compact context contract |
+| [human-validation-package.md](./human-validation-package.md) | Ten-deployment review format |
+| [engineering-baseline-2026-10.md](./engineering-baseline-2026-10.md) | Reconciliation matrix and Git/runtime ownership |
+
+## Code ownership
+
+| Layer | Location |
+|-------|----------|
+| Trajectory engine | `libraries/DepMngr/src/CoreDeploymentTrajectory*.js` |
+| Defaults / gating | `libraries/DepMngr/src/CoreConfig.js` (`deploymentSignal`, schema version **2**) |
+| SLG pilot enablement | `solutions/SLG_DM/src/Config_SLG.js`, `Code.js` (`refreshDeploymentTrajectory`) |
+| Tests | `libraries/DepMngr/test/deployment-trajectory-*.test.js`, `pf-history-export-analysis.test.js` |
+| Local PF history diagnostic | `scripts/diagnose-deployment-trajectory-pf-history.js` |

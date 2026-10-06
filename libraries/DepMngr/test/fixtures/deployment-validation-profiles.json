@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "description": "Sanitized profile checklist for ten-deployment human validation (no customer data).",
+  "profiles": [
+    { "id": "PROFILE_01", "label": "Stable Green / stable schedule", "syntheticDeploymentId": "DEP_SAN_01" },
+    { "id": "PROFILE_02", "label": "Long-tenure Green", "syntheticDeploymentId": "DEP_SAN_02" },
+    { "id": "PROFILE_03", "label": "Yellow or Red current health", "syntheticDeploymentId": "DEP_SAN_03" },
+    { "id": "PROFILE_04", "label": "Recent health deterioration", "syntheticDeploymentId": "DEP_SAN_04" },
+    { "id": "PROFILE_05", "label": "Health recovery", "syntheticDeploymentId": "DEP_SAN_05" },
+    { "id": "PROFILE_06", "label": "Significant target movement", "syntheticDeploymentId": "DEP_SAN_06" },
+    { "id": "PROFILE_07", "label": "Multiple Product Function production dates", "syntheticDeploymentId": "DEP_SAN_07" },
+    { "id": "PROFILE_08", "label": "Completed + remaining Product Functions", "syntheticDeploymentId": "DEP_SAN_08" },
+    { "id": "PROFILE_09", "label": "Open DHP + Action History + schedule movement", "syntheticDeploymentId": "DEP_SAN_09" },
+    { "id": "PROFILE_10", "label": "Sparse / incomplete history", "syntheticDeploymentId": "DEP_SAN_10" }
+  ],
+  "reviewSections": [
+    "current_health",
+    "health_trajectory",
+    "production_dates",
+    "historical_target_movement",
+    "actual_vs_target_semantics",
+    "product_function_representation",
+    "health_plan_linkage",
+    "action_history_linkage",
+    "evidence_warnings"
+  ],
+  "closingQuestion": "Does this trajectory tell the same story a knowledgeable deployment leader would tell?"
+}

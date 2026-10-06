@@ -38,6 +38,18 @@ var APP_CONFIG = {
     metricsEnabled: false,
     issueCategoryDelimiter: ';'
   },
+
+  deploymentSignal: {
+    enabled: true,
+    trajectorySheetName: 'Deployment_Trajectory',
+    actionHistorySheetName: 'SFDC_DHPActionHistory',
+    healthEventsSheetName: 'Deployment_Trajectory_HealthEvents',
+    mtpEventsSheetName: 'Deployment_Trajectory_MtpEvents',
+    actionHistoryIndexSheetName: 'Deployment_Trajectory_ActionHistory_Index',
+    productFunctionsSheetName: 'SFDC_DeploymentProductFunctions',
+    productFunctionHistorySheetName: 'SFDC_DeploymentProductFunctionHistory',
+    schemaVersion: 2
+  },
   
   sheets: {
     activeDeployments:     'ActiveDeployments',

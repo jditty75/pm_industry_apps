@@ -65,6 +65,55 @@ def _fixture_blob(html: str) -> str:
     return html[start:end]
 
 
+def test_integrated_visual_structure():
+    html = open(os.path.join(OUT_DIR, "CSAT_INTEGRATED.html"), encoding="utf-8").read()
+    blob = _fixture_blob(html)
+    if "csat-row-marker" in blob:
+        raise AssertionError("fixture must not emit csat-row-marker column")
+    if "csat-sv-lifecycle-section" not in blob:
+        raise AssertionError("missing Surveys lifecycle section class")
+    if "csat-sv-panel csat-sv-card" in blob or "csat-sv-giant" in blob.lower():
+        raise AssertionError("regression to giant Surveys cards")
+
+    resp_html = open(os.path.join(OUT_DIR, "CSAT_INTEGRATED_RESPONSES_NORMAL.html"), encoding="utf-8").read()
+    resp_blob = _fixture_blob(resp_html)
+    if "csat-ix-rowlist" not in resp_blob:
+        raise AssertionError("Responses result list container missing")
+    if "csat-row-marker" in resp_blob:
+        raise AssertionError("Responses still uses csat-row-marker")
+
+
+def _ensure_playwright():
+    mod = os.path.join(SCRIPT_DIR, "node_modules", "playwright")
+    if os.path.isdir(mod):
+        return
+    r = subprocess.run(
+        ["npm", "install", "--no-fund", "--no-audit"],
+        capture_output=True,
+        text=True,
+        cwd=SCRIPT_DIR,
+        timeout=300,
+        shell=True,
+    )
+    if r.returncode != 0:
+        raise AssertionError(f"npm install playwright failed:\n{r.stderr or r.stdout}")
+
+
+def test_layout_overlap():
+    _ensure_playwright()
+    layout = os.path.join(SCRIPT_DIR, "preview_csat_integrated_layout.mjs")
+    r = subprocess.run(
+        ["node", layout],
+        capture_output=True,
+        text=True,
+        cwd=SCRIPT_DIR,
+        timeout=300,
+        shell=True,
+    )
+    if r.returncode != 0:
+        raise AssertionError(f"layout overlap check failed:\n{r.stderr or r.stdout}")
+
+
 def test_integrated_rules():
     html = open(os.path.join(OUT_DIR, "CSAT_INTEGRATED.html"), encoding="utf-8").read()
     blob = _fixture_blob(html)
@@ -145,9 +194,11 @@ def test_standalone_still_build():
 
 def main():
     test_build()
+    test_integrated_visual_structure()
     test_integrated_rules()
     test_standalone_still_build()
     test_http_fetch()
+    test_layout_overlap()
     print("preview_csat_integrated_selftest: PASS")
 
 

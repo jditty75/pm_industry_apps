@@ -111,8 +111,20 @@ def render_attention(att: Optional[Dict[str, Any]]) -> str:
 
 def render_row_csat_grid(row: Dict[str, Any], ctx: Optional[IntegratedSurveysCtx] = None) -> str:
     """Shared csatRow grid (integrated harmonization)."""
+    import os
+    import sys
+
+    ix_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dm-ux-csat-integrated"))
+    if ix_dir not in sys.path:
+        sys.path.insert(0, ix_dir)
+    from csat_shared import render_csat_row  # noqa: WPS433
+
     attn = row.get("attention")
-    marker = render_attention(attn) if attn else '<span class="csat-attention-marker csat-attention-marker--plain"></span>'
+    status = render_attention(attn) if attn else ""
+    if row.get("verdictChip"):
+        vc = row["verdictChip"]
+        sev = "status-red" if vc.get("severity") == "red" else "status-yellow"
+        status = f'<span class="csat-verdict-chip status-pill {sev}">{esc(vc.get("label", ""))}</span>'
     if ctx:
         deploy = ctx.deployment_link(row["deployment"])
     else:
@@ -122,11 +134,6 @@ def render_row_csat_grid(row: Dict[str, Any], ctx: Optional[IntegratedSurveysCtx
     if acct:
         name_cell = f'{deploy}<span class="csat-sv-account">{esc(acct)}</span>'
     survey = f'<span class="csat-survey-tag">{esc(row["survey"])}</span>'
-    verdict = ""
-    if row.get("verdictChip"):
-        vc = row["verdictChip"]
-        sev = "status-red" if vc.get("severity") == "red" else "status-yellow"
-        verdict = f'<span class="csat-verdict-chip status-pill {sev}">{esc(vc.get("label", ""))}</span>'
     key_fact = esc(row.get("keyFact") or row.get("facetLine", ""))
     date_cls = "csat-survey-date"
     if row.get("dateMuted"):
@@ -138,16 +145,15 @@ def render_row_csat_grid(row: Dict[str, Any], ctx: Optional[IntegratedSurveysCtx
             f'<span class="csat-evidence-marker" title="{esc(m.get("title", ""))}">{esc(m.get("glyph", "·"))}</span>'
             for m in row["evidenceMarkers"]
         )
-    return (
-        '<div class="csat-row csat-sv-row-wrap" data-csat-surveys-row="grid">'
-        f'<span class="csat-row-marker">{marker}</span>'
-        f'<span class="csat-row-name">{name_cell}</span>'
-        f'<span class="csat-row-tag">{survey}</span>'
-        f'<span class="csat-row-verdict">{verdict}</span>'
-        f'<span class="csat-row-key">{key_fact}</span>'
-        f'<span class="csat-row-evidence">{evidence}</span>'
-        f'<span class="csat-row-date">{date_html}</span>'
-        "</div>"
+    return render_csat_row(
+        name_cell,
+        survey,
+        status,
+        key_fact,
+        evidence,
+        date_html,
+        extra_class="csat-sv-row-wrap",
+        data_attrs='data-csat-surveys-row="grid"',
     )
 
 
@@ -235,7 +241,7 @@ def render_group(
     eyebrow_cls = "csat-sv-eyebrow csatEyebrow"
     head_cls = "csat-sv-section-head csatSectionHeader"
     return (
-        f'<section class="csat-sv-panel" id="{esc(section_id)}" '
+        f'<section class="csat-sv-panel csat-sv-lifecycle-section" id="{esc(section_id)}" '
         f'data-csat-surveys-group="{esc(section_key)}" aria-labelledby="{esc(section_id)}-title">'
         f'<div class="{head_cls}">'
         f'<span class="{eyebrow_cls}">{esc(eyebrow)}</span>'

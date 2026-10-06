@@ -15,6 +15,7 @@ from csat_shared import (
     render_verdict_chip,
     render_attention_marker,
     render_csat_row,
+    _row_status_html,
 )
 
 
@@ -40,8 +41,9 @@ def render_filter_bar(filters: Dict[str, Any]) -> str:
     chips = []
     for c in primary:
         pressed = "true" if c.get("active") else "false"
+        active_cls = " active" if c.get("active") else ""
         chips.append(
-            f'<button type="button" class="filter-chip csatFilterBar-chip" aria-pressed="{pressed}" '
+            f'<button type="button" class="filter-chip csatFilterBar-chip{active_cls}" aria-pressed="{pressed}" '
             f'data-filter="{esc(c.get("key", ""))}">{esc(c["label"])}</button>'
         )
     adv = filters.get("advancedLabel", "More filters")
@@ -73,13 +75,16 @@ def _evidence_markers(row: Dict[str, Any]) -> str:
 
 def render_response_row(row: Dict[str, Any], expanded: bool = False) -> str:
     att = row.get("attention", {})
-    marker = render_attention_marker(att.get("kind", ""), att.get("label", ""), att.get("severity", "neutral"))
+    attention = render_attention_marker(
+        att.get("kind", ""), att.get("label", ""), att.get("severity", "neutral")
+    )
     name = render_deployment_link(row["deployment"], row["deploymentId"])
     tag = render_survey_tag(row["survey"])
     verdict = ""
     if row.get("verdict"):
         v = row["verdict"]
         verdict = render_verdict_chip(v["label"], v.get("severity", "yellow"))
+    status = _row_status_html(verdict, attention)
     key_parts = [esc(row.get("keyFact", ""))]
     if row.get("followup"):
         key_parts.append(render_followup_facet(row["followup"]))
@@ -87,7 +92,9 @@ def render_response_row(row: Dict[str, Any], expanded: bool = False) -> str:
     evidence = _evidence_markers(row)
     date_html = f'<span class="csat-survey-date">{esc(row.get("surveyDate", ""))}</span>'
     data = f'data-row-id="{esc(row.get("rowId", ""))}" data-expandable="{"true" if row.get("expandable") else "false"}"'
-    row_html = render_csat_row(marker, name, tag, verdict, key_html, evidence, date_html, data_attrs=data)
+    row_html = render_csat_row(
+        name, tag, status, key_html, evidence, date_html, data_attrs=data
+    )
     panel = ""
     if expanded and row.get("evidence"):
         panel = render_evidence_panel(row["evidence"], row.get("respondentRole", "Deployment contact"))

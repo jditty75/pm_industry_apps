@@ -1,13 +1,14 @@
 /**
  * Shared CSAT component system (integrated prototype).
+ * Deployment-first two-line row: anchor line + fact line; date in trailing column.
  */
 
 .csat-row {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto minmax(120px, 1.4fr) auto auto;
-  gap: 8px 12px;
-  align-items: center;
-  padding: 4px 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 20px;
+  align-items: start;
+  padding: 6px 0;
   border-top: 1px solid var(--color-border-subtle);
   font-size: 13px;
   line-height: 18px;
@@ -15,12 +16,24 @@
 .csat-row:first-child {
   border-top: none;
 }
-.csat-row-marker {
-  justify-self: start;
+.csat-row-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.csat-row-line1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  min-width: 0;
 }
 .csat-row-name {
   min-width: 0;
   font-weight: 600;
+  flex: 0 1 auto;
+  max-width: 100%;
 }
 .csat-row-name .csat-sv-account {
   display: block;
@@ -28,12 +41,59 @@
   font-size: 12px;
   color: var(--color-text-muted);
 }
+.csat-row-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.csat-row-meta:empty {
+  display: none;
+}
+.csat-row-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.csat-row-status:empty {
+  display: none;
+}
+.csat-row-status .status-pill {
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.csat-row-line2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--color-text-muted);
+}
+.csat-row-key {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+.csat-row-evidence {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .csat-survey-tag {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .csat-deployment-link {
   color: var(--color-primary);
@@ -55,21 +115,20 @@
   font-size: 12px;
   color: var(--color-status-yellow-fg, #b06000);
 }
-.csat-attention-marker--plain {
-  min-width: 8px;
-  display: inline-block;
-}
 .csat-survey-date,
 .csat-row-date .csat-survey-date {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--color-text-muted);
-  justify-self: end;
+}
+.csat-row-date {
+  align-self: center;
+  text-align: right;
+  padding-top: 1px;
 }
 .csat-evidence-marker {
   font-size: 12px;
   color: var(--color-text-muted);
-  margin-right: 4px;
 }
 .csat-evidence-marker--qx {
   opacity: 0.85;
@@ -113,19 +172,13 @@
   align-self: center;
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 720px) {
   .csat-row {
-    grid-template-columns: 28px 1fr auto;
-    grid-template-areas:
-      "m name date"
-      "m tag verdict"
-      "m key evidence";
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
-  .csat-row-marker { grid-area: m; }
-  .csat-row-name { grid-area: name; }
-  .csat-row-date { grid-area: date; justify-self: end; }
-  .csat-row-tag { grid-area: tag; }
-  .csat-row-verdict { grid-area: verdict; }
-  .csat-row-key { grid-area: key; grid-column: 2 / -1; }
-  .csat-row-evidence { grid-area: evidence; justify-self: end; }
+  .csat-row-date {
+    justify-self: start;
+    text-align: left;
+  }
 }

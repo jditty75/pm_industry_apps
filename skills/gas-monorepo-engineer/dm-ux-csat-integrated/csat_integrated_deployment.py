@@ -55,6 +55,7 @@ def render_timeline_event(ev: Dict[str, Any]) -> str:
         )
     if ev.get("followup"):
         extra += render_followup_facet(ev["followup"])
+    meta_block = f'<div class="csat-ix-timeline-meta">{extra}</div>' if extra else ""
     if ev.get("evidence"):
         evd = ev["evidence"]
         if evd.get("customerComments"):
@@ -82,7 +83,7 @@ def render_timeline_event(ev: Dict[str, Any]) -> str:
         f'<time class="csat-ix-timeline-date">{esc(ev.get("date", ""))}</time>'
         f'<div class="csat-ix-timeline-body">'
         f'<h3 class="csat-ix-timeline-title">{esc(title)}</h3>'
-        f'{extra}{body_html}{actions}</div></article>'
+        f"{meta_block}{body_html}{actions}</div></article>"
     )
 
 

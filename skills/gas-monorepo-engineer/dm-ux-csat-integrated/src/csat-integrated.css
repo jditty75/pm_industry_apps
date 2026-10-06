@@ -19,6 +19,84 @@
 .csat-ix-viewport #csat-surveys-app .csat-sv-row-wrap.csat-row {
   padding: 5px 0;
 }
+
+/* Surveys lifecycle sections (integrated) */
+.csat-ix-viewport #csat-surveys-app .csat-sv-lifecycle-section {
+  margin: 0 0 var(--space-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-surface, #fff);
+  overflow: hidden;
+}
+.csat-ix-viewport #csat-surveys-app .csat-sv-lifecycle-section + .csat-sv-lifecycle-section {
+  margin-top: var(--space-3);
+}
+.csat-ix-viewport #csat-surveys-app .csat-sv-lifecycle-section .csat-sv-section-head {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: var(--color-background, #f7f8fa);
+  gap: var(--space-1) var(--space-3);
+}
+.csat-ix-viewport #csat-surveys-app .csat-sv-lifecycle-section .csat-sv-rowlist {
+  padding: 0 var(--space-3);
+}
+.csat-ix-viewport #csat-surveys-app .csat-sv-layout {
+  gap: var(--space-1);
+}
+
+/* DM-native filter controls in integrated CSAT */
+.csat-ix-viewport #csat-surveys-app .csat-sv-chip,
+.csat-ix-viewport .csatFilterBar .filter-chip,
+.csat-ix-viewport .csat-ix-group-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-2);
+  min-height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1.2;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.csat-ix-viewport #csat-surveys-app .csat-sv-chip[aria-pressed="true"],
+.csat-ix-viewport .csatFilterBar .filter-chip[aria-pressed="true"],
+.csat-ix-viewport .csatFilterBar .filter-chip.active,
+.csat-ix-viewport .csat-ix-group-btn[aria-pressed="true"] {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+.csat-ix-viewport #csat-surveys-app .csat-sv-phase-btn {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+.csat-ix-viewport #csat-surveys-app .csat-sv-phase-btn.is-active {
+  border-color: var(--color-border-subtle);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.csat-ix-viewport .filter-drawer-toggle.csat-ix-advanced-toggle {
+  min-height: 28px;
+  padding: 4px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
 .csat-ix-proto-badge {
   position: fixed;
   right: 12px;
@@ -44,26 +122,33 @@
   padding: 0 24px;
 }
 .csat-ix-learn {
-  margin: 12px 0;
-  padding: 12px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: #fff;
-  box-shadow: var(--shadow-subtle);
+  margin: 10px 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-background, #f7f8fa);
+  box-shadow: none;
 }
 .csat-ix-learn-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px 12px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .csat-ix-learn-strip {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
 }
 .csat-ix-learn-fact {
   border: none;
   background: transparent;
   text-align: left;
-  padding: 4px 8px;
+  padding: 2px 4px;
   cursor: pointer;
   font: inherit;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+  min-width: 0;
 }
 .csat-ix-learn-fact:hover {
   background: var(--color-background, #f5f5f5);
@@ -118,10 +203,29 @@
   font-size: 12px;
   color: var(--color-text-muted);
 }
+.csat-ix-list-section {
+  margin-top: 4px;
+}
+.csat-ix-rowlist {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface, #fff);
+  padding: 2px var(--space-3) var(--space-2);
+}
+.csat-ix-rowlist .csat-row {
+  min-height: 44px;
+  align-items: center;
+}
+.csat-ix-rowlist .csat-row-date {
+  align-self: center;
+}
 .csat-ix-evidence-panel {
   grid-column: 1 / -1;
-  margin: 4px 0 12px 40px;
-  padding: 12px;
+  margin: 2px 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--color-background, #fafafa);
   border-left: 3px solid var(--color-border);
 }
 .csat-ix-evidence-panel--open {
@@ -176,7 +280,20 @@
 }
 .csat-ix-timeline-title {
   font-size: 14px;
-  margin: 4px 0;
+  margin: 4px 0 2px;
+}
+.csat-ix-timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 0 0 6px;
+}
+.csat-ix-timeline-meta .csat-survey-tag,
+.csat-ix-timeline-meta .status-pill,
+.csat-ix-timeline-meta .csat-delivery-rating,
+.csat-ix-timeline-meta .csat-followup-facet {
+  flex: 0 0 auto;
 }
 .csat-ix-timeline-event--milestone .csat-ix-timeline-title {
   font-weight: 700;

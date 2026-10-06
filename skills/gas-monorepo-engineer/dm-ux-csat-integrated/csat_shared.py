@@ -53,26 +53,55 @@ def render_provenance_block(block_type: str, title: str, body_html: str) -> str:
     )
 
 
+def _row_status_html(verdict_html: str, attention_html: str) -> str:
+    """Single inline status slot: verdict chip or attention label, not both columns."""
+    if verdict_html and verdict_html.strip():
+        return verdict_html.strip()
+    if not attention_html or not attention_html.strip():
+        return ""
+    if 'aria-hidden="true"' in attention_html and "status-pill" not in attention_html:
+        return ""
+    return attention_html.strip()
+
+
 def render_csat_row(
-    marker_html: str,
     name_html: str,
-    tag_html: str,
-    verdict_html: str,
-    key_html: str,
-    evidence_html: str,
-    date_html: str,
+    tag_html: str = "",
+    status_html: str = "",
+    key_html: str = "",
+    evidence_html: str = "",
+    date_html: str = "",
     extra_class: str = "",
     data_attrs: str = "",
 ) -> str:
+    """Deployment-anchored worklist row (two-line body + trailing date)."""
+    tag_bit = tag_html.strip() if tag_html else ""
+    status_bit = status_html.strip() if status_html else ""
+    meta_inner = ""
+    if tag_bit:
+        meta_inner += tag_bit
+    if status_bit:
+        meta_inner += f'<span class="csat-row-status">{status_bit}</span>'
+    meta_block = f'<span class="csat-row-meta">{meta_inner}</span>' if meta_inner else ""
+    line1 = (
+        f'<div class="csat-row-line1">'
+        f'<span class="csat-row-name">{name_html}</span>{meta_block}</div>'
+    )
+    line2 = ""
+    key_bit = key_html.strip() if key_html else ""
+    ev_bit = evidence_html.strip() if evidence_html else ""
+    if key_bit or ev_bit:
+        line2 = (
+            f'<div class="csat-row-line2">'
+            f'<span class="csat-row-key">{key_bit}</span>'
+            f'<span class="csat-row-evidence">{ev_bit}</span></div>'
+        )
     cls = f"csat-row {extra_class}".strip()
+    attrs = data_attrs.strip()
+    open_tag = f'<div class="{cls}"{(" " + attrs) if attrs else ""}>'
     return (
-        f'<div class="{cls}" {data_attrs}>'
-        f'<span class="csat-row-marker">{marker_html}</span>'
-        f'<span class="csat-row-name">{name_html}</span>'
-        f'<span class="csat-row-tag">{tag_html}</span>'
-        f'<span class="csat-row-verdict">{verdict_html}</span>'
-        f'<span class="csat-row-key">{key_html}</span>'
-        f'<span class="csat-row-evidence">{evidence_html}</span>'
+        f"{open_tag}"
+        f'<div class="csat-row-body">{line1}{line2}</div>'
         f'<span class="csat-row-date">{date_html}</span>'
         "</div>"
     )

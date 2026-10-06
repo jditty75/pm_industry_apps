@@ -28,6 +28,12 @@ Grounded in the discovery above and in `docs/analysis/csat-subsystem/`; does not
 | [preview-concept-spec.md](preview-concept-spec.md) | Handoff spec for Composer: page structure, fixtures, states, deep links, T1/T2 and token-treatment toggles, visual-review screenshot matrix |
 | [visual-review-guide.md](visual-review-guide.md) | Launch command, controls, review sequence, stable URLs, checklist, approval phrase |
 
+## Focused visual-design follow-on (2026-10-05)
+
+| Doc | Read when |
+|-----|-----------|
+| [csat-overview-design/README.md](csat-overview-design/README.md) | The architecture above is approved in principle, but the Phase-1 prototype's *visual execution* needs a reset — a narrower CSAT → Overview-only visual spec, grounded in current production DM screenshots, with three alternative compositions for Jeff to compare |
+
 ## Headline findings
 
 1. **The "original Workday assets" are brand-guideline docs plus recipes, not a UI kit.** No CSS file, HTML template, component library or screenshots exist in the repo. The core of Chris's skill (`SKILL.md` Steps 1-6: skeleton, tokens, "Cards and surfaces", gradient library) is **absent**; surviving references still point at it.
@@ -44,5 +50,7 @@ Verification stance: static source analysis only. No browser inspection or live 
 ## Design-concept phase outcome
 
 Three concepts were produced (Evolve in place / Deployment-centric / Grouped navigation); recommendation is Concept B built on Concept A's baseline fixes — see `recommended-direction.md`. **Phase 1 localhost prototypes** are implemented under `skills/gas-monorepo-engineer/dm-ux-concept/` — launch with `.\preview.ps1 DM_UX` (see [visual-review-guide.md](visual-review-guide.md)). No visual approval has been recorded yet.
+
+**Superseded for visual evaluation (2026-10-05):** the Phase-1 prototype's visual execution (prototype-chrome weight, drawer sizing/scrim, competing navigation tiers) is no longer used as a visual baseline — review feedback found it looked substantially less polished than production DM and made the underlying architecture hard to judge on its own merits. The prototype itself, its fixtures, and its architecture (Concept B, the drawer, the five-section CSAT tab) remain valid and are not discarded — only its visual comparison role is superseded. A narrower visual-design pass for CSAT → Overview only now lives in [csat-overview-design/](csat-overview-design/README.md), grounded in screenshots of current production DM rather than the prototype's own styling.
 
 **Evidence (SLG Responses storage canary):** Responses source 177; SLG routed 28; 26 stored; 2 excluded by deployment-universe eligibility; idempotent re-runs; `CSAT_Responses` present in SLG. Prototype fixtures remain synthetic and are not sized to the canary row count.

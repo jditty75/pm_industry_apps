@@ -2,6 +2,8 @@
 
 Interactive **localhost-only** prototypes for Baseline, Concept A, and Concept B. Not production UI. No Apps Script deploy.
 
+**Note (2026-10-05):** this prototype's visual execution is superseded for visual-evaluation purposes — review found it read as substantially less polished than production DM (oversized control bar, modal-like scrim on a non-modal drawer, competing navigation tiers). The architecture it demonstrates (Concept B, the drawer, the five-section CSAT tab) is unaffected. A focused visual-design pass for CSAT → Overview only, grounded in production screenshots, lives in [csat-overview-design/README.md](csat-overview-design/README.md).
+
 ## Launch
 
 From repo root (`C:\JD`). Use **`preview.ps1`** at the repository root (there is no `preview\` subfolder launcher).

@@ -1,5 +1,7 @@
 # Comparison and recommendation
 
+> **Status: not selected — product information model under redesign.** See [../csat-product-model/](../csat-product-model/README.md).
+
 ## Preserved / Evolved / New / Removed
 
 ### Overview A — Executive signal first

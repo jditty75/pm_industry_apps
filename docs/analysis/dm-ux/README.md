@@ -34,6 +34,14 @@ Grounded in the discovery above and in `docs/analysis/csat-subsystem/`; does not
 |-----|-----------|
 | [csat-overview-design/README.md](csat-overview-design/README.md) | The architecture above is approved in principle, but the Phase-1 prototype's *visual execution* needs a reset — a narrower CSAT → Overview-only visual spec, grounded in current production DM screenshots, with three alternative compositions for Jeff to compare |
 
+## CSAT product model reset (2026-10-05)
+
+| Doc | Read when |
+|-----|-----------|
+| [csat-product-model/README.md](csat-product-model/README.md) | **Current CSAT direction.** What CSAT should tell a DM user: question hierarchy, metric semantics, MDS→PGL journey, attention taxonomy, information hierarchy, navigation (Overview / Responses / Survey Operations), workflows, next visual-design handoff. Awaiting Jeff's IA review |
+
+The focused Overview compositions A/B/C in `csat-overview-design/` are **not selected — product information model under redesign.** They are retained for reference.
+
 ## Headline findings
 
 1. **The "original Workday assets" are brand-guideline docs plus recipes, not a UI kit.** No CSS file, HTML template, component library or screenshots exist in the repo. The core of Chris's skill (`SKILL.md` Steps 1-6: skeleton, tokens, "Cards and surfaces", gradient library) is **absent**; surviving references still point at it.

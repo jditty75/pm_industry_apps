@@ -1,5 +1,7 @@
 # Overview B — Balanced operational analytics
 
+> **Status: not selected — product information model under redesign.** See [../csat-product-model/](../csat-product-model/README.md).
+
 Design-spec document. No runtime changed. Reference viewport: **1440×900**, content container `max-width:1400px` centered.
 
 ## Concept

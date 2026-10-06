@@ -1,5 +1,7 @@
 # CSAT Overview — focused visual design (2026-10-05)
 
+> **Status: not selected — product information model under redesign.** Overviews A, B and C (docs and `DM_UX_CSAT_*` prototypes) are retained for reference only. Current direction: [../csat-product-model/](../csat-product-model/README.md). The production-DM visual-language observations below remain valid input. The compositions, the four-section CSAT sub-nav and the recommendation do not.
+
 Visual-design-only. No production UI/CSS/markup/JS/config changed, no CLASP used, no deploy performed, no new preview built, no API/EDM/workbook changes. Scope: **one screen** — Deployment Manager → CSAT → Overview. Grounds in the completed architecture work in `../` (esp. `recommended-direction.md`, `concept-a-evolve-in-place.md` §3, `concept-b-deployment-centric.md`) and `docs/analysis/csat-subsystem/` (esp. `csat-ui-architecture.md`, `canonical-response-model.md`); does not re-derive or contradict either.
 
 ## Why this reset

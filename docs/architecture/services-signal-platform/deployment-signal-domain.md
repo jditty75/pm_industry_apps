@@ -52,6 +52,29 @@ Do not use “Big Bang” or “Phased” in implementation, logs, or user-facin
 - Deterioration / improvement only when both sides parse to a rank.
 - Blank transitions are traceable on `Deployment_Trajectory_HealthEvents` but not auto-classified as deterioration/improvement.
 
+### Summary field semantics (trajectory row)
+
+| Field | Meaning |
+|-------|---------|
+| `current_health` | Live `Overall_Health__c` on the deployment row (authoritative **now**). |
+| `previous_health` | **Old** value of the **last recorded** historized transition — not guaranteed to be the health immediately before `current_health`. |
+| `health_last_change_date` | Date of the last **recorded** historized transition. |
+| `days_at_current_health` | Days from `health_last_change_date` to build date — equals tenure at `current_health` only when `current_health` matches the last event `new_health`. |
+| `Deployment_Trajectory_HealthEvents` | Full historized transition list from Deployment History; does not include silent field updates. |
+
+When `current_health` differs from the last event `new_health`, Context Assembler must emit reconciliation metadata (`health_current_matches_last_event_new_health: false` and explicit caveats). Do not infer missing transitions (pilot calibration **CAL-01**).
+
+### Schedule net / gross (parent target)
+
+| Concept | Rule |
+|---------|------|
+| **Gross movement** | `mtp_gross_movement_days` — sum of `abs(movement_days)` on **valid** parent target changes (both old and new dates). |
+| **Net movement** | `mtp_net_movement_days` — signed days from `earliest_recorded_mtp` to `current_mtp`; basis in `mtp_net_movement_comparison` (typically `earliest_recorded_current_mtp`). |
+| **Initial target population** | Blank → date appears on the MTP trace but is **not** a valid target change; does **not** set the net baseline. |
+| **Actual outcome** | `PARENT_ACTUAL_MTP` / `FUNCTION_ACTUAL_MTP` — separate from target movement metrics. |
+
+Pilot note: lifetime gross parent movement can be positive while net is zero when the earliest **valid** recorded target equals current MTP (CAL-01 schedule ambiguity — contract, not math defect).
+
 ## Schedule trajectory
 
 - **Target** metrics: changes, slips, accelerations, **net** movement (ultimate position vs earliest reliable target), **gross** movement (sum of absolute moves — not “cumulative slippage”).

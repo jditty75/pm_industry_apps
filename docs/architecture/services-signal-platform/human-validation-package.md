@@ -46,6 +46,18 @@ Format reference: `libraries/DepMngr/test/fixtures/deployment-validation-profile
 3. In SLG Apps Script editor, run `debugDeploymentTrajectoryForDeployment('<deploymentId>')` for deep JSON (no sheet mutation).  
 4. Assemble a short markdown or spreadsheet review tab from exports — **do not commit** customer exports.
 
+## Sana reasoning calibration (pilot)
+
+Three cases exercise one frozen Sauna agent contract (no per-case prompt tuning):
+
+| Id | Scenario | Ground truth |
+|----|----------|--------------|
+| CAL-01 | Historical health/schedule volatility, quiet recent trajectory, Green now | **NO_SIGNAL** — confirmed correct by deployment leader |
+| CAL-02 | Green + lifecycle/production exposure with historical instability | PENDING |
+| CAL-03 | Green + open Health Plan / Action History | PENDING |
+
+Evidence packets for CAL-02/03 are generated locally (`scripts/generate-sana-calibration-packets.py`) into gitignored `.ai/signal-exports/`. Do not commit customer exports or narrative.
+
 ## Next step after validation
 
-Freeze Deployment Trajectory **v2** deterministics → implement Context Assembler → Sauna signal pilot (A/B vs production Exec Summary).
+Deterministic contract closed for pilot → run CAL-02/03 through Sauna → then implement Context Assembler → portfolio signal pilot (A/B vs production Exec Summary).

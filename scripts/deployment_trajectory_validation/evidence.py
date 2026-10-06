@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from .context_contract import health_summary_contract
 from .fields import (
     as_float,
     as_int,
@@ -173,7 +174,11 @@ def schedule_window_metrics(
     }
 
 
-def evidence_quality(t: Dict[str, Any], intervention: Dict[str, Any]) -> Tuple[str, List[str]]:
+def evidence_quality(
+    t: Dict[str, Any],
+    intervention: Dict[str, Any],
+    health_events: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[str, List[str]]:
     reasons: List[str] = []
     warnings = str(t.get("build_warnings") or "").strip()
     if warnings:
@@ -189,6 +194,9 @@ def evidence_quality(t: Dict[str, Any], intervention: Dict[str, Any]) -> Tuple[s
         reasons.append("previous_health set but zero health_event_count")
     if mtp_count == 0 and as_int(t.get("mtp_changes_total")) > 0:
         reasons.append("mtp_changes_total>0 but mtp_event_count=0")
+    health_contract = health_summary_contract(t, health_events or [])
+    if health_contract.get("reconciliation_metadata_required"):
+        reasons.append("health_summary_not_reconciled_with_current_health")
 
     if not reasons and not warnings:
         return "HIGH", ["Complete trajectory row; no build warnings"]
@@ -214,7 +222,7 @@ def build_deployment_bundle(
     mtp_rows = mtp_by_dep.get(dep_id, [])
     intervention = intervention_evidence(t, dhp_by_dep, action_idx_by_dep, action_by_dep, dep_id)
     sched = schedule_window_metrics(t, mtp_rows, today_str)
-    eq_level, eq_reasons = evidence_quality(t, intervention)
+    eq_level, eq_reasons = evidence_quality(t, intervention, raw_he)
 
     pfs = pf_by_dep.get(dep_id, [])
     completed = as_int(trajectory_get(t, "pf_completed"))

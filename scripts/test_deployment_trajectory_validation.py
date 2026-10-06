@@ -18,6 +18,10 @@ from deployment_trajectory_validation.fields import (
     resolve_dhp_deployment_id,
     trajectory_get,
 )
+from deployment_trajectory_validation.context_contract import (
+    health_summary_contract,
+    schedule_movement_contract,
+)
 from deployment_trajectory_validation.evidence import intervention_evidence
 from deployment_trajectory_validation.schema import build_header_map, resolve_column
 from deployment_trajectory_validation.selectors import (
@@ -59,6 +63,40 @@ class HealthEventRenderingTests(unittest.TestCase):
     def test_mapping_failure_detects_wrong_keys(self):
         disp = health_event_display_row({"event_date": "2025-01-15"})
         self.assertTrue(health_event_mapping_failure(disp))
+
+
+class ContextContractTests(unittest.TestCase):
+    def test_health_reconciliation_flags_gap(self):
+        t = {
+            "current_health": "Green",
+            "previous_health": "Red",
+            "health_last_change_date": "2025-09-22",
+        }
+        events = [{"new_health": "Yellow", "old_health": "Red", "event_date": "2025-09-22"}]
+        c = health_summary_contract(t, events)
+        self.assertFalse(c["health_current_matches_last_event_new_health"])
+        self.assertTrue(c["reconciliation_metadata_required"])
+
+    def test_schedule_net_excludes_initial_population_semantics(self):
+        t = {
+            "mtp_gross_movement_days": 365,
+            "mtp_net_movement_days": 0,
+            "mtp_net_movement_comparison": "earliest_recorded_current_mtp",
+            "earliest_recorded_mtp": "2026-07-01",
+            "current_mtp": "2026-07-01",
+        }
+        mtp = [
+            {"event_type": "PARENT_TARGET_CHANGE", "old_date": "", "new_date": "2025-07-01"},
+            {
+                "event_type": "PARENT_TARGET_CHANGE",
+                "old_date": "2025-07-01",
+                "new_date": "2026-07-01",
+                "movement_days": 365,
+            },
+        ]
+        c = schedule_movement_contract(t, mtp)
+        self.assertEqual(c["initial_target_population_event_count"], 1)
+        self.assertEqual(c["valid_parent_target_change_event_count"], 1)
 
 
 class TrajectoryFieldTests(unittest.TestCase):

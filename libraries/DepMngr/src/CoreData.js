@@ -5279,7 +5279,7 @@ var CoreData = (function () {
         var issueCategoryRaw = cellStr_(colIssueCategory);
         rows.push({
           dhpId: cellStr_(colId),
-          deploymentId: _canonicalId_(cellStr_(colDeploymentId)),
+          deploymentId: _canonicalId_(_parseRelationshipIdField_(cellStr_(colDeploymentId))),
           planOwner: cellStr_(colPlanOwner),
           dhpLastUpdated: _formatDhpDate_(colLastUpdated >= 0 ? row[colLastUpdated] : ''),
           healthPlanUpdate: cellStr_(colPlanUpdate),
@@ -16066,6 +16066,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // D1 diagnostic
     _debugDdFromContacts_:       _debugDdFromContacts_,
     _debugDeploymentHealthPlan:  _debugDeploymentHealthPlan,
+    readSfdcDeploymentsRaw:    readSfdcDeploymentsRaw_,
+    getDeploymentHealthPlanMap: buildDeploymentHealthPlanMap_,
+    canonicalDeploymentId:     _canonicalId_,
+    parseSalesforceRelationshipId: _parseRelationshipIdField_,
     debugTraceDeploymentInUiPipeline: debugTraceDeploymentInUiPipeline,
     _debugWellnessData:          _debugWellnessData,
 

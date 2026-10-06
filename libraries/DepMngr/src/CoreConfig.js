@@ -1265,6 +1265,41 @@ var CoreConfig = (function () {
       cfg.momentum.chart.inProgressOpacity = 0.55;
     }
 
+    // -------------------------------------------------------------------------
+    // Deployment Signal / Trajectory (SLG pilot — default off)
+    // -------------------------------------------------------------------------
+    cfg.deploymentSignal = cfg.deploymentSignal || {};
+    if (cfg.deploymentSignal.enabled === undefined) {
+      cfg.deploymentSignal.enabled = false;
+    }
+    if (!cfg.deploymentSignal.trajectorySheetName) {
+      cfg.deploymentSignal.trajectorySheetName = 'Deployment_Trajectory';
+    }
+    if (!cfg.deploymentSignal.actionHistorySheetName) {
+      cfg.deploymentSignal.actionHistorySheetName = 'SFDC_DHPActionHistory';
+    }
+    if (!cfg.deploymentSignal.healthEventsSheetName) {
+      cfg.deploymentSignal.healthEventsSheetName = 'Deployment_Trajectory_HealthEvents';
+    }
+    if (!cfg.deploymentSignal.mtpEventsSheetName) {
+      cfg.deploymentSignal.mtpEventsSheetName = 'Deployment_Trajectory_MtpEvents';
+    }
+    if (!cfg.deploymentSignal.actionHistoryIndexSheetName) {
+      cfg.deploymentSignal.actionHistoryIndexSheetName =
+        'Deployment_Trajectory_ActionHistory_Index';
+    }
+    if (!cfg.deploymentSignal.productFunctionsSheetName) {
+      cfg.deploymentSignal.productFunctionsSheetName =
+        'SFDC_DeploymentProductFunctions';
+    }
+    if (!cfg.deploymentSignal.productFunctionHistorySheetName) {
+      cfg.deploymentSignal.productFunctionHistorySheetName =
+        'SFDC_DeploymentProductFunctionHistory';
+    }
+    if (cfg.deploymentSignal.schemaVersion === undefined) {
+      cfg.deploymentSignal.schemaVersion = 2;
+    }
+
     return cfg;
   }
 

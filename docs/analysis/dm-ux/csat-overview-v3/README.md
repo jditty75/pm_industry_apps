@@ -1,6 +1,6 @@
 # CSAT Overview V3: executive-first visual design (2026-10-06)
 
-Status: **visual information-design specification, ready for an executive-first prototype.** Documentation only. No production UI/CSS/JS, prototype, API, EDM, workbook, CLASP or deployment change was made.
+Status: **design specification + localhost visual prototype for executive review.** Production DepMngr UI/CSS/JS is unchanged. The V3 prototype lives under `skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/` and builds to gitignored `.preview-out/CSAT_OVERVIEW_V3_*.html`.
 
 This folder specifies **one** CSAT → Overview. It applies the product-approved [reconciled architecture](../csat-reconciled-architecture/README.md) (commit `d31efef`, J1–J6 approved) to a calmer, executive-first composition. It replaces the V2 visual design ([../csat-overview-v2/](../csat-overview-v2/README.md)), which is kept for history.
 
@@ -59,4 +59,19 @@ Nothing in this brief contradicts the guidebook as extracted in [guidebook-requi
 - **Guidebook:** not attached in this session. The guidebook content used is the rule extraction already in the repository (GB-01…GB-51, from the August 2026 PDF supplied on 2026-10-06).
 - **V2 screenshot:** not attached either. The V2 diagnosis is based on the V2 prototype pages built locally (`.preview-out/CSAT_OVERVIEW_HEALTHY.html`, `…_RISK.html`), captured at 1440×900 with headless Chrome. These are the pages Jeff reviewed.
 - **Visual baseline:** the DM design-system analysis ([../current-design-system.md](../current-design-system.md)) and the production CSS inlined into those pages.
-- **Synthetic values:** all values are synthetic and sized to real per-app volumes. Nothing was queried. No V3 prototype exists yet.
+- **Synthetic values:** all values are synthetic and sized to real per-app volumes. Nothing was queried from production.
+
+## Visual review sequence (Jeff)
+
+Review **one state at a time** in this order. Do not open the full index until Healthy has been judged.
+
+1. **Healthy only** (`.\preview.ps1 CSAT_OVERVIEW_V3` opens this by default). Ask:
+   - Can I understand the message in five seconds?
+   - Does my eye go outcome → concerns → survey horizon → learning?
+   - Is Upcoming prominent enough?
+   - Does this feel materially calmer than V2?
+   - Does it still feel like Deployment Manager?
+2. Only if Healthy passes: **Customer concerns** → **Heavy upcoming** → **Chase** → **Weak evidence** → **SLG-like low volume** → **Partner-led** → **No immediate actions**.
+3. Return to **Healthy** for a final pass.
+
+Use the acceptance questions in [composer-preview-spec.md §8](composer-preview-spec.md). Approval phrase: **CSAT OVERVIEW V3 VISUALLY APPROVED**.

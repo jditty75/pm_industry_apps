@@ -1,0 +1,595 @@
+{
+  "fixtureId": "csat-overview-v3-states-20261006",
+  "shells": {
+    "hc": {
+      "headerTitle": "Healthcare Deployment Health Manager",
+      "headerSubtitle": "Healthcare program portfolio"
+    },
+    "slg": {
+      "headerTitle": "SLG Deployment Health Manager",
+      "headerSubtitle": "State & Local Government"
+    }
+  },
+  "methodNote": "A customer concern is a Detractor response: satisfaction 3 or lower, or NPS 6 or lower. Satisfaction words (strong / mixed / concerning) and direction use DM prototype thresholds documented in the V3 design spec — not VoC programme targets.",
+  "states": {
+    "healthy": {
+      "file": "CSAT_OVERVIEW_V3_HEALTHY.html",
+      "protoLabel": "State 1 of 8: Healthy",
+      "shell": "hc",
+      "dataAsOf": "Fri 9 Oct 2026",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "message": {
+        "anchor": "85%",
+        "anchorCaption": "rated 4 or 5 (Top-2 Box)",
+        "sentenceA": "Workday-led customer satisfaction is strong and stable.",
+        "sentenceB": "44 of 52 responses rated their deployment 4 or 5 · 40 deployments · Oct 2025 – Sep 2026",
+        "sentenceCParts": [
+          { "type": "link", "href": "#csat-v3-concerns", "text": "2 deployments" },
+          { "type": "text", "text": " raised customer concerns in the last 90 days, 1 with follow-up expected. Next survey round 4 Nov: " },
+          { "type": "link", "href": "#", "text": "9 deployments" },
+          { "type": "text", "text": " to prepare by 21 Oct." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "SUFFICIENT",
+        "n": 52,
+        "t2b": 85,
+        "satisfactionWord": "strong",
+        "directionWord": "stable",
+        "n1": 24,
+        "n2": 28,
+        "t2b1": 83,
+        "t2b2": 86,
+        "clauseOrder": "concern_then_horizon"
+      },
+      "concerns": {
+        "subtitle": "Last 90 days",
+        "rows": [
+          {
+            "pill": "Detractor",
+            "severity": "red",
+            "name": "Example Health Network",
+            "stage": "PGL",
+            "detail": "Satisfaction 2 · NPS 4 · 14 Sep · Follow-up expected: Deployment Sponsor · in Qualtrics"
+          },
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Sample Regional Medical Center",
+            "stage": "MDS",
+            "detail": "Satisfaction 3 · 5 Aug · Follow-up status in Qualtrics"
+          }
+        ],
+        "footer": "Follow-up expected on 5 responses from the last 30 days (4 MDS acknowledgements, 1 Detractor) · tracked in Qualtrics",
+        "footerLink": "View all concerns in Responses →"
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 4 Nov",
+            "lines": [
+              "9 deployments · 6 MDS · 3 PGL",
+              { "emphasis": true, "text": "Prepare by Wed 21 Oct · 12 days" },
+              "2 with readiness issues:",
+              { "issue": true, "name": "Example Children's Hospital", "stage": "MDS", "reason": "No Executive Sponsor contact" },
+              { "issue": true, "name": "Sample University Health", "stage": "PGL", "reason": "No customer contact with email" }
+            ]
+          },
+          {
+            "head": "Following round · Wed 2 Dec",
+            "lines": ["7 deployments", { "link": true, "text": "3 deployments can't be forecast: missing dates →" }]
+          },
+          {
+            "head": "In flight · October round · closes 28 Oct",
+            "lines": [
+              "11 surveys · 3 responded · 8 without a response yet",
+              { "link": true, "text": "1 to chase: all invitations bounced →" }
+            ]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Lowest delivery rating", "text": "Schedule management: 71% rated 4 or 5 (MDS, 21 responses)" },
+          { "label": "Recommendation (PGL NPS)", "text": "+41 · 31 responses" },
+          { "label": "Partner-led PGL, for context", "text": "74% rated 4 or 5 · 23 responses" },
+          { "label": "Evidence", "text": "7 deployments with Detractor responses in 12 months · 4 surveys closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": {
+        "rows": [
+          ["Survey", "Top-2 Box", "Deployments", "Direction", "Mean", "Bands (4–5 · 3 · 1–2)", "NPS"],
+          ["MDS", "18 of 21 (86%)", "17", "Stable (90% → 82%, 10 · 11)", "4.4", "18 · 2 · 1", "—"],
+          ["PGL", "26 of 31 (84%)", "25", "Stable (79% → 88%, 14 · 17)", "4.2", "26 · 4 · 1", "+41 (31)"],
+          ["Journey", "7 deployments answered both MDS and PGL", "", "Held 5 · higher 1 · lower 1", "", "", ""]
+        ],
+        "notes": "Combined direction: 20 of 24 (83%) → 24 of 28 (86%), +3 points. Responses imported 5 Oct 2026, 07:12 · Invitations imported 5 Oct 2026."
+      }
+    },
+    "concerns": {
+      "file": "CSAT_OVERVIEW_V3_CONCERNS.html",
+      "protoLabel": "State 2 of 8: Customer concerns",
+      "shell": "hc",
+      "dataAsOf": "Fri 9 Oct 2026",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "message": {
+        "anchor": "73%",
+        "anchorCaption": "rated 4 or 5 (Top-2 Box)",
+        "sentenceA": "Workday-led customer satisfaction is mixed and declining.",
+        "sentenceB": "36 of 49 responses rated their deployment 4 or 5 · 38 deployments · Oct 2025 – Sep 2026",
+        "sentenceCParts": [
+          { "type": "link", "href": "#csat-v3-concerns", "text": "5 deployments" },
+          { "type": "text", "text": " raised customer concerns in the last 90 days, 3 with follow-up expected. Next survey round 4 Nov: " },
+          { "type": "link", "href": "#", "text": "8 deployments" },
+          { "type": "text", "text": " to prepare by 21 Oct." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "SUFFICIENT",
+        "n": 49,
+        "t2b": 73,
+        "satisfactionWord": "mixed",
+        "directionWord": "declining",
+        "n1": 23,
+        "n2": 26,
+        "t2b1": 83,
+        "t2b2": 65,
+        "clauseOrder": "concern_then_horizon"
+      },
+      "concerns": {
+        "subtitle": "Last 90 days",
+        "rows": [
+          {
+            "pill": "Detractor",
+            "severity": "red",
+            "name": "Example Health Network",
+            "stage": "PGL",
+            "tag": "Declined from MDS 5",
+            "detail": "Satisfaction 2 · NPS 3 · 28 Sep · Follow-up expected: Deployment Sponsor · in Qualtrics"
+          },
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Lakeside Community Health",
+            "stage": "PGL",
+            "detail": "Satisfaction 3 · NPS 6 · 21 Sep · Follow-up expected: Deployment Sponsor · in Qualtrics"
+          },
+          {
+            "pill": "Detractor",
+            "severity": "red",
+            "name": "Sample Regional Medical Center",
+            "stage": "MDS",
+            "detail": "Satisfaction 2 · 16 Sep · +1 more response · Follow-up expected: Delivery Director · in Qualtrics"
+          },
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Northview Specialty Clinics",
+            "stage": "PGL",
+            "detail": "Satisfaction 4 · NPS 5 · 2 Aug · Follow-up status in Qualtrics"
+          }
+        ],
+        "moreLink": "+1 more in the last 90 days →",
+        "footer": "Follow-up expected on 6 responses from the last 30 days (3 MDS acknowledgements, 3 Detractor)"
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 4 Nov",
+            "lines": [
+              "8 deployments · 5 MDS · 3 PGL",
+              "Prepare by Wed 21 Oct · 12 days",
+              "1 readiness issue (named)"
+            ]
+          },
+          { "head": "Following round · Wed 2 Dec", "lines": ["6 deployments"] },
+          {
+            "head": "In flight · October round",
+            "lines": ["10 surveys · 2 responded · 8 without a response yet", "Nothing to chase."]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Lowest delivery rating", "text": "Communications: 58% rated 4 or 5 (PGL, 29 responses)" },
+          { "label": "Recommendation (PGL NPS)", "text": "+12 · 29 responses" },
+          { "label": "Partner-led PGL, for context", "text": "72% · 22 responses" },
+          { "label": "Evidence", "text": "11 deployments with Detractor responses in 12 months · 3 surveys closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": { "rows": [["Survey", "Top-2 Box", "Deployments", "Direction"]], "notes": "Prototype disclosure — values per state model." }
+    },
+    "upcoming": {
+      "file": "CSAT_OVERVIEW_V3_UPCOMING.html",
+      "protoLabel": "State 3 of 8: Heavy upcoming",
+      "shell": "hc",
+      "dataAsOf": "Mon 19 Oct 2026",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "message": {
+        "anchor": "85%",
+        "anchorCaption": "rated 4 or 5 (Top-2 Box)",
+        "sentenceA": "Workday-led customer satisfaction is strong and stable.",
+        "sentenceB": "45 of 53 responses rated their deployment 4 or 5 · 41 deployments · Oct 2025 – Sep 2026",
+        "sentenceCParts": [
+          { "type": "text", "text": "Preparation closes in 2 days: " },
+          { "type": "link", "href": "#", "text": "14 deployments" },
+          { "type": "text", "text": " launch surveys on 4 Nov, 5 with readiness issues. " },
+          { "type": "link", "href": "#csat-v3-concerns", "text": "1 deployment" },
+          { "type": "text", "text": " raised customer concerns in the last 90 days." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "SUFFICIENT",
+        "n": 53,
+        "t2b": 85,
+        "satisfactionWord": "strong",
+        "directionWord": "stable",
+        "clauseOrder": "time_critical_then_concern"
+      },
+      "concerns": {
+        "subtitle": "Last 90 days",
+        "rows": [
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Example Health Network",
+            "stage": "PGL",
+            "detail": "Satisfaction 3 · NPS 7 · 24 Jul · Follow-up status in Qualtrics"
+          }
+        ],
+        "footer": "Follow-up expected on 4 responses from the last 30 days (4 MDS acknowledgements)"
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 4 Nov",
+            "lines": [
+              "14 deployments · 9 MDS · 5 PGL",
+              { "emphasis": true, "warning": true, "text": "Prepare by Wed 21 Oct · 2 days" },
+              "5 with readiness issues: 3 named, then +2 more →"
+            ]
+          },
+          {
+            "head": "Following round · Wed 2 Dec",
+            "lines": ["11 deployments", { "link": true, "text": "2 deployments can't be forecast: missing dates →" }]
+          },
+          {
+            "head": "In flight · October round · closes 28 Oct",
+            "lines": ["11 surveys · 6 responded · 5 without a response yet", "Nothing to chase."]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Lowest delivery rating", "text": "Schedule management: 71% rated 4 or 5 (MDS, 21 responses)" },
+          { "label": "Recommendation (PGL NPS)", "text": "+41 · 31 responses" },
+          { "label": "Partner-led PGL, for context", "text": "74% rated 4 or 5 · 23 responses" },
+          { "label": "Evidence", "text": "7 deployments with Detractor responses in 12 months · 4 surveys closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": { "rows": [["Survey", "Top-2 Box"]], "notes": "As Healthy (values vary slightly)." }
+    },
+    "chase": {
+      "file": "CSAT_OVERVIEW_V3_CHASE.html",
+      "protoLabel": "State 4 of 8: Chase",
+      "shell": "hc",
+      "dataAsOf": "Thu 22 Oct 2026",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "message": {
+        "anchor": "85%",
+        "anchorCaption": "rated 4 or 5 (Top-2 Box)",
+        "sentenceA": "Workday-led customer satisfaction is strong and stable.",
+        "sentenceB": "45 of 53 responses rated their deployment 4 or 5 · 41 deployments · Oct 2025 – Sep 2026",
+        "sentenceCParts": [
+          { "type": "link", "href": "#", "text": "9 open surveys" },
+          { "type": "text", "text": " need chasing before the round closes on 28 Oct. " },
+          { "type": "link", "href": "#csat-v3-concerns", "text": "1 deployment" },
+          { "type": "text", "text": " raised customer concerns in the last 90 days." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "SUFFICIENT",
+        "n": 53,
+        "t2b": 85,
+        "satisfactionWord": "strong",
+        "directionWord": "stable",
+        "clauseOrder": "time_critical_then_concern"
+      },
+      "concerns": {
+        "subtitle": "Last 90 days",
+        "rows": [
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Example Health Network",
+            "stage": "PGL",
+            "detail": "Satisfaction 3 · NPS 7 · 24 Jul · Follow-up status in Qualtrics"
+          }
+        ],
+        "footer": "Follow-up expected on 4 responses from the last 30 days (4 MDS acknowledgements)"
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 4 Nov",
+            "lines": [
+              "10 deployments",
+              { "muted": true, "text": "Prepare-by date passed · launches Wed 4 Nov (13 days)" },
+              "2 still show readiness issues (named)"
+            ]
+          },
+          { "head": "Following round · Wed 2 Dec", "lines": ["11 deployments"] },
+          {
+            "head": "In flight · October round · closes 28 Oct · 6 days",
+            "lines": [
+              "13 surveys · 4 responded · 9 without a response yet",
+              { "link": true, "text": "9 to chase before 28 Oct: 7 with no response · 2 all bounced →" }
+            ]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Lowest delivery rating", "text": "Schedule management: 71% rated 4 or 5 (MDS, 21 responses)" },
+          { "label": "Recommendation (PGL NPS)", "text": "+41 · 31 responses" },
+          { "label": "Partner-led PGL, for context", "text": "74% rated 4 or 5 · 23 responses" },
+          { "label": "Evidence", "text": "7 deployments with Detractor responses in 12 months · 4 surveys closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": { "rows": [["Survey", "Top-2 Box"]], "notes": "As Healthy." }
+    },
+    "low_evidence": {
+      "file": "CSAT_OVERVIEW_V3_LOW_EVIDENCE.html",
+      "protoLabel": "State 5 of 8: Weak evidence",
+      "shell": "hc",
+      "dataAsOf": "Fri 9 Oct 2026",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "message": {
+        "anchor": "8",
+        "anchorCaption": "responses",
+        "sentenceA": "Limited Workday-led evidence so far: 8 responses from 7 deployments.",
+        "sentenceB": "6 of 8 rated their deployment 4 or 5. Too few responses to describe satisfaction or its direction (10 needed). 11 surveys closed without a response in the last 3 months.",
+        "sentenceCParts": [
+          { "type": "text", "text": "No customer concerns in the last 90 days. Next survey round 4 Nov: " },
+          { "type": "link", "href": "#", "text": "6 deployments" },
+          { "type": "text", "text": " to prepare by 21 Oct." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "LIMITED",
+        "n": 8,
+        "clauseOrder": "concern_then_horizon"
+      },
+      "concerns": {
+        "empty": true,
+        "emptyPrimary": "No Detractor responses in the last 90 days among 3 responses received.",
+        "emptyMuted": "2 deployments had Detractor responses earlier in the 12-month window →",
+        "emptyMuted2": "11 surveys closed without a response: silence isn't a verdict →"
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 4 Nov",
+            "lines": ["6 deployments", "1 readiness issue"]
+          },
+          {
+            "head": "In flight",
+            "lines": ["9 surveys · 1 responded · 8 without a response yet", "Nothing to chase."]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Delivery ratings", "text": "Too few ratings to compare yet (10 per rating needed)" },
+          { "label": "PGL NPS", "text": "Not shown: fewer than 10 PGL responses (5)" },
+          { "label": "Partner-led PGL, for context", "text": "4 of 6 rated 4 or 5" },
+          { "label": "Evidence", "text": "2 deployments with Detractor responses in 12 months · 11 surveys closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": { "rows": [["Tier", "LIMITED — n=8"]], "notes": "Evidence gap promoted in message B." }
+    },
+    "slg": {
+      "file": "CSAT_OVERVIEW_V3_SLG.html",
+      "protoLabel": "State 6 of 8: SLG-like low volume",
+      "shell": "slg",
+      "dataAsOf": "Fri 9 Oct 2026",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "message": {
+        "anchor": "86%",
+        "anchorCaption": "rated 4 or 5 (Top-2 Box)",
+        "sentenceA": "Workday-led customer satisfaction is strong.",
+        "sentenceB": "12 of 14 responses rated their deployment 4 or 5 · 12 deployments · Oct 2025 – Sep 2026, too few responses to tell direction",
+        "sentenceCParts": [
+          { "type": "link", "href": "#csat-v3-concerns", "text": "1 deployment" },
+          { "type": "text", "text": " raised customer concerns in the last 90 days, 1 with follow-up expected. Next survey round 4 Nov: 2 deployments, no readiness issues found." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "SUFFICIENT",
+        "n": 14,
+        "t2b": 86,
+        "satisfactionWord": "strong",
+        "directionWord": null,
+        "clauseOrder": "concern_then_horizon"
+      },
+      "concerns": {
+        "subtitle": "Last 90 days",
+        "rows": [
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Example County Services",
+            "stage": "PGL",
+            "detail": "Satisfaction 3 · NPS 8 · 23 Sep · Follow-up expected: Deployment Sponsor · in Qualtrics"
+          }
+        ],
+        "footer": "Follow-up expected on 2 responses from the last 30 days (1 MDS acknowledgement, 1 Detractor)"
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 4 Nov",
+            "lines": [
+              "2 deployments · 1 MDS · 1 PGL",
+              "Prepare by Wed 21 Oct · 12 days",
+              "No readiness issues found (dates and contacts present)."
+            ]
+          },
+          { "head": "Following round · Wed 2 Dec", "lines": ["1 deployment"] },
+          {
+            "head": "In flight",
+            "lines": ["3 surveys · 1 responded · 2 without a response yet", "Nothing to chase."]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Delivery ratings", "text": "Too few ratings to compare yet" },
+          { "label": "PGL NPS", "text": "Not shown: fewer than 10 PGL responses (8)" },
+          { "label": "Partner-led PGL, for context", "text": "4 of 5 rated 4 or 5" },
+          { "label": "Evidence", "text": "2 deployments with Detractor responses in 12 months · 1 survey closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": { "rows": [["Volume", "SLG-like — direction suppressed"]], "notes": "Halves 6 · 8." }
+    },
+    "partner": {
+      "file": "CSAT_OVERVIEW_V3_PARTNER.html",
+      "protoLabel": "State 7 of 8: Partner-led",
+      "shell": "hc",
+      "dataAsOf": "Fri 9 Oct 2026",
+      "scopeMenu": "Partner-led · Rolling 12 months",
+      "message": {
+        "anchor": "74%",
+        "anchorCaption": "rated 4 or 5 (Top-2 Box)",
+        "sentenceA": "Partner-led customer satisfaction is mixed and stable.",
+        "sentenceB": "17 of 23 responses rated their deployment 4 or 5 · 19 deployments · Oct 2025 – Sep 2026 · No partner-led MDS responses on record",
+        "sentenceCParts": [
+          { "type": "link", "href": "#csat-v3-concerns", "text": "3 deployments" },
+          { "type": "text", "text": " raised customer concerns in the last 90 days. Next survey round 4 Nov: 3 partner-led PGLs to prepare by 21 Oct." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "SUFFICIENT",
+        "n": 23,
+        "t2b": 74,
+        "satisfactionWord": "mixed",
+        "directionWord": "stable",
+        "scope": "partner-led",
+        "clauseOrder": "concern_then_horizon"
+      },
+      "concerns": {
+        "subtitle": "Last 90 days",
+        "partnerNoFollowUp": true,
+        "rows": [
+          {
+            "pill": "Detractor",
+            "severity": "red",
+            "name": "Example Partner Health",
+            "stage": "PGL",
+            "detail": "Satisfaction 2 · NPS 4 · 12 Sep"
+          },
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Sample Partner Network",
+            "stage": "PGL",
+            "detail": "Satisfaction 3 · NPS 5 · 3 Aug"
+          },
+          {
+            "pill": "Detractor",
+            "severity": "yellow",
+            "name": "Lakeside Partner Clinics",
+            "stage": "PGL",
+            "detail": "Satisfaction 3 · NPS 6 · 19 Jul"
+          }
+        ],
+        "footer": "Programme follow-up expectations cover Workday-led deployments; partner-led follow-up ownership is being confirmed with VoC."
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 4 Nov",
+            "lines": ["3 partner-led PGLs", "1 readiness issue"]
+          },
+          {
+            "head": "In flight",
+            "lines": ["4 surveys · 1 responded · 3 without a response yet", "Nothing to chase."]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Lowest delivery rating", "text": "Schedule management: 57% rated 4 or 5 (PGL, 23) · may rate the partner team" },
+          { "label": "Recommendation (PGL NPS)", "text": "+22 · 23 responses" },
+          { "label": "Workday-led PGL, for context", "text": "84% · 31 responses" },
+          { "label": "Evidence", "text": "6 deployments with Detractor responses in 12 months · 2 surveys closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": { "rows": [["Scope", "Partner-led — no MDS"]], "notes": "No follow-up facet on partner rows." }
+    },
+    "clear": {
+      "file": "CSAT_OVERVIEW_V3_CLEAR.html",
+      "protoLabel": "State 8 of 8: No immediate actions",
+      "shell": "hc",
+      "dataAsOf": "Thu 12 Nov 2026",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "message": {
+        "anchor": "85%",
+        "anchorCaption": "rated 4 or 5 (Top-2 Box)",
+        "sentenceA": "Workday-led customer satisfaction is strong and stable.",
+        "sentenceB": "46 of 54 responses rated their deployment 4 or 5 · 41 deployments · Nov 2025 – Oct 2026",
+        "sentenceCParts": [
+          { "type": "text", "text": "No customer concerns in the last 90 days. Next survey round 2 Dec: 6 deployments, no readiness issues found." }
+        ]
+      },
+      "messageInputs": {
+        "tier": "SUFFICIENT",
+        "n": 54,
+        "t2b": 85,
+        "satisfactionWord": "strong",
+        "directionWord": "stable",
+        "clauseOrder": "concern_then_horizon"
+      },
+      "concerns": {
+        "empty": true,
+        "emptyPrimary": "No Detractor responses in the last 90 days among 13 responses received.",
+        "emptyMuted": "6 deployments had Detractor responses earlier in the 12-month window →",
+        "footer": "Follow-up expected on 3 responses from the last 30 days (3 MDS acknowledgements) · tracked in Qualtrics"
+      },
+      "horizon": {
+        "blocks": [
+          {
+            "head": "Next round · Wed 2 Dec",
+            "lines": [
+              "6 deployments · 4 MDS · 2 PGL",
+              "Prepare by Wed 18 Nov · 6 days",
+              "No readiness issues found (dates and contacts present)."
+            ]
+          },
+          { "head": "Following round · Wed 6 Jan 2027", "lines": ["5 deployments"] },
+          {
+            "head": "In flight · November round · closes 25 Nov",
+            "lines": ["9 surveys · 5 responded · 4 without a response yet", "Nothing to chase."]
+          }
+        ],
+        "footerLink": "Open Surveys →"
+      },
+      "learn": {
+        "facts": [
+          { "label": "Lowest delivery rating", "text": "Schedule management: 71% rated 4 or 5 (MDS, 21 responses)" },
+          { "label": "Recommendation (PGL NPS)", "text": "+41 · 31 responses" },
+          { "label": "Partner-led PGL, for context", "text": "74% rated 4 or 5 · 23 responses" },
+          { "label": "Evidence", "text": "7 deployments with Detractor responses in 12 months · 4 surveys closed without a response →", "linkTail": true }
+        ]
+      },
+      "disclosure": { "rows": [["Survey", "Top-2 Box"]], "notes": "All four learning facts." }
+    }
+  }
+}

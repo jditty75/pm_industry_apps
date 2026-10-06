@@ -1,19 +1,19 @@
 # Composer prototype specification: CSAT Overview V3
 
-Narrow handoff. Build **one** Overview composition as **eight deterministic static pages** plus a plain index, and nothing else. Build only after Jeff accepts this design spec.
+Narrow handoff for the **implemented** localhost prototype (design spec baseline commit `daf663e`).
 
 ## 1. Build
 
 | Item | Value |
 |---|---|
-| Location | **New** folder `skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/`. Do **not** modify `dm-ux-csat-overview-v2/`, `dm-ux-csat-overview/` or `dm-ux-concept/` (historical) |
-| Styling | Production DepMngr CSS inlined via `skills/gas-monorepo-engineer/scripts/gas_bundle_extract.mjs` from `solutions/HC_DM/src` (same mechanism as V2). Prototype-only CSS in `dm-ux-csat-overview-v3/src/csat-overview-v3.css`, prefixed `csat-v3-` |
-| Files | `csat_overview_v3_render.py` (formats only, computes nothing), `preview_csat_overview_v3_build.py`, `preview_csat_overview_v3_selftest.py`, `fixtures/csat-overview-v3-states.json` |
-| Fixture | The eight states in [state-model.md](state-model.md), values copied verbatim. **The sentences A/B/C are stored in the fixture as final strings**, together with the inputs that produced them, so the self-test can check them against the rules |
-| Shell | Real DM `.header`, `.tabs` (CSAT active), `.csat-subtab-nav` with exactly **Overview · Surveys · Responses** (Overview active), the scope menu button at the right of the sub-nav row. **No `.info-banner`** |
-| Launch | Add alias `CSAT_OVERVIEW_V3` to `preview.ps1` (pattern of the existing `CSAT_OVERVIEW_V2` block). It opens **Healthy** |
-| Output | Gitignored `.preview-out/` |
-| Selftest | Register in `skills/gas-monorepo-engineer/scripts/preview_selftest.py` |
+| Location | `skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/` (does not modify V2/V1/concept folders or production DepMngr) |
+| Styling | Production DepMngr CSS inlined via `skills/gas-monorepo-engineer/scripts/gas_bundle_extract.mjs` from `solutions/HC_DM/src`. Prototype layout: `dm-ux-csat-overview-v3/src/csat-overview-v3.css` (`csat-v3-` prefix) |
+| Files | `csat_overview_v3_render.py`, `preview_csat_overview_v3_build.py`, `preview_csat_overview_v3.py`, `preview_csat_overview_v3_selftest.py`, `fixtures/csat-overview-v3-states.json` |
+| Fixture | Eight states from [state-model.md](state-model.md); sentences A/B/C and region copy stored as final strings plus `messageInputs` for rule checks |
+| Shell | DM `.header`, `.tabs` (CSAT active), `.csat-subtab-nav` **Overview · Surveys · Responses** (Overview active), scope menu button on the sub-nav row. **No `.info-banner`** |
+| Launch | `.\preview.ps1 CSAT_OVERVIEW_V3` → builds, serves, opens **Healthy**. `.\preview.ps1 CSAT_OVERVIEW_V3 -NoOpen` for CI/selftest. Equivalent: `python skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/preview_csat_overview_v3.py --no-open` |
+| Output | Gitignored `.preview-out/CSAT_OVERVIEW_V3_*.html` |
+| Selftest | `python skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/preview_csat_overview_v3_selftest.py` and `skills/gas-monorepo-engineer/scripts/preview_selftest.py` |
 
 ## 2. Pages (stable URLs)
 
@@ -29,7 +29,21 @@ Narrow handoff. Build **one** Overview composition as **eight deterministic stat
 | `CSAT_OVERVIEW_V3_PARTNER.html` | 7 Partner-led scope |
 | `CSAT_OVERVIEW_V3_CLEAR.html` | 8 No immediate actions |
 
-The V3 prefix keeps these pages from overwriting the V2 pages in `.preview-out/`. Served at `http://127.0.0.1:<port>/<file>`.
+The V3 prefix keeps these pages from overwriting the V2 pages in `.preview-out/`.
+
+After `.\preview.ps1 CSAT_OVERVIEW_V3` (port from the preview server, typically `http://127.0.0.1:<port>/`):
+
+| URL path | State |
+|---|---|
+| `/CSAT_OVERVIEW_V3_HEALTHY.html` | 1 Healthy (**default open**) |
+| `/CSAT_OVERVIEW_V3_CONCERNS.html` | 2 Customer concerns |
+| `/CSAT_OVERVIEW_V3_UPCOMING.html` | 3 Heavy upcoming |
+| `/CSAT_OVERVIEW_V3_CHASE.html` | 4 Chase |
+| `/CSAT_OVERVIEW_V3_LOW_EVIDENCE.html` | 5 Weak evidence |
+| `/CSAT_OVERVIEW_V3_SLG.html` | 6 SLG-like low volume |
+| `/CSAT_OVERVIEW_V3_PARTNER.html` | 7 Partner-led |
+| `/CSAT_OVERVIEW_V3_CLEAR.html` | 8 No immediate actions |
+| `/CSAT_OVERVIEW_V3_INDEX.html` | Plain index (no DM shell) |
 
 ## 3. Prototype chrome (hard limits)
 

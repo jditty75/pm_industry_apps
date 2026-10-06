@@ -18,6 +18,7 @@ $Engine = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\scripts\preview_
 $DmUx = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-concept\preview_dm_ux.py"
 $DmUxCsat = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-overview\preview_dm_ux_csat.py"
 $DmUxCsatV2 = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-overview-v2\preview_csat_overview_v2.py"
+$DmUxCsatV3 = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-overview-v3\preview_csat_overview_v3.py"
 if (-not (Test-Path $Engine)) {
     Write-Error "Preview engine not found: $Engine"
     exit 1
@@ -65,6 +66,18 @@ if ($App -eq "CSAT_OVERVIEW_V2") {
     if ($NoOpen) { $v2Args += "--no-open" }
     if ($Stop) { $v2Args += "--stop" }
     & python $DmUxCsatV2 @v2Args
+    exit $LASTEXITCODE
+}
+
+if ($App -eq "CSAT_OVERVIEW_V3") {
+    if (-not (Test-Path $DmUxCsatV3)) {
+        Write-Error "CSAT Overview V3 preview not found: $DmUxCsatV3"
+        exit 1
+    }
+    $v3Args = @()
+    if ($NoOpen) { $v3Args += "--no-open" }
+    if ($Stop) { $v3Args += "--stop" }
+    & python $DmUxCsatV3 @v3Args
     exit $LASTEXITCODE
 }
 

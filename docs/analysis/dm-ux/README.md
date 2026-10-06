@@ -62,6 +62,14 @@ The focused Overview compositions A/B/C in `csat-overview-design/` are **rejecte
 
 The reconciled architecture is now **product-approved for visual design**. `csat-overview-v2/` is **superseded for visual design by the reconciled architecture / V3** and retained for history.
 
+## CSAT Surveys — deployment-centric operational design (2026-10-06)
+
+| Doc | Read when |
+|-----|-----------|
+| [csat-surveys-design/README.md](csat-surveys-design/README.md) | **Current CSAT Surveys design.** The operational survey lifecycle (prepare → in flight → responded / closed → follow-up) as one lifecycle-ordered surface — no internal tabs: scope + filter bar, a dense horizon line, three phase groups (Upcoming · In Flight · Recent), a deployment × survey row, five distinct attention kinds (Prepare now · Can't forecast · Chase now · Delivery problem · Follow-up expected) that are never summed, 1440×900 composition, eight states, future-data requirements, Composer handoff |
+
+Applies the approved reconciled architecture and the provisional V3 visual vocabulary to **Surveys**. Design-only; the prototype handoff lives in [csat-surveys-design/composer-preview-spec.md](csat-surveys-design/composer-preview-spec.md).
+
 Status of earlier CSAT design folders: `csat-product-model/` is **still authoritative for areas marked KEEP** in [decision-reconciliation.md](csat-reconciled-architecture/decision-reconciliation.md) (semantics, tiers, small-n rules, journey, feedback placement). It is **superseded** on headline metric, risk thresholds, navigation and hierarchy. `csat-overview-v2/` and its prototype are **historical**: the visual-language guidance is reusable, but its structure and thresholds are superseded. `csat-overview-design/` stays rejected/historical.
 
 ## Headline findings

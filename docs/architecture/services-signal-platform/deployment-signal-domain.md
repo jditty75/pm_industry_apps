@@ -114,6 +114,6 @@ Writes replace sheet body with idempotent full refresh (`CoreDeploymentTrajector
 2. **Unresolved PF history ParentIds (~170 in handoff):** likely mix of deleted/historical PFs outside current extract; categorize with export diagnostic before join changes.
 3. **Parent MTP reconciliation warnings:** mix of `EXPECTED_LIMITATION`, `SOURCE_HISTORY_GAP`, `CURRENT_VS_RECONSTRUCTED_DIFFERENCE`, and cases needing human validation — do not suppress.
 
-## After human validation
+## Pilot freeze
 
-Freeze **Deployment Trajectory v2** deterministics, then build **LLM Context Assembler** (not before).
+**Deployment Trajectory v2** is pilot-frozen for the SLG Signal pilot. See [deployment-trajectory-v2-pilot-freeze.md](./deployment-trajectory-v2-pilot-freeze.md). Context Assembler consumes this contract; semantic trajectory changes require explicit review.

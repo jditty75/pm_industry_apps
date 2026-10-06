@@ -1,49 +1,41 @@
-# LLM Context Assembler (architecture only — not implemented)
+# Context Assembler (Deployment Signal pilot)
 
-## Problem
+Deterministic layer between **Deployment Trajectory v2** and **Sana reasoning**. See [deployment-signal-context-v1.md](./deployment-signal-context-v1.md) and [deployment-trajectory-v2-pilot-freeze.md](./deployment-trajectory-v2-pilot-freeze.md).
 
-`Deployment_Trajectory` is optimized for analytical completeness (~many columns). Sauna should not receive the full row.
+## Responsibility
 
-## Inputs
+| Does | Does not |
+|------|----------|
+| Select facts, normalize semantics, explicit time windows | Assign Signal categories |
+| Surface unavailable evidence and reconciliation metadata | Assign leadership attention |
+| Include selected trace rows and intervention excerpts | Predict outcomes or causality |
+| Classify evidence completeness (HIGH/MEDIUM/LOW) | Write leadership recommendations |
 
-- Selected columns from `Deployment_Trajectory` (current condition + key trajectory metrics).
-- **Selected** raw intervention narrative from `SFDC_DHP` / `SFDC_DHPActionHistory` (retrieved by id, not duplicated in trajectory).
-- Evidence-quality metadata (`build_warnings`, coverage counts, reconciliation status).
-- **Context contract helpers** (validator-local today: `scripts/deployment_trajectory_validation/context_contract.py`) for health/schedule reconciliation flags.
+## Entry points (Apps Script / DepMngr)
 
-## Output
+- `CoreDeploymentSignalContext.buildDeploymentSignalContext(cfg, deploymentId, options)`
+- `CoreDeploymentSignalContext.buildDeploymentSignalPortfolioContext(cfg, options)`
+- Gated by `deploymentSignal.enabled` (default **false**; SLG pilot only).
 
-Compact, reasoning-oriented context block (per deployment or small batch), e.g.:
+## Local portfolio workflow
 
-- Identity: name, customer, stage, health, days to MTP.
-- Health trajectory summary with **explicit reconciliation** when `current_health` ≠ last HealthEvents `new_health`.
-- Schedule trajectory summary with **net comparison basis** (`mtp_net_movement_comparison`, `earliest_recorded_mtp`) and initial-population vs valid-change distinction.
-- **Recent vs historical windows** (e.g. 90d vs lifetime / 365d) — never label lifetime gross as 90-day movement.
-- Product Function schedule summary when `mtp_analysis_grain = PRODUCT_FUNCTION`; PF target history gaps marked **UNAVAILABLE**.
-- Intervention header + **one or few** latest narrative excerpts.
-- Evidence quality / warnings.
+1. Generate packets: `python scripts/generate-deployment-signal-context-packets.py`
+2. Inspect: `.ai/signal-exports/context-packet-review.html`
+3. Build Sana input (no LLM): `python scripts/deployment-signal-portfolio-pilot-harness.py`
+4. Manually run unchanged **Sana Deployment Signals Pilot** agent with `.ai/signal-exports/sana-portfolio-pilot-input*.txt`
 
-## Requirements learned from pilot calibration (CAL-01)
+Production-derived artifacts remain under `.ai/signal-exports/` only (gitignored).
 
-1. **Recent vs historical** — Separate quiet recent trajectory from substantial historical volatility; both may appear in the same deployment.
-2. **Deterministic metric semantics** — Ship field definitions with summaries (see [deployment-signal-domain.md](./deployment-signal-domain.md#summary-field-semantics-trajectory-row)).
-3. **Evidence availability** — State what history exists; mark PF target history **UNAVAILABLE** when absent (not zero movement).
-4. **Evidence-quality warnings** — Surface `build_warnings`, reconciliation status, and `health_summary_not_reconciled_with_current_health` when applicable.
-5. **Summary/trace reconciliation** — If summary fields and HealthEvents/MTP trace can disagree, include contract metadata; never ask the model to bridge the gap.
-6. **Never infer missing evidence** — Missing Green transition after Yellow is a source/history boundary, not an LLM interpolation task.
-7. **Trace sufficiency** — When showing net/gross movement, include enough MTP trace rows to explain net baseline (initial population vs valid changes).
-8. **Compact context** — Selected metrics + excerpted traces, not full trajectory sheets.
+## Pilot calibration acceptance (patterns — not rules)
 
-## Principle
+| Case | Pattern | Accepted Sana outcome |
+|------|---------|------------------------|
+| CAL-01 | Historical volatility → current stabilization | NO_SIGNAL |
+| CAL-02 | Historical displacement + lifecycle exposure + evidence ambiguity | WATCH / COMPOUND |
+| CAL-03 | Green + recent intervention + remaining delivery exposure | WATCH / INTERVENTION |
 
-Optimize for **LLM reasoning**, not analytical completeness. Every interpretive claim must trace to deterministic or source evidence.
+Automatic reproduction: `context-packets/calibration-comparison-report.json` from the generator script.
 
-## Pilot calibration status
+## Batching strategy
 
-| Case | Purpose | Ground truth |
-|------|---------|--------------|
-| CAL-01 | Historical volatility → current stabilization | Sana **NO_SIGNAL** — confirmed correct (local pilot record; no customer detail in Git) |
-| CAL-02 | Green + historical volatility + lifecycle exposure | PENDING |
-| CAL-03 | Green + active intervention | PENDING |
-
-Local packets and manifest: `.ai/signal-exports/` (gitignored).
+When portfolio payload size exceeds limits, the harness emits deterministic batches (stable `deployment_id` order). **Stage 1:** per-batch candidate Signals. **Stage 2 (future):** portfolio-level attention compression across candidates — not implemented in this repo task.

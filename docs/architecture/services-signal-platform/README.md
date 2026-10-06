@@ -11,9 +11,9 @@ Deterministic derived trajectory (GAS / DepMngr)
         ↓
 Evidence quality + trace sheets
         ↓
-LLM Context Assembler (planned — not implemented)
+LLM Context Assembler (SLG pilot — deployment-signal-context-v1)
         ↓
-LLM reasoning (Sauna pilot — not implemented)
+LLM reasoning (Sana Deployment Signals Pilot — manual portfolio step)
         ↓
 Structured signals (documented contract only)
         ↓
@@ -51,7 +51,9 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 | [deployment-signal-domain.md](./deployment-signal-domain.md) | Trajectory v2 sheets, sources, grain, limitations |
 | [structured-signals-contract.md](./structured-signals-contract.md) | Planned signal shape (no storage yet) |
 | [llm-guardrails.md](./llm-guardrails.md) | Agreed Sauna constraints (no prompt yet) |
-| [context-assembler.md](./context-assembler.md) | Next-stage compact context contract |
+| [deployment-trajectory-v2-pilot-freeze.md](./deployment-trajectory-v2-pilot-freeze.md) | Pilot-frozen trajectory v2 contract |
+| [deployment-signal-context-v1.md](./deployment-signal-context-v1.md) | Context packet schema |
+| [context-assembler.md](./context-assembler.md) | Assembler architecture and portfolio workflow |
 | [human-validation-package.md](./human-validation-package.md) | Ten-deployment review format |
 | [engineering-baseline-2026-10.md](./engineering-baseline-2026-10.md) | Reconciliation matrix and Git/runtime ownership |
 
@@ -60,7 +62,9 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 | Layer | Location |
 |-------|----------|
 | Trajectory engine | `libraries/DepMngr/src/CoreDeploymentTrajectory*.js` |
+| Context Assembler | `libraries/DepMngr/src/CoreDeploymentSignalContext.js` |
 | Defaults / gating | `libraries/DepMngr/src/CoreConfig.js` (`deploymentSignal`, schema version **2**) |
+| Local packet / harness | `scripts/generate-deployment-signal-context-packets.py`, `scripts/deployment-signal-portfolio-pilot-harness.py` |
 | SLG pilot enablement | `solutions/SLG_DM/src/Config_SLG.js`, `Code.js` (`refreshDeploymentTrajectory`) |
 | Tests | `libraries/DepMngr/test/deployment-trajectory-*.test.js`, `pf-history-export-analysis.test.js` |
 | Local PF history diagnostic | `scripts/diagnose-deployment-trajectory-pf-history.js` |

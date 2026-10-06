@@ -127,14 +127,14 @@ def main() -> int:
         },
         "CAL-02": {
             "deployment_id_prefix": cal02_prefix[:15],
-            "purpose": "historical volatility + lifecycle exposure",
-            "ground_truth": "PENDING",
+            "purpose": "historical displacement + lifecycle exposure + evidence ambiguity",
+            "sana_outcome": "WATCH / COMPOUND",
             "packet": str(path02),
         },
         "CAL-03": {
             "deployment_id_prefix": cal03_prefix[:15],
-            "purpose": "Green + active intervention",
-            "ground_truth": "PENDING",
+            "purpose": "Green + recent intervention + remaining delivery exposure",
+            "sana_outcome": "WATCH / INTERVENTION",
             "packet": str(path03),
         },
     }

@@ -6,12 +6,16 @@ Narrow handoff. It authorizes building **one** CSAT Overview design as **seven d
 
 | Item | Value |
 |---|---|
-| Location | New folder `skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/`. Do **not** modify `dm-ux-concept/` or `dm-ux-csat-overview/` (the rejected A/B/C) |
-| Styling | Inline the production DepMngr stylesheet via the existing `gas_bundle_extract.mjs` path, as `dm-ux-csat-overview` does. Prototype-only CSS lives in one file (`src/csat-overview-v2.css`) and may only add the layout grid and the few new marks (band bar, coverage meter, reference row, `n<5` pill). It reuses tokens from `CoreUI_Css.js` `:root` and never defines new colours |
+| Location | `skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/` (implemented). Do **not** modify `dm-ux-concept/` or `dm-ux-csat-overview/` (the rejected A/B/C) |
+| Styling | Production DepMngr CSS inlined via `skills/gas-monorepo-engineer/scripts/gas_bundle_extract.mjs` from `solutions/HC_DM/src`. Prototype-only CSS: `skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/src/csat-overview-v2.css` |
+| Build | `python skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/preview_csat_overview_v2_build.py` |
+| Renderer | `skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/csat_overview_v2_render.py` |
+| Fixture | `skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/fixtures/csat-overview-v2-states.json` |
 | Shell | Real DM header, real top-level tab bar (CSAT active), the single CSAT `.info-banner` (copy from [overview-information-design.md §5](overview-information-design.md)), `.csat-subtab-nav` with exactly **Overview · Responses · Survey Operations** (Overview active) |
 | Data | One fixture `fixtures/csat-overview-v2-states.json` holding the seven states exactly as in [state-model.md](state-model.md). Values are copied verbatim, never generated or randomised. The renderer computes nothing; it formats fixture values |
 | Output (gitignored) | `.preview-out/` pages below |
-| Launch | Register an alias in `preview.ps1`: `.\preview.ps1 CSAT_OVERVIEW_V2` → opens the index |
+| Launch | `.\preview.ps1 CSAT_OVERVIEW_V2` → builds, serves, opens **Healthy** (`CSAT_OVERVIEW_HEALTHY.html`). `.\preview.ps1 CSAT_OVERVIEW_V2 -NoOpen` for CI/selftest. Index: `CSAT_OVERVIEW_V2_INDEX.html` on the same server |
+| Selftest | `python skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/preview_csat_overview_v2_selftest.py` (also wired in `scripts/preview_selftest.py`) |
 
 ## 2. Pages (stable URLs)
 
@@ -27,6 +31,21 @@ Narrow handoff. It authorizes building **one** CSAT Overview design as **seven d
 | `CSAT_OVERVIEW_LOW_VOLUME.html` | 7 SLG-like low volume (SLG shell title) |
 
 States 1–6 use an HC-like app shell. State 7 uses the SLG-like shell. Header titles come from the existing app config strings and contain no customer data.
+
+### Stable URLs (localhost)
+
+After `.\preview.ps1 CSAT_OVERVIEW_V2` (port from preview server, typically `http://127.0.0.1:<port>/`):
+
+| URL path | State |
+|---|---|
+| `/CSAT_OVERVIEW_HEALTHY.html` | 1 Healthy (default open) |
+| `/CSAT_OVERVIEW_RISK.html` | 2 Concerning satisfaction |
+| `/CSAT_OVERVIEW_LOW_EVIDENCE.html` | 3 Low evidence |
+| `/CSAT_OVERVIEW_DECLINE.html` | 4 Meaningful decline |
+| `/CSAT_OVERVIEW_PARTNER.html` | 5 Partner-led |
+| `/CSAT_OVERVIEW_ALL.html` | 6 All deployments |
+| `/CSAT_OVERVIEW_LOW_VOLUME.html` | 7 SLG-like low volume |
+| `/CSAT_OVERVIEW_V2_INDEX.html` | Plain index (no DM shell) |
 
 ## 3. Prototype chrome (hard limits)
 

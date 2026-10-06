@@ -1,6 +1,6 @@
 # CSAT Overview v2 — one Overview designed from the approved product model (2026-10-06)
 
-Status: **design specification for Jeff's review.** Documentation only. No production UI/CSS/markup/JS, prototype, API, EDM, workbook, CLASP or deployment change was made.
+Status: **design specification + localhost visual prototype for Jeff's review.** Production DepMngr UI/CSS/JS is unchanged. The V2 prototype lives under `skills/gas-monorepo-engineer/dm-ux-csat-overview-v2/` and builds to gitignored `.preview-out/CSAT_OVERVIEW_*.html`.
 
 This folder specifies **one** CSAT → Overview for Deployment Manager. It is not a set of alternatives. It is derived from the approved [Customer Satisfaction product model](../csat-product-model/README.md) and Jeff's resolved decisions P1–P10. It adds one new authoritative requirement: **Workday-led CSAT is the primary management lens.** Partner-led CSAT provides comparative and portfolio context.
 
@@ -22,6 +22,22 @@ CSAT navigation: **Overview | Responses | Survey Operations**. Overview is MONIT
 | [state-model.md](state-model.md) | The seven required states with synthetic values, all on one composition |
 | [drilldown-map.md](drilldown-map.md) | Every Overview signal → its destination and pre-applied filter |
 | [composer-preview-spec.md](composer-preview-spec.md) | Narrow handoff: one design, seven static pages, visual acceptance questions |
+
+## Visual review (localhost)
+
+Launch:
+
+```powershell
+.\preview.ps1 CSAT_OVERVIEW_V2
+```
+
+Opens **Healthy** first. Use the bottom-right badge link **All states** or `CSAT_OVERVIEW_V2_INDEX.html` for the full list. No scenario toolbar — each state is its own page.
+
+**Review order:** Healthy → Low Evidence → Concerning (`CSAT_OVERVIEW_RISK.html`) → Decline → Partner-led → All deployments → SLG-like Low Volume → return to Healthy.
+
+First question: *Does Healthy finally tell a coherent Customer Satisfaction story and feel like Deployment Manager?*
+
+Approval phrase for this stage: **CSAT OVERVIEW VISUALLY APPROVED** (see [composer-preview-spec.md §8](composer-preview-spec.md)).
 
 ## Resolved decisions applied
 

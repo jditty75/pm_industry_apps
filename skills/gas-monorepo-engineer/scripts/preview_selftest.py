@@ -173,6 +173,25 @@ def main():
         else:
             print((r.stdout or "").strip())
 
+    dm_csat_v2_selftest = os.path.join(
+        REPO, "skills", "gas-monorepo-engineer", "dm-ux-csat-overview-v2", "preview_csat_overview_v2_selftest.py"
+    )
+    if os.path.isfile(dm_csat_v2_selftest):
+        import subprocess
+
+        r = subprocess.run(
+            [sys.executable, dm_csat_v2_selftest],
+            cwd=os.path.dirname(dm_csat_v2_selftest),
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            print("FAIL preview_csat_overview_v2_selftest.py")
+            print(r.stdout or r.stderr)
+            failed += 1
+        else:
+            print((r.stdout or "").strip())
+
     if failed:
         sys.exit(1)
 

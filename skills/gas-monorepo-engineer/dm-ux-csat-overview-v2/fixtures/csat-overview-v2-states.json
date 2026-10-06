@@ -1,0 +1,542 @@
+{
+  "fixtureId": "csat-overview-v2-states-20261006",
+  "windowLabel": "Rolling 12 months",
+  "windowRange": "Oct 2025 – Sep 2026",
+  "responsesImported": "Responses imported 5 Oct 2026, 07:12",
+  "invitationsImported": "Invitations imported 5 Oct 2026",
+  "infoBanner": "CSAT: what customers tell us about our delivery, how representative that is, and where to follow up.",
+  "shells": {
+    "hc": {
+      "headerTitle": "Healthcare Deployment Health Manager",
+      "headerSubtitle": "Healthcare program portfolio"
+    },
+    "slg": {
+      "headerTitle": "SLG Deployment Health Manager",
+      "headerSubtitle": "State & Local Government"
+    }
+  },
+  "states": {
+    "healthy": {
+      "file": "CSAT_OVERVIEW_HEALTHY.html",
+      "protoLabel": "State 1 of 7: Healthy",
+      "shell": "hc",
+      "scopeActive": "workday-led",
+      "ov1Title": "Customer Satisfaction · Workday-led deployments",
+      "headline": {
+        "value": "4.3",
+        "responses": 52,
+        "deployments": 40,
+        "direction": { "kind": "stable", "from": 4.2, "to": 4.3, "n1": 24, "n2": 28 }
+      },
+      "mdsRow": {
+        "label": "MDS",
+        "sublabel": "Mid-deployment",
+        "mean": "4.4",
+        "bands": [17, 2, 1],
+        "responses": 20,
+        "deployments": 17,
+        "heardFrom": { "heard": 17, "due": 20 },
+        "direction": { "kind": "stable", "from": 4.3, "to": 4.4, "n1": 10, "n2": 10 },
+        "nps": "Not asked"
+      },
+      "pglRow": {
+        "label": "PGL",
+        "sublabel": "Post go-live",
+        "mean": "4.2",
+        "bands": [27, 4, 1],
+        "responses": 32,
+        "deployments": 25,
+        "heardFrom": { "heard": 25, "due": 29 },
+        "direction": { "kind": "stable", "from": 4.2, "to": 4.2, "n1": 15, "n2": 17 },
+        "nps": "+41 (n 31)"
+      },
+      "referenceRow": {
+        "label": "Partner-led PGL",
+        "mean": "4.0",
+        "bands": [17, 4, 2],
+        "responses": 23,
+        "deployments": 19,
+        "comparisonNote": "Comparison context: observed values only"
+      },
+      "stageNote": "MDS and PGL rows are different deployments at different points in delivery. For deployments with both, see MDS → PGL journey.",
+      "qualifier": {
+        "tone": "info",
+        "text": "Based on most deployments due for a survey. 7 due surveys have no response yet.",
+        "gapsLink": "View 7 evidence gaps →",
+        "gapsCount": 7
+      },
+      "weightingNote": null,
+      "risk": {
+        "lowVerdicts": 2,
+        "earlyWarnings": 1,
+        "footer": "View in Responses →",
+        "rows": [
+          { "pill": "Dissatisfied", "severity": "red", "name": "Example Health Network", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 14 Aug 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Sample Regional Medical Center", "stage": "MDS", "fact": "Overall Satisfaction 2 of 5 · 2 Sep 2026" },
+          { "pill": "Low rating", "severity": "yellow", "name": "Example Children's Hospital", "stage": "MDS", "fact": "Communications rated 1 · Overall 4 · 3 Jul 2026" }
+        ]
+      },
+      "delivery": {
+        "lowest": [
+          { "label": "Schedule management", "value": 3.8, "n": 30 },
+          { "label": "Communications", "value": 4.0, "n": 30 }
+        ],
+        "highest": [{ "label": "Technical competence", "value": 4.6, "n": 50 }]
+      },
+      "journey": {
+        "subtitle": "Workday-led deployments with both surveys",
+        "summary": "7 deployments: Held 5 · Higher 1 · Lower 1",
+        "note": "Same deployment, often different respondents."
+      },
+      "surveyOps": {
+        "issues": ["2 bounced invitations", "3 invitations expire within 7 days"],
+        "allClear": false
+      }
+    },
+    "risk": {
+      "file": "CSAT_OVERVIEW_RISK.html",
+      "protoLabel": "State 2 of 7: Concerning satisfaction",
+      "shell": "hc",
+      "scopeActive": "workday-led",
+      "ov1Title": "Customer Satisfaction · Workday-led deployments",
+      "headline": {
+        "value": "3.6",
+        "responses": 52,
+        "deployments": 40,
+        "direction": { "kind": "stable", "from": 3.7, "to": 3.6, "n1": 24, "n2": 28 }
+      },
+      "mdsRow": {
+        "label": "MDS",
+        "sublabel": "Mid-deployment",
+        "mean": "3.9",
+        "bands": [13, 4, 3],
+        "responses": 20,
+        "deployments": 17,
+        "heardFrom": { "heard": 18, "due": 20 },
+        "direction": { "kind": "stable", "from": 4.0, "to": 3.9, "n1": 10, "n2": 10 },
+        "nps": "Not asked"
+      },
+      "pglRow": {
+        "label": "PGL",
+        "sublabel": "Post go-live",
+        "mean": "3.4",
+        "bands": [17, 7, 8],
+        "responses": 32,
+        "deployments": 25,
+        "heardFrom": { "heard": 26, "due": 29 },
+        "direction": { "kind": "stable", "from": 3.5, "to": 3.4, "n1": 15, "n2": 17 },
+        "nps": "−6 (n 31)"
+      },
+      "referenceRow": {
+        "label": "Partner-led PGL",
+        "mean": "3.9",
+        "bands": [16, 4, 3],
+        "responses": 23,
+        "deployments": 19,
+        "comparisonNote": "Comparison context: observed values only"
+      },
+      "stageNote": "MDS and PGL rows are different deployments at different points in delivery. For deployments with both, see MDS → PGL journey.",
+      "qualifier": {
+        "tone": "info",
+        "text": "Based on most deployments due for a survey. 5 due surveys have no response yet.",
+        "gapsLink": "View 5 evidence gaps →",
+        "gapsCount": 5
+      },
+      "weightingNote": "Each deployment counts once. Counting every response gives 3.4: 3 deployments with several respondents rated lower.",
+      "risk": {
+        "lowVerdicts": 9,
+        "earlyWarnings": 2,
+        "footer": "View all 11 in Responses →",
+        "rows": [
+          { "pill": "Dissatisfied", "severity": "red", "name": "Example Metro Health System", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 18 Sep 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Sample Valley Hospital", "stage": "PGL", "fact": "Overall Satisfaction 1 of 5 · 12 Sep 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Demo Regional Care", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 4 Aug 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Synthetic Academic Medical", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 22 Jul 2026" },
+          { "pill": "Declined", "severity": "red", "name": "Example Community Clinic", "stage": "PGL", "fact": "MDS 4 → PGL 3 · 11 Sep 2026" }
+        ]
+      },
+      "delivery": {
+        "lowest": [
+          { "label": "Prepared for go-live (PGL)", "value": 2.9, "n": 30 },
+          { "label": "Schedule management", "value": 3.1, "n": 30 }
+        ],
+        "highest": [{ "label": "Technical competence", "value": 4.1, "n": 50 }]
+      },
+      "journey": {
+        "subtitle": "Workday-led deployments with both surveys",
+        "summary": "7 deployments: Held 3 · Higher 1 · Lower 3",
+        "note": "Same deployment, often different respondents."
+      },
+      "surveyOps": {
+        "issues": ["1 bounced invitation"],
+        "allClear": false
+      }
+    },
+    "low_evidence": {
+      "file": "CSAT_OVERVIEW_LOW_EVIDENCE.html",
+      "protoLabel": "State 3 of 7: Low evidence",
+      "shell": "hc",
+      "scopeActive": "workday-led",
+      "ov1Title": "Customer Satisfaction · Workday-led deployments",
+      "headline": {
+        "value": "4.5",
+        "responses": 23,
+        "deployments": 20,
+        "direction": { "kind": "insufficient", "n1": 9, "n2": 14, "needed": 10 }
+      },
+      "mdsRow": {
+        "label": "MDS",
+        "sublabel": "Mid-deployment",
+        "mean": "4.6",
+        "bands": [8, 1, 0],
+        "responses": 9,
+        "deployments": 8,
+        "heardFrom": { "heard": 8, "due": 21 },
+        "direction": { "kind": "insufficient", "n1": 4, "n2": 5, "needed": 10 },
+        "nps": "Not asked"
+      },
+      "pglRow": {
+        "label": "PGL",
+        "sublabel": "Post go-live",
+        "mean": "4.4",
+        "bands": [12, 2, 0],
+        "responses": 14,
+        "deployments": 12,
+        "heardFrom": { "heard": 12, "due": 30 },
+        "direction": { "kind": "insufficient", "n1": 5, "n2": 9, "needed": 10 },
+        "nps": "+50 (n 12)"
+      },
+      "referenceRow": {
+        "label": "Partner-led PGL",
+        "mean": "4.0",
+        "bands": [15, 5, 2],
+        "responses": 22,
+        "deployments": 18,
+        "comparisonNote": "Comparison context: observed values only"
+      },
+      "stageNote": "MDS and PGL rows are different deployments at different points in delivery. For deployments with both, see MDS → PGL journey.",
+      "qualifier": {
+        "tone": "caution",
+        "text": "Read with caution: we have heard from fewer than half of the deployments due at MDS (8 of 21) and PGL (12 of 30). 31 due surveys have no response yet.",
+        "gapsLink": "View 31 evidence gaps →",
+        "gapsCount": 31
+      },
+      "weightingNote": null,
+      "risk": {
+        "empty": true,
+        "responseCount": 23,
+        "lowVerdicts": 0,
+        "earlyWarnings": 0
+      },
+      "delivery": {
+        "lowest": [
+          { "label": "Schedule management", "value": 4.0, "n": 12 },
+          { "label": "Methodology", "value": 4.2, "n": 12 }
+        ],
+        "highest": [{ "label": "Responsiveness", "value": 4.8, "n": 21 }]
+      },
+      "journey": {
+        "subtitle": "Workday-led deployments with both surveys",
+        "summary": "3 deployments have both surveys: too few to summarise (5 needed).",
+        "link": "View their histories →",
+        "note": "Same deployment, often different respondents."
+      },
+      "surveyOps": {
+        "issues": ["6 bounced invitations", "9 invitations expire within 7 days", "1 notification rule invalid"],
+        "allClear": false
+      }
+    },
+    "decline": {
+      "file": "CSAT_OVERVIEW_DECLINE.html",
+      "protoLabel": "State 4 of 7: Meaningful decline",
+      "shell": "hc",
+      "scopeActive": "workday-led",
+      "ov1Title": "Customer Satisfaction · Workday-led deployments",
+      "headline": {
+        "value": "3.9",
+        "responses": 52,
+        "deployments": 40,
+        "direction": { "kind": "declining", "from": 4.2, "to": 3.7, "n1": 24, "n2": 28 }
+      },
+      "mdsRow": {
+        "label": "MDS",
+        "sublabel": "Mid-deployment",
+        "mean": "4.3",
+        "bands": [16, 3, 1],
+        "responses": 20,
+        "deployments": 17,
+        "heardFrom": { "heard": 17, "due": 20 },
+        "direction": { "kind": "stable", "from": 4.3, "to": 4.3, "n1": 10, "n2": 10 },
+        "nps": "Not asked"
+      },
+      "pglRow": {
+        "label": "PGL",
+        "sublabel": "Post go-live",
+        "mean": "3.7",
+        "bands": [21, 5, 6],
+        "responses": 32,
+        "deployments": 25,
+        "heardFrom": { "heard": 25, "due": 29 },
+        "direction": { "kind": "declining", "from": 4.2, "to": 3.3, "n1": 15, "n2": 17 },
+        "nps": "+9 (n 31)"
+      },
+      "referenceRow": {
+        "label": "Partner-led PGL",
+        "mean": "4.0",
+        "bands": [17, 4, 2],
+        "responses": 23,
+        "deployments": 19,
+        "comparisonNote": "Comparison context: observed values only"
+      },
+      "stageNote": "MDS and PGL rows are different deployments at different points in delivery. For deployments with both, see MDS → PGL journey.",
+      "qualifier": {
+        "tone": "info",
+        "text": "Based on most deployments due for a survey. 7 due surveys have no response yet.",
+        "gapsLink": "View 7 evidence gaps →",
+        "gapsCount": 7
+      },
+      "weightingNote": null,
+      "risk": {
+        "lowVerdicts": 6,
+        "earlyWarnings": 1,
+        "footer": "View all 7 in Responses →",
+        "rows": [
+          { "pill": "Dissatisfied", "severity": "red", "name": "Example Lakeside Health", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 28 Sep 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Sample Coastal Medical", "stage": "PGL", "fact": "Overall Satisfaction 1 of 5 · 15 Sep 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Demo Plains Hospital", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 8 Sep 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Synthetic River Health", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 2 Aug 2026" },
+          { "pill": "Declined", "severity": "red", "name": "Example Summit Care", "stage": "PGL", "fact": "MDS 4 → PGL 2 · 22 Aug 2026" }
+        ]
+      },
+      "delivery": {
+        "lowest": [
+          { "label": "Prepared for go-live (PGL)", "value": 3.2, "n": 31 },
+          { "label": "Schedule management", "value": 3.5, "n": 30 }
+        ],
+        "highest": [{ "label": "Technical competence", "value": 4.4, "n": 50 }]
+      },
+      "journey": {
+        "subtitle": "Workday-led deployments with both surveys",
+        "summary": "7 deployments: Held 3 · Higher 0 · Lower 4",
+        "note": "Same deployment, often different respondents."
+      },
+      "surveyOps": {
+        "issues": ["2 bounced invitations"],
+        "allClear": false
+      }
+    },
+    "partner": {
+      "file": "CSAT_OVERVIEW_PARTNER.html",
+      "protoLabel": "State 5 of 7: Partner-led",
+      "shell": "hc",
+      "scopeActive": "partner-led",
+      "ov1Title": "Customer Satisfaction · Partner-led deployments",
+      "headline": {
+        "value": "4.0",
+        "responses": 23,
+        "deployments": 19,
+        "pglOnlyNote": "PGL survey only",
+        "direction": { "kind": "stable", "from": 4.1, "to": 4.0, "n1": 11, "n2": 12 }
+      },
+      "mdsMutedLine": "MDS: partner-led deployments aren't surveyed at mid-deployment.",
+      "pglRow": {
+        "label": "PGL",
+        "sublabel": "Post go-live",
+        "mean": "4.0",
+        "bands": [17, 4, 2],
+        "responses": 23,
+        "deployments": 19,
+        "heardFrom": { "heard": 19, "due": 26 },
+        "direction": { "kind": "stable", "from": 4.1, "to": 4.0, "n1": 11, "n2": 12 },
+        "nps": "+22 (n 21)"
+      },
+      "referenceRow": {
+        "label": "Workday-led PGL",
+        "mean": "4.2",
+        "bands": [27, 4, 1],
+        "responses": 32,
+        "deployments": 25,
+        "comparisonNote": "Comparison context: observed values only"
+      },
+      "stageNote": null,
+      "qualifier": {
+        "tone": "info",
+        "text": "Based on most deployments due for a survey. 7 due surveys have no response yet.",
+        "gapsLink": "View 7 evidence gaps →",
+        "gapsCount": 7
+      },
+      "weightingNote": null,
+      "risk": {
+        "lowVerdicts": 2,
+        "earlyWarnings": 0,
+        "footer": "View in Responses →",
+        "rows": [
+          { "pill": "Dissatisfied", "severity": "red", "name": "Synthetic Community Hospital", "stage": "PGL", "fact": "Overall 1 of 5 · 28 Aug 2026" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Demo University Health", "stage": "PGL", "fact": "Overall 2 of 5 · 10 May 2026" }
+        ]
+      },
+      "delivery": {
+        "lowest": [
+          { "label": "Prepared for go-live (PGL)", "value": 3.5, "n": 22 },
+          { "label": "Communications", "value": 3.7, "n": 13 }
+        ],
+        "highest": [{ "label": "Collaboration", "value": 4.3, "n": 22 }]
+      },
+      "journey": {
+        "notApplicable": "Not applicable: partner-led deployments are not surveyed at MDS."
+      },
+      "surveyOps": {
+        "issues": ["1 bounced invitation"],
+        "allClear": false
+      }
+    },
+    "all": {
+      "file": "CSAT_OVERVIEW_ALL.html",
+      "protoLabel": "State 6 of 7: All deployments",
+      "shell": "hc",
+      "scopeActive": "all",
+      "ov1Title": "Customer Satisfaction · All deployments",
+      "headline": {
+        "value": "4.2",
+        "responses": 75,
+        "deployments": 59,
+        "mixNote": "52 Workday-led · 23 partner-led responses",
+        "direction": { "kind": "stable", "from": 4.2, "to": 4.2, "n1": 35, "n2": 40 }
+      },
+      "mdsRow": {
+        "label": "MDS",
+        "sublabel": "Mid-deployment",
+        "workdayLedOnly": true,
+        "mean": "4.4",
+        "bands": [17, 2, 1],
+        "responses": 20,
+        "deployments": 17,
+        "heardFrom": { "heard": 17, "due": 20 },
+        "direction": { "kind": "stable", "from": 4.3, "to": 4.4, "n1": 10, "n2": 10 },
+        "nps": "Not asked"
+      },
+      "pglRow": {
+        "label": "PGL",
+        "sublabel": "Post go-live",
+        "mean": "4.1",
+        "bands": [44, 8, 3],
+        "responses": 55,
+        "deployments": 44,
+        "mixLine": "32 Workday-led · 23 partner-led",
+        "heardFrom": { "heard": 44, "due": 55 },
+        "direction": { "kind": "stable", "from": 4.1, "to": 4.1, "n1": 26, "n2": 29 },
+        "nps": "+33 (n 52)"
+      },
+      "referenceRow": null,
+      "pglCompositionNote": "Partner-led share of PGL responses rose from 35% to 48%: part of any change may reflect the mix.",
+      "stageNote": "MDS is Workday-led only, so MDS vs PGL here is not a like-for-like comparison. Use Workday-led for stage context.",
+      "qualifier": {
+        "tone": "info",
+        "text": "Based on most deployments due for a survey. 14 due surveys have no response yet.",
+        "gapsLink": "View 14 evidence gaps →",
+        "gapsCount": 14
+      },
+      "weightingNote": null,
+      "risk": {
+        "lowVerdicts": 4,
+        "earlyWarnings": 1,
+        "footer": "View in Responses →",
+        "rows": [
+          { "pill": "Dissatisfied", "severity": "red", "name": "Example Health Network", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 14 Aug 2026 · Workday-led" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Synthetic Community Hospital", "stage": "PGL", "fact": "Overall 1 of 5 · 28 Aug 2026 · Partner-led" },
+          { "pill": "Low rating", "severity": "yellow", "name": "Example Children's Hospital", "stage": "MDS", "fact": "Communications rated 1 · Overall 4 · 3 Jul 2026 · Workday-led" },
+          { "pill": "Dissatisfied", "severity": "red", "name": "Demo Regional Care", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 4 Aug 2026 · Workday-led" }
+        ]
+      },
+      "delivery": {
+        "lowest": [
+          { "label": "Prepared for go-live (PGL)", "value": 3.8, "n": 53 },
+          { "label": "Schedule management", "value": 3.9, "n": 43 }
+        ],
+        "highest": [{ "label": "Technical competence", "value": 4.5, "n": 73 }]
+      },
+      "journey": {
+        "subtitle": "Workday-led only: partner-led deployments have no MDS survey",
+        "summary": "7 deployments: Held 5 · Higher 1 · Lower 1",
+        "note": "Same deployment, often different respondents."
+      },
+      "surveyOps": {
+        "issues": ["3 bounced invitations", "4 invitations expire within 7 days"],
+        "allClear": false
+      }
+    },
+    "low_volume": {
+      "file": "CSAT_OVERVIEW_LOW_VOLUME.html",
+      "protoLabel": "State 7 of 7: SLG-like low volume",
+      "shell": "slg",
+      "scopeActive": "workday-led",
+      "ov1Title": "Customer Satisfaction · Workday-led deployments",
+      "headline": {
+        "value": "4.1",
+        "responses": 16,
+        "deployments": 13,
+        "direction": { "kind": "insufficient", "n1": 7, "n2": 9, "needed": 10 }
+      },
+      "mdsRow": {
+        "label": "MDS",
+        "sublabel": "Mid-deployment",
+        "suppressed": true,
+        "suppressedDetail": "4 responses: too few to summarise",
+        "responses": 4,
+        "deployments": 4,
+        "heardFrom": { "heard": 4, "due": 9 },
+        "direction": { "kind": "insufficient", "n1": 1, "n2": 3, "needed": 10 },
+        "nps": "Not asked"
+      },
+      "pglRow": {
+        "label": "PGL",
+        "sublabel": "Post go-live",
+        "mean": "4.0",
+        "bands": [9, 2, 1],
+        "responses": 12,
+        "deployments": 10,
+        "heardFrom": { "heard": 10, "due": 13 },
+        "direction": { "kind": "insufficient", "n1": 6, "n2": 6, "needed": 10 },
+        "nps": "n<10 (9 NPS responses)"
+      },
+      "referenceRow": {
+        "label": "Partner-led PGL",
+        "mean": "3.8",
+        "bands": [6, 2, 1],
+        "responses": 9,
+        "deployments": 8,
+        "comparisonNote": "Comparison context: observed values only"
+      },
+      "stageNote": "MDS and PGL rows are different deployments at different points in delivery. For deployments with both, see MDS → PGL journey.",
+      "qualifier": {
+        "tone": "caution",
+        "text": "Read with caution: we have heard from fewer than half of the deployments due at MDS (4 of 9). 8 due surveys have no response yet.",
+        "gapsLink": "View 8 evidence gaps →",
+        "gapsCount": 8
+      },
+      "weightingNote": null,
+      "risk": {
+        "lowVerdicts": 1,
+        "earlyWarnings": 0,
+        "footer": "View in Responses →",
+        "rows": [
+          { "pill": "Dissatisfied", "severity": "red", "name": "Example County", "stage": "PGL", "fact": "Overall Satisfaction 2 of 5 · 19 Jun 2026" }
+        ]
+      },
+      "delivery": {
+        "lowest": [{ "label": "Schedule management", "value": 3.6, "n": 8 }],
+        "highest": [{ "label": "Responsiveness", "value": 4.5, "n": 16 }]
+      },
+      "journey": {
+        "subtitle": "Workday-led deployments with both surveys",
+        "summary": "1 deployment has both surveys: too few to summarise (5 needed).",
+        "link": "View its history →",
+        "note": "Same deployment, often different respondents."
+      },
+      "surveyOps": {
+        "issues": [],
+        "allClear": true
+      }
+    }
+  }
+}

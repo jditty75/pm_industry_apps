@@ -70,6 +70,15 @@ The reconciled architecture is now **product-approved for visual design**. `csat
 
 Applies the approved reconciled architecture and the provisional V3 visual vocabulary to **Surveys**. Design-only; the prototype handoff lives in [csat-surveys-design/composer-preview-spec.md](csat-surveys-design/composer-preview-spec.md).
 
+## CSAT integrated design — Responses · Deployment CSAT History · one subsystem (2026-10-06)
+
+| Doc | Read when |
+|-----|-----------|
+| [csat-integrated-design/README.md](csat-integrated-design/README.md) | **Current CSAT integrated design — completes the subsystem end-to-end.** Designs the two unbuilt surfaces (**Responses** investigation workspace; **Deployment CSAT History** as a routed in-page deployment workspace, not the rejected drawer), the **shared CSAT component system**, final visual/component **harmonization for Overview** and horizontal-utilisation **harmonization for Surveys**, **HC/SLG/HENP** config-only behaviour, low-volume behaviour, and a minimal representative state matrix |
+| [csat-integrated-design/composer-handoff.md](csat-integrated-design/composer-handoff.md) | The single build spec for the integrated, navigable CSAT prototype (shell, routing/deep-links, page specs, shared components, state fixtures, tests, Composer autonomy + 1440×900 self-review protocol, acceptance checklist) — no further Claude design prompt needed before implementation |
+
+These two files **supersede prior CSAT *visual-design* specs for integrated implementation** (`csat-overview-v2/`, `csat-overview-design/`, and the visual-execution role of the Phase-1 concept prototype). They do **not** supersede the approved architecture (`csat-reconciled-architecture/`), the canonical data contracts (`../csat-subsystem/`), or the frozen IA of `csat-overview-v3/` and `csat-surveys-design/`, which remain authoritative inputs. Design-only; no production/EDM/workbook/API/deploy change.
+
 Status of earlier CSAT design folders: `csat-product-model/` is **still authoritative for areas marked KEEP** in [decision-reconciliation.md](csat-reconciled-architecture/decision-reconciliation.md) (semantics, tiers, small-n rules, journey, feedback placement). It is **superseded** on headline metric, risk thresholds, navigation and hierarchy. `csat-overview-v2/` and its prototype are **historical**: the visual-language guidance is reusable, but its structure and thresholds are superseded. `csat-overview-design/` stays rejected/historical.
 
 ## Headline findings

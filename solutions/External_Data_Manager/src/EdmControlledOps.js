@@ -995,6 +995,80 @@ function runEdmEnsureQualtricsResponsesDriveFromProperties() {
 }
 
 /**
+ * Read-only sanitized snapshot for SLG Responses canary partial-state inspection (Logger only).
+ * @return {Object}
+ */
+function runEdmDiagnoseCsatResponsesSlgStorageCanaryState() {
+  Logger.log('runEdmDiagnoseCsatResponsesSlgStorageCanaryState: start');
+  var props = PropertiesService.getScriptProperties();
+  var SLG = EdmDestinationRegistry.APP_SLG;
+  var responsesInboxConfigured = !!props.getProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID);
+  var responsesFailedConfigured = !!props.getProperty(EdmProperties.QUALTRICS_RESPONSES_FAILED_FOLDER_ID);
+  Logger.log('responsesFoldersConfigured inbox=' + responsesInboxConfigured +
+    ' failed=' + responsesFailedConfigured);
+
+  var inboxCsvCount = 0;
+  if (responsesInboxConfigured) {
+    try {
+      var inboxId = props.getProperty(EdmProperties.QUALTRICS_RESPONSES_INBOX_FOLDER_ID);
+      var folder = DriveApp.getFolderById(inboxId);
+      var files = folder.getFiles();
+      while (files.hasNext()) {
+        var f = files.next();
+        if (String(f.getName()).toLowerCase().indexOf('.csv') >= 0) {
+          inboxCsvCount++;
+        }
+      }
+    } catch (driveErr) {
+      Logger.log('runEdmDiagnoseCsatResponsesSlgStorageCanaryState: inboxCountError=' + driveErr);
+    }
+  }
+  Logger.log('responsesInboxCsvCount=' + inboxCsvCount);
+
+  var responsesLedgerJobCount = 0;
+  var latestResponsesJobStatus = 'none';
+  var ledgerId = props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID);
+  if (ledgerId) {
+    try {
+      var sheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+      var rows = EdmAuditLedgerSheet.readAllJobs(sheet);
+      var responsesRows = rows.filter(function (r) {
+        return String(r.pipeline || '') === QualtricsResponsesPipeline.PIPELINE_ID;
+      });
+      responsesLedgerJobCount = responsesRows.length;
+      if (responsesRows.length) {
+        latestResponsesJobStatus = String(responsesRows[responsesRows.length - 1].overall_status || 'unknown');
+      }
+    } catch (ledgerErr) {
+      Logger.log('runEdmDiagnoseCsatResponsesSlgStorageCanaryState: ledgerReadError=' + ledgerErr);
+    }
+  }
+  Logger.log('responsesLedgerJobCount=' + responsesLedgerJobCount +
+    ' latestResponsesJobStatus=' + latestResponsesJobStatus);
+
+  var responsesIngestEnabled = props.getProperty(EdmProperties.RESPONSES_INGEST_ENABLED) === 'true';
+  Logger.log('responsesIngestEnabled=' + responsesIngestEnabled);
+
+  var storage = runEdmVerifyCsatResponsesStorage(SLG);
+  var slgSheetPresent = !!(storage.ok || storage.headerOk || storage.rowCount > 0);
+  Logger.log('slgCsatResponsesPresent=' + slgSheetPresent +
+    ' slgStoredRowCount=' + (storage.rowCount || 0) +
+    ' slgUniqueResponseCount=' + (storage.uniqueResponseIds || 0));
+
+  return {
+    ok: true,
+    responsesFoldersConfigured: responsesInboxConfigured && responsesFailedConfigured,
+    inboxCsvCount: inboxCsvCount,
+    responsesLedgerJobCount: responsesLedgerJobCount,
+    latestResponsesJobStatus: latestResponsesJobStatus,
+    responsesIngestEnabled: responsesIngestEnabled,
+    slgCsatResponsesPresent: slgSheetPresent,
+    slgStoredRowCount: storage.rowCount || 0,
+    slgUniqueResponseCount: storage.uniqueResponseIds || 0
+  };
+}
+
+/**
  * Authorized SLG CSAT Responses storage canary (editor / API executable).
  * Expects validated Responses CSV already in Responses/Inbox. Counts only in output.
  *
@@ -1005,7 +1079,7 @@ function runEdmEnsureQualtricsResponsesDriveFromProperties() {
 function runEdmCsatResponsesSlgStorageCanaryNow(options) {
   options = options || {};
   var SLG = EdmDestinationRegistry.APP_SLG;
-  var report = { ok: false, phase: 'start', steps: [] };
+  var report = { ok: false, phase: 'setup', steps: [] };
 
   function record_(name, result) {
     report.steps.push({
@@ -1021,143 +1095,111 @@ function runEdmCsatResponsesSlgStorageCanaryNow(options) {
     return !!result.ok;
   }
 
-  var pre = runEdmVerifyOperationalState();
-  var propsPre = PropertiesService.getScriptProperties();
-  var responsesDeleteOn = propsPre.getProperty(EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE) === 'true';
-  if (!record_('operational_state', {
-    ok: pre.ok && pre.triggerCount > 0 &&
-      pre.triggerHandlers.indexOf('runQualtricsInboxScheduled') >= 0 &&
-      !pre.responsesIngestEnabled && !responsesDeleteOn,
-    message: pre.ok ? 'inflight_trigger_ok' : 'operational_read_failed',
-    summary: 'triggers=' + pre.triggerCount + ' responsesIngest=' + pre.responsesIngestEnabled
-  })) {
-    return report;
-  }
+  try {
+    var pre = runEdmVerifyOperationalState();
+    var propsPre = PropertiesService.getScriptProperties();
+    var responsesDeleteOn = propsPre.getProperty(EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE) === 'true';
+    if (!record_('setup', {
+      ok: pre.ok && pre.triggerCount > 0 &&
+        pre.triggerHandlers.indexOf('runQualtricsInboxScheduled') >= 0 &&
+        !pre.responsesIngestEnabled && !responsesDeleteOn,
+      message: pre.ok ? 'inflight_trigger_ok' : 'operational_read_failed',
+      summary: 'triggers=' + pre.triggerCount + ' responsesIngest=' + pre.responsesIngestEnabled
+    })) {
+      return report;
+    }
 
-  var drive = runEdmEnsureQualtricsResponsesDriveFromProperties();
-  if (!record_('responses_drive', Object.assign({ summary: drive.message || '' }, drive))) {
-    return report;
-  }
+    var drive = runEdmEnsureQualtricsResponsesDriveFromProperties();
+    if (!record_('setup', Object.assign({ summary: drive.message || '' }, drive))) {
+      return report;
+    }
 
-  var dry = processQualtricsResponsesInboxNow({ dryRun: true });
-  var pop = (dry.outcome && dry.outcome.job && dry.outcome.job.populationCounts) || {};
-  var destMap = {};
-  (dry.destinationResults || []).forEach(function (d) {
-    destMap[d.appId] = d.inputRows;
-  });
-  var dryOk = dry.ok &&
-    (dry.outcome.job.sourceRowCount === 177) &&
-    destMap.HC_DM === 77 && destMap.SLG_DM === 28 && destMap.HENP_DM === 72;
-  if (!record_('responses_dry_run', {
-    ok: dryOk,
-    message: dryOk ? 'dry_run_counts_ok' : 'dry_run_counts_mismatch',
-    summary: 'source=' + (dry.outcome.job.sourceRowCount || 0) +
-      ' hc=' + (destMap.HC_DM || 0) + ' slg=' + (destMap.SLG_DM || 0) +
-      ' henp=' + (destMap.HENP_DM || 0)
-  })) {
-    return report;
-  }
+    report.phase = 'dryRun';
+    var dry = processQualtricsResponsesInboxNow({ dryRun: true });
+    if (!record_('dryRun', EdmCsatResponsesCanaryPhases.evaluateDryRunPhase(dry))) {
+      return report;
+    }
 
-  var preview = runEdmPreviewCsatResponsesEligibility(SLG);
-  var prevTotal = (preview.eligible || 0) + (preview.excluded || 0) + (preview.rejected || 0);
-  var previewOk = preview.ok &&
-    preview.routedCandidateRows === 28 &&
-    prevTotal === 28 &&
-    (preview.deploymentUniverseSize || 0) > 0 &&
-    ((preview.eligible || 0) > 0 || preview.excluded === 28);
-  if (!record_('slg_eligibility_preview', {
-    ok: previewOk,
-    message: previewOk ? 'eligibility_ok' : 'eligibility_implausible',
-    summary: 'input=' + preview.routedCandidateRows + ' eligible=' + (preview.eligible || 0) +
-      ' excluded=' + (preview.excluded || 0) + ' universe=' + (preview.deploymentUniverseSize || 0)
-  })) {
-    return report;
-  }
+    report.phase = 'eligibility';
+    var preview = runEdmPreviewCsatResponsesEligibility(SLG);
+    if (!record_('eligibility', EdmCsatResponsesCanaryPhases.evaluateEligibilityPhase(preview))) {
+      return report;
+    }
 
-  if (options.skipIngest) {
+    if (options.skipIngest) {
+      report.ok = true;
+      report.phase = 'complete_skip_ingest';
+      report.message = 'canary_complete_skip_ingest';
+      return report;
+    }
+
+    report.phase = 'bootstrap';
+    var boot = runEdmBootstrapCsatResponsesStorage(SLG);
+    if (!record_('bootstrap', EdmCsatResponsesCanaryPhases.evaluateBootstrapPhase(boot))) {
+      return report;
+    }
+
+    report.phase = 'firstIngest';
+    runEdmSetQualtricsResponsesIngestEnabled(true);
+    var ingest1 = processQualtricsResponsesInboxNow({
+      dryRun: false,
+      ingestEnabled: true,
+      deleteSuccessfulSource: false,
+      limitDestinationAppIds: [SLG]
+    });
+    var firstIngestStep = EdmCsatResponsesCanaryPhases.evaluateFirstIngestPhase(
+      ingest1, SLG, 'slg_first_ingest'
+    );
+    var slg1 = firstIngestStep.slg || {};
+    if (!record_('firstIngest', firstIngestStep)) {
+      runEdmSetQualtricsResponsesIngestEnabled(false);
+      return report;
+    }
+
+    report.phase = 'storageVerify';
+    var verify1 = runEdmVerifyCsatResponsesStorage(SLG);
+    if (!record_('storageVerify', EdmCsatResponsesCanaryPhases.evaluateStorageVerifyPhase(verify1, slg1))) {
+      runEdmSetQualtricsResponsesIngestEnabled(false);
+      return report;
+    }
+
+    report.phase = 'idempotencyIngest';
+    var ingest2 = processQualtricsResponsesInboxNow({
+      dryRun: false,
+      ingestEnabled: true,
+      deleteSuccessfulSource: false,
+      limitDestinationAppIds: [SLG],
+      allowDuplicateOverride: true
+    });
+    if (!record_('idempotencyIngest', EdmCsatResponsesCanaryPhases.evaluateIdempotencyPhase(ingest2, slg1, SLG))) {
+      runEdmSetQualtricsResponsesIngestEnabled(false);
+      return report;
+    }
+
+    runEdmSetQualtricsResponsesIngestEnabled(false);
+    report.phase = 'finalVerify';
+    var post = runEdmVerifyOperationalState();
+    record_('finalVerify', {
+      ok: post.ok && !post.responsesIngestEnabled,
+      message: 'responses_ingest_disabled',
+      summary: 'responsesIngest=' + post.responsesIngestEnabled
+    });
+
     report.ok = true;
-    report.phase = 'complete_skip_ingest';
+    report.phase = 'complete';
+    report.message = 'canary_complete';
     return report;
-  }
-
-  var boot = runEdmBootstrapCsatResponsesStorage(SLG);
-  if (!record_('slg_bootstrap', {
-    ok: boot.ok && boot.dataRowCount === 0,
-    message: boot.ok ? 'bootstrap_ok' : 'bootstrap_failed',
-    summary: 'dataRows=' + (boot.dataRowCount || 0)
-  })) {
-    return report;
-  }
-
-  runEdmSetQualtricsResponsesIngestEnabled(true);
-  var ingest1 = processQualtricsResponsesInboxNow({
-    dryRun: false,
-    ingestEnabled: true,
-    deleteSuccessfulSource: false,
-    limitDestinationAppIds: [SLG]
-  });
-  var slg1 = (ingest1.destinationResults || []).filter(function (d) {
-    return d.appId === SLG;
-  })[0] || {};
-  var ingest1Ok = ingest1.ok && slg1.status === 'success' &&
-    (slg1.inserted || 0) > 0 && (slg1.updated || 0) === 0 && (slg1.unchanged || 0) === 0;
-  if (!record_('slg_first_ingest', {
-    ok: ingest1Ok,
-    message: ingest1Ok ? 'first_ingest_ok' : 'first_ingest_failed',
-    summary: 'inserted=' + (slg1.inserted || 0) + ' updated=' + (slg1.updated || 0) +
-      ' unchanged=' + (slg1.unchanged || 0) + ' excluded=' + (slg1.excludedCount || 0)
-  })) {
+  } catch (err) {
     runEdmSetQualtricsResponsesIngestEnabled(false);
+    report.phase = report.phase || 'error';
+    report.message = 'canary_unhandled_error: ' + (err && err.message ? err.message : String(err));
+    report.steps.push({
+      step: 'error',
+      ok: false,
+      summary: report.message
+    });
     return report;
   }
-
-  var verify1 = runEdmVerifyCsatResponsesStorage(SLG);
-  var verifyOk = verify1.ok && verify1.headerOk && !verify1.forbiddenColumnsPresent &&
-    verify1.rowCount === verify1.uniqueResponseIds && verify1.rowCount === (slg1.inserted || 0);
-  if (!record_('slg_storage_verify', {
-    ok: verifyOk,
-    message: verifyOk ? 'storage_ok' : 'storage_verify_failed',
-    summary: 'rows=' + (verify1.rowCount || 0) + ' uniqueIds=' + (verify1.uniqueResponseIds || 0)
-  })) {
-    runEdmSetQualtricsResponsesIngestEnabled(false);
-    return report;
-  }
-
-  var ingest2 = processQualtricsResponsesInboxNow({
-    dryRun: false,
-    ingestEnabled: true,
-    deleteSuccessfulSource: false,
-    limitDestinationAppIds: [SLG],
-    allowDuplicateOverride: true
-  });
-  var slg2 = (ingest2.destinationResults || []).filter(function (d) {
-    return d.appId === SLG;
-  })[0] || {};
-  var priorEligible = (slg1.inserted || 0) + (slg1.unchanged || 0);
-  var idemOk = ingest2.ok &&
-    (slg2.inserted || 0) === 0 && (slg2.updated || 0) === 0 &&
-    (slg2.unchanged || 0) === priorEligible;
-  if (!record_('slg_idempotency', {
-    ok: idemOk,
-    message: idemOk ? 'idempotent_ok' : 'idempotency_failed',
-    summary: 'inserted=' + (slg2.inserted || 0) + ' unchanged=' + (slg2.unchanged || 0)
-  })) {
-    runEdmSetQualtricsResponsesIngestEnabled(false);
-    return report;
-  }
-
-  runEdmSetQualtricsResponsesIngestEnabled(false);
-  var post = runEdmVerifyOperationalState();
-  record_('post_operational_state', {
-    ok: post.ok && !post.responsesIngestEnabled,
-    message: 'responses_ingest_disabled',
-    summary: 'responsesIngest=' + post.responsesIngestEnabled
-  });
-
-  report.ok = true;
-  report.phase = 'complete';
-  report.message = 'canary_complete';
-  return report;
 }
 
 function runEdmV1bControlledInfrastructureSetup(

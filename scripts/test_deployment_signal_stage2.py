@@ -20,14 +20,20 @@ from deployment_trajectory_validation.data_stewardship import (
     detect_stewardship_conditions,
     scan_portfolio_stewardship,
 )
+from deployment_trajectory_validation.data_stewardship import compute_stewardship_deployment_populations
 from deployment_trajectory_validation.stage1_ingest import (
     EXPECTED_CANDIDATE_COUNT,
     Stage1IngestError,
+    REPORT_01_ID,
+    REPORT_03_ID,
     build_normalized_candidate,
+    detect_material_assessment_changes,
     ingest_stage1_directory,
+    merge_cumulative_candidates,
     normalize_attention,
     normalize_confidence,
     parse_stage1_batch_text,
+    split_cumulative_sana_reports,
 )
 from deployment_trajectory_validation.stage2_harness import (
     compact_context_for_stage2,
@@ -86,18 +92,56 @@ class Stage1IngestTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertIn("COMPOUND", signals[0].fields.get("Signal Type", ""))
 
-    def test_duplicate_detection(self):
+    def test_cumulative_sana_dedup_and_reports(self):
+        fixture = (
+            Path(__file__).resolve().parents[1]
+            / "libraries/DepMngr/test/fixtures/stage1-cumulative-synthetic.txt"
+        )
+        reports = split_cumulative_sana_reports(fixture.read_text(encoding="utf-8"))
+        self.assertEqual(len(reports), 3)
+        self.assertEqual(reports[0].report_id, REPORT_01_ID)
+        self.assertEqual(reports[2].report_id, REPORT_03_ID)
+        packets = {
+            "a0rSANITIZED0001": _packet(metadata={"deployment_id": "a0rSANITIZED0001"}),
+            "a0rSANITIZED0002": _packet(metadata={"deployment_id": "a0rSANITIZED0002"}),
+        }
+        import hashlib
+
+        text = fixture.read_text(encoding="utf-8")
+        reports = split_cumulative_sana_reports(text)
+        checksum = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        candidates, manifest = merge_cumulative_candidates(reports, packets, checksum)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(manifest["deduplication"]["unique_candidates"], 2)
+        self.assertGreater(manifest["deduplication"]["total_candidate_appearances"], 2)
+
+    def test_material_conflict_detection(self):
+        a = {
+            "attention": "HIGH",
+            "signal_type": "COMPOUND",
+            "observation": "Alpha text",
+            "interpretation": "",
+            "why_this_matters": "",
+            "leadership_question": "",
+            "confidence": "MEDIUM",
+            "evidence_limitations": "",
+        }
+        b = dict(a)
+        b["attention"] = "WATCH"
+        self.assertIn("attention", detect_material_assessment_changes(a, b))
+
+    def test_legacy_duplicate_batch_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             stage1 = Path(tmp)
-            dup = """Deployment: DEP_SANITIZED_001
+            dup = """Deployment a0rSANITIZED0001
 
 Attention: High
 Signal Type: HEALTH
 Observation: A
 """
-            (stage1 / "a.txt").write_text(dup, encoding="utf-8")
-            (stage1 / "b.txt").write_text(dup, encoding="utf-8")
-            packets = {"DEP_SANITIZED_001": _packet()}
+            (stage1 / "sana-batch-01-output.txt").write_text(dup, encoding="utf-8")
+            (stage1 / "sana-batch-02-output.txt").write_text(dup, encoding="utf-8")
+            packets = {"a0rSANITIZED0001": _packet(metadata={"deployment_id": "a0rSANITIZED0001"})}
             with self.assertRaises(Stage1IngestError):
                 ingest_stage1_directory(stage1, packets, expected_count=2)
 
@@ -149,6 +193,13 @@ class StewardshipTests(unittest.TestCase):
         rows, summary = scan_portfolio_stewardship(packets)
         self.assertEqual(summary["total_deployments_scanned"], 184)
         self.assertGreater(summary["condition_count"], 0)
+        self.assertIn("condition_count_platform", summary)
+        pops = compute_stewardship_deployment_populations(packets, rows, set())
+        self.assertIn("deployment_count_with_platform_limitation", pops)
+        self.assertGreaterEqual(
+            pops["deployment_count_with_platform_limitation"],
+            pops["deployment_count_platform_limitations_only"],
+        )
 
 
 class Stage2PayloadTests(unittest.TestCase):

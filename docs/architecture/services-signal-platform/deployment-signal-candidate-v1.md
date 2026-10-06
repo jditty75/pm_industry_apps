@@ -24,6 +24,6 @@ Fields: Attention, Signal Type, Observation, Historical Evidence, Interpretation
 
 - Local: `scripts/deployment_trajectory_validation/stage1_ingest.py`
 - Apps Script mirror: `CoreDeploymentSignalStage1Ingest.js` (parser tests)
-- Verbatim Stage-1 batch outputs: `.ai/signal-exports/stage1/sana-batch-{01,02,03}-output.txt` (gitignored)
+- Authoritative Stage-1 source (local, gitignored): `.ai/signal-exports/stage1/Sana.txt` — three **cumulative** portfolio reports in one verbatim file (`REPORT_01_BATCH_1`, `REPORT_02_BATCHES_1_2`, `REPORT_03_FULL_PORTFOLIO`). Legacy optional: `sana-batch-{01,02,03}-output.txt`.
 
-Pilot acceptance: **17** unique candidate deployments across three Stage-1 batches; ingest fails loudly on count mismatch or duplicate `deployment_id`.
+Pilot acceptance: **17** unique candidate deployments (184 evaluated / 167 NO_SIGNAL); cumulative appearances are deduplicated by `deployment_id`; ingest fails loudly on count mismatch or unresolved assessment conflicts.

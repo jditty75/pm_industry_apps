@@ -12,25 +12,24 @@ from .context_assembler import SCHEMA_VERSION
 from .data_stewardship import (
     LANE_PLATFORM,
     LANE_STEWARDSHIP,
+    compute_stewardship_deployment_populations,
     scan_portfolio_stewardship,
     stewardship_for_deployment,
 )
 from .portfolio_harness import privacy_scan_text
 from .stage1_ingest import CANDIDATE_SCHEMA_VERSION, EXPECTED_CANDIDATE_COUNT
 
-STAGE2_INSTRUCTION = """STAGE 2 — PORTFOLIO ATTENTION COMPRESSION (Deployment Intelligence vs Data Stewardship)
-
-You are reviewing candidate Signals from the complete deployment portfolio.
+STAGE2_INSTRUCTION = """You are reviewing candidate Signals from the complete deployment portfolio.
 
 Stage 1 intentionally used a lower threshold to identify individually interesting candidates.
 
 Your task now is relative portfolio attention compression.
 
-Compare the candidates against one another.
+Compare candidates against one another.
 
 Retain only conditions that materially deserve senior leadership awareness relative to the rest of the portfolio.
 
-Do not preserve a candidate merely because Stage 1 surfaced it.
+Do not retain a candidate merely because Stage 1 surfaced it.
 
 Do not target a predetermined number of Signals.
 
@@ -38,7 +37,7 @@ If only a few materially deserve leadership attention, return only those.
 
 Separate Deployment Intelligence from Data Stewardship.
 
-A data-quality issue should not automatically become a leadership Deployment Signal.
+A data-quality condition does not automatically become a leadership Deployment Signal.
 
 A deployment may have both.
 
@@ -48,7 +47,7 @@ Current Green alone is insufficient reason to discard one.
 
 Prefer information that adds material insight beyond current health/status alone.
 
-Respect evidence quality and source limitations.
+Respect evidence quality and platform/source limitations.
 
 Preserve meaningful recovery/stabilization.
 
@@ -56,28 +55,19 @@ Do not predict failure, escalation, or missed production.
 
 Use leadership questions rather than unsupported prescriptions.
 
-For every Deployment Intelligence Signal you retain, include mandatory field:
-Incremental Value Beyond Current Health — what this Signal tells leadership that current health/status alone does not.
-
-Return structured output with:
-Portfolio summary (deployments evaluated, Stage-1 candidates reviewed, Deployment Intelligence Signals retained,
-Data Stewardship conditions summarized, candidates compressed out at Stage 2).
-
-Deployment Intelligence grouped by: LEADERSHIP ATTENTION; WATCH / EMERGING; IMPROVING / STABILIZING; INFORMATIONAL (omit empty).
-
-Data Stewardship summarized by BLOCKING / REVIEW / ADVISORY with factual deterministic evidence (no blame).
-
-Compressed candidates: deployment, Stage-1 category, one-line reason not portfolio-level leadership attention."""
+For every retained Deployment Intelligence Signal, include mandatory field:
+Incremental Value Beyond Current Health — what this tells leadership that current health/status alone does not."""
 
 STAGE2_OUTPUT_CONTRACT = """
 STAGE 2 OUTPUT CONTRACT (required sections)
 -----------------------------------------
 Portfolio:
-- deployments evaluated: 184
-- Stage-1 candidates reviewed: 17
+- deployments evaluated
+- Stage-1 candidates reviewed
 - Deployment Intelligence Signals retained
-- Data Stewardship conditions summarized
-- candidates compressed out at Stage 2
+- Stage-1 candidates compressed out
+- Data Stewardship deployment population (distinct deployments)
+- Platform Evidence Limitation population (distinct deployments)
 
 Deployment Intelligence (omit empty groups):
 LEADERSHIP ATTENTION | WATCH / EMERGING | IMPROVING / STABILIZING | INFORMATIONAL
@@ -85,9 +75,11 @@ Per retained Signal: Deployment, Attention, Signal Type, Observation, Interpreta
 Incremental Value Beyond Current Health, Why This Matters, Leadership Question, Confidence,
 Evidence Limitations, Data Stewardship condition present: yes/no
 
-Data Stewardship (separate): BLOCKING | REVIEW | ADVISORY — material conditions with deterministic evidence
+Data Stewardship (separate): BLOCKING | REVIEW | ADVISORY
+Material conditions: Deployment, condition, deterministic evidence, why reliable system-of-record data matters,
+review target without assigning blame.
 
-Compressed candidates: deployment, Stage-1 category, one-line compression reason (no full summaries)
+Compressed Stage-1 candidates: deployment, Stage-1 category, one-line reason it did not merit portfolio-level leadership attention.
 """
 
 
@@ -187,9 +179,17 @@ def portfolio_stage2_payload(
     candidates: List[Dict[str, Any]],
     packets: List[Dict[str, Any]],
     stage1_manifest: Dict[str, Any],
+    stewardship_summary: Optional[Dict[str, Any]] = None,
+    stewardship_deployment_populations: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     packets_by_id_map = packets_by_id(packets)
     enriched = enrich_candidates(candidates, packets_by_id_map)
+    for cand in enriched:
+        for raw in candidates:
+            if raw["identity"]["deployment_id"] == cand["identity"]["deployment_id"]:
+                if raw.get("stage1_provenance"):
+                    cand["stage1_provenance"] = raw["stage1_provenance"]
+                break
     health_dist: Dict[str, int] = {}
     stage_dist: Dict[str, int] = {}
     eq_dist: Dict[str, int] = {}
@@ -202,18 +202,28 @@ def portfolio_stage2_payload(
         eq = str((ctx.get("evidence_quality") or {}).get("classification") or "UNKNOWN")
         eq_dist[eq] = eq_dist.get(eq, 0) + 1
 
+    evaluated = len(packets)
+    n_cand = len(enriched)
+    no_signal = evaluated - n_cand
+    compression_rate = round((no_signal / evaluated) * 100, 1) if evaluated else 0.0
+    baseline = stage1_manifest.get("stage1_portfolio_baseline") or {}
+
     return {
         "schema_version": "deployment-signal-stage2-input-v1",
         "portfolio_context": {
-            "deployments_evaluated": len(packets),
-            "stage1_candidates": len(enriched),
-            "stage1_no_signal": len(packets) - len(enriched),
+            "deployments_evaluated": evaluated,
+            "stage1_candidates": n_cand,
+            "stage1_no_signal": no_signal,
+            "stage1_compression_rate_percent": compression_rate,
+            "stage1_portfolio_baseline": baseline,
             "context_schema": SCHEMA_VERSION,
             "candidate_schema": CANDIDATE_SCHEMA_VERSION,
             "stage1_ingest": stage1_manifest,
             "candidate_health_distribution": health_dist,
             "candidate_stage_distribution": stage_dist,
             "candidate_evidence_quality_distribution": eq_dist,
+            "stewardship_condition_summary": stewardship_summary,
+            "stewardship_deployment_populations": stewardship_deployment_populations,
             "evidence_depth_note": (
                 "Product Function target-date history is unavailable platform-wide in the current extract. "
                 "Distinguish PLATFORM_EVIDENCE_LIMITATION from DEPLOYMENT_DATA_STEWARDSHIP in reasoning."
@@ -269,7 +279,9 @@ def _esc(v: Any) -> str:
     return html.escape(str(v if v is not None else ""))
 
 
-def render_stage2_candidate_review_html(candidates: List[Dict[str, Any]], manifest: Dict[str, Any]) -> str:
+def render_stage2_candidate_review_html(
+    candidates: List[Dict[str, Any]], manifest: Dict[str, Any]
+) -> str:
     parts = [
         "<!DOCTYPE html><html><head><meta charset='utf-8'>",
         "<title>Stage-2 Candidate Review (local only)</title>",
@@ -300,15 +312,32 @@ def render_stage2_candidate_review_html(candidates: List[Dict[str, Any]], manife
             f"<span class='tag'>Stage: {_esc(ctx.get('deployment_stage'))}</span>"
             f"<span class='tag'>EQ: {_esc((ctx.get('evidence_quality') or {}).get('classification'))}</span></p>"
         )
+        prov = cand.get("stage1_provenance") or {}
+        if prov:
+            parts.append("<h3>Cumulative report provenance</h3><pre>")
+            parts.append(_esc(json.dumps(prov, indent=2)))
+            parts.append("</pre>")
+            conflicts = prov.get("assessment_conflicts") or []
+            if conflicts:
+                parts.append("<p><strong>Assessment changes:</strong></p><pre>")
+                parts.append(_esc(json.dumps(conflicts, indent=2)))
+                parts.append("</pre>")
         if stew.get("has_stewardship"):
-            parts.append("<p><strong>Data Stewardship flags:</strong></p><ul>")
+            parts.append("<p><strong>Data Stewardship (system-of-record review):</strong></p><ul>")
             for row in stew.get("deployment_data_stewardship") or []:
                 parts.append(
                     f"<li>{_esc(row.get('impact_classification'))}: "
                     f"{_esc(row.get('condition_code'))} — {_esc(row.get('observation'))}</li>"
                 )
             parts.append("</ul>")
-        parts.append("<h3>Stage-1 assessment</h3><pre>")
+        if stew.get("has_platform_limitation"):
+            parts.append("<p><strong>Platform evidence limitations:</strong></p><ul>")
+            for row in stew.get("platform_evidence_limitations") or []:
+                parts.append(
+                    f"<li>{_esc(row.get('condition_code'))} — {_esc(row.get('observation'))}</li>"
+                )
+            parts.append("</ul>")
+        parts.append("<h3>Canonical Stage-1 assessment</h3><pre>")
         parts.append(_esc(json.dumps(assess, indent=2)))
         parts.append("</pre><h3>Deterministic context (Stage-2 payload)</h3><pre>")
         parts.append(_esc(json.dumps(ctx, indent=2)))
@@ -321,39 +350,74 @@ def render_stewardship_review_html(
     rows: List[Dict[str, Any]],
     candidate_ids: set,
     summary: Dict[str, Any],
+    deployment_populations: Optional[Dict[str, Any]] = None,
 ) -> str:
+    pop = deployment_populations or {}
     parts = [
         "<!DOCTYPE html><html><head><meta charset='utf-8'>",
         "<title>Data Stewardship Review (local only)</title>",
-        "<style>body{font-family:Segoe UI,sans-serif;margin:20px}"
-        "table{border-collapse:collapse;width:100%;font-size:12px}"
+        "<style>body{font-family:Segoe UI,sans-serif;margin:20px;max-width:1400px;line-height:1.4}"
+        "table{border-collapse:collapse;width:100%;font-size:12px;margin:12px 0}"
         "th,td{border:1px solid #ccc;padding:6px;vertical-align:top}"
-        "tr.stew{background:#fff8e6}tr.plat{background:#eef6ff}</style></head><body>",
-        "<h1>Data Stewardship — Portfolio QA Scan</h1>",
-        f"<p>Deployments scanned: {summary.get('total_deployments_scanned')}; "
-        f"with conditions: {summary.get('deployments_with_conditions')}</p>",
-        "<table><thead><tr>",
-        "<th>Lane</th><th>Impact</th><th>Code</th><th>Deployment</th>",
-        "<th>Health</th><th>Stage</th><th>Domain</th><th>Observation</th>",
-        "<th>Stage-1 candidate?</th></tr></thead><tbody>",
+        "tr.stew{background:#fff8e6}tr.plat{background:#eef6ff}"
+        ".stew-banner{background:#b45309;color:#fff;padding:12px;border-radius:6px}"
+        ".plat-banner{background:#1d4ed8;color:#fff;padding:12px;border-radius:6px;margin-top:24px}"
+        "h2{margin-top:28px}</style></head><body>",
+        "<h1>Portfolio QA — Data Stewardship vs Platform Limitations</h1>",
+        f"<p>Deployments scanned: <strong>{summary.get('total_deployments_scanned')}</strong> · "
+        f"Condition rows (all lanes): <strong>{summary.get('condition_count')}</strong> · "
+        f"Stewardship condition rows: <strong>{summary.get('condition_count_stewardship')}</strong> · "
+        f"Platform limitation rows: <strong>{summary.get('condition_count_platform')}</strong></p>",
+        "<div class='stew-banner'><strong>Deployment Data Stewardship</strong> — actionable "
+        "system-of-record review (SYSTEM_OF_RECORD_REVIEW_REQUIRED). Not personal blame.</div>",
+        "<p>Distinct deployments with any stewardship condition: "
+        f"<strong>{pop.get('deployment_count_with_stewardship_condition', '—')}</strong> · "
+        f"BLOCKING: <strong>{pop.get('deployment_count_stewardship_blocking', '—')}</strong> · "
+        f"REVIEW: <strong>{pop.get('deployment_count_stewardship_review', '—')}</strong> · "
+        f"ADVISORY-only: <strong>{pop.get('deployment_count_stewardship_advisory_only', '—')}</strong> · "
+        f"Multiple stewardship conditions: "
+        f"<strong>{pop.get('deployment_count_stewardship_multiple_conditions', '—')}</strong></p>",
+        _stewardship_table_html(
+            [r for r in rows if r.get("lane") == LANE_STEWARDSHIP], candidate_ids
+        ),
+        "<div class='plat-banner'><strong>Platform Evidence Limitations</strong> — extract/source "
+        "capability gaps (not Engagement Manager data-maintenance failures).</div>",
+        "<p>Distinct deployments with platform limitations: "
+        f"<strong>{pop.get('deployment_count_with_platform_limitation', '—')}</strong> · "
+        f"Platform-only (no stewardship): "
+        f"<strong>{pop.get('deployment_count_platform_limitations_only', '—')}</strong></p>",
+        _stewardship_table_html(
+            [r for r in rows if r.get("lane") == LANE_PLATFORM], candidate_ids
+        ),
+        "</body></html>",
     ]
-    # Build health/stage lookup from rows is not stored — pass via extra field on scan
+    return "".join(parts)
+
+
+def _stewardship_table_html(rows: List[Dict[str, Any]], candidate_ids: set) -> str:
+    parts = [
+        "<table><thead><tr>",
+        "<th>Impact</th><th>Code</th><th>Deployment</th>",
+        "<th>Health</th><th>Stage</th><th>Domain</th><th>Observation</th>",
+        "<th>Source</th><th>Age (days)</th><th>Stage-1 candidate?</th><th>Review action</th>",
+        "</tr></thead><tbody>",
+    ]
     for row in rows:
-        lane = row.get("lane", "")
-        cls = "stew" if lane == LANE_STEWARDSHIP else "plat"
         dep = row.get("deployment_id", "")
         parts.append(
-            f"<tr class='{cls}'><td>{_esc(lane)}</td>"
-            f"<td>{_esc(row.get('impact_classification'))}</td>"
+            f"<tr><td>{_esc(row.get('impact_classification'))}</td>"
             f"<td>{_esc(row.get('condition_code'))}</td>"
             f"<td>{_esc(dep)}</td>"
             f"<td>{_esc(row.get('current_health'))}</td>"
             f"<td>{_esc(row.get('deployment_stage'))}</td>"
             f"<td>{_esc(row.get('affected_domain'))}</td>"
             f"<td>{_esc(row.get('observation'))}</td>"
-            f"<td>{'yes' if dep in candidate_ids else 'no'}</td></tr>"
+            f"<td>{_esc(row.get('trace_reference'))}</td>"
+            f"<td>{_esc(row.get('age_or_staleness_days'))}</td>"
+            f"<td>{'yes' if dep in candidate_ids else 'no'}</td>"
+            f"<td>{_esc(row.get('review_action'))}</td></tr>"
         )
-    parts.append("</tbody></table></body></html>")
+    parts.append("</tbody></table>")
     return "".join(parts)
 
 
@@ -377,25 +441,19 @@ def build_stewardship_summary_json(
     summary: Dict[str, Any],
     candidate_ids: set,
     out_path: Path,
+    deployment_populations: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    overlap = len({r["deployment_id"] for r in rows if r.get("deployment_id") in candidate_ids})
-    health_dist: Dict[str, int] = {}
-    stage_dist: Dict[str, int] = {}
-    for row in rows:
-        if row.get("lane") != LANE_STEWARDSHIP:
-            continue
-        h = str(row.get("current_health") or "UNKNOWN")
-        s = str(row.get("deployment_stage") or "UNKNOWN")
-        health_dist[h] = health_dist.get(h, 0) + 1
-        stage_dist[s] = stage_dist.get(s, 0) + 1
+    stew_dep_ids = {
+        r["deployment_id"]
+        for r in rows
+        if r.get("lane") == LANE_STEWARDSHIP and r.get("deployment_id")
+    }
+    overlap = len(stew_dep_ids & candidate_ids)
     doc = {
         **summary,
-        "overlap_stage1_candidates": overlap,
-        "health_distribution_stewardship_rows": health_dist,
-        "stage_distribution_stewardship_rows": stage_dist,
+        "deployment_populations": deployment_populations or {},
+        "overlap_stage1_candidates_with_stewardship": overlap,
         "detailed_rows_local_reference": str(out_path),
-        "platform_limitation_count": sum(1 for r in rows if r.get("lane") == LANE_PLATFORM),
-        "deployment_stewardship_count": sum(1 for r in rows if r.get("lane") == LANE_STEWARDSHIP),
     }
     return doc
 
@@ -413,7 +471,16 @@ def write_stage2_artifacts(
     candidate_ids = {c["identity"]["deployment_id"] for c in candidates}
     stewardship_rows = attach_health_stage_to_stewardship_rows(stewardship_rows, packets_map)
 
-    payload = portfolio_stage2_payload(candidates, packets, stage1_manifest)
+    dep_pops = compute_stewardship_deployment_populations(
+        packets, stewardship_rows, candidate_ids
+    )
+    payload = portfolio_stage2_payload(
+        candidates,
+        packets,
+        stage1_manifest,
+        stewardship_summary,
+        dep_pops,
+    )
     validation_errors = validate_stage2_payload(payload)
     if validation_errors:
         raise ValueError("Stage-2 payload validation failed: " + "; ".join(validation_errors))
@@ -432,13 +499,19 @@ def write_stage2_artifacts(
 
     stew_html_path = out_dir / "data-stewardship-review.html"
     stew_html_path.write_text(
-        render_stewardship_review_html(stewardship_rows, candidate_ids, stewardship_summary),
+        render_stewardship_review_html(
+            stewardship_rows, candidate_ids, stewardship_summary, dep_pops
+        ),
         encoding="utf-8",
     )
 
     stew_json_path = out_dir / "data-stewardship-summary.json"
     stew_doc = build_stewardship_summary_json(
-        stewardship_rows, stewardship_summary, candidate_ids, stew_html_path
+        stewardship_rows,
+        stewardship_summary,
+        candidate_ids,
+        stew_html_path,
+        dep_pops,
     )
     stew_doc["candidate_deployment_ids"] = sorted(candidate_ids)
     stew_json_path.write_text(json.dumps(stew_doc, indent=2), encoding="utf-8")

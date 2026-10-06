@@ -355,12 +355,140 @@ def scan_portfolio_stewardship(
     summary = {
         "schema_version": STEWARDSHIP_SCHEMA_VERSION,
         "total_deployments_scanned": len(packets),
+        "deployments_with_any_condition": len(deps_with),
         "deployments_with_conditions": len(deps_with),
         "conditions_by_code": by_code,
         "conditions_by_impact": by_impact,
         "condition_count": len(all_rows),
+        "condition_count_platform": sum(1 for r in all_rows if r.get("lane") == LANE_PLATFORM),
+        "condition_count_stewardship": sum(1 for r in all_rows if r.get("lane") == LANE_STEWARDSHIP),
     }
     return all_rows, summary
+
+
+def _health_bucket(packet: Dict[str, Any]) -> str:
+    return _str((packet.get("current_state") or {}).get("current_health")).lower() or "unknown"
+
+
+def compute_stewardship_deployment_populations(
+    packets: List[Dict[str, Any]],
+    rows: List[Dict[str, Any]],
+    candidate_ids: Optional[set] = None,
+) -> Dict[str, Any]:
+    """Distinct deployment populations — separate condition rows from deployment counts."""
+    candidate_ids = candidate_ids or set()
+    by_dep_rows: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        dep = _str(row.get("deployment_id"))
+        if dep:
+            by_dep_rows.setdefault(dep, []).append(row)
+
+    packets_by_id = {
+        _str((p.get("metadata") or {}).get("deployment_id")): p for p in packets
+    }
+    all_dep_ids = {_str((p.get("metadata") or {}).get("deployment_id")) for p in packets}
+    all_dep_ids.discard("")
+
+    deps_platform_any: set = set()
+    deps_stewardship_any: set = set()
+    deps_blocking: set = set()
+    deps_review: set = set()
+    deps_advisory_only: set = set()
+    deps_multi_stewardship: set = set()
+
+    for dep, dep_rows in by_dep_rows.items():
+        plat = [r for r in dep_rows if r.get("lane") == LANE_PLATFORM]
+        stew = [r for r in dep_rows if r.get("lane") == LANE_STEWARDSHIP]
+        if plat:
+            deps_platform_any.add(dep)
+        if stew:
+            deps_stewardship_any.add(dep)
+            impacts = {r.get("impact_classification") for r in stew}
+            if IMPACT_BLOCKING in impacts:
+                deps_blocking.add(dep)
+            if IMPACT_REVIEW in impacts:
+                deps_review.add(dep)
+            if impacts and impacts <= {IMPACT_ADVISORY}:
+                deps_advisory_only.add(dep)
+            if len(stew) > 1:
+                deps_multi_stewardship.add(dep)
+
+    deps_platform_only = {
+        d
+        for d in deps_platform_any
+        if d not in deps_stewardship_any
+    }
+
+    overlap_candidates = deps_stewardship_any & candidate_ids
+    no_signal_ids = all_dep_ids - candidate_ids
+    overlap_no_signal = deps_stewardship_any & no_signal_ids
+
+    def stew_by_health(ids: set) -> Dict[str, int]:
+        dist: Dict[str, int] = {}
+        for dep in ids:
+            pkt = packets_by_id.get(dep) or {}
+            h = _health_bucket(pkt)
+            dist[h] = dist.get(h, 0) + 1
+        return dist
+
+    rule_ambiguity_notes = []
+    high_volume_codes = (
+        "PF_ROLLUP_RECONCILIATION_MISMATCH",
+        "PARENT_MTP_RECONCILIATION_MISMATCH",
+        "CURRENT_MTP_MISSING",
+    )
+    for code in high_volume_codes:
+        count = sum(1 for r in rows if r.get("condition_code") == code)
+        if not count:
+            continue
+        lane = next((r.get("lane") for r in rows if r.get("condition_code") == code), "")
+        if code == "CURRENT_MTP_MISSING":
+            rule_ambiguity_notes.append(
+                f"{code}: classified DEPLOYMENT_DATA_STEWARDSHIP (BLOCKING) — "
+                f"deployment-specific missing MTP in system of record ({count} condition rows)."
+            )
+        elif code == "PARENT_MTP_RECONCILIATION_MISMATCH":
+            rule_ambiguity_notes.append(
+                f"{code}: DEPLOYMENT_DATA_STEWARDSHIP when parent reconciliation flags mismatch; "
+                f"baseline-only net movement without logged events remains PLATFORM/context caveat "
+                f"({count} condition rows). Review if source cannot reconstruct parent MTP."
+            )
+        elif code == "PF_ROLLUP_RECONCILIATION_MISMATCH":
+            rule_ambiguity_notes.append(
+                f"{code}: DEPLOYMENT_DATA_STEWARDSHIP — count/complete/remaining inconsistency in "
+                f"extract ({count} condition rows); not a PF target-history platform gap."
+            )
+
+    return {
+        "deployment_count_with_platform_limitation": len(deps_platform_any),
+        "deployment_count_platform_limitations_only": len(deps_platform_only),
+        "deployment_count_with_stewardship_condition": len(deps_stewardship_any),
+        "deployment_count_stewardship_blocking": len(deps_blocking),
+        "deployment_count_stewardship_review": len(deps_review),
+        "deployment_count_stewardship_advisory_only": len(deps_advisory_only),
+        "deployment_count_stewardship_multiple_conditions": len(deps_multi_stewardship),
+        "overlap_stage1_candidates_with_stewardship": len(overlap_candidates),
+        "overlap_stage1_no_signal_with_stewardship": len(overlap_no_signal),
+        "stewardship_by_health_green": stew_by_health(
+            {d for d in deps_stewardship_any if _health_bucket(packets_by_id.get(d) or {}) == "green"}
+        ),
+        "stewardship_by_health_yellow": stew_by_health(
+            {d for d in deps_stewardship_any if _health_bucket(packets_by_id.get(d) or {}) == "yellow"}
+        ),
+        "stewardship_by_health_red": stew_by_health(
+            {d for d in deps_stewardship_any if _health_bucket(packets_by_id.get(d) or {}) == "red"}
+        ),
+        "stewardship_deployment_count_green": len(
+            [d for d in deps_stewardship_any if _health_bucket(packets_by_id.get(d) or {}) == "green"]
+        ),
+        "stewardship_deployment_count_yellow": len(
+            [d for d in deps_stewardship_any if _health_bucket(packets_by_id.get(d) or {}) == "yellow"]
+        ),
+        "stewardship_deployment_count_red": len(
+            [d for d in deps_stewardship_any if _health_bucket(packets_by_id.get(d) or {}) == "red"]
+        ),
+        "rule_ownership_notes": rule_ambiguity_notes,
+    }
 
 
 def stewardship_for_deployment(

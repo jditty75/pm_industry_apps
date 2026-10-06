@@ -59,18 +59,6 @@ def main() -> int:
     stewardship_rows, stewardship_summary = scan_portfolio_stewardship(packets)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    pmap = packets_by_id(packets)
-    stewardship_rows = attach_health_stage_to_stewardship_rows(stewardship_rows, pmap)
-    stew_html_path = out_dir / "data-stewardship-review.html"
-    stew_html_path.write_text(
-        render_stewardship_review_html(stewardship_rows, set(), stewardship_summary),
-        encoding="utf-8",
-    )
-    stew_json_path = out_dir / "data-stewardship-summary.json"
-    stew_doc = build_stewardship_summary_json(
-        stewardship_rows, stewardship_summary, set(), stew_html_path
-    )
-    stew_json_path.write_text(json.dumps(stew_doc, indent=2), encoding="utf-8")
 
     stage1_dir = Path(args.stage1_dir)
     try:
@@ -82,11 +70,10 @@ def main() -> int:
     except Stage1IngestError as exc:
         print(str(exc), file=sys.stderr)
         print(
-            "\nPlace verbatim Sana Stage-1 batch outputs under:\n"
+            "\nPlace verbatim Sana Stage-1 output under:\n"
             f"  {stage1_dir.resolve()}\n"
-            "  sana-batch-01-output.txt\n"
-            "  sana-batch-02-output.txt\n"
-            "  sana-batch-03-output.txt\n",
+            "  Sana.txt (cumulative reports 1–3)\n"
+            "  or legacy sana-batch-01/02/03-output.txt\n",
             file=sys.stderr,
         )
         return 3

@@ -9,7 +9,7 @@
 | NO_SIGNAL | 167 |
 | Compression | ~90.8% |
 
-Stage 1 used three deterministic Sana batches (unchanged Deployment Signals Pilot agent). Stage 1 outcomes are **not** deterministic rules — they are inputs to Stage 2.
+Stage 1 used three sequential Sana portfolio runs preserved verbatim in local `stage1/Sana.txt` (cumulative reports). Stage 1 outcomes are **not** deterministic rules — they are inputs to Stage 2.
 
 ## Stage 2 question
 
@@ -26,7 +26,7 @@ No hard-coded top-N, rankings, severity scores, or thresholds to reproduce Stage
 
 ## Workflow
 
-1. Store verbatim Stage-1 Sana outputs under `.ai/signal-exports/stage1/`.
+1. Store verbatim Stage-1 Sana output as `.ai/signal-exports/stage1/Sana.txt` (three cumulative reports in one file).
 2. `python scripts/deployment-signal-stage2-harness.py`
 3. Inspect `.ai/signal-exports/stage2-candidate-review.html` and `data-stewardship-review.html`.
 4. Manually paste `.ai/signal-exports/sana-stage2-portfolio-compression-input.txt` into Sana (Stage-2 instructions are embedded in that artifact).

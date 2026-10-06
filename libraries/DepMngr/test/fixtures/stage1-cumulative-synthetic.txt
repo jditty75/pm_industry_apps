@@ -1,0 +1,44 @@
+Deployment Signals Pilot — Portfolio Report
+Portfolio evaluated: 2 deployments analyzed Signals surfaced: 1 No current Signal: 1
+
+Leadership Attention
+1. Deployment a0rSANITIZED0001 — "Sanitized A"
+Attention: High
+Signal Type: COMPOUND
+Observation: First report observation alpha.
+Interpretation: Sanitized interpretation A.
+Why This Matters: Test cumulative ingest report one.
+Leadership Question: Question A?
+Confidence: Medium
+Evidence Limitations: Synthetic fixture.
+
+Deployment Signals Pilot — Updated Portfolio Report (Batches 1–2)
+Portfolio evaluated: 2 deployments analyzed Signals surfaced: 2 No current Signal: 0
+
+Leadership Attention
+1. Deployment a0rSANITIZED0001 — "Sanitized A"
+Attention: High
+Signal Type: COMPOUND
+Observation: First report observation alpha.
+Interpretation: Sanitized interpretation A.
+Why This Matters: Test cumulative ingest report one.
+Leadership Question: Question A?
+Confidence: Medium
+Evidence Limitations: Synthetic fixture.
+
+2. Deployment a0rSANITIZED0002 — "Sanitized B"
+Attention: Watch
+Signal Type: INTERVENTION
+Observation: Second report new candidate beta.
+Interpretation: Sanitized interpretation B.
+Why This Matters: Test cumulative ingest report two.
+Leadership Question: Question B?
+Confidence: Low
+Evidence Limitations: Synthetic fixture.
+
+Deployment Signals Pilot — Final Portfolio Report (Full Portfolio)
+Portfolio evaluated: 2 deployments analyzed Signals surfaced: 2 No current Signal: 0
+
+Leadership Attention
+a0rSANITIZED0001 — Compound — carried summary only.
+a0rSANITIZED0002 — Intervention — carried summary only.

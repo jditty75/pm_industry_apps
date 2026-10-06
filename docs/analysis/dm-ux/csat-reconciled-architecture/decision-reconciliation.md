@@ -2,7 +2,7 @@
 
 Every decision in [../csat-product-model/](../csat-product-model/README.md) and [../csat-overview-v2/](../csat-overview-v2/README.md), with selected items from [../../csat-subsystem/](../../csat-subsystem/README.md), classified against the guidebook and the four objectives.
 
-`KEEP` = still authoritative · `REFINE` = kept with a stated change · `SUPERSEDE` = replaced by this architecture · `INVALIDATED_BY_GUIDEBOOK` = conflicts with the VoC operating model. Where a decision needs Jeff (J#), the new position is the **recommendation** until he confirms.
+`KEEP` = still authoritative · `REFINE` = kept with a stated change · `SUPERSEDE` = replaced by this architecture · `INVALIDATED_BY_GUIDEBOOK` = conflicts with the VoC operating model. Where a decision needed Jeff (J#), the new position was the **recommendation** until he confirmed it. **Update 2026-10-06:** J1–J6 are approved (J5 with a refinement, J6 as a V1.1 priority; see [README](README.md#decisions-required-from-jeff)). Every "pending J#" position below is now authoritative.
 
 ## 1. Product-model commitments
 

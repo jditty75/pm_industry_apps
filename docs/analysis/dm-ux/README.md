@@ -46,13 +46,21 @@ The focused Overview compositions A/B/C in `csat-overview-design/` are **rejecte
 
 | Doc | Read when |
 |-----|-----------|
-| [csat-overview-v2/README.md](csat-overview-v2/README.md) | **Current CSAT Overview design.** One Overview from the approved product model: Workday-led default lens with partner-led/all-deployments context, satisfaction + evidence unit, explainable risk, delivery ratings, journey, seven states, drill-down map, Composer handoff for seven static pages |
+| [csat-overview-v2/README.md](csat-overview-v2/README.md) | *Historical (superseded for visual design by V3).* One Overview from the approved product model: Workday-led default lens with partner-led/all-deployments context, satisfaction + evidence unit, explainable risk, delivery ratings, journey, seven states, drill-down map, Composer handoff for seven static pages |
 
 ## CSAT reconciled architecture — VoC guidebook × deployment-centric DM (2026-10-06)
 
 | Doc | Read when |
 |-----|-----------|
-| [csat-reconciled-architecture/README.md](csat-reconciled-architecture/README.md) | **Current CSAT architecture (proposed, pending Jeff's product review).** Reconciles the VoC *PGL and MDS Deployment Surveys Guidebook* with the CSAT data foundation: survey lifecycle (prepare → in flight → responded → follow-up), Top-2 Box / Detractor rules, deployment and portfolio CSAT models, SFDC/Qualtrics/EDM/DM boundaries, data gaps, V1 scope, navigation **Overview · Surveys · Responses**, portable DM design principles |
+| [csat-reconciled-architecture/README.md](csat-reconciled-architecture/README.md) | **Current CSAT architecture (product-approved for visual design, J1–J6 approved 2026-10-06).** Reconciles the VoC *PGL and MDS Deployment Surveys Guidebook* with the CSAT data foundation: survey lifecycle (prepare → in flight → responded → follow-up), Top-2 Box / Detractor rules, deployment and portfolio CSAT models, SFDC/Qualtrics/EDM/DM boundaries, data gaps, V1 scope, navigation **Overview · Surveys · Responses**, portable DM design principles |
+
+## CSAT Overview V3 — executive-first visual design (2026-10-06)
+
+| Doc | Read when |
+|-----|-----------|
+| [csat-overview-v3/README.md](csat-overview-v3/README.md) | **Current CSAT Overview design.** One executive-first Overview on the approved reconciled architecture (J1–J6): a deterministic Top-2 Box message, named customer concerns, the survey horizon (prepare-by, readiness, in flight, chase), a quiet learning row, eight states, drill-down map, Composer handoff for eight static pages |
+
+The reconciled architecture is now **product-approved for visual design**. `csat-overview-v2/` is **superseded for visual design by the reconciled architecture / V3** and retained for history.
 
 Status of earlier CSAT design folders: `csat-product-model/` is **still authoritative for areas marked KEEP** in [decision-reconciliation.md](csat-reconciled-architecture/decision-reconciliation.md) (semantics, tiers, small-n rules, journey, feedback placement). It is **superseded** on headline metric, risk thresholds, navigation and hierarchy. `csat-overview-v2/` and its prototype are **historical**: the visual-language guidance is reusable, but its structure and thresholds are superseded. `csat-overview-design/` stays rejected/historical.
 

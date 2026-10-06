@@ -1,5 +1,7 @@
 # Next visual-design handoff (after Jeff approves this architecture)
 
+> **Status 2026-10-06: executed.** The architecture and J1–J6 are approved. The resulting design is [../csat-overview-v3/](../csat-overview-v3/README.md). Its state set follows Jeff's V3 brief (healthy, concerns, heavy upcoming, chase, weak evidence, SLG-like, partner-led, no actions). The EM-scope, Responses-disabled and All-scope cases below are covered there as behaviour rules.
+
 **Do not start until Jeff approves this architecture and answers J1–J3.** If J1/J2 are not answered, design with the recommendations and mark the headline treatment as provisional.
 
 ## Task

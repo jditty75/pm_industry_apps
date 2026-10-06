@@ -1,6 +1,6 @@
 # CSAT reconciled architecture: deployment-centric Customer Satisfaction (2026-10-06)
 
-Status: **proposed — ready for Jeff's product review.** Business-requirements, product and information architecture only. No screens, wireframes, layout, UI/CSS/JS, prototype, API, EDM, workbook, CLASP or deployment change was made.
+Status: **product-approved for visual design (2026-10-06).** Jeff approved J1–J6 (outcomes in [Decisions from Jeff](#decisions-required-from-jeff)). The first visual design built on this architecture is [../csat-overview-v3/](../csat-overview-v3/README.md). Business-requirements, product and information architecture only. No screens, wireframes, layout, UI/CSS/JS, prototype, API, EDM, workbook, CLASP or deployment change was made.
 
 **Authority:** once approved, this folder is the authoritative CSAT architecture. It reconciles the VoC *PGL and MDS Deployment Surveys Guidebook* (Aug 2026) with the CSAT data foundation ([../../csat-subsystem/](../../csat-subsystem/README.md)) and DM's purpose. Where it differs from [../csat-product-model/](../csat-product-model/README.md) or [../csat-overview-v2/](../csat-overview-v2/README.md), this folder wins. Item-by-item status: [decision-reconciliation.md](decision-reconciliation.md).
 
@@ -56,7 +56,7 @@ DM should not become a second Qualtrics. Qualtrics owns invitations, responses, 
 | [v1-scope.md](v1-scope.md) | V1, V1.1 and Future, with prerequisites |
 | [dm-design-principles.md](dm-design-principles.md) | Portable DM principles, whole-app review map, overlap classification (no redesign) |
 | [decision-reconciliation.md](decision-reconciliation.md) | Every prior decision: KEEP / REFINE / SUPERSEDE / INVALIDATED_BY_GUIDEBOOK |
-| [visual-design-handoff.md](visual-design-handoff.md) | Brief for the next task: one CSAT Overview |
+| [visual-design-handoff.md](visual-design-handoff.md) | Brief for the next task: one CSAT Overview (executed in [../csat-overview-v3/](../csat-overview-v3/README.md)) |
 
 ## Decisions required from Jeff
 
@@ -68,6 +68,19 @@ DM should not become a second Qualtrics. Qualtrics owns invitations, responses, 
 | J4 | Should DM's Upcoming follow the **VoC programme rule** (one MDS on First Target MTP, one PGL on First MTP Actual, eligibility exclusions, any deployment status), replacing today's per-product events? | **Yes**, with later go-lives shown as context | EMs prepare for what will actually launch. Changes existing behaviour → its own authorized release later |
 | J5 | Show **follow-up expectations** (all MDS; Detractors) with expected owner role and "tracked in Qualtrics", Workday-led only, without status, in V1? | **Yes** | Truthful about programme obligations without creating a second ticket system |
 | J6 | Prioritise a **Qualtrics CLFU ticket export** (and append-only invitation history) as V1.1? | **Yes**: ticket export first | Only source of follow-up completion and human root causes |
+
+**Outcomes (Jeff, 2026-10-06):**
+
+| # | Outcome |
+|---|---|
+| J1 | **Approved.** Top-2 Box (% of responses scoring 4–5) is the executive measure. Mean remains detail only |
+| J2 | **Approved.** Response-weighted programme measure, the same methodology as Qualtrics. Deployment counts are shown separately for management context. No deployment-weighted measures |
+| J3 | **Approved.** `Overview | Surveys | Responses` |
+| J4 | **Approved architecturally.** Upcoming should follow the VoC programme rules. Design shows the intended experience. Implementation needs its own authorized release |
+| J5 | **Approved with refinement.** DM may show "Follow-up expected" wherever VoC rules and available data support it. Never "completed", "overdue" or "ticket closed" without Qualtrics data. Partner-led follow-up behaviour is not invented while the rule is unresolved (DG-13) |
+| J6 | **Approved as a future priority.** The Qualtrics follow-up/ticket export is V1.1. It is not available to the V1 design |
+
+Positions marked "pending J#" in [decision-reconciliation.md](decision-reconciliation.md) are therefore authoritative.
 
 Confirmations to request from the VoC team (facts, not product decisions): partner-led MDS scope and partner Detractor ownership (DG-13); mapping of "Launch Now / Ad Hoc / Customer-Led" to SFDC values (DG-14); MDS calendar column label and FY27 window boundaries (GB-12, DG-21); `Alert_type` meaning; whether later phase go-lives generate additional PGLs.
 

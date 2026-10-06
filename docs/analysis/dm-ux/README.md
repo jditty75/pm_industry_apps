@@ -1,8 +1,8 @@
-# Deployment Manager UX discovery (2026-10-05)
+# Deployment Manager UX discovery & design concepts (2026-10-05)
 
-Evidence-only audit of the Deployment Manager (DM) family design versus the Workday-oriented design material in the repo. **No redesign, no source/CSS/config/preview changes.** Non-sensitive; source paths referenced, CSS not duplicated.
+Evidence-only audit of the Deployment Manager (DM) family design versus the Workday-oriented design material in the repo, plus a follow-on design-concept phase. **No production/runtime UI, CSS, markup, JS, config, or deploy pipeline changes.** Non-sensitive; source paths referenced, CSS not duplicated. The concept phase is design-only — screenshots/previews are built by a separate Composer pass per `preview-concept-spec.md`, not committed here.
 
-## Documents (load progressively)
+## Discovery documents (load progressively)
 
 | Doc | Read when |
 |-----|-----------|
@@ -13,6 +13,19 @@ Evidence-only audit of the Deployment Manager (DM) family design versus the Work
 | [csat-ux-requirements.md](csat-ux-requirements.md) | CSAT user tasks and security-shaped UI boundaries |
 | [design-opportunities.md](design-opportunities.md) | Preserve list, ranked opportunities, direction recommendation, next design phase |
 | [preview-strategy.md](preview-strategy.md) | What the localhost preview can/can't prototype today |
+
+## Design-concept documents (2026-10-05, follow-on phase)
+
+Grounded in the discovery above and in `docs/analysis/csat-subsystem/`; does not redo either.
+
+| Doc | Read when |
+|-----|-----------|
+| [concept-a-evolve-in-place.md](concept-a-evolve-in-place.md) | Best-possible version of today's flat-tab shell; lowest-risk baseline every other concept builds on |
+| [concept-b-deployment-centric.md](concept-b-deployment-centric.md) | Adds a persistent, deep-linkable deployment-detail drawer on top of Concept A |
+| [concept-c-grouped-navigation.md](concept-c-grouped-navigation.md) | Challenges the flat shell with grouped/hierarchical top nav, for scalability |
+| [concept-comparison.md](concept-comparison.md) | Scored matrix (STRONG/MODERATE/WEAK) across familiarity, density, scalability, CSAT fit, deployment context, consistency, a11y, complexity, risk, maintainability, growth |
+| [recommended-direction.md](recommended-direction.md) | Recommendation (Concept B on Concept A's baseline), what's gained/preserved/changed, decisions needed from Jeff |
+| [preview-concept-spec.md](preview-concept-spec.md) | Handoff spec for Composer: page structure, fixtures, states, deep links, T1/T2 and token-treatment toggles, visual-review screenshot matrix |
 
 ## Headline findings
 
@@ -26,3 +39,9 @@ Evidence-only audit of the Deployment Manager (DM) family design versus the Work
 Provenance vocabulary: `ORIGINAL_SKILL_ASSET`, `CURRENT_DM_IMPLEMENTATION`, `SHARED/ADAPTED`, `LEGACY/UNUSED`, `UNKNOWN_PROVENANCE`.
 
 Verification stance: static source analysis only. No browser inspection or live Apps Script run was performed; contrast ratios are computed from hex values, not WCAG compliance claims.
+
+## Design-concept phase outcome
+
+Three concepts were produced (Evolve in place / Deployment-centric / Grouped navigation); recommendation is Concept B built on Concept A's baseline fixes — see `recommended-direction.md`. This phase is design-only: no concept has been built as a runtime preview yet, and no visual approval has been recorded. Next step is a separate Composer pass against `preview-concept-spec.md`, then Jeff's visual review, before any R3/read-API or production UI work begins.
+
+**Evidence correction carried into the concept docs:** the SLG "production storage canary" referenced in the concept-phase brief (28 Government-routed responses / 26 stored / 2 excluded / confirmed idempotent) is only partially documented in `docs/analysis/csat-subsystem/`. Only the **28-count routing split**, from one 177-row sample export, is confirmed there. The 26-stored/2-excluded/idempotency result is a **planned R2 acceptance test that has not yet been run** (`implementation-plan.md`). The concept docs cite the 28-count as sample-export evidence only and do not assert production storage/idempotency as proven.

@@ -240,7 +240,9 @@ Existing `CSAT_OVERVIEW_V3_*` (8) and `CSAT_SURVEYS_*` (8) state pages are reuse
 
 ## 8. Integrated prototype — what this unlocks
 
-For the first time CSAT can be evaluated as a **subsystem**: Overview ↔ Surveys ↔ Responses navigation, and a drill from a synthetic deployment into Deployment CSAT History, fully isolated from production. The build spec, routing, autonomy grant, self-review protocol, and acceptance checklist are in [`composer-handoff.md`](composer-handoff.md).
+For the first time CSAT can be evaluated as a **subsystem**: Overview ↔ Surveys ↔ Responses navigation, and a drill from a synthetic deployment into Deployment CSAT History, fully isolated from production.
+
+**Implementation (2026-10-06):** `skills/gas-monorepo-engineer/dm-ux-csat-integrated/` — launch `.\preview.ps1 CSAT_INTEGRATED` (default `#/overview`). State pages: `CSAT_INTEGRATED*.html` in `.preview-out/`. Visual review screenshots: `.preview-out/csat-integrated-screenshots/`. Build spec and review sequence: [`composer-handoff.md`](composer-handoff.md).
 
 ---
 

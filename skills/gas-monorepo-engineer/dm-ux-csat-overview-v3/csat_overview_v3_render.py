@@ -11,6 +11,28 @@ W_MARK_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" 
 
 LINK_TITLE = "Destination not built in this prototype"
 
+
+class IntegratedRenderCtx:
+    """Optional link targets for CSAT integrated prototype (hash routes)."""
+
+    def __init__(self, deployment_ids: Dict[str, str], responses_route: str = "#/responses") -> None:
+        self.deployment_ids = deployment_ids
+        self.responses_route = responses_route
+
+    def deployment_href(self, name: str) -> str:
+        return f"#/deployment/{self.deployment_ids.get(name, 'syn-unknown')}/csat"
+
+    def deployment_link(self, name: str, extra_class: str = "csat-v3-dep-name") -> str:
+        return (
+            f'<a href="{esc(self.deployment_href(name))}" class="csat-deployment-link {esc(extra_class)}" '
+            f'title="{esc(name)}">{esc(name)}</a>'
+        )
+
+    def responses_link(self, text: str, role: str = "primary") -> str:
+        return working_link(text, self.responses_route) if role == "primary" else inert_link(
+            text, self.responses_route, role=role
+        )
+
 STATE_ORDER = (
     "healthy",
     "concerns",
@@ -133,22 +155,26 @@ def render_shell_start(shell: Dict[str, str], data_as_of: str) -> str:
     )
 
 
-def render_csat_subnav(scope_menu: str) -> str:
+def render_csat_subnav(scope_menu: str, active_tab: int = 0, integrated: bool = False) -> str:
     tabs = ("Overview", "Surveys", "Responses")
     btns = []
+    routes = ("#/overview", "#/surveys", "#/responses")
     for i, label in enumerate(tabs):
-        active = i == 0
+        active = i == active_tab
+        data_route = f' data-csat-route="{routes[i]}"' if integrated else ""
         btns.append(
             f'<button type="button" class="csat-subtab-btn{" active" if active else ""}" '
             f'role="tab" aria-selected="{"true" if active else "false"}" '
-            f'tabindex="{"0" if active else "-1"}">{esc(label)}</button>'
+            f'tabindex="{"0" if active else "-1"}"{data_route}>{esc(label)}</button>'
         )
+    nav_cls = "csat-subtab-nav csat-v3-subnav csatSubtabNav" if integrated else "csat-subtab-nav csat-v3-subnav"
+    scope_cls = "csatScopeMenu csat-v3-scope-btn" if integrated else "csat-v3-scope-btn"
     return (
         '<div class="csat-v3-subnav-row">'
-        '<nav class="csat-subtab-nav csat-v3-subnav" role="tablist" aria-label="CSAT sections">'
+        f'<nav class="{nav_cls}" role="tablist" aria-label="CSAT sections">'
         + "".join(btns)
         + "</nav>"
-        f'<button type="button" class="csat-v3-scope-btn" aria-haspopup="true" aria-expanded="false">'
+        f'<button type="button" class="{scope_cls}" aria-haspopup="true" aria-expanded="false">'
         f'{esc(scope_menu)} <span class="csat-v3-caret" aria-hidden="true">▾</span></button>'
         "</div>"
     )
@@ -186,21 +212,29 @@ def _split_concern_detail(detail: str) -> Tuple[str, Optional[str]]:
     return detail, None
 
 
-def render_concern_row(row: Dict[str, Any]) -> str:
+def render_concern_row(row: Dict[str, Any], ctx: Optional["IntegratedRenderCtx"] = None) -> str:
     tag = ""
     if row.get("tag"):
-        tag = f'<span class="csat-v3-row-tag">{esc(row["tag"])}</span>'
-    name = esc(row["name"])
+        tag = f'<span class="csat-survey-tag csat-v3-row-tag">{esc(row["tag"])}</span>'
+    name = row["name"]
     facts, follow = _split_concern_detail(row["detail"])
     follow_html = ""
     if follow:
         follow_html = f'<p class="csat-v3-concern-follow">{esc(follow)}</p>'
+    if ctx:
+        name_link = ctx.deployment_link(name)
+    else:
+        name_esc = esc(name)
+        name_link = (
+            f'<a href="#" class="csat-v3-dep-name" title="{name_esc}" onclick="return false;">{name_esc}</a>'
+        )
+    stage_tag = f'<span class="csat-survey-tag survey-pill">{esc(row["stage"])}</span>'
     return (
         '<div class="csat-v3-concern-row">'
         '<div class="csat-v3-concern-line1">'
         f'{render_status_pill(row["pill"], row["severity"])}'
-        f'<a href="#" class="csat-v3-dep-name" title="{name}" onclick="return false;">{name}</a>'
-        f'<span class="survey-pill">{esc(row["stage"])}</span>'
+        f"{name_link}"
+        f"{stage_tag}"
         f"{tag}"
         "</div>"
         f'<p class="csat-v3-concern-facts">{esc(facts)}</p>'
@@ -209,7 +243,7 @@ def render_concern_row(row: Dict[str, Any]) -> str:
     )
 
 
-def render_r2(st: Dict[str, Any]) -> str:
+def render_r2(st: Dict[str, Any], ctx: Optional[IntegratedRenderCtx] = None) -> str:
     c = st["concerns"]
     body = ""
     if c.get("empty"):
@@ -219,7 +253,7 @@ def render_r2(st: Dict[str, Any]) -> str:
             f'<p class="csat-v3-muted">{inert_link(c.get("emptyMuted2", "")) if c.get("emptyMuted2") else ""}</p></div>'
         )
     else:
-        rows = "".join(render_concern_row(r) for r in c.get("rows", []))
+        rows = "".join(render_concern_row(r, ctx) for r in c.get("rows", []))
         more = ""
         if c.get("moreLink"):
             more = f'<p class="csat-v3-more-link">{inert_link(c["moreLink"], role="inline")}</p>'
@@ -229,9 +263,16 @@ def render_r2(st: Dict[str, Any]) -> str:
     if c.get("footer"):
         foot_bits.append(f'<p class="csat-v3-region-footer-note">{esc(c["footer"])}</p>')
     if c.get("footerLink"):
-        foot_bits.append(
-            f'<p class="csat-v3-region-footer-link">{inert_link(c["footerLink"], role="primary")}</p>'
-        )
+        fl = c["footerLink"]
+        if ctx and "Responses" in fl:
+            foot_bits.append(
+                f'<p class="csat-v3-region-footer-link csat-drilldown-link">'
+                f'{ctx.responses_link(fl, role="primary")}</p>'
+            )
+        else:
+            foot_bits.append(
+                f'<p class="csat-v3-region-footer-link">{inert_link(fl, role="primary")}</p>'
+            )
     if foot_bits:
         footer = f'<div class="csat-v3-region-foot">{"".join(foot_bits)}</div>'
     return (
@@ -530,20 +571,33 @@ def render_r4(st: Dict[str, Any], meta: Dict[str, Any]) -> str:
     )
 
 
-def render_state_page(st: Dict[str, Any], meta: Dict[str, Any]) -> str:
+def render_state_page(
+    st: Dict[str, Any],
+    meta: Dict[str, Any],
+    ctx: Optional[IntegratedRenderCtx] = None,
+    integrated: bool = False,
+    include_shell: bool = True,
+) -> str:
     shell = meta["shells"][st["shell"]]
+    parts: List[str] = []
+    if include_shell:
+        parts.append(render_shell_start(shell, st.get("dataAsOf", "Oct 2026")))
+    parts.append(render_csat_subnav(st["scopeMenu"], active_tab=0, integrated=integrated))
+    parts.append('<div class="csat-v3-layout">')
+    parts.append(render_r1(st))
+    parts.append('<div class="csat-v3-mid-row">')
+    parts.append(render_r2(st, ctx))
+    parts.append(render_r3(st))
+    parts.append("</div>")
+    parts.append(render_r4(st, meta))
+    parts.append("</div>")
+    body = "".join(parts)
+    if not include_shell:
+        return f'<div id="csat-overview-v3-app">{body}</div>'
     return (
         '<main class="container" id="csat-overview-v3-app">'
-        + render_shell_start(shell, st.get("dataAsOf", "Oct 2026"))
-        + render_csat_subnav(st["scopeMenu"])
-        + '<div class="csat-v3-layout">'
-        + render_r1(st)
-        + '<div class="csat-v3-mid-row">'
-        + render_r2(st)
-        + render_r3(st)
-        + "</div>"
-        + render_r4(st, meta)
-        + "</div></main>"
+        + body
+        + "</main>"
         + f'<div class="csat-v3-proto-badge" role="status">LOCAL PROTOTYPE · {esc(st["protoLabel"])} · '
         f'<a href="CSAT_OVERVIEW_V3_INDEX.html">All states</a></div>'
     )

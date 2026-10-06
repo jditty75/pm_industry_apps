@@ -20,6 +20,7 @@ $DmUxCsat = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-ove
 $DmUxCsatV2 = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-overview-v2\preview_csat_overview_v2.py"
 $DmUxCsatV3 = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-overview-v3\preview_csat_overview_v3.py"
 $DmUxCsatSurveys = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-surveys\preview_csat_surveys.py"
+$DmUxCsatIntegrated = Join-Path $PSScriptRoot "skills\gas-monorepo-engineer\dm-ux-csat-integrated\preview_csat_integrated.py"
 if (-not (Test-Path $Engine)) {
     Write-Error "Preview engine not found: $Engine"
     exit 1
@@ -91,6 +92,18 @@ if ($App -eq "CSAT_SURVEYS") {
     if ($NoOpen) { $svArgs += "--no-open" }
     if ($Stop) { $svArgs += "--stop" }
     & python $DmUxCsatSurveys @svArgs
+    exit $LASTEXITCODE
+}
+
+if ($App -eq "CSAT_INTEGRATED") {
+    if (-not (Test-Path $DmUxCsatIntegrated)) {
+        Write-Error "CSAT integrated preview not found: $DmUxCsatIntegrated"
+        exit 1
+    }
+    $ixArgs = @()
+    if ($NoOpen) { $ixArgs += "--no-open" }
+    if ($Stop) { $ixArgs += "--stop" }
+    & python $DmUxCsatIntegrated @ixArgs
     exit $LASTEXITCODE
 }
 

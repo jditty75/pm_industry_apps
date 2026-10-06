@@ -1,0 +1,131 @@
+/**
+ * Shared CSAT component system (integrated prototype).
+ */
+
+.csat-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto auto minmax(120px, 1.4fr) auto auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 13px;
+  line-height: 18px;
+}
+.csat-row:first-child {
+  border-top: none;
+}
+.csat-row-marker {
+  justify-self: start;
+}
+.csat-row-name {
+  min-width: 0;
+  font-weight: 600;
+}
+.csat-row-name .csat-sv-account {
+  display: block;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.csat-survey-tag {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+.csat-deployment-link {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+.csat-deployment-link:hover {
+  text-decoration: underline;
+}
+.csatEyebrow,
+.csat-sv-eyebrow.csatEyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.csat-attention-marker--amber {
+  font-size: 12px;
+  color: var(--color-status-yellow-fg, #b06000);
+}
+.csat-attention-marker--plain {
+  min-width: 8px;
+  display: inline-block;
+}
+.csat-survey-date,
+.csat-row-date .csat-survey-date {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  justify-self: end;
+}
+.csat-evidence-marker {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-right: 4px;
+}
+.csat-evidence-marker--qx {
+  opacity: 0.85;
+}
+.csat-provenance-block {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+.csat-provenance-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 8px;
+  color: var(--color-text-muted);
+}
+.csat-provenance-block[data-provenance="qualtrics"] .csat-provenance-label {
+  color: var(--color-text-muted);
+}
+.csat-provenance-block[data-provenance="customer"] .csat-provenance-body {
+  font-size: 14px;
+}
+.csatTopToBox,
+.csat-top2box {
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+.csatSubtabNav .csat-subtab-btn.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+.csatSectionHeader .csat-sv-group-header {
+  margin-left: auto;
+}
+#csat-integrated-app .header .freshness-badge.csat-ix-freshness {
+  align-self: center;
+}
+
+@media (max-width: 1000px) {
+  .csat-row {
+    grid-template-columns: 28px 1fr auto;
+    grid-template-areas:
+      "m name date"
+      "m tag verdict"
+      "m key evidence";
+  }
+  .csat-row-marker { grid-area: m; }
+  .csat-row-name { grid-area: name; }
+  .csat-row-date { grid-area: date; justify-self: end; }
+  .csat-row-tag { grid-area: tag; }
+  .csat-row-verdict { grid-area: verdict; }
+  .csat-row-key { grid-area: key; grid-column: 2 / -1; }
+  .csat-row-evidence { grid-area: evidence; justify-self: end; }
+}

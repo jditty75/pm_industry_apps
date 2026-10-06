@@ -1,0 +1,305 @@
+{
+  "fixtureId": "csat-integrated-20261006",
+  "deploymentIds": {
+    "Example Health Network": "syn-ehn-001",
+    "Sample Regional Medical Center": "syn-srmc-002",
+    "Example Children's Hospital": "syn-ech-003",
+    "Sample University Health": "syn-suh-004",
+    "Metro County Human Services": "syn-mchs-slg-001",
+    "State Agency Benefits Modernization": "syn-sabm-slg-002",
+    "Sample State University ERP": "syn-ssu-henp-001"
+  },
+  "csatAppConfig": {
+    "hc": {
+      "shell": "hc",
+      "industryLabel": "Healthcare",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "lowVolumeMode": false,
+      "studentContext": false
+    },
+    "slg": {
+      "shell": "slg",
+      "industryLabel": "State & Local Gov",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "lowVolumeMode": true,
+      "studentContext": false
+    },
+    "henp": {
+      "shell": "henp",
+      "industryLabel": "Higher Ed & Student",
+      "scopeMenu": "Workday-led · Rolling 12 months",
+      "lowVolumeMode": false,
+      "studentContext": true
+    }
+  },
+  "shells": {
+    "hc": {
+      "headerTitle": "Healthcare Deployment Health Manager",
+      "headerSubtitle": "Healthcare program portfolio"
+    },
+    "slg": {
+      "headerTitle": "SLG Deployment Health Manager",
+      "headerSubtitle": "State & Local Government"
+    },
+    "henp": {
+      "headerTitle": "HENP Deployment Health Manager",
+      "headerSubtitle": "Higher Education & Student"
+    }
+  },
+  "overviewStateKey": "healthy",
+  "surveysStateKey": "normal",
+  "states": {
+    "RESPONSES_NORMAL": {
+      "file": "CSAT_INTEGRATED_RESPONSES_NORMAL.html",
+      "protoLabel": "Responses — normal (HC)",
+      "app": "hc",
+      "route": "#/responses",
+      "responses": {
+        "accessTier": "T1",
+        "groupBy": "survey",
+        "listSummary": "47 deployment × survey rows · attention-first",
+        "learning": {
+          "facts": [
+            { "label": "Deployment Satisfaction (Top-2 Box)", "value": "82% · 21 of 26 · 19 deployments", "filterKey": "t2b" },
+            { "label": "Verdict distribution", "value": "Satisfied 18 · Neutral 5 · Dissatisfied 3", "filterKey": "verdict" },
+            { "label": "NPS (PGL)", "value": "+41 · 31 responses", "filterKey": "nps" },
+            { "label": "MDS vs PGL", "value": "MDS 84% · PGL 79%", "filterKey": "survey-type" },
+            { "label": "Delivery leadership", "value": "Workday-led 82% · Partner-led 76% (reference)", "filterKey": "leadership" }
+          ]
+        },
+        "filters": {
+          "primary": [
+            { "key": "window", "label": "Rolling 12 months", "active": true },
+            { "key": "mds", "label": "MDS", "active": false },
+            { "key": "pgl", "label": "PGL", "active": false },
+            { "key": "workday-led", "label": "Workday-led", "active": true },
+            { "key": "detractor", "label": "Detractor", "active": false }
+          ],
+          "advancedLabel": "More filters",
+          "activeAdvanced": []
+        },
+        "rows": [
+          {
+            "rowId": "r-ehn-pgl",
+            "deployment": "Example Health Network",
+            "deploymentId": "syn-ehn-001",
+            "survey": "PGL",
+            "attention": { "kind": "detractor", "label": "Detractor", "severity": "red" },
+            "verdict": { "label": "Detractor", "severity": "red" },
+            "keyFact": "DSAT 2 · NPS 4",
+            "followup": "Follow-up expected · in Qualtrics",
+            "hasCustomerComment": true,
+            "hasQualtricsAnalysis": true,
+            "surveyDate": "14 Sep 2026",
+            "expandable": true
+          },
+          {
+            "rowId": "r-srmc-mds",
+            "deployment": "Sample Regional Medical Center",
+            "deploymentId": "syn-srmc-002",
+            "survey": "MDS",
+            "attention": { "kind": "detractor", "label": "Detractor", "severity": "yellow" },
+            "verdict": { "label": "Neutral", "severity": "yellow" },
+            "keyFact": "Schedule management lowest · 2 of 5",
+            "surveyDate": "5 Aug 2026",
+            "expandable": false
+          },
+          {
+            "rowId": "r-suh-pgl",
+            "deployment": "Sample University Health",
+            "deploymentId": "syn-suh-004",
+            "survey": "PGL",
+            "attention": { "kind": "", "label": "", "severity": "neutral" },
+            "verdict": { "label": "Satisfied", "severity": "yellow" },
+            "keyFact": "Declined from MDS 5",
+            "surveyDate": "22 Jul 2026",
+            "expandable": false
+          }
+        ],
+        "overflowMore": "+12 more deployment × survey rows →"
+      }
+    },
+    "RESPONSES_LOW_VOLUME": {
+      "file": "CSAT_INTEGRATED_RESPONSES_LOW_VOLUME.html",
+      "protoLabel": "Responses — SLG low volume",
+      "app": "slg",
+      "route": "#/responses",
+      "responses": {
+        "accessTier": "T1",
+        "lowVolume": true,
+        "groupBy": "survey",
+        "listSummary": "14 deployment × survey rows",
+        "learning": {
+          "lowVolumeLine": "Top-2 Box 71% · 10 of 14 responses · 9 deployments — additional portfolio facts suppressed (n < 5 per segment)."
+        },
+        "filters": {
+          "primary": [
+            { "key": "window", "label": "Rolling 12 months", "active": true },
+            { "key": "workday-led", "label": "Workday-led", "active": true }
+          ],
+          "advancedLabel": "More filters",
+          "activeAdvanced": []
+        },
+        "rows": [
+          {
+            "rowId": "r-mchs-pgl",
+            "deployment": "Metro County Human Services",
+            "deploymentId": "syn-mchs-slg-001",
+            "survey": "PGL",
+            "attention": { "kind": "detractor", "label": "Detractor", "severity": "red" },
+            "verdict": { "label": "Detractor", "severity": "red" },
+            "keyFact": "DSAT 2 · only PGL response",
+            "surveyDate": "3 Sep 2026",
+            "expandable": false
+          }
+        ],
+        "lensNote": "Product Area counts are responses touching area — not additive across areas."
+      }
+    },
+    "RESPONSES_T2_DETAIL": {
+      "file": "CSAT_INTEGRATED_RESPONSES_T2_DETAIL.html",
+      "protoLabel": "Responses — T2 evidence expanded",
+      "app": "hc",
+      "route": "#/responses",
+      "responses": {
+        "accessTier": "T2",
+        "groupBy": "survey",
+        "listSummary": "Row expanded — T2 evidence",
+        "learning": {
+          "facts": [
+            { "label": "Deployment Satisfaction (Top-2 Box)", "value": "82% · 21 of 26 · 19 deployments", "filterKey": "t2b" }
+          ]
+        },
+        "filters": { "primary": [], "advancedLabel": "More filters", "activeAdvanced": [] },
+        "rows": [
+          {
+            "rowId": "r-ehn-pgl",
+            "deployment": "Example Health Network",
+            "deploymentId": "syn-ehn-001",
+            "survey": "PGL",
+            "attention": { "kind": "detractor", "label": "Detractor", "severity": "red" },
+            "verdict": { "label": "Detractor", "severity": "red" },
+            "keyFact": "DSAT 2 · NPS 4",
+            "followup": "Follow-up expected · in Qualtrics",
+            "hasCustomerComment": true,
+            "hasQualtricsAnalysis": true,
+            "surveyDate": "14 Sep 2026",
+            "expanded": true,
+            "expandable": true,
+            "evidence": {
+              "customerComments": [
+                { "question": "What could we improve?", "text": "Synthetic comment about communication gaps during cutover week." },
+                { "question": "What is working well?", "text": "Synthetic praise for core team responsiveness." }
+              ],
+              "qualtrics": {
+                "sentiment": "Negative · score 0.32",
+                "parentTopics": ["Communication", "Cutover planning"],
+                "note": "Derived from Qualtrics text analytics — not customer-authored labels."
+              }
+            },
+            "respondentRole": "Deployment Sponsor"
+          }
+        ]
+      }
+    },
+    "DEPLOYMENT_HISTORY_MDS_PGL": {
+      "file": "CSAT_INTEGRATED_DEPLOYMENT_MDS_PGL.html",
+      "protoLabel": "Deployment history — MDS + PGL",
+      "app": "hc",
+      "route": "#/deployment/syn-ehn-001/csat",
+      "deployment": {
+        "deploymentId": "syn-ehn-001",
+        "deploymentName": "Example Health Network",
+        "account": "Synthetic Health Account",
+        "facets": [
+          { "label": "Latest verdict", "value": "PGL · Sep 2026 · Detractor (DSAT 2, NPS 4)" },
+          { "label": "Trajectory", "value": "MDS 5 → PGL 2" },
+          { "label": "Follow-up", "value": "Detractor follow-up expected · Deployment Sponsor · Qualtrics" },
+          { "label": "Survey in motion", "value": "No open survey" },
+          { "label": "Next survey", "value": "PGL forecast Dec 2026 · prepare by 18 Nov" },
+          { "label": "Evidence recency", "value": "Last heard: 3 weeks ago (PGL)" }
+        ],
+        "timeline": [
+          { "kind": "milestone", "date": "Jan 2025", "title": "Deployment start", "body": "SFDC deployment record created." },
+          { "kind": "process", "date": "Jun 2025", "title": "MDS forecast (⅓ point)", "body": "Prepare by 15 Jun · forecast labelled." },
+          { "kind": "process", "date": "Jul 2025", "title": "MDS launched", "body": "Survey open · Workday-led." },
+          { "kind": "outcome", "date": "Aug 2025", "title": "MDS response", "body": "Top-2 Box satisfied.", "survey": "MDS", "verdict": { "label": "Satisfied", "severity": "yellow" }, "deliveryRatings": [{ "label": "Schedule management", "value": "100% · 1 response" }] },
+          { "kind": "milestone", "date": "Oct 2025", "title": "Go Live (actual)", "body": "Actual go-live supersedes forecast." },
+          { "kind": "process", "date": "Dec 2025", "title": "PGL forecast (+2 mo)", "body": "Prepare by 10 Dec · forecast." },
+          { "kind": "outcome", "date": "Sep 2026", "title": "PGL response", "body": "Customer outcome recorded.", "survey": "PGL", "verdict": { "label": "Detractor", "severity": "red" }, "nps": "+4 · n < 10 — shown as score only", "followup": "Follow-up expected · in Qualtrics" },
+          { "kind": "history", "date": "Context", "title": "Portfolio learning", "body": "Declined from MDS 5 — separate verdicts, never averaged." }
+        ],
+        "outLinks": [
+          { "label": "Surveys row for this deployment", "href": "#/surveys" },
+          { "label": "Responses filtered to this deployment", "href": "#/responses?deployment=syn-ehn-001" },
+          { "label": "Qualtrics (action)", "href": "#qualtrics-stub" }
+        ]
+      }
+    },
+    "DEPLOYMENT_HISTORY_MDS_ONLY": {
+      "file": "CSAT_INTEGRATED_DEPLOYMENT_MDS_ONLY.html",
+      "protoLabel": "Deployment history — MDS only (pre-PGL)",
+      "app": "hc",
+      "route": "#/deployment/syn-ech-003/csat",
+      "deployment": {
+        "deploymentId": "syn-ech-003",
+        "deploymentName": "Example Children's Hospital",
+        "account": "Synthetic Pediatric Account",
+        "facets": [
+          { "label": "Latest verdict", "value": "MDS · Aug 2026 · Satisfied (DSAT 5)" },
+          { "label": "Trajectory", "value": "MDS only — PGL forecast upcoming" },
+          { "label": "Next survey", "value": "PGL forecast after go-live · prepare by 21 Oct" }
+        ],
+        "timeline": [
+          { "kind": "milestone", "date": "Mar 2026", "title": "Deployment start", "body": "In flight implementation." },
+          { "kind": "outcome", "date": "Aug 2026", "title": "MDS response", "body": "Strong MDS outcome.", "survey": "MDS", "verdict": { "label": "Satisfied", "severity": "yellow" } },
+          { "kind": "process", "date": "Nov 2026", "title": "PGL forecast", "body": "Forecast labelled — not yet launched." }
+        ],
+        "outLinks": [{ "label": "Surveys", "href": "#/surveys" }]
+      }
+    },
+    "DEPLOYMENT_HISTORY_FOLLOWUP": {
+      "file": "CSAT_INTEGRATED_DEPLOYMENT_FOLLOWUP.html",
+      "protoLabel": "Deployment history — follow-up expected",
+      "app": "hc",
+      "route": "#/deployment/syn-ehn-001/csat",
+      "deployment": {
+        "deploymentId": "syn-ehn-001",
+        "deploymentName": "Example Health Network",
+        "account": "Synthetic Health Account",
+        "facets": [
+          { "label": "Follow-up", "value": "Detractor follow-up expected · owner role: Deployment Sponsor · tracked in Qualtrics" }
+        ],
+        "timeline": [
+          {
+            "kind": "outcome",
+            "date": "Sep 2026",
+            "title": "PGL Detractor response",
+            "body": "Workday-led ProServ follow-up expectation only — completion not shown in DM.",
+            "survey": "PGL",
+            "verdict": { "label": "Detractor", "severity": "red" },
+            "followup": "Follow-up expected · in Qualtrics",
+            "evidence": {
+              "role": "Deployment Sponsor",
+              "customerComments": [{ "question": "Additional comments", "text": "Synthetic T2 comment visible at POWER_USER." }],
+              "qualtrics": { "sentiment": "Negative", "parentTopics": ["Support"] }
+            }
+          }
+        ],
+        "outLinks": [{ "label": "Responses", "href": "#/responses" }]
+      }
+    },
+    "HENP_CONFIG": {
+      "file": "CSAT_INTEGRATED_HENP.html",
+      "protoLabel": "HENP configuration demo",
+      "app": "henp",
+      "route": "#/overview"
+    },
+    "DEFAULT": {
+      "file": "CSAT_INTEGRATED.html",
+      "protoLabel": "Integrated CSAT — Overview default",
+      "app": "hc",
+      "route": "#/overview"
+    }
+  }
+}

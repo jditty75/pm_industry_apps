@@ -11,7 +11,21 @@
 
 ## 1. Where to build & how to run
 
-Build an isolated prototype alongside the existing CSAT prototypes (same pattern as `skills/gas-monorepo-engineer/dm-ux-csat-overview-v3/` and `dm-ux-csat-surveys/`): suggested `skills/gas-monorepo-engineer/dm-ux-csat-integrated/`. Confirm the exact convention from the existing Overview-V3/Surveys prototype dirs and match it. Launch via the monorepo preview harness (`.\preview.ps1 <scenario>` / `scripts/preview_engine.py`) with one scenario per state page. Reuse the Overview-V3 and Surveys fixtures and state pages directly — link to them, do not re-create them. Prototype CSS prefix: `csat-ix-` for integrated-only chrome; shared components keep the `csat-` names in README §3.
+**Implemented:** `skills/gas-monorepo-engineer/dm-ux-csat-integrated/` (build, render, fixtures, shared CSS/JS, selftest, Playwright screenshots).
+
+| Action | Command |
+|--------|---------|
+| Launch (opens Overview) | `.\preview.ps1 CSAT_INTEGRATED` |
+| CI / no browser | `.\preview.ps1 CSAT_INTEGRATED -NoOpen` |
+| Build only | `python skills/gas-monorepo-engineer/dm-ux-csat-integrated/preview_csat_integrated_build.py` |
+| Selftest | `python skills/gas-monorepo-engineer/dm-ux-csat-integrated/preview_csat_integrated_selftest.py` |
+| Screenshots (1440×900) | `node skills/gas-monorepo-engineer/dm-ux-csat-integrated/preview_csat_integrated_screenshots.mjs` |
+
+**Default URL:** served `CSAT_INTEGRATED.html` → hash `#/overview`. **Routes:** `#/overview` · `#/surveys` · `#/responses` · `#/deployment/<synthetic-id>/csat`. Standalone `CSAT_OVERVIEW_V3_*` and `CSAT_SURVEYS_*` previews unchanged.
+
+**Screenshot output:** `.preview-out/csat-integrated-screenshots/` (post self-review pass, 2026-10-06).
+
+Prototype CSS prefix: `csat-ix-` for integrated-only chrome; shared components use `csat-` names from README §3.
 
 ## 2. Shell & navigation
 
@@ -55,4 +69,16 @@ Add the prototype's own structural/client tests (match the existing CSAT prototy
 
 1. Does CSAT feel like one coherent subsystem? 2. Does Overview summarize without duplicating the other pages? 3. Does Surveys work as the operational lifecycle? 4. Does Responses make historical learning understandable? 5. Can I move naturally from portfolio signal → deployment evidence? 6. Does deployment history tell the customer's story of that deployment? 7. Do HC/SLG/HENP feel like the same product? 8. Does everything still feel like Deployment Manager?
 
-The next step after this prototype is Jeff's review — not another design cycle.
+## 10. Review sequence (Jeff)
+
+1. `.\preview.ps1 CSAT_INTEGRATED` → **Overview** (`#/overview`).
+2. **Surveys** (`#/surveys`) — confirm lifecycle density / `csatRow` grid.
+3. **Responses normal** — `CSAT_INTEGRATED_RESPONSES_NORMAL.html` or `#/responses`.
+4. Open **Example Health Network** → `#/deployment/syn-ehn-001/csat`.
+5. **Deployment CSAT History** — MDS→PGL story, breadcrumb back.
+6. Return to **Responses**; toggle **T2 evidence** → `CSAT_INTEGRATED_RESPONSES_T2_DETAIL.html`.
+7. **SLG low-volume** — `CSAT_INTEGRATED_RESPONSES_LOW_VOLUME.html`.
+8. **HENP** — `CSAT_INTEGRATED_HENP.html` (`#/overview`).
+9. Back to **Overview** — subsystem coherence check.
+
+The next step after this prototype is Jeff's visual approval — not another design cycle.

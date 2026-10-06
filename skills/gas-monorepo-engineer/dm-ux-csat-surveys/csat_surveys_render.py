@@ -11,6 +11,20 @@ W_MARK_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 2000" 
 
 LINK_TITLE = "Destination not built in this prototype"
 
+
+class IntegratedSurveysCtx:
+    """Hash-route deployment links for integrated CSAT prototype."""
+
+    def __init__(self, deployment_ids: Dict[str, str]) -> None:
+        self.deployment_ids = deployment_ids
+
+    def deployment_link(self, name: str) -> str:
+        dep_id = self.deployment_ids.get(name, "syn-unknown")
+        return (
+            f'<a href="#/deployment/{esc(dep_id)}/csat" class="csat-deployment-link csat-sv-link--entity" '
+            f'title="{esc(name)}">{esc(name)}</a>'
+        )
+
 STATE_ORDER = (
     "normal",
     "heavy",
@@ -95,7 +109,51 @@ def render_attention(att: Optional[Dict[str, Any]]) -> str:
     return f'<span class="{cls}">{esc(prefix + label)}</span>'
 
 
-def render_row(row: Dict[str, Any]) -> str:
+def render_row_csat_grid(row: Dict[str, Any], ctx: Optional[IntegratedSurveysCtx] = None) -> str:
+    """Shared csatRow grid (integrated harmonization)."""
+    attn = row.get("attention")
+    marker = render_attention(attn) if attn else '<span class="csat-attention-marker csat-attention-marker--plain"></span>'
+    if ctx:
+        deploy = ctx.deployment_link(row["deployment"])
+    else:
+        deploy = inert_entity_link(row["deployment"])
+    acct = row.get("account")
+    name_cell = deploy
+    if acct:
+        name_cell = f'{deploy}<span class="csat-sv-account">{esc(acct)}</span>'
+    survey = f'<span class="csat-survey-tag">{esc(row["survey"])}</span>'
+    verdict = ""
+    if row.get("verdictChip"):
+        vc = row["verdictChip"]
+        sev = "status-red" if vc.get("severity") == "red" else "status-yellow"
+        verdict = f'<span class="csat-verdict-chip status-pill {sev}">{esc(vc.get("label", ""))}</span>'
+    key_fact = esc(row.get("keyFact") or row.get("facetLine", ""))
+    date_cls = "csat-survey-date"
+    if row.get("dateMuted"):
+        date_cls += " is-muted"
+    date_html = f'<span class="{date_cls}">{esc(row["dateLine"])}</span>'
+    evidence = ""
+    if row.get("evidenceMarkers"):
+        evidence = "".join(
+            f'<span class="csat-evidence-marker" title="{esc(m.get("title", ""))}">{esc(m.get("glyph", "·"))}</span>'
+            for m in row["evidenceMarkers"]
+        )
+    return (
+        '<div class="csat-row csat-sv-row-wrap" data-csat-surveys-row="grid">'
+        f'<span class="csat-row-marker">{marker}</span>'
+        f'<span class="csat-row-name">{name_cell}</span>'
+        f'<span class="csat-row-tag">{survey}</span>'
+        f'<span class="csat-row-verdict">{verdict}</span>'
+        f'<span class="csat-row-key">{key_fact}</span>'
+        f'<span class="csat-row-evidence">{evidence}</span>'
+        f'<span class="csat-row-date">{date_html}</span>'
+        "</div>"
+    )
+
+
+def render_row(row: Dict[str, Any], ctx: Optional[IntegratedSurveysCtx] = None, use_grid: bool = False) -> str:
+    if use_grid:
+        return render_row_csat_grid(row, ctx)
     attn_html = render_attention(row.get("attention"))
     deploy = inert_entity_link(row["deployment"])
     acct = row.get("account")
@@ -143,8 +201,15 @@ def render_group_header(header_parts: List[Dict[str, str]]) -> str:
     )
 
 
-def render_group(section_key: str, eyebrow: str, section_id: str, group: Dict[str, Any]) -> str:
-    rows_html = "".join(render_row(r) for r in group.get("rows", []))
+def render_group(
+    section_key: str,
+    eyebrow: str,
+    section_id: str,
+    group: Dict[str, Any],
+    ctx: Optional[IntegratedSurveysCtx] = None,
+    use_grid: bool = False,
+) -> str:
+    rows_html = "".join(render_row(r, ctx, use_grid) for r in group.get("rows", []))
     extra = ""
     if group.get("emptyMessage"):
         extra += f'<p class="csat-sv-empty-group">{esc(group["emptyMessage"])}</p>'
@@ -165,14 +230,17 @@ def render_group(section_key: str, eyebrow: str, section_id: str, group: Dict[st
                 f'{inert_count_link(block["linkText"])}</p>'
             )
     for tail_row in group.get("tailRows", []):
-        extra += render_row(tail_row)
+        extra += render_row(tail_row, ctx, use_grid)
     header_meta = render_group_header(group.get("headerParts", []))
+    eyebrow_cls = "csat-sv-eyebrow csatEyebrow"
+    head_cls = "csat-sv-section-head csatSectionHeader"
     return (
         f'<section class="csat-sv-panel" id="{esc(section_id)}" '
         f'data-csat-surveys-group="{esc(section_key)}" aria-labelledby="{esc(section_id)}-title">'
-        f'<div class="csat-sv-section-head">'
-        f'<span class="csat-sv-eyebrow">{esc(eyebrow)}</span>'
-        f'<h2 class="csat-sv-section-title" id="{esc(section_id)}-title">{esc(group.get("title", ""))}</h2>'
+        f'<div class="{head_cls}">'
+        f'<span class="{eyebrow_cls}">{esc(eyebrow)}</span>'
+        f'<h2 class="trends-section-title csat-sv-section-title" id="{esc(section_id)}-title">'
+        f'{esc(group.get("title", ""))}</h2>'
         f"{header_meta}</div>"
         f'<div class="csat-sv-rowlist">{rows_html}{extra}</div></section>'
     )
@@ -253,40 +321,59 @@ def render_shell_start(shell: Dict[str, str], data_as_of: str) -> str:
     )
 
 
-def render_csat_subnav(scope_menu: str) -> str:
+def render_csat_subnav(scope_menu: str, active_tab: int = 1, integrated: bool = False) -> str:
     tabs = ("Overview", "Surveys", "Responses")
     btns = []
+    routes = ("#/overview", "#/surveys", "#/responses")
     for i, label in enumerate(tabs):
-        active = i == 1
+        active = i == active_tab
+        data_route = f' data-csat-route="{routes[i]}"' if integrated else ""
         btns.append(
             f'<button type="button" class="csat-subtab-btn{" active" if active else ""}" '
             f'role="tab" aria-selected="{"true" if active else "false"}" '
-            f'tabindex="{"0" if active else "-1"}">{esc(label)}</button>'
+            f'tabindex="{"0" if active else "-1"}"{data_route}>{esc(label)}</button>'
         )
+    nav_cls = "csat-subtab-nav csat-sv-subnav csatSubtabNav" if integrated else "csat-subtab-nav csat-sv-subnav"
+    scope_cls = "csatScopeMenu csat-sv-scope-btn" if integrated else "csat-sv-scope-btn"
     return (
         '<div class="csat-sv-subnav-row">'
-        '<nav class="csat-subtab-nav csat-sv-subnav" role="tablist" aria-label="CSAT sections">'
+        f'<nav class="{nav_cls}" role="tablist" aria-label="CSAT sections">'
         + "".join(btns)
         + "</nav>"
-        f'<button type="button" class="csat-sv-scope-btn" aria-haspopup="true" aria-expanded="false">'
+        f'<button type="button" class="{scope_cls}" aria-haspopup="true" aria-expanded="false">'
         f'{esc(scope_menu)} <span class="csat-sv-caret" aria-hidden="true">▾</span></button>'
         "</div>"
     )
 
 
-def render_state_page(st: Dict[str, Any], meta: Dict[str, Any]) -> str:
+def render_state_page(
+    st: Dict[str, Any],
+    meta: Dict[str, Any],
+    ctx: Optional[IntegratedSurveysCtx] = None,
+    integrated: bool = False,
+    use_grid: bool = False,
+    include_shell: bool = True,
+) -> str:
     shell = meta["shells"][st["shell"]]
     groups_html = ""
     for key, eyebrow, sid in LIFECYCLE_GROUPS:
-        groups_html += render_group(key, eyebrow, sid, st[key])
+        groups_html += render_group(key, eyebrow, sid, st[key], ctx, use_grid)
+    parts = []
+    if include_shell:
+        parts.append(render_shell_start(shell, st.get("dataAsOf", "Oct 2026")))
+    parts.append(render_csat_subnav(st["scopeMenu"], active_tab=1, integrated=integrated))
+    layout_id = "" if include_shell else ' id="csat-surveys-app"'
+    parts.append(f'<div class="csat-sv-layout"{layout_id} data-csat-surveys-layout="compact-worklist">')
+    parts.append(render_filter_bar(st.get("filters", {})))
+    parts.append(groups_html)
+    parts.append("</div>")
+    body = "".join(parts)
+    if not include_shell:
+        return body
     return (
         '<main class="container" id="csat-surveys-app" data-csat-surveys-layout="compact-worklist">'
-        + render_shell_start(shell, st.get("dataAsOf", "Oct 2026"))
-        + render_csat_subnav(st["scopeMenu"])
-        + '<div class="csat-sv-layout">'
-        + render_filter_bar(st.get("filters", {}))
-        + groups_html
-        + "</div></main>"
+        + body
+        + "</main>"
         + f'<div class="csat-sv-proto-badge" role="status">LOCAL PROTOTYPE · {esc(st["protoLabel"])} · '
         f'<a href="CSAT_SURVEYS_INDEX.html">All states</a></div>'
     )

@@ -1,0 +1,88 @@
+{
+  "organizations": [
+    "Example County",
+    "Sample Health System",
+    "Example University",
+    "Test Customer Agency",
+    "Demo Municipal Services",
+    "Sample State Department"
+  ],
+  "productAreas": [
+    "Financial Management",
+    "Human Capital Management",
+    "Planning",
+    "Analytics and Reporting",
+    "Talent Management",
+    "Payroll",
+    "Time Tracking",
+    "Benefits",
+    "Recruiting"
+  ],
+  "deployments": [
+    {
+      "id": "syn-dep-001",
+      "name": "Example County — Core HCM",
+      "account": "Example County",
+      "stage": "Active",
+      "partner": "Sample Partner LLC",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2024-06-15",
+      "health": "At Risk",
+      "notable": true,
+      "hasStudent": false,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-002",
+      "name": "Sample Health System — Financials",
+      "account": "Sample Health System",
+      "stage": "Active",
+      "partner": "Demo Integrators",
+      "servicesApproach": "Accelerated",
+      "goLiveDate": "2023-11-01",
+      "health": "Healthy",
+      "notable": false,
+      "hasStudent": false,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-003",
+      "name": "Example University — Student & HCM",
+      "account": "Example University",
+      "stage": "Active",
+      "partner": "Campus Partners Co",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2025-01-20",
+      "health": "Watch",
+      "notable": false,
+      "hasStudent": true,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-004",
+      "name": "Test Customer Agency — Planning",
+      "account": "Test Customer Agency",
+      "stage": "Complete",
+      "partner": "Public Sector Advisors",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2022-03-10",
+      "health": "Healthy",
+      "notable": false,
+      "hasStudent": false,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-005",
+      "name": "Demo Municipal — Payroll",
+      "account": "Demo Municipal Services",
+      "stage": "Active",
+      "partner": "Sample Partner LLC",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2024-09-01",
+      "health": "At Risk",
+      "notable": true,
+      "hasStudent": false,
+      "hasEscalation": true
+    }
+  ]
+}

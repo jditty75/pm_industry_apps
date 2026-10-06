@@ -99,7 +99,7 @@ For whichever concept is shortlisted after Jeff's review, additionally capture:
 
 ## 9. Scope notes and evidence caveats for Composer
 
-- Fixture volume: the only confirmed real-world number from `docs/analysis/csat-subsystem/qualtrics-responses-contract.md` is a **177-row sample export** split 77 HC / 28 SLG(Government) / 72 HENP by sub-region routing. **Storage/idempotency behavior (how many of those rows actually land and persist in production) is a planned R2 acceptance test, not yet executed** — do not caption any fixture or preview screen as demonstrating "proven production storage counts." The portfolio-wide volume estimate to design around is `csat-ui-architecture.md`'s projection (~177 responses/~11 months observed, ~300/year planned, ~1,000–1,500 rows across all apps over 5 years) — use this for the "high-volume portfolio" fixture (#12 in §5), not the raw 28/77/72 sample split, which is a routing-correctness demonstration, not a UI-volume target.
+- Fixture volume: design around portfolio-scale projections in `csat-ui-architecture.md` (~300/year planned; high-volume fixture uses synthetic rows). **SLG Responses storage canary (accepted production evidence):** Responses source 177; SLG routed candidates 28; 26 stored; 2 excluded by historical deployment-universe eligibility; first pass inserted 26 / updated 0; second pass inserted 0 / updated 0; `CSAT_Responses` exists in SLG; repeat processing produced no duplicate growth. Do not caption prototype screens as demonstrating production counts — fixtures remain synthetic.
 - No R3/read-API work, no server contract changes, and no AI service calls are part of this spec (instruction 34, 37). The "Future AI" sub-nav entry in every concept renders as a disabled/placeholder state only.
 - Do not build screenshots or mock images into the `docs/analysis/dm-ux/` documentation tree itself (instruction 35) — screenshots are Composer/Jeff review artifacts, produced and reviewed outside Git-tracked docs unless Jeff later asks for specific ones to be archived.
 
@@ -117,3 +117,15 @@ This inventory is deliberately data-shaped, not endpoint-shaped — turning it i
 ## 11. Approval workflow (for Composer and Jeff, instruction 33)
 
 Claude concept (this document and its siblings) → Composer isolated preview → Jeff screenshot/browser review → feedback → Composer iteration → Jeff visual approval, recorded explicitly as **CSAT / DM UX VISUALLY APPROVED** → only then does R3/read-API design and production UI implementation begin. Architecture approval (this document) is not visual approval and does not authorize either preview-stage shortcuts into production code or, independently, any production deploy.
+
+## 12. Launch (implemented)
+
+From repo root:
+
+```powershell
+.\preview.ps1 DM_UX
+```
+
+Output: `.preview-out/DM_UX.html` (gitignored), served at `http://127.0.0.1:<port>/DM_UX.html`. Full controls, hash routes, and review checklist: [visual-review-guide.md](visual-review-guide.md).
+
+Source (isolated, not production DepMngr): `skills/gas-monorepo-engineer/dm-ux-concept/`.

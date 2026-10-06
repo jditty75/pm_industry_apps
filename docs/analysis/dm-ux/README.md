@@ -26,6 +26,7 @@ Grounded in the discovery above and in `docs/analysis/csat-subsystem/`; does not
 | [concept-comparison.md](concept-comparison.md) | Scored matrix (STRONG/MODERATE/WEAK) across familiarity, density, scalability, CSAT fit, deployment context, consistency, a11y, complexity, risk, maintainability, growth |
 | [recommended-direction.md](recommended-direction.md) | Recommendation (Concept B on Concept A's baseline), what's gained/preserved/changed, decisions needed from Jeff |
 | [preview-concept-spec.md](preview-concept-spec.md) | Handoff spec for Composer: page structure, fixtures, states, deep links, T1/T2 and token-treatment toggles, visual-review screenshot matrix |
+| [visual-review-guide.md](visual-review-guide.md) | Launch command, controls, review sequence, stable URLs, checklist, approval phrase |
 
 ## Headline findings
 
@@ -42,6 +43,6 @@ Verification stance: static source analysis only. No browser inspection or live 
 
 ## Design-concept phase outcome
 
-Three concepts were produced (Evolve in place / Deployment-centric / Grouped navigation); recommendation is Concept B built on Concept A's baseline fixes — see `recommended-direction.md`. This phase is design-only: no concept has been built as a runtime preview yet, and no visual approval has been recorded. Next step is a separate Composer pass against `preview-concept-spec.md`, then Jeff's visual review, before any R3/read-API or production UI work begins.
+Three concepts were produced (Evolve in place / Deployment-centric / Grouped navigation); recommendation is Concept B built on Concept A's baseline fixes — see `recommended-direction.md`. **Phase 1 localhost prototypes** are implemented under `skills/gas-monorepo-engineer/dm-ux-concept/` — launch with `.\preview.ps1 DM_UX` (see [visual-review-guide.md](visual-review-guide.md)). No visual approval has been recorded yet.
 
-**Evidence correction carried into the concept docs:** the SLG "production storage canary" referenced in the concept-phase brief (28 Government-routed responses / 26 stored / 2 excluded / confirmed idempotent) is only partially documented in `docs/analysis/csat-subsystem/`. Only the **28-count routing split**, from one 177-row sample export, is confirmed there. The 26-stored/2-excluded/idempotency result is a **planned R2 acceptance test that has not yet been run** (`implementation-plan.md`). The concept docs cite the 28-count as sample-export evidence only and do not assert production storage/idempotency as proven.
+**Evidence (SLG Responses storage canary):** Responses source 177; SLG routed 28; 26 stored; 2 excluded by deployment-universe eligibility; idempotent re-runs; `CSAT_Responses` present in SLG. Prototype fixtures remain synthetic and are not sized to the canary row count.

@@ -1,0 +1,10 @@
+{
+  "patterns": [
+    "@workday.com",
+    "@gmail.com",
+    "script.google.com/macros",
+    "AKIA",
+    "-----BEGIN"
+  ],
+  "forbiddenIds": []
+}

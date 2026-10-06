@@ -160,6 +160,12 @@
       "previewSupport": "FULL",
       "limitations": ["Static marketing page; no server scriptlets"]
     },
+    "skills/gas-monorepo-engineer/dm-ux-concept": {
+      "appId": "DM_UX",
+      "profile": "dm-ux-concept",
+      "previewSupport": "FULL",
+      "note": "Isolated UX concept prototype — launch via .\\preview.ps1 DM_UX (not preview_engine profile dm-depmngr-webapp)"
+    },
     "solutions/GS_Kit": {
       "appId": "GS_KIT",
       "previewSupport": "NOT_YET",

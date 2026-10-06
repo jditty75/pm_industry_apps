@@ -47,6 +47,16 @@ Authoritative list: [`config/ui-preview.json`](../../config/ui-preview.json) (`p
 - **Scenarios:** `-Scenario` on `preview.ps1` or `?scenario=` on the served URL. Default `mixed-health`.
 - Detail: [`skills/gas-monorepo-engineer/references/ui-preview-dm.md`](../../skills/gas-monorepo-engineer/references/ui-preview-dm.md) and [`docs/analysis/dm-family/preview-data-plan.md`](../analysis/dm-family/preview-data-plan.md).
 
+## DM UX concept prototypes (Phase 1)
+
+Isolated design comparison (Baseline, Concept A, Concept B) — does **not** modify production DepMngr source:
+
+```powershell
+.\preview.ps1 DM_UX
+```
+
+Guide: [`docs/analysis/dm-ux/visual-review-guide.md`](../analysis/dm-ux/visual-review-guide.md). Output: `.preview-out/DM_UX.html`.
+
 ## What is mocked
 
 - `google.script.run` — DM M1 handler map; other apps use generic chained warnings

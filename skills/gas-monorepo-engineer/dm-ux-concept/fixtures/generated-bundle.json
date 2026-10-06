@@ -1,0 +1,1075 @@
+{
+  "meta": {
+    "synthetic": true,
+    "version": 1
+  },
+  "deployments": [
+    {
+      "id": "syn-dep-001",
+      "name": "Example County \u2014 Core HCM",
+      "account": "Example County",
+      "stage": "Active",
+      "partner": "Sample Partner LLC",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2024-06-15",
+      "health": "At Risk",
+      "notable": true,
+      "hasStudent": false,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-002",
+      "name": "Sample Health System \u2014 Financials",
+      "account": "Sample Health System",
+      "stage": "Active",
+      "partner": "Demo Integrators",
+      "servicesApproach": "Accelerated",
+      "goLiveDate": "2023-11-01",
+      "health": "Healthy",
+      "notable": false,
+      "hasStudent": false,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-003",
+      "name": "Example University \u2014 Student & HCM",
+      "account": "Example University",
+      "stage": "Active",
+      "partner": "Campus Partners Co",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2025-01-20",
+      "health": "Watch",
+      "notable": false,
+      "hasStudent": true,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-004",
+      "name": "Test Customer Agency \u2014 Planning",
+      "account": "Test Customer Agency",
+      "stage": "Complete",
+      "partner": "Public Sector Advisors",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2022-03-10",
+      "health": "Healthy",
+      "notable": false,
+      "hasStudent": false,
+      "hasEscalation": false
+    },
+    {
+      "id": "syn-dep-005",
+      "name": "Demo Municipal \u2014 Payroll",
+      "account": "Demo Municipal Services",
+      "stage": "Active",
+      "partner": "Sample Partner LLC",
+      "servicesApproach": "Standard",
+      "goLiveDate": "2024-09-01",
+      "health": "At Risk",
+      "notable": true,
+      "hasStudent": false,
+      "hasEscalation": true
+    }
+  ],
+  "organizations": [
+    "Example County",
+    "Sample Health System",
+    "Example University",
+    "Test Customer Agency",
+    "Demo Municipal Services",
+    "Sample State Department"
+  ],
+  "productAreas": [
+    "Financial Management",
+    "Human Capital Management",
+    "Planning",
+    "Analytics and Reporting",
+    "Talent Management",
+    "Payroll",
+    "Time Tracking",
+    "Benefits",
+    "Recruiting"
+  ],
+  "responses": [
+    {
+      "id": "syn-res-001a",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "MDS",
+      "responseDate": "2025-08-11",
+      "overallSatisfaction": 3.2,
+      "surveySatisfaction": 3.0,
+      "nps": null,
+      "productAreas": [
+        "Human Capital Management",
+        "Analytics and Reporting"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Implementation timeline"
+      ],
+      "comments": {
+        "reasons": "Timeline slipped twice during cutover planning.",
+        "improve": "Clearer milestone communication would help."
+      }
+    },
+    {
+      "id": "syn-res-001b",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "PGL",
+      "responseDate": "2026-08-21",
+      "overallSatisfaction": 2.1,
+      "surveySatisfaction": 2.0,
+      "nps": 4,
+      "productAreas": [
+        "Human Capital Management",
+        "Planning"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Support responsiveness",
+        "Training"
+      ],
+      "comments": {
+        "reasons": "Post go-live support felt reactive rather than proactive.",
+        "improve": "Dedicated office hours for payroll leads.",
+        "additional": "We remain committed but need tighter follow-through."
+      }
+    },
+    {
+      "id": "syn-res-002",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-05",
+      "overallSatisfaction": 4.8,
+      "surveySatisfaction": 4.9,
+      "nps": 9,
+      "productAreas": [
+        "Financial Management"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Partner collaboration"
+      ],
+      "comments": {
+        "workingWell": "Finance team praised weekly steering cadence."
+      }
+    },
+    {
+      "id": "syn-res-003",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "MDS",
+      "responseDate": "2026-03-19",
+      "overallSatisfaction": 4.0,
+      "surveySatisfaction": 4.1,
+      "nps": null,
+      "productAreas": [
+        "Human Capital Management",
+        "Time Tracking"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Student records"
+      ],
+      "comments": {
+        "workingWell": "Registrar workflows validated ahead of schedule."
+      }
+    },
+    {
+      "id": "syn-res-004",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "MDS",
+      "responseDate": "2025-02-12",
+      "overallSatisfaction": 3.8,
+      "surveySatisfaction": 3.7,
+      "nps": null,
+      "productAreas": [
+        "Talent Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [],
+      "comments": {}
+    },
+    {
+      "id": "syn-res-005",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "PGL",
+      "responseDate": "2026-07-07",
+      "overallSatisfaction": 4.2,
+      "surveySatisfaction": 4.3,
+      "nps": 7,
+      "productAreas": [
+        "Financial Management",
+        "Human Capital Management",
+        "Planning",
+        "Analytics and Reporting",
+        "Talent Management"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Cross-module integration"
+      ],
+      "comments": {
+        "workingWell": "Benefits and payroll interfaces stabilized quickly."
+      }
+    },
+    {
+      "id": "syn-res-low-1",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-24",
+      "overallSatisfaction": 3.5,
+      "surveySatisfaction": 3.4,
+      "nps": 6,
+      "productAreas": [
+        "Benefits"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [],
+      "comments": {}
+    },
+    {
+      "id": "syn-res-low-2",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-23",
+      "overallSatisfaction": 3.5,
+      "surveySatisfaction": 3.4,
+      "nps": 6,
+      "productAreas": [
+        "Benefits"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [],
+      "comments": {}
+    },
+    {
+      "id": "syn-res-006a",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "MDS",
+      "responseDate": "2026-06-07",
+      "overallSatisfaction": 3.0,
+      "surveySatisfaction": 2.8,
+      "nps": null,
+      "productAreas": [
+        "Time Tracking"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Payroll accuracy"
+      ],
+      "comments": {
+        "reasons": "Parallel payroll runs surfaced mapping gaps."
+      }
+    },
+    {
+      "id": "syn-res-006b",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-20",
+      "overallSatisfaction": 4.5,
+      "surveySatisfaction": 4.6,
+      "nps": 8,
+      "productAreas": [
+        "Time Tracking"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Issue resolution"
+      ],
+      "comments": {
+        "workingWell": "Payroll team closed critical defects within one sprint."
+      }
+    },
+    {
+      "id": "syn-res-vol-000",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "MDS",
+      "responseDate": "2026-09-30",
+      "overallSatisfaction": 2.5,
+      "surveySatisfaction": 2.5,
+      "nps": null,
+      "productAreas": [
+        "Financial Management"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 0 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-001",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-27",
+      "overallSatisfaction": 2.6,
+      "surveySatisfaction": 2.6,
+      "nps": 1,
+      "productAreas": [
+        "Human Capital Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 1 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-002",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "MDS",
+      "responseDate": "2026-09-24",
+      "overallSatisfaction": 2.7,
+      "surveySatisfaction": 2.7,
+      "nps": null,
+      "productAreas": [
+        "Planning"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 2 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-003",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-21",
+      "overallSatisfaction": 2.8,
+      "surveySatisfaction": 2.8,
+      "nps": 3,
+      "productAreas": [
+        "Analytics and Reporting"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 3 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-004",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "MDS",
+      "responseDate": "2026-09-18",
+      "overallSatisfaction": 2.9,
+      "surveySatisfaction": 2.9,
+      "nps": null,
+      "productAreas": [
+        "Talent Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 4 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-005",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-15",
+      "overallSatisfaction": 3.0,
+      "surveySatisfaction": 3.0,
+      "nps": 5,
+      "productAreas": [
+        "Payroll"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 5 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-006",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "MDS",
+      "responseDate": "2026-09-12",
+      "overallSatisfaction": 3.1,
+      "surveySatisfaction": 3.1,
+      "nps": null,
+      "productAreas": [
+        "Time Tracking"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 6 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-007",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-09",
+      "overallSatisfaction": 3.2,
+      "surveySatisfaction": 3.2,
+      "nps": 7,
+      "productAreas": [
+        "Benefits"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 7 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-008",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "MDS",
+      "responseDate": "2026-09-06",
+      "overallSatisfaction": 3.3,
+      "surveySatisfaction": 3.3,
+      "nps": null,
+      "productAreas": [
+        "Recruiting"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 8 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-009",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "PGL",
+      "responseDate": "2026-09-03",
+      "overallSatisfaction": 3.4,
+      "surveySatisfaction": 3.4,
+      "nps": 9,
+      "productAreas": [
+        "Financial Management"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 9 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-010",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "MDS",
+      "responseDate": "2026-08-31",
+      "overallSatisfaction": 3.5,
+      "surveySatisfaction": 3.5,
+      "nps": null,
+      "productAreas": [
+        "Human Capital Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 10 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-011",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "PGL",
+      "responseDate": "2026-08-28",
+      "overallSatisfaction": 3.6,
+      "surveySatisfaction": 3.6,
+      "nps": 0,
+      "productAreas": [
+        "Planning"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 11 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-012",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "MDS",
+      "responseDate": "2026-08-25",
+      "overallSatisfaction": 3.7,
+      "surveySatisfaction": 3.7,
+      "nps": null,
+      "productAreas": [
+        "Analytics and Reporting"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 12 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-013",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "PGL",
+      "responseDate": "2026-08-22",
+      "overallSatisfaction": 3.8,
+      "surveySatisfaction": 3.8,
+      "nps": 2,
+      "productAreas": [
+        "Talent Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 13 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-014",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "MDS",
+      "responseDate": "2026-08-19",
+      "overallSatisfaction": 3.9,
+      "surveySatisfaction": 3.9,
+      "nps": null,
+      "productAreas": [
+        "Payroll"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 14 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-015",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "PGL",
+      "responseDate": "2026-08-16",
+      "overallSatisfaction": 4.0,
+      "surveySatisfaction": 4.0,
+      "nps": 4,
+      "productAreas": [
+        "Time Tracking"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 15 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-016",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "MDS",
+      "responseDate": "2026-08-13",
+      "overallSatisfaction": 4.1,
+      "surveySatisfaction": 4.1,
+      "nps": null,
+      "productAreas": [
+        "Benefits"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 16 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-017",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "PGL",
+      "responseDate": "2026-08-10",
+      "overallSatisfaction": 4.2,
+      "surveySatisfaction": 4.2,
+      "nps": 6,
+      "productAreas": [
+        "Recruiting"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 17 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-018",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "MDS",
+      "responseDate": "2026-08-07",
+      "overallSatisfaction": 4.3,
+      "surveySatisfaction": 4.3,
+      "nps": null,
+      "productAreas": [
+        "Financial Management"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 18 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-019",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "PGL",
+      "responseDate": "2026-08-04",
+      "overallSatisfaction": 4.4,
+      "surveySatisfaction": 4.4,
+      "nps": 8,
+      "productAreas": [
+        "Human Capital Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 19 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-020",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "MDS",
+      "responseDate": "2026-08-01",
+      "overallSatisfaction": 4.5,
+      "surveySatisfaction": 4.5,
+      "nps": null,
+      "productAreas": [
+        "Planning"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 20 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-021",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "PGL",
+      "responseDate": "2026-07-29",
+      "overallSatisfaction": 4.6,
+      "surveySatisfaction": 4.6,
+      "nps": 10,
+      "productAreas": [
+        "Analytics and Reporting"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 21 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-022",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "MDS",
+      "responseDate": "2026-07-26",
+      "overallSatisfaction": 4.7,
+      "surveySatisfaction": 4.7,
+      "nps": null,
+      "productAreas": [
+        "Talent Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 22 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-023",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "PGL",
+      "responseDate": "2026-07-23",
+      "overallSatisfaction": 4.8,
+      "surveySatisfaction": 2.5,
+      "nps": 1,
+      "productAreas": [
+        "Payroll"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 23 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-024",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "MDS",
+      "responseDate": "2026-07-20",
+      "overallSatisfaction": 4.9,
+      "surveySatisfaction": 2.6,
+      "nps": null,
+      "productAreas": [
+        "Time Tracking"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 24 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-025",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "PGL",
+      "responseDate": "2026-07-17",
+      "overallSatisfaction": 2.5,
+      "surveySatisfaction": 2.7,
+      "nps": 3,
+      "productAreas": [
+        "Benefits"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 25 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-026",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "MDS",
+      "responseDate": "2026-07-14",
+      "overallSatisfaction": 2.6,
+      "surveySatisfaction": 2.8,
+      "nps": null,
+      "productAreas": [
+        "Recruiting"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 26 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-027",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "PGL",
+      "responseDate": "2026-07-11",
+      "overallSatisfaction": 2.7,
+      "surveySatisfaction": 2.9,
+      "nps": 5,
+      "productAreas": [
+        "Financial Management"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 27 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-028",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "MDS",
+      "responseDate": "2026-07-08",
+      "overallSatisfaction": 2.8,
+      "surveySatisfaction": 3.0,
+      "nps": null,
+      "productAreas": [
+        "Human Capital Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 28 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-029",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "PGL",
+      "responseDate": "2026-07-05",
+      "overallSatisfaction": 2.9,
+      "surveySatisfaction": 3.1,
+      "nps": 7,
+      "productAreas": [
+        "Planning"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 29 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-030",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "MDS",
+      "responseDate": "2026-07-02",
+      "overallSatisfaction": 3.0,
+      "surveySatisfaction": 3.2,
+      "nps": null,
+      "productAreas": [
+        "Analytics and Reporting"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 30 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-031",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "PGL",
+      "responseDate": "2026-06-29",
+      "overallSatisfaction": 3.1,
+      "surveySatisfaction": 3.3,
+      "nps": 9,
+      "productAreas": [
+        "Talent Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 31 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-032",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "MDS",
+      "responseDate": "2026-06-26",
+      "overallSatisfaction": 3.2,
+      "surveySatisfaction": 3.4,
+      "nps": null,
+      "productAreas": [
+        "Payroll"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 32 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-033",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "PGL",
+      "responseDate": "2026-06-23",
+      "overallSatisfaction": 3.3,
+      "surveySatisfaction": 3.5,
+      "nps": 0,
+      "productAreas": [
+        "Time Tracking"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 33 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-034",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "MDS",
+      "responseDate": "2026-06-20",
+      "overallSatisfaction": 3.4,
+      "surveySatisfaction": 3.6,
+      "nps": null,
+      "productAreas": [
+        "Benefits"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 34 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-035",
+      "deploymentId": "syn-dep-001",
+      "surveyType": "PGL",
+      "responseDate": "2026-06-17",
+      "overallSatisfaction": 3.5,
+      "surveySatisfaction": 3.7,
+      "nps": 2,
+      "productAreas": [
+        "Recruiting"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 35 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-036",
+      "deploymentId": "syn-dep-002",
+      "surveyType": "MDS",
+      "responseDate": "2026-06-14",
+      "overallSatisfaction": 3.6,
+      "surveySatisfaction": 3.8,
+      "nps": null,
+      "productAreas": [
+        "Financial Management"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 36 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-037",
+      "deploymentId": "syn-dep-003",
+      "surveyType": "PGL",
+      "responseDate": "2026-06-11",
+      "overallSatisfaction": 3.7,
+      "surveySatisfaction": 3.9,
+      "nps": 4,
+      "productAreas": [
+        "Human Capital Management"
+      ],
+      "qualtricsSentiment": "neutral",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 37 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-038",
+      "deploymentId": "syn-dep-004",
+      "surveyType": "MDS",
+      "responseDate": "2026-06-08",
+      "overallSatisfaction": 3.8,
+      "surveySatisfaction": 4.0,
+      "nps": null,
+      "productAreas": [
+        "Planning"
+      ],
+      "qualtricsSentiment": "negative",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 38 for density review."
+      }
+    },
+    {
+      "id": "syn-res-vol-039",
+      "deploymentId": "syn-dep-005",
+      "surveyType": "PGL",
+      "responseDate": "2026-06-05",
+      "overallSatisfaction": 3.9,
+      "surveySatisfaction": 4.1,
+      "nps": 6,
+      "productAreas": [
+        "Analytics and Reporting"
+      ],
+      "qualtricsSentiment": "positive",
+      "qualtricsTopics": [
+        "Synthetic topic"
+      ],
+      "comments": {
+        "additional": "Synthetic comment row 39 for density review."
+      }
+    }
+  ],
+  "inflight": [
+    {
+      "deploymentId": "syn-dep-001",
+      "deployment": "Example County \u2014 Core HCM",
+      "sent": 48,
+      "opened": 36,
+      "started": 28,
+      "completed": 22,
+      "bounced": 2,
+      "status": "In progress"
+    },
+    {
+      "deploymentId": "syn-dep-003",
+      "deployment": "Example University \u2014 Student & HCM",
+      "sent": 12,
+      "opened": 10,
+      "started": 8,
+      "completed": 6,
+      "bounced": 0,
+      "status": "In progress"
+    },
+    {
+      "deploymentId": "syn-dep-002",
+      "deployment": "Sample Health System \u2014 Financials",
+      "sent": 0,
+      "opened": 0,
+      "started": 0,
+      "completed": 0,
+      "bounced": 0,
+      "status": "Upcoming"
+    }
+  ]
+}

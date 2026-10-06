@@ -147,6 +147,18 @@ def main():
         built_files[label] = os.path.basename(path)
         print(f"PASS {label}: {len(html)} chars")
 
+    dm_ux_selftest = os.path.join(REPO, "skills", "gas-monorepo-engineer", "dm-ux-concept", "preview_dm_ux_selftest.py")
+    if os.path.isfile(dm_ux_selftest):
+        import subprocess
+
+        r = subprocess.run([sys.executable, dm_ux_selftest], cwd=os.path.dirname(dm_ux_selftest), capture_output=True, text=True)
+        if r.returncode != 0:
+            print("FAIL preview_dm_ux_selftest.py")
+            print(r.stdout or r.stderr)
+            failed += 1
+        else:
+            print((r.stdout or "").strip())
+
     if failed:
         sys.exit(1)
 

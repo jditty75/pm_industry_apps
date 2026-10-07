@@ -51,7 +51,7 @@ class TestDiscovery(unittest.TestCase):
         dep = registry["DepMngr"]
         consumers = discover_consumers(REPO, dep["userSymbol"], dep["consumerDirPattern"])
         slg = next(c for c in consumers if c.app_id == "SLG_DM")
-        self.assertEqual(slg.version, "155")
+        self.assertEqual(slg.version, "160")
         self.assertFalse(slg.consumes_head)
         hc = next(c for c in consumers if c.app_id == "HC_DM")
         self.assertEqual(hc.version, "146")

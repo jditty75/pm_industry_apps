@@ -54,6 +54,7 @@ function loadPlatform() {
   };
   vm.createContext(sandbox);
   [
+    'CoreUtils.js',
     'CoreDeploymentSignals.js',
     'CoreDeploymentSignalLifecycle.js',
     'CoreDeploymentSignalStore.js',
@@ -295,4 +296,90 @@ test('diagnose aggregates exclusion reasons without narratives', () => {
   assert.equal(diag.rowsPassingActiveStatus, 1);
   assert.equal(diag.exclusions.submittedStatus, 1);
   assert.ok(!JSON.stringify(diag).match(/observation|interpretation/i));
+});
+
+function assertGasTransportSafe(value, path) {
+  if (value === null) return;
+  const t = typeof value;
+  if (t === 'undefined' || t === 'function' || t === 'symbol' || t === 'bigint') {
+    throw new Error('unsupported transport value at ' + path + ': ' + t);
+  }
+  if (value instanceof Date) {
+    throw new Error('native Date at ' + path);
+  }
+  if (Array.isArray(value)) {
+    value.forEach(function (v, i) {
+      assertGasTransportSafe(v, path + '[' + i + ']');
+    });
+    return;
+  }
+  if (value && t === 'object') {
+    Object.keys(value).forEach(function (k) {
+      assertGasTransportSafe(value[k], path + '.' + k);
+    });
+  }
+}
+
+test('landing DTO normalizes sheet-derived Date fields for google.script.run transport', () => {
+  const sheetDate = new Date('2026-10-05T12:00:00.000Z');
+  const store = Store.createMemoryStore();
+  const rows = [];
+  for (let i = 0; i < 16; i++) {
+    rows.push(Object.assign(baseRow('DEP_A', 'NEW', 'HIGH'), {
+      signal_id: 'SIG-DATE-' + i,
+      signal_as_of: i === 0 ? '2026-10-01' : sheetDate,
+      first_active_at: i === 0 ? '' : sheetDate,
+      last_updated_at: i === 0 ? '' : sheetDate,
+      persisted_at: i === 0 ? null : sheetDate
+    }));
+  }
+  Store.replaceBody(store, 'Deployment_Signals', Store.currentHeaders(), rows);
+  Store.appendRows(store, 'Deployment_Signal_Runs', Store.runHeaders(), [{
+    signal_run_id: 'RUN-DATE',
+    signal_as_of: sheetDate,
+    persisted_at: sheetDate,
+    received_at: sheetDate,
+    run_status: 'COMPLETE',
+    lifecycle_new_count: 0,
+    deployments_evaluated: 16,
+    signals_persisted: 16
+  }]);
+
+  const payload = Persist.getDeploymentSignalsLandingForUI(
+    SLG_CFG, {}, {}, { store: store, includeResolved: false });
+  assert.equal(payload.ok, true);
+  assert.equal(payload.signals.length, 16);
+  assert.equal(payload.activeCount, 16);
+
+  const s0 = payload.signals.find(function (x) { return x.signal_id === 'SIG-DATE-0'; });
+  assert.ok(s0);
+  assert.equal(typeof s0.signal_as_of, 'string');
+  assert.ok(s0.signal_as_of.indexOf('2026-10-01') === 0);
+  assert.equal(s0.first_active_at, '');
+  assert.equal(s0.last_updated_at, '');
+  assert.equal(s0.persisted_at, '');
+
+  const s1 = payload.signals.find(function (x) { return x.signal_id === 'SIG-DATE-1'; });
+  assert.ok(s1);
+  assert.equal(s1.signal_as_of, sheetDate.toISOString());
+  assert.equal(s1.first_active_at, sheetDate.toISOString());
+  assert.equal(s1.last_updated_at, sheetDate.toISOString());
+  assert.equal(s1.persisted_at, sheetDate.toISOString());
+
+  assert.ok(payload.latestRun);
+  assert.equal(typeof payload.latestRun.signal_as_of, 'string');
+  assert.equal(typeof payload.latestRun.persisted_at, 'string');
+  assert.equal(typeof payload.latestRun.received_at, 'string');
+  assert.equal(payload.latestRun.signal_as_of, sheetDate.toISOString());
+
+  payload.signals.forEach(function (sig) {
+    ['signal_as_of', 'first_active_at', 'last_updated_at', 'persisted_at'].forEach(function (f) {
+      if (sig[f] != null && sig[f] !== '') {
+        assert.equal(sig[f] instanceof Date, false);
+        assert.equal(typeof sig[f], 'string');
+      }
+    });
+  });
+
+  assertGasTransportSafe(payload, 'landing');
 });

@@ -2,6 +2,18 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-07 — SLG_DM — deploy (Signals GAS transport DTO)
+
+- Authorization: user (Signals UI FINAL proven GAS serialization fix, 2026-10-07)
+- Git source: pending
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: **204**
+- Live GAS version: pending
+- CoreLib: **160** (`fix(signals): normalize landing UI DTO dates for GAS transport`)
+- Description: fix(signals): ISO-string normalize Signal landing/run UI DTO dates at transport boundary
+- Verification: DepMngr **204/204** local tests; SLG preview structural PASS; production browser RPC smoke pending Jeff
+- Result: pending
+
 ### 2026-10-07 — SLG_DM — deploy (Deployment Intelligence v1)
 
 - Authorization: user (DI v1 bounded implementation — Signals scope + scheduled notification engine, 2026-10-07)

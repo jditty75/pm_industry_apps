@@ -1092,9 +1092,12 @@ var CoreDeploymentSignalPersistence = {
     runRow = runRow || {};
     return {
       signal_run_id: runRow.signal_run_id,
-      signal_as_of: runRow.signal_as_of,
-      persisted_at: runRow.persisted_at,
-      received_at: runRow.received_at,
+      signal_as_of: runRow.signal_as_of
+        ? CoreUtils.formatDateToIsoString(runRow.signal_as_of) : '',
+      persisted_at: runRow.persisted_at
+        ? CoreUtils.formatDateToIsoString(runRow.persisted_at) : '',
+      received_at: runRow.received_at
+        ? CoreUtils.formatDateToIsoString(runRow.received_at) : '',
       run_status: runRow.run_status,
       deployments_evaluated: runRow.deployments_evaluated,
       signals_persisted: runRow.signals_persisted
@@ -1108,7 +1111,7 @@ var CoreDeploymentSignalPersistence = {
         row.deployment_id, depById) || {};
     var conf = CoreDeploymentSignalNormalize.formatConfidenceForUi(
       row.confidence, row.confidence);
-    return Object.assign({}, row, {
+    var enriched = Object.assign({}, row, {
       deployment_name: dep.deploymentName || dep.deployment_name || '',
       account_name: dep.accountName || dep.account_name || '',
       signal_type_label: CoreDeploymentSignalNormalize.formatSignalTypeLabel(row.signal_type),
@@ -1117,6 +1120,15 @@ var CoreDeploymentSignalPersistence = {
       confidence_detail: conf.detail,
       takeaway: String(row.why_it_matters || row.interpretation || '').trim()
     });
+    enriched.signal_as_of = row.signal_as_of
+      ? CoreUtils.formatDateToIsoString(row.signal_as_of) : '';
+    enriched.first_active_at = row.first_active_at
+      ? CoreUtils.formatDateToIsoString(row.first_active_at) : '';
+    enriched.last_updated_at = row.last_updated_at
+      ? CoreUtils.formatDateToIsoString(row.last_updated_at) : '';
+    enriched.persisted_at = row.persisted_at
+      ? CoreUtils.formatDateToIsoString(row.persisted_at) : '';
+    return enriched;
   },
 
   /** @private */

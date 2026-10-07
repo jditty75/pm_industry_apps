@@ -35,6 +35,8 @@ const FILES = [
   'qualtrics/QualtricsResponsesTransform.js',
   'qualtrics/QualtricsResponsesPipeline.js',
   'EdmQualtricsResponsesProcessor.js',
+  'EdmQualtricsResponsesRunPolicy.js',
+  'EdmQualtricsScheduledRunner.js',
   'EdmOrchestrator.js',
   'EdmProductionActivation.js',
   'EdmQualtricsProcessor.js',

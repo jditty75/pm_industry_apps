@@ -8,10 +8,21 @@
  * @return {Object}
  */
 function runQualtricsInboxScheduled(e) {
-  return processQualtricsInboxNow({
-    dryRun: false,
-    ingestEnabled: isQualtricsIngestEnabled_(),
-    deleteSuccessfulSource: isDeleteSuccessfulSourceEnabled_()
+  return EdmQualtricsScheduledRunner.runScheduledPipelines({
+    runInFlight: function () {
+      return processQualtricsInboxNow({
+        dryRun: false,
+        ingestEnabled: isQualtricsIngestEnabled_(),
+        deleteSuccessfulSource: isDeleteSuccessfulSourceEnabled_()
+      });
+    },
+    runResponses: function () {
+      return processQualtricsResponsesInboxNow({
+        dryRun: false,
+        ingestEnabled: isQualtricsResponsesIngestEnabled_(),
+        deleteSuccessfulSource: isDeleteSuccessfulResponsesSourceEnabled_()
+      });
+    }
   });
 }
 
@@ -179,6 +190,14 @@ function isDeleteSuccessfulSourceEnabled_() {
 /**
  * @return {boolean}
  */
+function isDeleteSuccessfulResponsesSourceEnabled_() {
+  return PropertiesService.getScriptProperties()
+    .getProperty(EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE) === 'true';
+}
+
+/**
+ * @return {boolean}
+ */
 function isQualtricsResponsesIngestEnabled_() {
   return PropertiesService.getScriptProperties()
     .getProperty(EdmProperties.RESPONSES_INGEST_ENABLED) === 'true';
@@ -194,14 +213,20 @@ function isQualtricsResponsesIngestEnabled_() {
  */
 function processQualtricsResponsesInboxNow(options) {
   options = options || {};
-  var dryRun = options.dryRun !== false;
-  var ingestEnabled = !!options.ingestEnabled && isQualtricsResponsesIngestEnabled_();
-  if (options.ingestEnabled && !dryRun && !ingestEnabled) {
+  var propertyIngestOn = isQualtricsResponsesIngestEnabled_();
+  var invocation = EdmQualtricsResponsesRunPolicy.resolveInvocation(options, propertyIngestOn);
+  if (invocation.blocked) {
+    Logger.log('processQualtricsResponsesInboxNow: ' + invocation.message +
+      (invocation.reason ? ' reason=' + invocation.reason : ''));
     return {
       ok: false,
-      message: 'Ingest requested but EDM_QUALTRICS_RESPONSES_INGEST_ENABLED is not true'
+      message: invocation.message,
+      reason: invocation.reason || invocation.message,
+      responsesIngestEnabled: propertyIngestOn
     };
   }
+  var dryRun = invocation.dryRun;
+  var ingestEnabled = invocation.ingestEnabled;
 
   var lock = EdmLocking.tryAcquire(EdmLocking.QUALTRICS_INGEST_LOCK_KEY, LockService, 1000);
   if (!lock.acquired) {
@@ -221,7 +246,15 @@ function processQualtricsResponsesInboxNow(options) {
       DriveApp
     );
     if (!candidate) {
-      return { ok: true, message: 'No CSV in Responses Inbox' };
+      var noFile = EdmQualtricsResponsesRunPolicy.noCandidateResult(false);
+      Logger.log('processQualtricsResponsesInboxNow: ' + noFile.message);
+      return {
+        ok: noFile.ok,
+        message: noFile.message,
+        reason: noFile.reason,
+        dryRun: dryRun,
+        responsesIngestEnabled: propertyIngestOn
+      };
     }
 
     var csvText = EdmQualtricsInbox.readCsvText(candidate.file);
@@ -280,15 +313,22 @@ function processQualtricsResponsesInboxNow(options) {
       });
     }
 
-    Logger.log('processQualtricsResponsesInboxNow: ' + buildResponsesJobLogLine_(outcome));
+    var runMessage = buildResponsesRunMessage_(outcome, dryRun, ingestEnabled, propertyIngestOn);
+    Logger.log('processQualtricsResponsesInboxNow: ' + buildResponsesJobLogLine_(outcome) +
+      ' ' + runMessage);
     return {
       ok: outcome.result.ok,
       dryRun: dryRun,
+      message: runMessage,
+      reason: outcome.job && outcome.job.errorCategory
+        ? outcome.job.errorCategory
+        : (dryRun ? EdmQualtricsResponsesRunPolicy.MESSAGE_DRY_RUN : 'INGEST_COMPLETE'),
       jobId: outcome.job.jobId,
       disposition: disposition,
       diagnostics: outcome.result.diagnostics,
       warningCounts: outcome.result.warningCounts,
       destinationResults: summarizeResponsesDestinations_(outcome),
+      responsesIngestEnabled: propertyIngestOn,
       outcome: outcome
     };
   } finally {
@@ -300,6 +340,27 @@ function processQualtricsResponsesInboxNow(options) {
  * @param {Object} outcome
  * @return {string}
  */
+/**
+ * @param {Object} outcome
+ * @param {boolean} dryRun
+ * @param {boolean} ingestEnabled
+ * @param {boolean} propertyIngestOn
+ * @return {string}
+ */
+function buildResponsesRunMessage_(outcome, dryRun, ingestEnabled, propertyIngestOn) {
+  var job = outcome.job || {};
+  if (job.errorCategory === 'DUPLICATE_SUCCESS_CHECKSUM') {
+    return 'DUPLICATE_SUCCESS_CHECKSUM';
+  }
+  if (dryRun) {
+    return EdmQualtricsResponsesRunPolicy.MESSAGE_DRY_RUN;
+  }
+  if (!propertyIngestOn || !ingestEnabled) {
+    return EdmQualtricsResponsesRunPolicy.MESSAGE_INGEST_DISABLED;
+  }
+  return 'INGEST_COMPLETE status=' + (job.status || 'unknown');
+}
+
 function buildResponsesJobLogLine_(outcome) {
   var job = outcome.job || {};
   return [

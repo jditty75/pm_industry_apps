@@ -2,6 +2,15 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-07 — External_Data_Manager — Qualtrics Responses operating loop (HEAD push)
+
+- Authorization: user (VOC Responses automation fix, 2026-10-07)
+- Git source: (pending commit on `main`)
+- GAS: `clasp push` to EDM HEAD — shared scheduler runs InFlight then Responses; Responses run policy/logging; `runEdmSetQualtricsResponsesDeleteSuccessfulSource`
+- Local verification: EDM **84/84** tests
+- Production runtime verification: not performed (Execution API / `clasp run` **403**); editor handoff for property enable + one-shot ingest
+- Result: partial (HEAD updated; production ingest/properties not verified from agent)
+
 ### 2026-10-07 — DepMngr CoreLib 161 — shared VoC platform (library cut)
 
 - Authorization: user (Shared VoC Platform PRODUCTION RELEASE, 2026-10-07)

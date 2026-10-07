@@ -955,6 +955,25 @@ function runEdmSetQualtricsResponsesIngestEnabled(enable) {
 }
 
 /**
+ * Enable or disable delete-after-success for Responses inbox sources.
+ * @param {boolean} enable
+ * @return {Object}
+ */
+function runEdmSetQualtricsResponsesDeleteSuccessfulSource(enable) {
+  var props = PropertiesService.getScriptProperties();
+  if (enable === true) {
+    props.setProperty(EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE, 'true');
+  } else {
+    props.deleteProperty(EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE);
+  }
+  return {
+    ok: true,
+    deleteSuccessfulResponsesSource:
+      props.getProperty(EdmProperties.DELETE_SUCCESSFUL_RESPONSES_SOURCE) === 'true'
+  };
+}
+
+/**
  * Sanitized exclusion reason counts for routed Responses inbox rows (no PII).
  * @param {string} logicalAppId
  * @return {Object}

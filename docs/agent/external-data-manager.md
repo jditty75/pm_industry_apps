@@ -28,7 +28,7 @@ It does **not** require a developer machine, Cursor, `scripts.run`, or `clasp ru
 | EVI / PDX / HS | CoreLib **139** (not Qualtrics destinations) |
 | Ingest | `EDM_QUALTRICS_INGEST_ENABLED=true` (normal ops) |
 | Successful-source delete | `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE=true` |
-| Schedule | One trigger: `runQualtricsInboxScheduled` (~15 min) |
+| Schedule | One trigger: `runQualtricsInboxScheduled` (~15 min) — InFlight then Responses (each isolated try/catch) |
 | User workflow | Drop full-dashboard Qualtrics CSV in Drive **Qualtrics → Inbox** |
 
 **Operations runbook:** [edm-qualtrics-v1-runbook.md](./edm-qualtrics-v1-runbook.md)
@@ -79,6 +79,10 @@ Healthcare is not routed to HENP. Routing lives in `QualtricsRoutingConfig`, not
 | `EDM_DEST_HENP_DM_SPREADSHEET_ID` | HENP workbook id |
 | `EDM_QUALTRICS_INGEST_ENABLED` | Must be `true` for non–dry-run ingest |
 | `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` | Must be `true` to delete Inbox file after full success |
+| `QUALTRICS_RESPONSES_INBOX_FOLDER_ID` | Responses export drop folder |
+| `QUALTRICS_RESPONSES_FAILED_FOLDER_ID` | Failed Responses sources |
+| `EDM_QUALTRICS_RESPONSES_INGEST_ENABLED` | Must be `true` for scheduled/manual Responses ingest |
+| `EDM_DELETE_SUCCESSFUL_QUALTRICS_RESPONSES_SOURCE` | Must be `true` to delete Responses Inbox file after full success |
 
 Never commit property **values** or `.clasp.json`.
 

@@ -125,7 +125,7 @@ Persists `QUALTRICS_RESPONSES_INBOX_FOLDER_ID`, `QUALTRICS_RESPONSES_FAILED_FOLD
 - Classifier `QUALTRICS_RESPONSES`, source/canonical **177**
 - Routes: HC **77**, SLG **28**, HENP **72**
 - No destination writes, no source delete, ledger `pipeline=qualtrics_responses`
-- InFlight trigger unchanged (still `runQualtricsInboxScheduled` only)
+- Scheduled handler `runQualtricsInboxScheduled` runs **InFlight then Responses** (isolated try/catch); Responses ingest still requires `EDM_QUALTRICS_RESPONSES_INGEST_ENABLED=true`
 
 ## Rollback references
 

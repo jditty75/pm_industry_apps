@@ -51,7 +51,7 @@ class TestDiscovery(unittest.TestCase):
         dep = registry["DepMngr"]
         consumers = discover_consumers(REPO, dep["userSymbol"], dep["consumerDirPattern"])
         slg = next(c for c in consumers if c.app_id == "SLG_DM")
-        self.assertEqual(slg.version, "154")
+        self.assertEqual(slg.version, "155")
         self.assertFalse(slg.consumes_head)
         hc = next(c for c in consumers if c.app_id == "HC_DM")
         self.assertEqual(hc.version, "146")
@@ -108,7 +108,7 @@ class TestRollbackPlan(unittest.TestCase):
             c.app_id: {"version": c.version, "developmentMode": c.development_mode}
             for c in consumers
         }
-        rb = build_rollback_plan("DepMngr", consumers, "154", pins, ["SLG_DM"])
+        rb = build_rollback_plan("DepMngr", consumers, "155", pins, ["SLG_DM"])
         self.assertEqual(rb["strategy"], "forward_git_repoint_production")
         head_entries = [x for x in rb["perConsumer"] if x.get("wasHead")]
         self.assertEqual(head_entries, [])

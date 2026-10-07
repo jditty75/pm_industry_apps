@@ -15,6 +15,14 @@ var CoreDeploymentSignalStore = {
   RUN_STATUS_COMPLETE: 'COMPLETE',
   RUN_STATUS_FAILED: 'FAILED',
   RUN_STATUS_IN_PROGRESS: 'IN_PROGRESS',
+  RUN_STATUS_SUBMITTED: 'SUBMITTED',
+
+  SIGNAL_STATUS_SUBMITTED: 'SUBMITTED',
+
+  EMAIL_STATUS_NOT_REQUIRED: 'NOT_REQUIRED',
+  EMAIL_STATUS_PENDING: 'PENDING',
+  EMAIL_STATUS_SENT: 'SENT',
+  EMAIL_STATUS_FAILED: 'FAILED',
 
   /**
    * @return {Array<string>}
@@ -301,5 +309,54 @@ var CoreDeploymentSignalStore = {
       }
     }
     return null;
+  },
+
+  /**
+   * @param {Array<Object>} runRows
+   * @param {string} runId
+   * @return {Object|null} latest row for run id
+   */
+  findLatestRunRow: function (runRows, runId) {
+    var target = String(runId || '').trim();
+    for (var i = runRows.length - 1; i >= 0; i--) {
+      if (String(runRows[i].signal_run_id || '').trim() === target) {
+        return runRows[i];
+      }
+    }
+    return null;
+  },
+
+  /**
+   * Replace the last matching run row body fields (sheet IO).
+   *
+   * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+   * @param {Array<string>} headers
+   * @param {string} runId
+   * @param {Object} patch
+   * @return {boolean}
+   */
+  updateRunRowBySignalRunId: function (sheet, headers, runId, patch) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return false;
+    var width = headers.length;
+    var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    var hdr = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (h) {
+      return String(h || '').trim();
+    });
+    var target = String(runId || '').trim();
+    var rowIndex = -1;
+    for (var i = values.length - 1; i >= 0; i--) {
+      var obj = CoreDeploymentSignalStore.arrayToRow(values[i], hdr);
+      if (String(obj.signal_run_id || '').trim() === target) {
+        rowIndex = i;
+        break;
+      }
+    }
+    if (rowIndex < 0) return false;
+    var merged = Object.assign(
+      CoreDeploymentSignalStore.arrayToRow(values[rowIndex], hdr), patch || {});
+    var arr = CoreDeploymentSignalStore.rowToArray(merged, headers);
+    sheet.getRange(rowIndex + 2, 1, rowIndex + 2, width).setValues([arr]);
+    return true;
   }
 };

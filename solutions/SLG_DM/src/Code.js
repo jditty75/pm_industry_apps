@@ -363,6 +363,51 @@ function getLatestApprovedSlgSignalRun() {
   return CoreLib.CoreDeploymentSignalPersistence.getLatestApprovedSlgSignalRun(APP_CONFIG);
 }
 
+/**
+ * Source-aware deterministic Signal evidence refresh (trajectory build when sources advance).
+ *
+ * @return {Object}
+ */
+function refreshSlgDeploymentSignalEvidenceIfNeeded() {
+  var result = CoreLib.CoreDeploymentSignalEvidenceRefresh.refreshIfNeeded(APP_CONFIG);
+  Logger.log('refreshSlgDeploymentSignalEvidenceIfNeeded: ' + JSON.stringify(result));
+  return result;
+}
+
+/**
+ * Process Sana SUBMITTED runs from Deployment_Signal_Runs / Deployment_Signals.
+ *
+ * @return {Object}
+ */
+function processSubmittedSlgDeploymentSignalRuns() {
+  var result = CoreLib.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+    APP_CONFIG);
+  Logger.log('processSubmittedSlgDeploymentSignalRuns: ' + JSON.stringify(result));
+  return result;
+}
+
+/** Time-based trigger handler — evidence refresh (cheap NO_OP when unchanged). */
+function tickSlgDeploymentSignalEvidenceRefresh() {
+  refreshSlgDeploymentSignalEvidenceIfNeeded();
+}
+
+/** Time-based trigger handler — SUBMITTED run processor. */
+function tickSlgDeploymentSignalSubmittedProcessor() {
+  processSubmittedSlgDeploymentSignalRuns();
+}
+
+/**
+ * Install SLG Signal operating-loop triggers (30-minute cadence; no duplicates).
+ *
+ * @return {Array<Object>}
+ */
+function installSlgDeploymentSignalOperatingLoopTriggers() {
+  return CoreLib.CoreDeploymentSignalTriggers.installSlgOperatingLoopTriggers([
+    'tickSlgDeploymentSignalEvidenceRefresh',
+    'tickSlgDeploymentSignalSubmittedProcessor'
+  ], 30);
+}
+
 // ============================================================================
 // 4. DEBUG HELPERS (OPTIONAL, LOCAL IMPLEMENTATIONS)
 // ============================================================================

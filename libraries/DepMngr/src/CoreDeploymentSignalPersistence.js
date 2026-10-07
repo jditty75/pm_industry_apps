@@ -328,6 +328,120 @@ var CoreDeploymentSignalPersistence = {
     }
   },
 
+  /**
+   * Persist a Sana SUBMITTED run already present in workbook sheets (no new run append).
+   *
+   * @param {AppConfig} cfg
+   * @param {Object} runInput
+   * @param {Object} ctx { priorCurrent, skipHistoryAppend, io }
+   * @param {Object=} options
+   * @return {Object}
+   * @private
+   */
+  _executeSubmittedPersist_: function (cfg, runInput, ctx, options) {
+    options = options || {};
+    ctx = ctx || {};
+    var nowIso = new Date().toISOString();
+    var signalRunId = String(runInput.signal_run_id || '').trim();
+    var receivedAt = runInput.received_at || runInput.receivedAt || nowIso;
+    var signalAsOf = runInput.signal_as_of || runInput.signalAsOf ||
+      nowIso.slice(0, 10);
+
+    var proposedCount = parseInt(runInput.signals_proposed, 10);
+    var norm;
+    if (proposedCount === 0) {
+      norm = {
+        ok: true,
+        records: [],
+        errors: [],
+        meta: { proposed_count: 0, normalized_count: 0 }
+      };
+    } else {
+      norm = CoreDeploymentSignalNormalize.normalizeApprovedRun(runInput, options);
+      if (!norm.ok) {
+        return CoreDeploymentSignalPersistence._fail_(norm.errors.join('; '));
+      }
+    }
+
+    var validIds = CoreDeploymentSignalPersistence._resolveValidDeploymentIds_(cfg, options);
+    var identityErrors = [];
+    norm.records.forEach(function (rec, idx) {
+      var id = CoreData.canonicalDeploymentId(rec.deployment_id);
+      rec.deployment_id = id;
+      if (!validIds[id]) {
+        identityErrors.push('record[' + idx + ']: unknown deployment ' + id);
+      }
+    });
+    if (identityErrors.length) {
+      return CoreDeploymentSignalPersistence._fail_(identityErrors.join('; '));
+    }
+
+    var priorCurrent = (ctx.priorCurrent || []).filter(function (row) {
+      return String(row.signal_status) !== CoreDeploymentSignalStore.SIGNAL_STATUS_SUBMITTED;
+    });
+    priorCurrent.forEach(function (row) {
+      if (!row.identity_key && row.deployment_id && row.signal_type) {
+        row.identity_key = CoreDeploymentSignalNormalize.identityKey(
+          row.deployment_id, row.signal_type);
+      }
+    });
+
+    var runMeta = {
+      signal_run_id: signalRunId,
+      signal_as_of: signalAsOf,
+      source_reasoning_run_ref: String(
+        runInput.source_reasoning_run_ref || runInput.reasoningRunRef || '').trim(),
+      context_schema_version: String(
+        runInput.context_schema_version || 'deployment-signal-context-v1').trim(),
+      agent_reference: String(runInput.agent_reference || '').trim()
+    };
+
+    var plan = CoreDeploymentSignalLifecycle.buildPlan({
+      priorCurrent: priorCurrent,
+      incomingRecords: norm.records,
+      runMeta: runMeta,
+      timestamps: { receivedAt: receivedAt, persistedAt: nowIso },
+      makeSignalId: function (key) {
+        return CoreDeploymentSignalPersistence._newSignalId_(key);
+      }
+    });
+
+    try {
+      if (!ctx.skipHistoryAppend) {
+        ctx.io.appendHistory(plan.historyEvents);
+      }
+      ctx.io.writeCurrent(plan.nextCurrent);
+      var completeRun = CoreDeploymentSignalPersistence._buildRunRow_({
+        signal_run_id: signalRunId,
+        signal_as_of: signalAsOf,
+        started_at: receivedAt,
+        received_at: receivedAt,
+        persisted_at: nowIso,
+        deployments_evaluated: runInput.deployments_evaluated || 0,
+        signals_proposed: norm.meta.proposed_count || norm.records.length,
+        signals_persisted: plan.signalsPersisted,
+        no_signal_count: runInput.no_signal_count || 0,
+        lifecycleCounts: plan.lifecycleCounts,
+        run_status: CoreDeploymentSignalStore.RUN_STATUS_COMPLETE,
+        persistence_status: 'COMPLETE',
+        context_schema_version: runMeta.context_schema_version,
+        agent_reference: runMeta.agent_reference,
+        source_reasoning_run_ref: runMeta.source_reasoning_run_ref,
+        error_message: ''
+      });
+      return {
+        ok: true,
+        signal_run_id: signalRunId,
+        signals_persisted: plan.signalsPersisted,
+        lifecycle_counts: plan.lifecycleCounts,
+        run: completeRun,
+        current: plan.nextCurrent
+      };
+    } catch (writeErr) {
+      return CoreDeploymentSignalPersistence._fail_(String(writeErr));
+    }
+  },
+
   /** @private */
   _persistToStore_: function (cfg, runInput, options, sheetNames, signalRunId) {
     var store = options.store;

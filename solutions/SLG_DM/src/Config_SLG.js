@@ -53,7 +53,16 @@ var APP_CONFIG = {
     signalHistorySheetName: 'Deployment_Signal_History',
     signalRunsSheetName: 'Deployment_Signal_Runs',
     schemaVersion: 2,
-    signalRecordSchemaVersion: 'deployment-signal-v1'
+    signalRecordSchemaVersion: 'deployment-signal-v1',
+    // Authoritative SFDC/source tabs whose successful connector refresh can change deterministic evidence.
+    signalEvidenceSourceSheets: [
+      'SFDC_Deployments',
+      'SFDC_DeploymentHistory',
+      'SFDC_DeploymentProductFunctions',
+      'SFDC_DeploymentProductFunctionHistory',
+      'SFDC_DHP',
+      'SFDC_DHPActionHistory'
+    ]
   },
   
   sheets: {

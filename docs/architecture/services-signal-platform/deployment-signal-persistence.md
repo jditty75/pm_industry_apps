@@ -5,10 +5,14 @@
 ## Architecture
 
 ```text
-Deterministic SLG evidence → Sana reasoning → normalization/validation
-  → persistApprovedSlgSignalRun → lifecycle → workbook storage
-  → Deployment Manager UI / weekly email (future) / reporting
+SFDC connector → Auto Refresh Execution Log
+  → source-aware trajectory refresh (GAS)
+  → Sana Monday analysis → SUBMITTED rows in workbook
+  → processSubmittedSlgSignalRuns → normalization/lifecycle/history/current
+  → notification eligibility → Deployment Manager UI / leadership email (template TBD)
 ```
+
+Legacy editor path `persistApprovedSlgSignalRun(runInput)` remains supported for sanitized tests; production handoff is **Sana direct-write + SUBMITTED processor**.
 
 | Layer | Responsibility |
 |-------|----------------|
@@ -88,7 +92,34 @@ Stable key: `deployment_id` + normalized `signal_type` (`CoreDeploymentSignalNor
 
 **POSITIVE:** modeled as **`attention`** (`POSITIVE`), not a lifecycle state. Weekly email “improving” sections use attention + lifecycle (`DE_ESCALATED`, etc.), not a sixth lifecycle enum.
 
-## Approved write transaction
+## Source-aware deterministic evidence refresh
+
+- **Freshness authority:** `Auto Refresh Execution Log` (column contract: Refresh Time, Sheet, Status=Success).
+- **SLG required sources** (`Config_SLG.js` → `deploymentSignal.signalEvidenceSourceSheets`):  
+  `SFDC_Deployments`, `SFDC_DeploymentHistory`, `SFDC_DeploymentProductFunctions`,  
+  `SFDC_DeploymentProductFunctionHistory`, `SFDC_DHP`, `SFDC_DHPActionHistory`.
+- **Consumed markers:** Script property `deploymentSignal_sourceMarkers_v1_SLG` (per-sheet ISO timestamp after successful trajectory build).
+- **Entry point:** `refreshSlgDeploymentSignalEvidenceIfNeeded()` → `CoreDeploymentSignalEvidenceRefresh.refreshIfNeeded`.
+- **Outcomes:** `SIGNAL_REFRESH_NO_OP`, `SIGNAL_REFRESH_COMPLETE` (+ `sources_changed`, `build_timestamp`), `SIGNAL_REFRESH_BLOCKED` (+ `source_not_ready`).
+- **Trigger:** `tickSlgDeploymentSignalEvidenceRefresh` every **30 minutes** (install via `installSlgDeploymentSignalOperatingLoopTriggers()`).
+
+## Sana direct-write handoff (production)
+
+Sana writes `run_status=SUBMITTED` and `persistence_status=SUBMITTED` on `Deployment_Signal_Runs`, and `signal_status=SUBMITTED` on `Deployment_Signals`. GAS does **not** use inbox sheets, CSV, or onEdit.
+
+**Processor:** `processSubmittedSlgDeploymentSignalRuns()` → `CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns`.
+
+Validation includes run/signal count reconciliation, active deployment population, identity uniqueness, and substantive field normalization. Failures set `run_status=FAILED` without falsely completing. Retries are safe when history for the run already exists (no duplicate history append).
+
+**Trigger:** `tickSlgDeploymentSignalSubmittedProcessor` every **30 minutes**.
+
+## Notification eligibility (post-COMPLETE)
+
+Rule: `lifecycle_new_count > 0` **OR** `lifecycle_escalated_count > 0`.  
+CONTINUING / DE_ESCALATED / RESOLVED alone → `email_status=NOT_REQUIRED`.  
+Eligible runs → payload via `CoreDeploymentSignalNotification.buildPayload` (`email_status=PENDING` until template wired in NotificationConfig).
+
+## Approved write transaction (legacy / tests)
 
 **Function:** `CoreDeploymentSignalPersistence.persistApprovedSlgSignalRun(appConfig, runInput)`
 
@@ -134,5 +165,10 @@ Stewardship conditions remain in the deterministic stewardship lane (`CoreDeploy
 | `CoreDeploymentSignalStore.js` | Headers / versions, Spreadsheet IO, in-memory test store |
 | `CoreDeploymentSignalLifecycle.js` | Pure lifecycle plan |
 | `CoreDeploymentSignalPersistence.js` | Orchestration + public API |
+| `CoreAutoRefreshExecutionLog.js` | Generic Auto Refresh Execution Log reader (latest Success per sheet) |
+| `CoreDeploymentSignalEvidenceRefresh.js` | Source-aware trajectory refresh |
+| `CoreDeploymentSignalSubmittedProcessor.js` | SUBMITTED run processor |
+| `CoreDeploymentSignalNotification.js` | Eligibility + payload contract |
+| `CoreDeploymentSignalTriggers.js` | Periodic trigger installer |
 
 Tests: `libraries/DepMngr/test/deployment-signal-persistence.test.js`.

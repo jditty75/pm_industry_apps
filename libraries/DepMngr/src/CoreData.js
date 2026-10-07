@@ -10475,7 +10475,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           deploymentId:        canonDep || depId,
           accountName:         r.accountName,
           deploymentName:      r.deploymentName,
-          deploymentStartDate: depStart || null,
+          deploymentStartDate: _coerceUiDateField_(depStart, null),
           missingType:         missingType,
           hasProducts:         hasProducts,
           deliveryDirector:    r.damFullName || null,
@@ -12919,7 +12919,160 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @param {number=} windowMonths
    * @return {Object}
    */
-  function getCsatTabDataForUI(config, viewModeOpts, windowMonths, productOpts) {
+
+  /**
+   * Recursively coerces Date/undefined values for google.script.run transport.
+   * @param {*} val
+   * @return {*}
+   * @private
+   */
+  function _sanitizeValueForGasTransport_(val) {
+    if (val === undefined) {
+      return null;
+    }
+    if (val === null) {
+      return null;
+    }
+    if (val instanceof Date) {
+      return isNaN(val.getTime()) ? '' : CoreUtils.formatDateToIsoString(val);
+    }
+    if (Array.isArray(val)) {
+      return val.map(_sanitizeValueForGasTransport_);
+    }
+    if (typeof val === 'object') {
+      var out = {};
+      Object.keys(val).forEach(function (k) {
+        out[k] = _sanitizeValueForGasTransport_(val[k]);
+      });
+      return out;
+    }
+    return val;
+  }
+
+  /**
+   * @param {Object} payload getCsatTabDataForUI result
+   * @return {Object}
+   * @private
+   */
+  function _sanitizeCsatTabPayloadForGasTransport_(payload) {
+    return _sanitizeValueForGasTransport_(payload);
+  }
+
+  /**
+   * Read-only VoC CSAT tab RPC diagnostic (aggregate shape only; no customer payloads).
+   *
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {number=} windowMonths
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function diagnoseVocCsatTabDataForUI(config, viewModeOpts, windowMonths, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var transportIssues = [];
+
+    function walkTransport_(val, path) {
+      if (val === undefined) {
+        transportIssues.push({ path: path, kind: 'undefined' });
+        return;
+      }
+      if (val === null) {
+        return;
+      }
+      if (val instanceof Date) {
+        transportIssues.push({ path: path, kind: 'Date' });
+        return;
+      }
+      if (typeof val === 'function') {
+        transportIssues.push({ path: path, kind: 'function' });
+        return;
+      }
+      if (Array.isArray(val)) {
+        val.forEach(function (item, i) {
+          walkTransport_(item, path + '[' + i + ']');
+        });
+        return;
+      }
+      if (typeof val === 'object') {
+        Object.keys(val).forEach(function (k) {
+          walkTransport_(val[k], path + '.' + k);
+        });
+      }
+    }
+
+    try {
+      var built = _buildCsatTabDataForUIUnsafe_(cfg, viewModeOpts, windowMonths, productOpts);
+      walkTransport_(built, 'root');
+      var sanitized = _sanitizeCsatTabPayloadForGasTransport_(built);
+
+      var ub = built && built.upcomingBatches;
+      var groups = (ub && ub.groups) || [];
+      var batchRowSample = null;
+      for (var gi = 0; gi < groups.length && !batchRowSample; gi++) {
+        var g = groups[gi];
+        if (g.mdsRows && g.mdsRows.length) {
+          batchRowSample = g.mdsRows[0];
+        } else if (g.pglRows && g.pglRows.length) {
+          batchRowSample = g.pglRows[0];
+        }
+      }
+
+      return {
+        ok: true,
+        appId: cfg.appId || '',
+        resultIsNull: built == null,
+        resultType: typeof built,
+        topLevelKeys: built ? Object.keys(built) : [],
+        success: !!(sanitized && sanitized.success),
+        enabled: !!(cfg.ui && cfg.ui.mgmPglTab && cfg.ui.mgmPglTab.enabled !== false),
+        status: 'built',
+        clientContractOkAfterSanitize: !!(sanitized && sanitized.success),
+        horizonMonths: built ? built.horizonMonths : null,
+        collections: {
+          inFlightRows: {
+            present: !!(built && built.inFlightRows),
+            length: built && built.inFlightRows ? built.inFlightRows.length : 0
+          },
+          responseRows: {
+            present: !!(built && built.responseRows),
+            length: built && built.responseRows ? built.responseRows.length : 0
+          },
+          upcomingBatchGroups: {
+            present: !!(ub && ub.groups),
+            length: groups.length
+          },
+          exceptions: {
+            present: !!(built && built.exceptions),
+            length: built && built.exceptions ? built.exceptions.length : 0
+          },
+          notificationRules: {
+            present: !!(built && built.notificationRules),
+            length: built && built.notificationRules ? built.notificationRules.length : 0
+          }
+        },
+        batchRowHasScheduleFields: batchRowSample ? !!(
+          batchRowSample.surveyOpen || batchRowSample.cohortDate || batchRowSample.surveyTargetDate
+        ) : false,
+        batchRowHasAwareness: batchRowSample ? !!(
+          batchRowSample.awarenessConditions && batchRowSample.awarenessConditions.length
+        ) : false,
+        responseRowPresent: !!(built && built.responseRows && built.responseRows.length),
+        transportIssueCountBeforeSanitize: transportIssues.length,
+        transportIssuesBeforeSanitize: transportIssues.slice(0, 40),
+        sanitizedWouldChangePayload: transportIssues.length > 0
+      };
+    } catch (err) {
+      Logger.log('CoreData.diagnoseVocCsatTabDataForUI: ' + err);
+      return {
+        ok: false,
+        appId: cfg.appId || '',
+        status: 'error',
+        error: String(err)
+      };
+    }
+  }
+
+  function _buildCsatTabDataForUIUnsafe_(config, viewModeOpts, windowMonths, productOpts) {
     var cfg = CoreConfig.withDefaults(config);
     var horizonMonths = (windowMonths === 6) ? 6 : 3;
     Logger.log('CoreData.getCsatTabDataForUI: appId=' + cfg.appId +
@@ -13024,6 +13177,19 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       horizonMonths:    horizonMonths,
       asOf:             new Date().toISOString()
     };
+  }
+
+  /**
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {number=} windowMonths
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function getCsatTabDataForUI(config, viewModeOpts, windowMonths, productOpts) {
+    return _sanitizeCsatTabPayloadForGasTransport_(
+      _buildCsatTabDataForUIUnsafe_(config, viewModeOpts, windowMonths, productOpts)
+    );
   }
 
   // ===========================================================================
@@ -16355,6 +16521,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     verifyCsatResponsesStorage:  verifyCsatResponsesStorage,
     uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,
     getCsatTabDataForUI:         getCsatTabDataForUI,
+    diagnoseVocCsatTabDataForUI: diagnoseVocCsatTabDataForUI,
     getDistributionLogDataForUI: getDistributionLogDataForUI,
 
     // Overview Snapshot (C11b)

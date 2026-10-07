@@ -99,6 +99,23 @@ function getCsatTabDataForUI(viewModeOpts, windowMonths, productOpts) {
 }
 
 /**
+ * Read-only VoC CSAT tab RPC diagnostic (shape/transport only; no customer payloads).
+ * @param {Object=} viewModeOpts
+ * @param {number=} windowMonths
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function diagnoseVocCsatTabDataForUI(viewModeOpts, windowMonths, productOpts) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  return CoreLib.CoreData.diagnoseVocCsatTabDataForUI(
+    cfg,
+    viewModeOpts,
+    (windowMonths === 6) ? 6 : 3,
+    productOpts
+  );
+}
+
+/**
  * UI Endpoint Wrapper: Upload CSAT In-Flight CSV
  */
 function uploadCsatInFlightCsvForUI(viewModeOpts, csvText) {

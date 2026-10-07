@@ -99,6 +99,23 @@ function getCsatTabDataForUI(viewModeOpts, windowMonths, productOpts) {
 }
 
 /**
+ * Read-only VoC CSAT tab RPC diagnostic (shape/transport only; no customer payloads).
+ * @param {Object=} viewModeOpts
+ * @param {number=} windowMonths
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function diagnoseVocCsatTabDataForUI(viewModeOpts, windowMonths, productOpts) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  return CoreLib.CoreData.diagnoseVocCsatTabDataForUI(
+    cfg,
+    viewModeOpts,
+    (windowMonths === 6) ? 6 : 3,
+    productOpts
+  );
+}
+
+/**
  * Debug helper: MDS/PGL duplicate-row diagnostics for a search token.
  * @param {string=} token  Account or deployment name substring.
  * @param {number=} windowMonths  3 or 6

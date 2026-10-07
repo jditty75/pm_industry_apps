@@ -2,6 +2,45 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-07 — DepMngr CoreLib 162 — VoC CSAT tab GAS transport hotfix
+
+- Authorization: user (VoC production regression hotfix, 2026-10-07)
+- Git source: (pending commit on `main`)
+- Library: CoreLib **162** — `fix(voc): normalize CSAT tab DTO for GAS RPC transport`
+- Previous immutable library version: **161**
+- Rollback library version: **161**
+- Consumer pin updates: SLG_DM **161 → 162**; HC_DM **161 → 162**; HENP_DM **161 → 162**
+- Verification: DepMngr **226/226** local tests; HENP/HC/SLG structural preview PASS; library release selftest PASS
+- Result: success (library cut; consumer deploys below)
+
+### 2026-10-07 — HENP_DM — deploy (VoC CSAT tab GAS transport hotfix CoreLib 162)
+
+- Authorization: user (VoC production regression hotfix, 2026-10-07)
+- Deployment ID: `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`
+- Previous GAS version: **110**
+- Live GAS version: **111**
+- CoreLib: **162**
+- Description: fix(voc): CSAT tab RPC null response when CSAT_Responses sheet dates present
+- Result: success
+
+### 2026-10-07 — HC_DM — deploy (VoC CSAT tab GAS transport hotfix CoreLib 162)
+
+- Authorization: user (VoC production regression hotfix, 2026-10-07)
+- Deployment ID: `AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA`
+- Previous GAS version: **89**
+- Live GAS version: **90**
+- CoreLib: **162**
+- Result: success
+
+### 2026-10-07 — SLG_DM — deploy (VoC CSAT tab GAS transport hotfix CoreLib 162)
+
+- Authorization: user (VoC production regression hotfix, 2026-10-07)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: **207**
+- Live GAS version: **208**
+- CoreLib: **162**
+- Result: success
+
 ### 2026-10-07 — External_Data_Manager — Qualtrics Responses operating loop (HEAD push)
 
 - Authorization: user (VOC Responses automation fix, 2026-10-07)

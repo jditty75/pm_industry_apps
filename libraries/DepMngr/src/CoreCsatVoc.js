@@ -402,6 +402,26 @@ var CoreCsatVoc = (function () {
   }
 
   /**
+   * Coerces sheet/API values for google.script.run (native Date breaks client RPC).
+   * @param {*} val
+   * @return {string|number|null}
+   */
+  function coerceRpcScalarField(val) {
+    if (val === undefined || val === null || val === '') {
+      return '';
+    }
+    if (val instanceof Date ||
+        (typeof val === 'object' && typeof val.getTime === 'function')) {
+      var ms = val.getTime();
+      return (typeof ms === 'number' && !isNaN(ms)) ? new Date(ms).toISOString() : '';
+    }
+    if (typeof val === 'number' && !isNaN(val)) {
+      return val;
+    }
+    return String(val);
+  }
+
+  /**
    * @param {Object} storageRow CSAT_Responses row
    * @param {Object} linkage from reconcile
    * @return {Object}
@@ -425,16 +445,16 @@ var CoreCsatVoc = (function () {
       accountName: storageRow.account_name || '',
       deploymentName: storageRow.deployment_name || '',
       surveyType: typeKey,
-      responseDate: storageRow.response_ts_utc || '',
-      cohortDate: linkage.cohortDate || '',
+      responseDate: coerceRpcScalarField(storageRow.response_ts_utc),
+      cohortDate: coerceRpcScalarField(linkage.cohortDate),
       surveyEventId: linkage.surveyEventId || '',
       linkMethod: linkage.linkMethod || LINK_LEGACY_UNKNOWN,
-      overallSatisfaction: headline,
-      npsScore: storageRow.nps_score,
-      aspectMethodology: storageRow.aspect_methodology,
-      aspectSchedule: storageRow.aspect_schedule,
-      aspectCommunications: storageRow.aspect_communications,
-      aspectValue: storageRow.aspect_value,
+      overallSatisfaction: headline != null && headline !== '' ? headline : '',
+      npsScore: storageRow.nps_score != null ? storageRow.nps_score : null,
+      aspectMethodology: storageRow.aspect_methodology != null ? storageRow.aspect_methodology : null,
+      aspectSchedule: storageRow.aspect_schedule != null ? storageRow.aspect_schedule : null,
+      aspectCommunications: storageRow.aspect_communications != null ? storageRow.aspect_communications : null,
+      aspectValue: storageRow.aspect_value != null ? storageRow.aspect_value : null,
       partnerName: storageRow.partner_name || '',
       summaryLine: buildResponseSummaryLine(storageRow)
     };
@@ -607,6 +627,7 @@ var CoreCsatVoc = (function () {
     computeSurveyState: computeSurveyState,
     buildAwarenessConditions: buildAwarenessConditions,
     reconcileInFlightToCohort: reconcileInFlightToCohort,
+    coerceRpcScalarField: coerceRpcScalarField,
     buildResponseListItem: buildResponseListItem,
     buildResponseDetailDto: buildResponseDetailDto,
     buildResponseSummaryLine: buildResponseSummaryLine,

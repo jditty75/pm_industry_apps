@@ -57,7 +57,7 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 | [context-assembler.md](./context-assembler.md) | Assembler architecture and portfolio workflow |
 | [ai-reasoning-contract.md](./ai-reasoning-contract.md) | AI instruction boundary (facts vs interpretation) |
 | [structured-signals-contract.md](./structured-signals-contract.md) | `deployment-signal-v1` field contract |
-| [deployment-signal-persistence.md](./deployment-signal-persistence.md) | SLG sheets, APIs, Sana handoff, lifecycle |
+| [deployment-signal-persistence.md](./deployment-signal-persistence.md) | SLG sheets, APIs, Sana handoff, lifecycle, **Deployment Intelligence** + Sana Slack contract |
 | [signal-lifecycle-roadmap.md](./signal-lifecycle-roadmap.md) | Lifecycle semantics + POSITIVE modeling |
 | [deployment-data-stewardship-v1.md](./deployment-data-stewardship-v1.md) | Data Stewardship condition contract |
 | [weekly-operating-governance-model.md](./weekly-operating-governance-model.md) | Daily/weekly cadence, approval boundary, email + DM consumption |

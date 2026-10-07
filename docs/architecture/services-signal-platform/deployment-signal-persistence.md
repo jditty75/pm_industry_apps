@@ -145,9 +145,65 @@ SLG menu/editor wrappers: `persistApprovedSlgSignalRun(runInput)` in `SLG_DM/Cod
 
 SLG wrapper: `initializeSlgDeploymentSignalSheets()`.
 
-## Weekly email handoff (renderer not implemented)
+## Deployment Intelligence (deployment-intelligence-v1)
+
+Shared platform capability (config: `cfg.deploymentIntelligence.enabled` + `deploymentSignal.persistenceEnabled`). SLG is the first consumer (`Config_SLG.js`).
+
+**Principle:** Source evidence is app-specific. Deployment Intelligence is shared. Google Sheets is the durable boundary for GAS email and Sana Slack.
+
+### Workbook sheet
+
+| Sheet | Purpose |
+|-------|---------|
+| `Deployment_Intelligence_Runs` | One row per finalized weekly intelligence run (`cfg.deploymentIntelligence.intelligenceRunsSheetName`) |
+
+Headers: `intelligence_run_id`, `app_id`, `signal_run_id`, `as_of_date`, `is_baseline`, `intelligence_status`, `artifact_schema_version`, `artifact_json`, `email_status`, `email_sent_at`, `slack_status`, `slack_sent_at`, `finalized_at`, `updated_at`.
+
+`artifact_json` holds the canonical read model (`portfolioPulse`, `portfolioMovement`, `signalMovement`, `talkingPoints`, `dataConfidence`, `editorial`, `links`, `distributionState`). The `editorial` block carries leadership-ready copy (what changed, quiet/improving week semantics, data requiring attention) so GAS email and Sana Slack can render the same intelligence without re-deriving facts. Sana and email consumers read this column — not raw SFDC/trajectory sheets.
+
+Data Stewardship in production uses `CoreDeploymentSignalContext.buildDeploymentSignalContext` (trajectory-backed) when `getContextPacketForDeployment` is not supplied.
+
+### Finalization
+
+`CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun(appConfig, options)` requires a **COMPLETE** Signal run (not `SUBMITTED`). Idempotent by `intelligence_run_id` (`INT-{signal_run_id}`) or `signal_run_id`. Baseline run: no prior `READY` row for the same `app_id` — leadership NEW counts suppressed in `signalMovement.leadership` and baseline talking-point rules.
+
+### Distribution state
+
+| Field | Owner |
+|-------|--------|
+| `email_status` / `email_sent_at` | GAS (`CoreNotify.sendDeploymentIntelligenceEmail`) |
+| `slack_status` / `slack_sent_at` | Sana (external) |
+
+Channels are independent: email success does not imply Slack success.
+
+### Sana Slack contract (no GAS Slack code)
+
+Sana Deployment Intelligence distribution agent:
+
+1. Read `Deployment_Intelligence_Runs` in the app workbook.
+2. Select the latest row for the app where `intelligence_status = READY`.
+3. Parse `artifact_json` for portfolio pulse, movement, signal movement, talking points, data confidence, and `links.exploreDeploymentIntelligenceUrl`.
+4. Distribute when `slack_status = PENDING` (set `slack_sent_at` / `slack_status` after post via Sana-owned process).
+5. Do not recalculate KPIs, lifecycle, or stewardship — render from the artifact only.
+
+### APIs
+
+| API | Role |
+|-----|------|
+| `initializeDeploymentIntelligenceSheets` | Header provisioning |
+| `buildDeploymentIntelligenceReadModel` | Pure artifact builder (tests/previews) |
+| `finalizeDeploymentIntelligenceRun` | Persist READY row |
+| `getLatestReadyDeploymentIntelligence` | Latest READY row per app |
+| `parseArtifactFromRunRow` | Parse `artifact_json` |
+| `CorePortfolioHealth.buildDeploymentIntelligencePortfolioPulse` | Deterministic KPIs |
+| `CoreNotify.buildDeploymentIntelligenceEmailHtml` | Leadership email HTML |
+| `CoreConfig.buildDeploymentManagerInvestigationUrl` | DM deep links |
+
+## Weekly Signal email handoff (leadership Signals)
 
 Consume **persisted** `Deployment_Signals` + `Deployment_Signal_History` + latest run from `Deployment_Signal_Runs`. Section by `lifecycle_state` and `attention` (`POSITIVE`). No second AI pass.
+
+Deployment Intelligence weekly email is a separate notification key (`deployment_intelligence_weekly`).
 
 ## Deployment Manager UI handoff (UI not in this milestone)
 

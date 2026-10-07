@@ -2929,11 +2929,67 @@ var CorePortfolioHealth = (function () {
     return diagnostic;
   }
 
+  /**
+   * Portfolio pulse KPIs for Deployment Intelligence (same active population as getSnapshot).
+   *
+   * @param {AppConfig} config
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @return {Object}
+   */
+  function buildDeploymentIntelligencePortfolioPulse(config, viewModeOpts, productOpts) {
+    var cfg = CoreConfig.withDefaults(config);
+    var tz = Session.getScriptTimeZone();
+    var todayStr = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+    var countRows = CoreData.getActiveCountDeployments(cfg, productOpts)
+      .filter(function (r) { return !r.excludeFromReport; });
+    countRows = CoreData.filterDeploymentsByStudent_(countRows, 'exclude', cfg);
+
+    var green = 0;
+    var yellow = 0;
+    var red = 0;
+    var mtpWithin90Days = 0;
+
+    countRows.forEach(function (r) {
+      var h = String(r.health || '').trim();
+      if (h === 'Green') green++;
+      else if (h === 'Yellow') yellow++;
+      else if (h === 'Red') red++;
+
+      var mtpRaw = r.currentMtp || r.goLiveDate || r.mtpDate || '';
+      if (!mtpRaw) return;
+      var mtpKey = String(mtpRaw).slice(0, 10);
+      var days = TrajectoryMetrics.signedDaysBetween(todayStr, mtpKey);
+      if (days !== null && days >= 0 && days <= 90) {
+        mtpWithin90Days++;
+      }
+    });
+
+    var totalActive = green + yellow + red;
+    var pct100 = function (v) {
+      if (!totalActive) return 0;
+      return Math.round((v / totalActive) * 1000) / 10;
+    };
+
+    return {
+      totalActive: totalActive,
+      green: green,
+      yellow: yellow,
+      red: red,
+      greenPct: pct100(green),
+      yellowPct: pct100(yellow),
+      redPct: pct100(red),
+      mtpWithin90Days: mtpWithin90Days
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // EXPORTS
   // ---------------------------------------------------------------------------
   return {
     getSnapshot: getSnapshot,
+    buildDeploymentIntelligencePortfolioPulse: buildDeploymentIntelligencePortfolioPulse,
     debugPortfolioHealthVNext: debugPortfolioHealthVNext,
     createPortfolioHealthSlides: createPortfolioHealthSlides,
     debugPortfolioHealthSlidesPayload: debugPortfolioHealthSlidesPayload

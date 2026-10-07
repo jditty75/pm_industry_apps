@@ -24,6 +24,14 @@ var CoreDeploymentSignalStore = {
   EMAIL_STATUS_SENT: 'SENT',
   EMAIL_STATUS_FAILED: 'FAILED',
 
+  INTELLIGENCE_STATUS_READY: 'READY',
+  INTELLIGENCE_STATUS_FAILED: 'FAILED',
+
+  SLACK_STATUS_PENDING: 'PENDING',
+  SLACK_STATUS_SENT: 'SENT',
+  SLACK_STATUS_FAILED: 'FAILED',
+  SLACK_STATUS_NOT_REQUIRED: 'NOT_REQUIRED',
+
   /**
    * @return {Array<string>}
    */
@@ -95,6 +103,28 @@ var CoreDeploymentSignalStore = {
       'source_reasoning_run_ref',
       'error_message',
       'email_status'
+    ];
+  },
+
+  /**
+   * @return {Array<string>}
+   */
+  intelligenceRunHeaders: function () {
+    return [
+      'intelligence_run_id',
+      'app_id',
+      'signal_run_id',
+      'as_of_date',
+      'is_baseline',
+      'intelligence_status',
+      'artifact_schema_version',
+      'artifact_json',
+      'email_status',
+      'email_sent_at',
+      'slack_status',
+      'slack_sent_at',
+      'finalized_at',
+      'updated_at'
     ];
   },
 

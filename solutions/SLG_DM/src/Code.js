@@ -364,6 +364,50 @@ function getLatestApprovedSlgSignalRun() {
 }
 
 /**
+ * Finalize weekly SLG Deployment Intelligence (canonical artifact + sheet row).
+ *
+ * @param {Object=} options signal_run_id, dryRun hooks via persistence options
+ * @return {Object}
+ */
+function finalizeWeeklySlgDeploymentIntelligence(options) {
+  var result = CoreLib.CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun(
+    APP_CONFIG, options || {});
+  Logger.log('finalizeWeeklySlgDeploymentIntelligence: ' + JSON.stringify({
+    ok: result.ok,
+    intelligence_run_id: result.intelligence_run_id,
+    idempotentReplay: result.idempotentReplay
+  }));
+  return result;
+}
+
+/**
+ * Render SLG Deployment Intelligence email HTML (dryRun; no production send).
+ *
+ * @param {Object=} options { signal_run_id, store }
+ * @return {Object}
+ */
+function renderSlgDeploymentIntelligenceEmailPreview(options) {
+  options = Object.assign({ dryRun: true, testMode: true }, options || {});
+  var finalized = CoreLib.CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun(
+    APP_CONFIG, options);
+  if (!finalized.ok || !finalized.artifact) {
+    return finalized;
+  }
+  var email = CoreLib.CoreNotify.sendDeploymentIntelligenceEmail(
+    APP_CONFIG, finalized.artifact, {
+      dryRun: true,
+      testMode: true,
+      runRow: finalized.run
+    });
+  return {
+    ok: true,
+    intelligence_run_id: finalized.intelligence_run_id,
+    html: email.html,
+    email_status: email.email_status
+  };
+}
+
+/**
  * Source-aware deterministic Signal evidence refresh (trajectory build when sources advance).
  *
  * @return {Object}

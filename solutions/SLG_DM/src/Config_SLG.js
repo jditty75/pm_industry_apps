@@ -64,6 +64,11 @@ var APP_CONFIG = {
       'SFDC_DHPActionHistory'
     ]
   },
+
+  deploymentIntelligence: {
+    enabled: true,
+    displayName: 'SLG Deployment Intelligence'
+  },
   
   sheets: {
     activeDeployments:     'ActiveDeployments',

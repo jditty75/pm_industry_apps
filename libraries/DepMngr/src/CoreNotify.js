@@ -1953,6 +1953,212 @@ var CoreNotify = (function () {
    * @param {Object=} options { dryRun: boolean }
    * @return {{ email_status: string, payload: (Object|null), sent: boolean }}
    */
+  var DEPLOYMENT_INTELLIGENCE_NOTIFICATION_KEY = 'deployment_intelligence_weekly';
+
+  /**
+   * Weekly Deployment Intelligence email is eligible when intelligence is READY (even quiet weeks).
+   *
+   * @param {Object} runRow intelligence run row or artifact distributionState
+   * @param {AppConfig=} appConfig
+   * @return {boolean}
+   */
+  function isDeploymentIntelligenceEmailEligible(runRow, appConfig) {
+    if (!runRow) return false;
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    if (!CoreConfig.isDeploymentIntelligenceEnabled(cfg)) return false;
+    var status = String(runRow.intelligence_status || runRow.distributionState &&
+      runRow.distributionState.intelligence_status || '').trim();
+    return status === CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY;
+  }
+
+  /**
+   * @param {Object} artifact canonical Deployment Intelligence artifact
+   * @param {AppConfig} appConfig
+   * @return {string}
+   */
+  function buildDeploymentIntelligenceEmailHtml(artifact, appConfig) {
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    artifact = artifact || {};
+    if (!artifact.editorial &&
+        typeof CoreDeploymentSignalPersistence !== 'undefined' &&
+        CoreDeploymentSignalPersistence.enrichDeploymentIntelligenceEditorial) {
+      CoreDeploymentSignalPersistence.enrichDeploymentIntelligenceEditorial(artifact);
+    }
+    var identity = artifact.identity || {};
+    var di = cfg.deploymentIntelligence || {};
+    var title = String(identity.display_name || di.displayName || 'Deployment Intelligence');
+    var editorial = artifact.editorial || {};
+    var pulse = artifact.portfolioPulse || {};
+    var talkingPoints = artifact.talkingPoints || [];
+    var links = artifact.links || {};
+    var whatChanged = editorial.whatChanged || {};
+    var dataRA = editorial.dataRequiringAttention;
+
+    var sectionLabel = 'font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;' +
+      'color:#64748b;margin:28px 0 10px 0;';
+    var h1Style = 'font-size:22px;font-weight:700;margin:0 0 6px 0;color:#0f172a;line-height:1.25;';
+    var leadStyle = 'margin:0 0 20px 0;font-size:15px;color:#334155;line-height:1.45;';
+    var bodyStyle = 'font-size:14px;color:#334155;line-height:1.5;margin:0;';
+    var subtleStyle = 'font-size:13px;color:#64748b;line-height:1.45;margin:6px 0 0 0;';
+    var linkStyle = 'color:#0875e1;text-decoration:none;font-weight:600;';
+    var cardStyle = 'background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:16px 18px;';
+
+    var parts = [];
+    parts.push('<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:660px;' +
+      'margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;' +
+      'padding:28px 24px 32px 24px;">');
+    parts.push('<h1 style="' + h1Style + '">' + _escapeHtml_(title) + '</h1>');
+    parts.push('<p style="' + leadStyle + '">Here are your talking points for this week.</p>');
+    parts.push('<hr style="border:none;border-top:1px solid #e2e8f0;margin:0 0 4px 0;"/>');
+
+    parts.push('<p style="' + sectionLabel + '">Portfolio pulse</p>');
+    if (identity.is_baseline && artifact.portfolioMovementBaselineCopy) {
+      parts.push('<p style="font-size:14px;color:#334155;margin:0 0 10px 0;font-style:italic;">' +
+        _escapeHtml_(artifact.portfolioMovementBaselineCopy) + '</p>');
+    }
+    parts.push('<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="' +
+      cardStyle + 'margin-bottom:4px;"><tr>');
+    function pulseCell(label, value, sub) {
+      return '<td style="vertical-align:top;padding:4px 8px;text-align:center;width:20%;">' +
+        '<div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;">' +
+        _escapeHtml_(label) + '</div>' +
+        '<div style="font-size:18px;font-weight:700;color:#0f172a;margin-top:4px;">' +
+        _escapeHtml_(value) + '</div>' +
+        (sub ? '<div style="font-size:11px;color:#64748b;margin-top:2px;">' +
+          _escapeHtml_(sub) + '</div>' : '') +
+        '</td>';
+    }
+    parts.push(pulseCell('Active', String(pulse.totalActive || 0), ''));
+    parts.push(pulseCell('Green', String(pulse.greenPct || 0) + '%', ''));
+    parts.push(pulseCell('Yellow', String(pulse.yellowPct || 0) + '%', ''));
+    parts.push(pulseCell('Red', String(pulse.redPct || 0) + '%', ''));
+    parts.push(pulseCell('MTP ≤90d', String(pulse.mtpWithin90Days || 0), 'days'));
+    parts.push('</tr></table>');
+    if (editorial.portfolioPulseLine) {
+      parts.push('<p style="' + subtleStyle + '">' + _escapeHtml_(editorial.portfolioPulseLine) + '</p>');
+    }
+
+    parts.push('<p style="' + sectionLabel + '">What changed</p>');
+    if (whatChanged.headline) {
+      parts.push('<p style="' + bodyStyle + 'font-weight:600;">' +
+        _escapeHtml_(whatChanged.headline) + '</p>');
+    }
+    (whatChanged.sublines || []).forEach(function (line) {
+      parts.push('<p style="' + subtleStyle + '">' + _escapeHtml_(line) + '</p>');
+    });
+    if (whatChanged.portfolioMovement && whatChanged.portfolioMovement.detail) {
+      parts.push('<p style="' + subtleStyle + '"><strong>' +
+        _escapeHtml_(whatChanged.portfolioMovement.headline || '') + '.</strong> ' +
+        _escapeHtml_(whatChanged.portfolioMovement.detail) + '.</p>');
+    }
+    if (editorial.baselineFollowUp) {
+      parts.push('<p style="' + subtleStyle + '">' + _escapeHtml_(editorial.baselineFollowUp) + '</p>');
+    }
+
+    var tpTitle = editorial.talkingSectionTitle ||
+      (talkingPoints.length ? '3 things to know this week' : '');
+    if (tpTitle) {
+      parts.push('<p style="' + sectionLabel + '">' + _escapeHtml_(tpTitle) + '</p>');
+    }
+    if (talkingPoints.length) {
+      talkingPoints.forEach(function (tp, idx) {
+        var headline = tp.headline || tp.leadership_takeaway || tp.deployment_display_name;
+        parts.push('<div style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px solid #f1f5f9;">');
+        parts.push('<p style="margin:0 0 6px 0;font-size:15px;font-weight:700;color:#0f172a;line-height:1.35;">' +
+          _escapeHtml_(headline) + '</p>');
+        if (tp.leadership_summary) {
+          parts.push('<p style="margin:0 0 8px 0;font-size:14px;color:#334155;line-height:1.45;">' +
+            _escapeHtml_(tp.leadership_summary) + '</p>');
+        } else if (tp.leadership_takeaway && tp.leadership_takeaway !== headline) {
+          parts.push('<p style="margin:0 0 8px 0;font-size:14px;color:#334155;line-height:1.45;">' +
+            _escapeHtml_(tp.leadership_takeaway) + '</p>');
+        }
+        if (tp.leadership_question) {
+          parts.push('<p style="margin:0 0 8px 0;font-size:13px;color:#64748b;">' +
+            '<span style="font-weight:600;">Leadership question:</span> ' +
+            _escapeHtml_(tp.leadership_question) + '</p>');
+        }
+        var sor = tp.system_of_record_note || tp.data_confidence_note;
+        if (sor) {
+          parts.push('<p style="margin:0 0 8px 0;font-size:13px;color:#b45309;">' +
+            _escapeHtml_(sor.indexOf('System-of-record:') >= 0 ? sor :
+              'System-of-record: ' + sor) + '</p>');
+        }
+        if (tp.investigation_url) {
+          parts.push('<p style="margin:0;"><a style="' + linkStyle + '" href="' +
+            _escapeHtml_(tp.investigation_url) + '">Investigate →</a></p>');
+        }
+        parts.push('</div>');
+      });
+    }
+
+    if (dataRA && dataRA.body) {
+      parts.push('<p style="' + sectionLabel + '">' +
+        _escapeHtml_(dataRA.headline || 'Data requiring attention') + '</p>');
+      parts.push('<p style="' + bodyStyle + '">' + _escapeHtml_(dataRA.body) + '</p>');
+    }
+
+    parts.push('<p style="' + sectionLabel + '">Current attention</p>');
+    parts.push('<p style="' + bodyStyle + '">' +
+      _escapeHtml_(editorial.currentAttentionLine || '') + '</p>');
+
+    parts.push('<p style="' + sectionLabel + '">Investigation</p>');
+    if (links.exploreDeploymentIntelligenceUrl) {
+      parts.push('<p style="margin:0 0 8px 0;"><a style="' + linkStyle + 'font-size:15px;" href="' +
+        _escapeHtml_(links.exploreDeploymentIntelligenceUrl) +
+        '">Explore Deployment Intelligence →</a></p>');
+    }
+    parts.push('</div>');
+    return parts.join('');
+  }
+
+  /**
+   * Prepare (or dry-run) weekly Deployment Intelligence email. Does not production-send in v1.
+   *
+   * @param {AppConfig} appConfig
+   * @param {Object} artifact
+   * @param {Object=} options { dryRun, testMode, runRow }
+   * @return {{ sent: boolean, email_status: string, html: string }}
+   */
+  function sendDeploymentIntelligenceEmail(appConfig, artifact, options) {
+    options = options || {};
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    var runRow = options.runRow || {};
+    var dist = artifact && artifact.distributionState ? artifact.distributionState : {};
+    if (String(dist.email_status) === CoreDeploymentSignalStore.EMAIL_STATUS_SENT) {
+      return {
+        sent: false,
+        email_status: CoreDeploymentSignalStore.EMAIL_STATUS_SENT,
+        html: buildDeploymentIntelligenceEmailHtml(artifact, cfg)
+      };
+    }
+    if (!isDeploymentIntelligenceEmailEligible(
+      Object.assign({}, runRow, { intelligence_status: dist.intelligence_status }), cfg)) {
+      return {
+        sent: false,
+        email_status: CoreDeploymentSignalStore.EMAIL_STATUS_NOT_REQUIRED,
+        html: ''
+      };
+    }
+    var html = buildDeploymentIntelligenceEmailHtml(artifact, cfg);
+    var key = (cfg.deploymentIntelligence && cfg.deploymentIntelligence.emailNotificationKey) ||
+      DEPLOYMENT_INTELLIGENCE_NOTIFICATION_KEY;
+    Logger.log('CoreNotify.sendDeploymentIntelligenceEmail: key=' + key +
+      ' dryRun=' + !!(options.dryRun || options.testMode));
+    if (options.dryRun || options.testMode || options.noSend) {
+      return {
+        sent: false,
+        email_status: CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+        html: html
+      };
+    }
+    return {
+      sent: false,
+      email_status: CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+      html: html
+    };
+  }
+
   function applyDeploymentSignalPostCompleteHandoff(appConfig, runRow, currentSignals, options) {
     options = options || {};
     if (!isDeploymentSignalNotificationEligible(runRow)) {
@@ -1991,6 +2197,10 @@ var CoreNotify = (function () {
     debugDdDigestDedupeForUI:      debugDdDigestDedupeForUI,
     isDeploymentSignalNotificationEligible: isDeploymentSignalNotificationEligible,
     buildDeploymentSignalNotificationPayload: buildDeploymentSignalNotificationPayload,
+    DEPLOYMENT_INTELLIGENCE_NOTIFICATION_KEY: DEPLOYMENT_INTELLIGENCE_NOTIFICATION_KEY,
+    isDeploymentIntelligenceEmailEligible: isDeploymentIntelligenceEmailEligible,
+    buildDeploymentIntelligenceEmailHtml: buildDeploymentIntelligenceEmailHtml,
+    sendDeploymentIntelligenceEmail: sendDeploymentIntelligenceEmail,
     applyDeploymentSignalPostCompleteHandoff: applyDeploymentSignalPostCompleteHandoff,
     _resolveRecipients_:           _resolveRecipients_,
     _renderTemplate_:              _renderTemplate_,

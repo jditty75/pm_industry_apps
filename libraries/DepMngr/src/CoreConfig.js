@@ -1315,6 +1315,30 @@ var CoreConfig = (function () {
       cfg.deploymentSignal.signalRecordSchemaVersion = 'deployment-signal-v1';
     }
 
+    // -------------------------------------------------------------------------
+    // Deployment Intelligence (shared platform; default off)
+    // -------------------------------------------------------------------------
+    cfg.deploymentIntelligence = cfg.deploymentIntelligence || {};
+    if (cfg.deploymentIntelligence.enabled === undefined) {
+      cfg.deploymentIntelligence.enabled = false;
+    }
+    if (!cfg.deploymentIntelligence.intelligenceRunsSheetName) {
+      cfg.deploymentIntelligence.intelligenceRunsSheetName = 'Deployment_Intelligence_Runs';
+    }
+    if (!cfg.deploymentIntelligence.displayName) {
+      var appLabel = String(cfg.appId || 'App').trim() || 'App';
+      cfg.deploymentIntelligence.displayName = appLabel + ' Deployment Intelligence';
+    }
+    if (cfg.deploymentIntelligence.talkingPointMin === undefined) {
+      cfg.deploymentIntelligence.talkingPointMin = 3;
+    }
+    if (cfg.deploymentIntelligence.talkingPointMax === undefined) {
+      cfg.deploymentIntelligence.talkingPointMax = 5;
+    }
+    if (!cfg.deploymentIntelligence.emailNotificationKey) {
+      cfg.deploymentIntelligence.emailNotificationKey = 'deployment_intelligence_weekly';
+    }
+
     return cfg;
   }
 
@@ -1360,6 +1384,42 @@ var CoreConfig = (function () {
    * @param {AppConfig} appConfig
    * @return {boolean}
    */
+  /**
+   * True when shared Deployment Intelligence finalization is enabled.
+   *
+   * @param {AppConfig} appConfig
+   * @return {boolean}
+   */
+  function isDeploymentIntelligenceEnabled(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    var di = cfg.deploymentIntelligence || {};
+    var sig = cfg.deploymentSignal || {};
+    return di.enabled === true && sig.persistenceEnabled === true;
+  }
+
+  /**
+   * Deep link into Deployment Manager investigation (Signals tab).
+   *
+   * @param {AppConfig} appConfig
+   * @param {Object=} linkOpts { tab, deploymentId, signalId }
+   * @return {string}
+   */
+  function buildDeploymentManagerInvestigationUrl(appConfig, linkOpts) {
+    linkOpts = linkOpts || {};
+    var entry = getWebAppEntryUrl(appConfig);
+    if (!entry) return '';
+    var params = [];
+    var tab = String(linkOpts.tab || 'signals').trim();
+    if (tab) params.push('tab=' + encodeURIComponent(tab));
+    if (linkOpts.deploymentId) {
+      params.push('deploymentId=' + encodeURIComponent(String(linkOpts.deploymentId).trim()));
+    }
+    if (linkOpts.signalId) {
+      params.push('signalId=' + encodeURIComponent(String(linkOpts.signalId).trim()));
+    }
+    return params.length ? entry + '?' + params.join('&') : entry;
+  }
+
   function isDeploymentSignalsUiEnabled(appConfig) {
     var cfg = withDefaults(appConfig || {});
     if (cfg.appId !== 'SLG') return false;
@@ -1602,6 +1662,8 @@ var CoreConfig = (function () {
     isExecutiveWatchEnabled: isExecutiveWatchEnabled,
     isNotableEnabled: isNotableEnabled,
     isEscalationsEnabled: isEscalationsEnabled,
+    isDeploymentIntelligenceEnabled: isDeploymentIntelligenceEnabled,
+    buildDeploymentManagerInvestigationUrl: buildDeploymentManagerInvestigationUrl,
     isDeploymentSignalsUiEnabled: isDeploymentSignalsUiEnabled,
     isProductModeApp: isProductModeApp,
     getPortfolioGroupingField: getPortfolioGroupingField,

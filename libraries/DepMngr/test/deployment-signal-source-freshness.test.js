@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const SRC = path.join(__dirname, '..', 'src');
 
-function loadModules(extraFiles) {
+function loadModules() {
   var props = { data: {} };
   var sandbox = {
     CoreConfig: {
@@ -16,6 +16,7 @@ function loadModules(extraFiles) {
           freshness: { logSheet: 'Auto Refresh Execution Log' },
           deploymentSignal: {
             enabled: true,
+            persistenceEnabled: true,
             signalEvidenceSourceSheets: [
               'SFDC_Deployments',
               'SFDC_DHP'
@@ -24,9 +25,12 @@ function loadModules(extraFiles) {
         }, cfg || {});
       }
     },
-    CoreDeploymentTrajectory: {
-      refresh: function () {
-        return { trajectory_built_at: '2026-10-06T12:00:00.000Z' };
+    CoreDeploymentSignalPersistence: {
+      isEnabled: function (cfg) {
+        return cfg.appId === 'SLG' &&
+          cfg.deploymentSignal &&
+          cfg.deploymentSignal.enabled === true &&
+          cfg.deploymentSignal.persistenceEnabled === true;
       }
     },
     PropertiesService: {
@@ -42,11 +46,11 @@ function loadModules(extraFiles) {
     propsStore: props
   };
   vm.createContext(sandbox);
-  ['CoreAutoRefreshExecutionLog.js', 'CoreDeploymentSignalEvidenceRefresh.js']
-    .concat(extraFiles || [])
-    .forEach(function (f) {
-      vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), sandbox);
-    });
+  vm.runInContext(fs.readFileSync(path.join(SRC, 'CoreFreshnessMonitor.js'), 'utf8'), sandbox);
+  vm.runInContext(fs.readFileSync(path.join(SRC, 'CoreDeploymentTrajectory.js'), 'utf8'), sandbox);
+  sandbox.CoreDeploymentTrajectory.refresh = function () {
+    return { trajectory_built_at: '2026-10-06T12:00:00.000Z' };
+  };
   sandbox._propsApi = {
     getProperty: function (k) { return props.data[k] || null; },
     setProperty: function (k, v) { props.data[k] = v; }
@@ -69,20 +73,24 @@ function mockLogSheet(rows) {
 
 test('Auto Refresh Execution Log sheet name default', () => {
   var S = loadModules();
-  assert.equal(S.CoreAutoRefreshExecutionLog.DEFAULT_LOG_SHEET,
+  assert.equal(S.CoreFreshnessMonitor.DEFAULT_LOG_SHEET,
     'Auto Refresh Execution Log');
 });
 
 test('latest SUCCESS per source; failed refresh ignored', () => {
   var S = loadModules();
-  var sh = mockLogSheet([
-    ['Refresh Time', 'Sheet', 'Operation', 'Status', 'User'],
-    [new Date('2026-10-06T10:00:00Z'), 'SFDC_Deployments', 'Refresh', 'Failed', 'x'],
-    [new Date('2026-10-06T11:00:00Z'), 'SFDC_Deployments', 'Refresh', 'Success', 'x'],
-    [new Date('2026-10-06T09:00:00Z'), 'SFDC_Deployments', 'Refresh', 'Success', 'x']
-  ]);
-  var parsed = S.CoreAutoRefreshExecutionLog._parseLogSheet_(sh);
-  var dep = parsed.latestSuccessBySheet['SFDC_Deployments'];
+  var ss = {
+    getSheetByName: function () {
+      return mockLogSheet([
+        ['Refresh Time', 'Sheet', 'Operation', 'Status', 'User'],
+        [new Date('2026-10-06T10:00:00Z'), 'SFDC_Deployments', 'Refresh', 'Failed', 'x'],
+        [new Date('2026-10-06T11:00:00Z'), 'SFDC_Deployments', 'Refresh', 'Success', 'x'],
+        [new Date('2026-10-06T09:00:00Z'), 'SFDC_Deployments', 'Refresh', 'Success', 'x']
+      ]);
+    }
+  };
+  var state = S.CoreFreshnessMonitor.getLatestSuccessRefreshBySheet(ss, {});
+  var dep = state.latestSuccessBySheet['SFDC_Deployments'];
   assert.ok(dep);
   assert.equal(dep.refreshIso, new Date('2026-10-06T11:00:00Z').toISOString());
 });
@@ -101,7 +109,7 @@ test('missing required source → SOURCE_NOT_READY via evaluate', () => {
     }
   };
   var cfg = S.CoreConfig.withDefaults({});
-  var decision = S.CoreDeploymentSignalEvidenceRefresh.evaluateRefreshDecision(cfg, ss, {
+  var decision = S.CoreDeploymentTrajectory.evaluateSignalEvidenceRefreshDecision(cfg, ss, {
     properties: S._propsApi
   });
   assert.equal(decision.outcome, 'SIGNAL_REFRESH_BLOCKED');
@@ -121,16 +129,16 @@ test('NO_OP when sources unchanged; rebuild when advanced', () => {
     }
   };
   var cfg = S.CoreConfig.withDefaults({});
-  S.CoreDeploymentSignalEvidenceRefresh.setConsumedSourceMarkers(cfg, {
+  S.CoreDeploymentTrajectory.setConsumedSignalSourceMarkers(cfg, {
     'SFDC_Deployments': new Date('2026-10-06T11:00:00Z').toISOString(),
     'SFDC_DHP': new Date('2026-10-06T11:00:00Z').toISOString()
   }, { properties: S._propsApi });
-  var noop = S.CoreDeploymentSignalEvidenceRefresh.evaluateRefreshDecision(cfg, ss, {
+  var noop = S.CoreDeploymentTrajectory.evaluateSignalEvidenceRefreshDecision(cfg, ss, {
     properties: S._propsApi
   });
   assert.equal(noop.outcome, 'SIGNAL_REFRESH_NO_OP');
 
-  var rebuild = S.CoreDeploymentSignalEvidenceRefresh.evaluateRefreshDecision(cfg, {
+  var rebuild = S.CoreDeploymentTrajectory.evaluateSignalEvidenceRefreshDecision(cfg, {
     getSheetByName: function () {
       return mockLogSheet([
         ['Refresh Time', 'Sheet', 'Status'],
@@ -156,12 +164,12 @@ test('markers updated only after successful refresh', () => {
     }
   };
   var cfg = S.CoreConfig.withDefaults({});
-  var res = S.CoreDeploymentSignalEvidenceRefresh.refreshIfNeeded(cfg, {
+  var res = S.CoreDeploymentTrajectory.refreshSignalEvidenceIfNeeded(cfg, {
     spreadsheet: ss,
     properties: S._propsApi
   });
   assert.equal(res.outcome, 'SIGNAL_REFRESH_COMPLETE');
-  var markers = S.CoreDeploymentSignalEvidenceRefresh.getConsumedSourceMarkers(cfg, {
+  var markers = S.CoreDeploymentTrajectory.getConsumedSignalSourceMarkers(cfg, {
     properties: S._propsApi
   });
   assert.ok(markers['SFDC_Deployments']);
@@ -170,7 +178,7 @@ test('markers updated only after successful refresh', () => {
 
 test('non-SLG apps disabled for evidence refresh', () => {
   var S = loadModules();
-  var res = S.CoreDeploymentSignalEvidenceRefresh.refreshIfNeeded(
+  var res = S.CoreDeploymentTrajectory.refreshSignalEvidenceIfNeeded(
     S.CoreConfig.withDefaults({ appId: 'HC' }), {});
   assert.equal(res.outcome, 'SIGNAL_REFRESH_SKIPPED');
 });

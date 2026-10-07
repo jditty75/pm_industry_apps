@@ -99,7 +99,7 @@ Stable key: `deployment_id` + normalized `signal_type` (`CoreDeploymentSignalNor
   `SFDC_Deployments`, `SFDC_DeploymentHistory`, `SFDC_DeploymentProductFunctions`,  
   `SFDC_DeploymentProductFunctionHistory`, `SFDC_DHP`, `SFDC_DHPActionHistory`.
 - **Consumed markers:** Script property `deploymentSignal_sourceMarkers_v1_SLG` (per-sheet ISO timestamp after successful trajectory build).
-- **Entry point:** `refreshSlgDeploymentSignalEvidenceIfNeeded()` → `CoreDeploymentSignalEvidenceRefresh.refreshIfNeeded`.
+- **Entry point:** `refreshSlgDeploymentSignalEvidenceIfNeeded()` → `CoreDeploymentTrajectory.refreshSignalEvidenceIfNeeded`.
 - **Outcomes:** `SIGNAL_REFRESH_NO_OP`, `SIGNAL_REFRESH_COMPLETE` (+ `sources_changed`, `build_timestamp`), `SIGNAL_REFRESH_BLOCKED` (+ `source_not_ready`).
 - **Trigger:** `tickSlgDeploymentSignalEvidenceRefresh` every **30 minutes** (install via `installSlgDeploymentSignalOperatingLoopTriggers()`).
 
@@ -107,7 +107,7 @@ Stable key: `deployment_id` + normalized `signal_type` (`CoreDeploymentSignalNor
 
 Sana writes `run_status=SUBMITTED` and `persistence_status=SUBMITTED` on `Deployment_Signal_Runs`, and `signal_status=SUBMITTED` on `Deployment_Signals`. GAS does **not** use inbox sheets, CSV, or onEdit.
 
-**Processor:** `processSubmittedSlgDeploymentSignalRuns()` → `CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns`.
+**Processor:** `processSubmittedSlgDeploymentSignalRuns()` → `CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns`.
 
 Validation includes run/signal count reconciliation, active deployment population, identity uniqueness, and substantive field normalization. Failures set `run_status=FAILED` without falsely completing. Retries are safe when history for the run already exists (no duplicate history append).
 
@@ -117,7 +117,7 @@ Validation includes run/signal count reconciliation, active deployment populatio
 
 Rule: `lifecycle_new_count > 0` **OR** `lifecycle_escalated_count > 0`.  
 CONTINUING / DE_ESCALATED / RESOLVED alone → `email_status=NOT_REQUIRED`.  
-Eligible runs → payload via `CoreDeploymentSignalNotification.buildPayload` (`email_status=PENDING` until template wired in NotificationConfig).
+Eligible runs → payload via `CoreNotify.buildDeploymentSignalNotificationPayload` (`email_status=PENDING` until template wired in NotificationConfig).
 
 ## Approved write transaction (legacy / tests)
 
@@ -164,11 +164,10 @@ Stewardship conditions remain in the deterministic stewardship lane (`CoreDeploy
 | `CoreDeploymentSignals.js` | Context assembler + substantive normalization (`CoreDeploymentSignalContext`, `CoreDeploymentSignalNormalize`) |
 | `CoreDeploymentSignalStore.js` | Headers / versions, Spreadsheet IO, in-memory test store |
 | `CoreDeploymentSignalLifecycle.js` | Pure lifecycle plan |
-| `CoreDeploymentSignalPersistence.js` | Orchestration + public API |
-| `CoreAutoRefreshExecutionLog.js` | Generic Auto Refresh Execution Log reader (latest Success per sheet) |
-| `CoreDeploymentSignalEvidenceRefresh.js` | Source-aware trajectory refresh |
-| `CoreDeploymentSignalSubmittedProcessor.js` | SUBMITTED run processor |
-| `CoreDeploymentSignalNotification.js` | Eligibility + payload contract |
-| `CoreDeploymentSignalTriggers.js` | Periodic trigger installer |
+| `CoreDeploymentSignalPersistence.js` | Orchestration, SUBMITTED run processor, public API |
+| `CoreDeploymentTrajectory.js` | Trajectory build + source-aware Signal evidence refresh |
+| `CoreFreshnessMonitor.js` | Auto Refresh Execution Log reader (`getLatestSuccessRefreshBySheet`) |
+| `CoreNotify.js` | Signal notification eligibility + payload handoff |
+| `SLG_DM/Code.js` | SLG wrappers + operating-loop trigger install |
 
 Tests: `libraries/DepMngr/test/deployment-signal-persistence.test.js`.

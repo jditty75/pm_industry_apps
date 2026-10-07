@@ -506,6 +506,70 @@ var CoreFreshnessMonitor = (function () {
     };
   }
 
+  /**
+   * @param {string} statusText
+   * @return {boolean}
+   * @private
+   */
+  function isLogSuccessStatus_(statusText) {
+    return String(statusText || '').trim().toLowerCase() === 'success';
+  }
+
+  /**
+   * Latest successful refresh per sheet name (failed rows ignored).
+   *
+   * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+   * @param {Object=} options
+   * @param {string=} options.logSheetName
+   * @param {Array<string>=} options.requiredSheets when set, include missing names in sourceNotReady
+   * @return {{
+   *   logSheetName: string,
+   *   latestSuccessBySheet: Object<string, { refreshTime: Date, refreshIso: string, sheetName: string }>,
+   *   sourceNotReady: Array<string>
+   * }}
+   */
+  function getLatestSuccessRefreshBySheet(ss, options) {
+    options = options || {};
+    var logSheetName = options.logSheetName || DEFAULT_LOG_SHEET;
+    var required = options.requiredSheets || [];
+    var out = {
+      logSheetName: logSheetName,
+      latestSuccessBySheet: {},
+      sourceNotReady: []
+    };
+    if (!ss) {
+      required.forEach(function (name) { out.sourceNotReady.push(name); });
+      return out;
+    }
+
+    var sh = ss.getSheetByName(logSheetName);
+    if (!sh) {
+      required.forEach(function (name) { out.sourceNotReady.push(name); });
+      return out;
+    }
+
+    var parsed = parseLogSheet_(sh);
+    Object.keys(parsed.latestBySheet).forEach(function (key) {
+      var entry = parsed.latestBySheet[key];
+      if (!isLogSuccessStatus_(entry.statusText)) return;
+      var existing = out.latestSuccessBySheet[key];
+      if (!existing || entry.refreshTime.getTime() > existing.refreshTime.getTime()) {
+        out.latestSuccessBySheet[key] = {
+          refreshTime: entry.refreshTime,
+          refreshIso: entry.refreshIso,
+          sheetName: key
+        };
+      }
+    });
+
+    required.forEach(function (sheetName) {
+      if (!out.latestSuccessBySheet[sheetName]) {
+        out.sourceNotReady.push(sheetName);
+      }
+    });
+    return out;
+  }
+
   // ---------------------------------------------------------------------------
   // INTERNAL — evaluation
   // ---------------------------------------------------------------------------
@@ -883,9 +947,11 @@ var CoreFreshnessMonitor = (function () {
   }
 
   return {
+    DEFAULT_LOG_SHEET: DEFAULT_LOG_SHEET,
     getFreshnessForUI: getFreshnessForUI,
     getFreshnessSnapshot: getFreshnessSnapshot,
     getFreshnessSnapshotForSpreadsheet: getFreshnessSnapshotForSpreadsheet,
+    getLatestSuccessRefreshBySheet: getLatestSuccessRefreshBySheet,
     getRollupSnapshot: getRollupSnapshot,
     sendDailyRollup: sendDailyRollup,
     installDailyTrigger: installDailyTrigger,

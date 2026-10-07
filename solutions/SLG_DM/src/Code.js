@@ -369,7 +369,7 @@ function getLatestApprovedSlgSignalRun() {
  * @return {Object}
  */
 function refreshSlgDeploymentSignalEvidenceIfNeeded() {
-  var result = CoreLib.CoreDeploymentSignalEvidenceRefresh.refreshIfNeeded(APP_CONFIG);
+  var result = CoreLib.CoreDeploymentTrajectory.refreshSignalEvidenceIfNeeded(APP_CONFIG);
   Logger.log('refreshSlgDeploymentSignalEvidenceIfNeeded: ' + JSON.stringify(result));
   return result;
 }
@@ -380,7 +380,7 @@ function refreshSlgDeploymentSignalEvidenceIfNeeded() {
  * @return {Object}
  */
 function processSubmittedSlgDeploymentSignalRuns() {
-  var result = CoreLib.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+  var result = CoreLib.CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns(
     APP_CONFIG);
   Logger.log('processSubmittedSlgDeploymentSignalRuns: ' + JSON.stringify(result));
   return result;
@@ -402,10 +402,26 @@ function tickSlgDeploymentSignalSubmittedProcessor() {
  * @return {Array<Object>}
  */
 function installSlgDeploymentSignalOperatingLoopTriggers() {
-  return CoreLib.CoreDeploymentSignalTriggers.installSlgOperatingLoopTriggers([
+  var handlers = [
     'tickSlgDeploymentSignalEvidenceRefresh',
     'tickSlgDeploymentSignalSubmittedProcessor'
-  ], 30);
+  ];
+  var minutes = 30;
+  return handlers.map(function (handlerName) {
+    var triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(function (t) {
+      if (t.getHandlerFunction && t.getHandlerFunction() === handlerName) {
+        ScriptApp.deleteTrigger(t);
+      }
+    });
+    ScriptApp.newTrigger(handlerName)
+      .timeBased()
+      .everyMinutes(minutes)
+      .create();
+    Logger.log('installSlgDeploymentSignalOperatingLoopTriggers: ' +
+      handlerName + ' every ' + minutes + 'm');
+    return { ok: true, handlerName: handlerName, everyMinutes: minutes };
+  });
 }
 
 // ============================================================================

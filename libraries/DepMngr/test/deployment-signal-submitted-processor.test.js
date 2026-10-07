@@ -40,6 +40,11 @@ function loadPlatform() {
       }
     },
     CoreDeploymentTrajectory: { _writeSheet_: function () {} },
+    CoreNotify: {
+      applyDeploymentSignalPostCompleteHandoff: function () {
+        return { email_status: 'NOT_REQUIRED', payload: null, sent: false };
+      }
+    },
     SpreadsheetApp: null,
     LockService: null,
     PropertiesService: { getScriptProperties: function () {
@@ -51,9 +56,7 @@ function loadPlatform() {
     'CoreDeploymentSignals.js',
     'CoreDeploymentSignalLifecycle.js',
     'CoreDeploymentSignalStore.js',
-    'CoreDeploymentSignalPersistence.js',
-    'CoreDeploymentSignalNotification.js',
-    'CoreDeploymentSignalSubmittedProcessor.js'
+    'CoreDeploymentSignalPersistence.js'
   ].forEach(function (f) {
     vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), sandbox);
   });
@@ -140,7 +143,7 @@ test('valid submitted run processes to COMPLETE', () => {
   seedSubmittedRun(store, runId, [
     baseSignalRow(runId, DEP_A, 'COMPOUND', 'WATCH')
   ], baseRunRow(runId, 1, 2, 1));
-  var res = S.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+  var res = S.CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns(
     CFG, { store: store, validDeploymentIds: VALID });
   assert.equal(res.ok, true);
   assert.equal(res.processed.length, 1);
@@ -156,7 +159,7 @@ test('zero-signal submitted run', () => {
   var store = S.CoreDeploymentSignalStore.createMemoryStore();
   var runId = 'RUN-ZERO';
   seedSubmittedRun(store, runId, [], baseRunRow(runId, 0, 5, 5));
-  var res = S.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+  var res = S.CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns(
     CFG, { store: store, validDeploymentIds: VALID });
   assert.equal(res.ok, true);
   assert.equal(S.CoreDeploymentSignalStore.readBody(store, 'Deployment_Signals').length, 0);
@@ -164,7 +167,7 @@ test('zero-signal submitted run', () => {
 
 test('count reconciliation failure', () => {
   var runId = 'RUN-BAD-COUNT';
-  var v = S.CoreDeploymentSignalSubmittedProcessor.validateSubmittedRunUnit(
+  var v = S.CoreDeploymentSignalPersistence.validateSubmittedSignalRunUnit(
     baseRunRow(runId, 2, 3, 1),
     [baseSignalRow(runId, DEP_A, 'HEALTH', 'WATCH')],
     VALID);
@@ -173,7 +176,7 @@ test('count reconciliation failure', () => {
 
 test('invalid deployment rejected', () => {
   var runId = 'RUN-BAD-DEP';
-  var v = S.CoreDeploymentSignalSubmittedProcessor.validateSubmittedRunUnit(
+  var v = S.CoreDeploymentSignalPersistence.validateSubmittedSignalRunUnit(
     baseRunRow(runId, 1, 1, 0),
     [baseSignalRow(runId, 'UNKNOWN', 'HEALTH', 'WATCH')],
     VALID);
@@ -186,11 +189,11 @@ test('second processor pass does not duplicate history', () => {
   seedSubmittedRun(store, runId, [
     baseSignalRow(runId, DEP_A, 'COMPOUND', 'WATCH')
   ], baseRunRow(runId, 1, 1, 0));
-  S.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+  S.CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns(
     CFG, { store: store, validDeploymentIds: VALID });
   var histLen = S.CoreDeploymentSignalStore.readBody(
     store, 'Deployment_Signal_History').length;
-  var res2 = S.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+  var res2 = S.CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns(
     CFG, { store: store, validDeploymentIds: VALID });
   assert.equal(res2.outcome, 'NO_SUBMITTED_RUNS');
   var histLen2 = S.CoreDeploymentSignalStore.readBody(
@@ -204,13 +207,13 @@ test('CONTINUING and ESCALATED via submitted processor', () => {
   seedSubmittedRun(store, r1, [
     baseSignalRow(r1, DEP_A, 'COMPOUND', 'WATCH')
   ], baseRunRow(r1, 1, 1, 0));
-  S.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+  S.CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns(
     CFG, { store: store, validDeploymentIds: VALID });
   var r2 = 'RUN-C2';
   seedSubmittedRun(store, r2, [
     baseSignalRow(r2, DEP_A, 'COMPOUND', 'HIGH')
   ], baseRunRow(r2, 1, 1, 0));
-  var res = S.CoreDeploymentSignalSubmittedProcessor.processSubmittedSlgSignalRuns(
+  var res = S.CoreDeploymentSignalPersistence.processSubmittedSlgSignalRuns(
     CFG, { store: store, validDeploymentIds: VALID });
   assert.equal(res.processed[0].lifecycle_counts.ESCALATED, 1);
 });

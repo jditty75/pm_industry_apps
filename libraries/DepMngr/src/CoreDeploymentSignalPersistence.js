@@ -1923,6 +1923,16 @@ var CoreDeploymentSignalPersistence = {
       var g = movement.greenPctPointsDelta || 0;
       var y = movement.yellowPctPointsDelta || 0;
       var r = movement.redPctPointsDelta || 0;
+      var ta = movement.totalActiveDelta || 0;
+      var mtpD = movement.mtpWithin90DaysDelta || 0;
+      if (g === 0 && y === 0 && r === 0 && ta === 0 && mtpD === 0) {
+        movement = null;
+      }
+    }
+    if (movement && !isBaseline) {
+      g = movement.greenPctPointsDelta || 0;
+      y = movement.yellowPctPointsDelta || 0;
+      r = movement.redPctPointsDelta || 0;
       var improved = g > 0 && (y <= 0 || r <= 0);
       var declined = g < 0 || r > 0;
       var headline = improved && !declined ?

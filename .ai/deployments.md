@@ -302,3 +302,16 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 - Result: partial (deploy complete; workbook baseline repair + test email pending editor)
 - Authorized by: User (Deployment Intelligence v1 production activation task, 2026-10-07)
 - CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-07 — SLG_DM — deploy
+
+- Git source: `771b4ea` (Signals web app JS parse + investigation deep links — CoreLib 156)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: 199
+- Live GAS version: 200
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec
+- Description: Fix CoreUI Signals detail HTML string break; honor `tab=signals` deep links; CoreLib pin 156 (scoped SLG only)
+- Verification: DepMngr 175/175 local; SLG preview structural PASS; clasp push + production deploy @200
+- Result: success (deploy complete; browser smoke pending)
+- Authorized by: User (SLG DM production regression fix, 2026-10-07)
+- CLASP user: jeffrey.ditty@workday.com

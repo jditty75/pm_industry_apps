@@ -289,3 +289,16 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 - Result: partial (deploy complete; intelligence workbook steps pending editor)
 - Authorized by: User (Deployment Intelligence v1 production activation task, 2026-10-07)
 - CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-07 — SLG_DM — deploy
+
+- Git source: `2854777` (Deployment Intelligence reconciliation — CoreLib 155)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: 198
+- Live GAS version: 199
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec
+- Description: Intelligence reconciliation (MTP/stewardship/context batch), auto-finalize, repair + test-email helpers; CoreLib pin 155 (scoped SLG only)
+- Verification: DepMngr 170/170 local; library release self-test OK; SLG clasp push + production deploy @199; baseline repair deferred to bound editor
+- Result: partial (deploy complete; workbook baseline repair + test email pending editor)
+- Authorized by: User (Deployment Intelligence v1 production activation task, 2026-10-07)
+- CLASP user: jeffrey.ditty@workday.com

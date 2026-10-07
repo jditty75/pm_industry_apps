@@ -2032,7 +2032,7 @@ var CoreNotify = (function () {
     parts.push(pulseCell('Green', String(pulse.greenPct || 0) + '%', ''));
     parts.push(pulseCell('Yellow', String(pulse.yellowPct || 0) + '%', ''));
     parts.push(pulseCell('Red', String(pulse.redPct || 0) + '%', ''));
-    parts.push(pulseCell('MTP ≤90d', String(pulse.mtpWithin90Days || 0), 'days'));
+    parts.push(pulseCell('MTP ≤90d', String(pulse.mtpWithin90Days || 0), ''));
     parts.push('</tr></table>');
     if (editorial.portfolioPulseLine) {
       parts.push('<p style="' + subtleStyle + '">' + _escapeHtml_(editorial.portfolioPulseLine) + '</p>');

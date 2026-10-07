@@ -436,6 +436,70 @@ test('weekly email eligible with zero NEW and independent slack status', () => {
   assert.equal(send.sent, false);
 });
 
+test('leadership email MTP pulse is a count without days unit', () => {
+  var S = loadPlatform();
+  var cfg = S.CoreConfig.withDefaults(slgCfg());
+  var artifact = S.CoreDeploymentSignalPersistence.enrichDeploymentIntelligenceEditorial({
+    identity: { display_name: 'Test DI', is_baseline: false, week_character: 'active' },
+    portfolioPulse: { totalActive: 50, greenPct: 80, yellowPct: 12, redPct: 8, mtpWithin90Days: 18 },
+    signalMovement: { leadership: { new: 0, escalated: 0, deEscalated: 0, resolved: 0 } },
+    talkingPoints: [],
+    currentAttention: { redDeployments: 2, yellowDeployments: 3, continuingSignals: 4 },
+    dataConfidence: { deploymentsWithStewardshipCount: 0 },
+    links: { exploreDeploymentIntelligenceUrl: 'https://example.test/dm/exec?tab=signals' }
+  });
+  var html = S.CoreNotify.buildDeploymentIntelligenceEmailHtml(artifact, cfg);
+  assert.ok(html.indexOf('approaching MTP (90 days)') > 0);
+  assert.ok(!/MTP ≤90d[\s\S]{0,120}days<\/div>/.test(html));
+});
+
+test('improving week What Changed does not duplicate improving or resolved counts', () => {
+  var S = loadPlatform();
+  var cfg = S.CoreConfig.withDefaults(slgCfg());
+  var artifact = S.CoreDeploymentSignalPersistence.enrichDeploymentIntelligenceEditorial({
+    identity: { display_name: 'Test DI', is_baseline: false, week_character: 'improving' },
+    portfolioPulse: { totalActive: 50, greenPct: 80, yellowPct: 12, redPct: 8, mtpWithin90Days: 4 },
+    portfolioMovement: {
+      greenPctPointsDelta: 3, yellowPctPointsDelta: -2, redPctPointsDelta: -1,
+      totalActiveDelta: 0, mtpWithin90DaysDelta: 0
+    },
+    signalMovement: { leadership: { new: 0, escalated: 0, deEscalated: 4, resolved: 2 } },
+    talkingPoints: [],
+    currentAttention: { redDeployments: 2, yellowDeployments: 3, continuingSignals: 4 },
+    dataConfidence: { deploymentsWithStewardshipCount: 0 },
+    links: { exploreDeploymentIntelligenceUrl: 'https://example.test/dm/exec?tab=signals' }
+  });
+  assert.equal(artifact.editorial.whatChanged.headline, 'Conditions are improving this week');
+  assert.equal(artifact.editorial.whatChanged.sublines.length, 1);
+  assert.equal(artifact.editorial.whatChanged.sublines[0], '4 improving · 2 resolved');
+  var html = S.CoreNotify.buildDeploymentIntelligenceEmailHtml(artifact, cfg);
+  var resolvedMatches = html.match(/2 resolved/g) || [];
+  assert.equal(resolvedMatches.length, 1);
+});
+
+test('baseline email omits orphan establishing-the-baseline section heading', () => {
+  var S = loadPlatform();
+  var cfg = S.CoreConfig.withDefaults(slgCfg());
+  var artifact = S.CoreDeploymentSignalPersistence.enrichDeploymentIntelligenceEditorial({
+    identity: {
+      display_name: 'Test DI', is_baseline: true, week_character: 'baseline'
+    },
+    portfolioPulse: { totalActive: 50, greenPct: 80, yellowPct: 12, redPct: 8, mtpWithin90Days: 4 },
+    portfolioMovement: null,
+    portfolioMovementBaselineCopy: 'Initial Deployment Intelligence baseline established.',
+    signalMovement: { leadership: { new: 0, escalated: 0, deEscalated: 0, resolved: 0 } },
+    talkingPoints: [],
+    currentAttention: { redDeployments: 2, yellowDeployments: 3, continuingSignals: 4 },
+    dataConfidence: { deploymentsWithStewardshipCount: 0 },
+    links: { exploreDeploymentIntelligenceUrl: 'https://example.test/dm/exec?tab=signals' }
+  });
+  assert.equal(artifact.editorial.talkingSectionTitle, '');
+  var html = S.CoreNotify.buildDeploymentIntelligenceEmailHtml(artifact, cfg);
+  assert.ok(html.toLowerCase().indexOf('establishing the baseline') < 0);
+  assert.ok(html.indexOf('What changed') > 0);
+  assert.match(artifact.editorial.whatChanged.headline, /baseline/i);
+});
+
 test('disabled app produces no intelligence', () => {
   var S = loadPlatform();
   var cfg = S.CoreConfig.withDefaults(slgCfg());

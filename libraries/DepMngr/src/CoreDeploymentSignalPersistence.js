@@ -1979,7 +1979,7 @@ var CoreDeploymentSignalPersistence = {
     } else if (weekCharacter === 'improving') {
       whatChanged.headline = 'Conditions are improving this week';
       var imp = [];
-      if (de > 0) imp.push(de + ' de-escalated');
+      if (de > 0) imp.push(de + ' improving');
       if (res > 0) imp.push(res + ' resolved');
       if (imp.length) whatChanged.sublines.push(imp.join(' · '));
     } else if (weekCharacter === 'quiet') {
@@ -1992,10 +1992,11 @@ var CoreDeploymentSignalPersistence = {
       whatChanged.headline = 'No new or escalated conditions this week';
     }
 
-    if (!isBaseline && de > 0 && attentionTotal === 0 && weekCharacter !== 'quiet') {
+    if (!isBaseline && de > 0 && attentionTotal === 0 &&
+        weekCharacter !== 'quiet' && weekCharacter !== 'improving') {
       whatChanged.sublines.push(de + ' condition' + (de === 1 ? '' : 's') + ' improving');
     }
-    if (!isBaseline && res > 0 && attentionTotal === 0) {
+    if (!isBaseline && res > 0 && attentionTotal === 0 && weekCharacter !== 'improving') {
       whatChanged.sublines.push(res + ' resolved');
     }
 
@@ -2011,12 +2012,8 @@ var CoreDeploymentSignalPersistence = {
       };
     }
 
-    var talkingSectionTitle = '3 things to know this week';
-    if (weekCharacter === 'baseline') {
-      talkingSectionTitle = 'Establishing the baseline';
-    } else if ((artifact.talkingPoints || []).length === 0) {
-      talkingSectionTitle = '';
-    }
+    var talkingSectionTitle = (artifact.talkingPoints || []).length ?
+      '3 things to know this week' : '';
 
     return {
       weekCharacter: weekCharacter,

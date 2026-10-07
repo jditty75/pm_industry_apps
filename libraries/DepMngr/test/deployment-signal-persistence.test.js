@@ -41,20 +41,16 @@ function loadSignalPlatform() {
         return Buffer.from(bytes).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
       }
     },
-    CoreDeploymentSignalStage1Ingest: null,
     CoreDeploymentTrajectory: { _writeSheet_: function () {} },
     SpreadsheetApp: null,
     LockService: null
   };
   vm.createContext(sandbox);
   const files = [
-    'CoreDeploymentSignalSchema.js',
-    'CoreDeploymentSignalNormalize.js',
+    'CoreDeploymentSignals.js',
     'CoreDeploymentSignalLifecycle.js',
     'CoreDeploymentSignalStore.js',
-    'CoreDeploymentSignalWorkbook.js',
-    'CoreDeploymentSignalPersistence.js',
-    'CoreDeploymentSignalStage1Ingest.js'
+    'CoreDeploymentSignalPersistence.js'
   ];
   files.forEach(function (f) {
     vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), sandbox);
@@ -91,7 +87,7 @@ function persist(runId, records, store, prior) {
   if (prior) {
     S.CoreDeploymentSignalStore.replaceBody(
       store, 'Deployment_Signals',
-      S.CoreDeploymentSignalSchema.currentHeaders(), prior);
+      S.CoreDeploymentSignalStore.currentHeaders(), prior);
   }
   return S.CoreDeploymentSignalPersistence.persistApprovedSlgSignalRun(
     SLG_CFG,
@@ -106,10 +102,10 @@ function persist(runId, records, store, prior) {
 }
 
 test('schema headers are stable contracts', () => {
-  var cur = S.CoreDeploymentSignalSchema.currentHeaders();
+  var cur = S.CoreDeploymentSignalStore.currentHeaders();
   assert.ok(cur.includes('signal_id'));
   assert.ok(cur.includes('lifecycle_state'));
-  assert.equal(S.CoreDeploymentSignalSchema.historyHeaders().length, cur.length + 2);
+  assert.equal(S.CoreDeploymentSignalStore.historyHeaders().length, cur.length + 2);
 });
 
 test('SLG-only persistence gating', () => {

@@ -1644,7 +1644,7 @@ var CoreDeploymentTrajectory = {
    * @private
    */
   _logWritePlan_: function (sheetName, headers, dataRows) {
-    var plan = TrajectorySheetWrite.estimatePayload(headers, dataRows || []);
+    var plan = CoreDeploymentTrajectoryStore.estimatePayload(headers, dataRows || []);
     Logger.log('CoreDeploymentTrajectory._runRefresh_: WRITE_PLAN sheet="' + sheetName + '"' +
       ' dataRows=' + plan.dataRows +
       ' headerCols=' + plan.headerCols +
@@ -1682,14 +1682,14 @@ var CoreDeploymentTrajectory = {
     var previousLastCol = sheet.getLastColumn();
     Logger.log(logPrefix + ' PHASE getLastColumn DONE value=' + previousLastCol);
     var headerColCount = headers.length;
-    var normalized = TrajectorySheetWrite.normalizeRectangularRows(dataRows, headerColCount);
+    var normalized = CoreDeploymentTrajectoryStore.normalizeRectangularRows(dataRows, headerColCount);
     var bodyRows = normalized.rows;
     var dataRowCount = bodyRows.length;
     var writeColCount = Math.max(headerColCount, 1);
-    var matrixNumRows = TrajectorySheetWrite.writeMatrixRowCount(dataRowCount);
-    var trailingClearNumRows = TrajectorySheetWrite.trailingBodyClearNumRows(
+    var matrixNumRows = CoreDeploymentTrajectoryStore.writeMatrixRowCount(dataRowCount);
+    var trailingClearNumRows = CoreDeploymentTrajectoryStore.trailingBodyClearNumRows(
       previousLastRow, dataRowCount);
-    var prevBodyRows = TrajectorySheetWrite.previousBodyRowCount(previousLastRow);
+    var prevBodyRows = CoreDeploymentTrajectoryStore.previousBodyRowCount(previousLastRow);
 
     Logger.log(logPrefix +
       ' headerCols=' + headerColCount +
@@ -1735,9 +1735,9 @@ var CoreDeploymentTrajectory = {
 
     if (trailingClearNumRows > 0) {
       Logger.log(logPrefix + ' PHASE clearContent START trailingRows=' + trailingClearNumRows +
-        ' cols=' + writeColCount + ' startRow=' + (TrajectorySheetWrite.bodyStartRow() + dataRowCount));
+        ' cols=' + writeColCount + ' startRow=' + (CoreDeploymentTrajectoryStore.bodyStartRow() + dataRowCount));
       sheet.getRange(
-        TrajectorySheetWrite.bodyStartRow() + dataRowCount,
+        CoreDeploymentTrajectoryStore.bodyStartRow() + dataRowCount,
         1,
         trailingClearNumRows,
         writeColCount

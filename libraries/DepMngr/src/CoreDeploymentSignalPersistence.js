@@ -30,12 +30,12 @@ var CoreDeploymentSignalPersistence = {
       sig.signalHistorySheetName,
       sig.signalRunsSheetName
     ];
-    CoreDeploymentSignalWorkbook.ensureSheetHeaders(
-      ss, sig.signalsSheetName, CoreDeploymentSignalSchema.currentHeaders());
-    CoreDeploymentSignalWorkbook.ensureSheetHeaders(
-      ss, sig.signalHistorySheetName, CoreDeploymentSignalSchema.historyHeaders());
-    CoreDeploymentSignalWorkbook.ensureSheetHeaders(
-      ss, sig.signalRunsSheetName, CoreDeploymentSignalSchema.runHeaders());
+    CoreDeploymentSignalStore.ensureSheetHeaders(
+      ss, sig.signalsSheetName, CoreDeploymentSignalStore.currentHeaders());
+    CoreDeploymentSignalStore.ensureSheetHeaders(
+      ss, sig.signalHistorySheetName, CoreDeploymentSignalStore.historyHeaders());
+    CoreDeploymentSignalStore.ensureSheetHeaders(
+      ss, sig.signalRunsSheetName, CoreDeploymentSignalStore.runHeaders());
     Logger.log('CoreDeploymentSignalPersistence.initializeSignalSheets: ' +
       JSON.stringify(names));
     return { sheets: names };
@@ -80,11 +80,11 @@ var CoreDeploymentSignalPersistence = {
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       CoreDeploymentSignalPersistence.initializeSignalSheets(cfg);
       var runsSheet = ss.getSheetByName(sheetNames.runs);
-      var priorRuns = CoreDeploymentSignalWorkbook.readDataRows(
-        runsSheet, CoreDeploymentSignalSchema.runHeaders());
+      var priorRuns = CoreDeploymentSignalStore.readDataRows(
+        runsSheet, CoreDeploymentSignalStore.runHeaders());
       var existing = priorRuns.filter(function (r) {
         return String(r.signal_run_id) === signalRunId &&
-          String(r.run_status) === CoreDeploymentSignalSchema.RUN_STATUS_COMPLETE;
+          String(r.run_status) === CoreDeploymentSignalStore.RUN_STATUS_COMPLETE;
       })[0];
       if (existing) {
         return {
@@ -99,27 +99,27 @@ var CoreDeploymentSignalPersistence = {
         cfg, runInput, options, sheetNames, signalRunId, {
           readCurrent: function () {
             var sh = ss.getSheetByName(sheetNames.current);
-            return CoreDeploymentSignalWorkbook.readDataRows(
-              sh, CoreDeploymentSignalSchema.currentHeaders());
+            return CoreDeploymentSignalStore.readDataRows(
+              sh, CoreDeploymentSignalStore.currentHeaders());
           },
           writeCurrent: function (rows) {
             var sh = ss.getSheetByName(sheetNames.current);
-            CoreDeploymentSignalWorkbook.replaceCurrentBody(
-              sh, CoreDeploymentSignalSchema.currentHeaders(), rows);
+            CoreDeploymentSignalStore.replaceCurrentBody(
+              sh, CoreDeploymentSignalStore.currentHeaders(), rows);
           },
           appendHistory: function (rows) {
             var sh = ss.getSheetByName(sheetNames.history);
-            CoreDeploymentSignalWorkbook.appendBodyRows(
-              sh, CoreDeploymentSignalSchema.historyHeaders(), rows);
+            CoreDeploymentSignalStore.appendBodyRows(
+              sh, CoreDeploymentSignalStore.historyHeaders(), rows);
           },
           appendRun: function (row) {
             var sh = ss.getSheetByName(sheetNames.runs);
-            CoreDeploymentSignalWorkbook.appendBodyRows(
-              sh, CoreDeploymentSignalSchema.runHeaders(), [row]);
+            CoreDeploymentSignalStore.appendBodyRows(
+              sh, CoreDeploymentSignalStore.runHeaders(), [row]);
           },
           updateRunStatus: function (row) {
-            CoreDeploymentSignalWorkbook.appendBodyRows(
-              runsSheet, CoreDeploymentSignalSchema.runHeaders(), [row]);
+            CoreDeploymentSignalStore.appendBodyRows(
+              runsSheet, CoreDeploymentSignalStore.runHeaders(), [row]);
           }
         });
 
@@ -186,7 +186,7 @@ var CoreDeploymentSignalPersistence = {
     if (!CoreDeploymentSignalPersistence.isEnabled(cfg)) return null;
     var rows = CoreDeploymentSignalPersistence._readRunRows_(cfg, options.store);
     for (var i = rows.length - 1; i >= 0; i--) {
-      if (String(rows[i].run_status) === CoreDeploymentSignalSchema.RUN_STATUS_COMPLETE) {
+      if (String(rows[i].run_status) === CoreDeploymentSignalStore.RUN_STATUS_COMPLETE) {
         return rows[i];
       }
     }
@@ -257,7 +257,7 @@ var CoreDeploymentSignalPersistence = {
       signals_persisted: 0,
       no_signal_count: runInput.no_signal_count || 0,
       lifecycleCounts: {},
-      run_status: CoreDeploymentSignalSchema.RUN_STATUS_IN_PROGRESS,
+      run_status: CoreDeploymentSignalStore.RUN_STATUS_IN_PROGRESS,
       persistence_status: 'WRITING',
       context_schema_version: runMeta.context_schema_version,
       agent_reference: runMeta.agent_reference,
@@ -280,7 +280,7 @@ var CoreDeploymentSignalPersistence = {
         signals_persisted: plan.signalsPersisted,
         no_signal_count: runInput.no_signal_count || 0,
         lifecycleCounts: plan.lifecycleCounts,
-        run_status: CoreDeploymentSignalSchema.RUN_STATUS_COMPLETE,
+        run_status: CoreDeploymentSignalStore.RUN_STATUS_COMPLETE,
         persistence_status: 'COMPLETE',
         context_schema_version: runMeta.context_schema_version,
         agent_reference: runMeta.agent_reference,
@@ -309,7 +309,7 @@ var CoreDeploymentSignalPersistence = {
         signals_persisted: 0,
         no_signal_count: runInput.no_signal_count || 0,
         lifecycleCounts: {},
-        run_status: CoreDeploymentSignalSchema.RUN_STATUS_FAILED,
+        run_status: CoreDeploymentSignalStore.RUN_STATUS_FAILED,
         persistence_status: 'FAILED',
         context_schema_version: runMeta.context_schema_version,
         agent_reference: runMeta.agent_reference,
@@ -327,7 +327,7 @@ var CoreDeploymentSignalPersistence = {
     var existing = CoreDeploymentSignalStore.findRunById(
       store, sheetNames.runs, signalRunId);
     if (existing && String(existing.run_status) ===
-        CoreDeploymentSignalSchema.RUN_STATUS_COMPLETE) {
+        CoreDeploymentSignalStore.RUN_STATUS_COMPLETE) {
       return {
         ok: true,
         idempotentReplay: true,
@@ -343,22 +343,22 @@ var CoreDeploymentSignalPersistence = {
         writeCurrent: function (rows) {
           CoreDeploymentSignalStore.replaceBody(
             store, sheetNames.current,
-            CoreDeploymentSignalSchema.currentHeaders(), rows);
+            CoreDeploymentSignalStore.currentHeaders(), rows);
         },
         appendHistory: function (rows) {
           CoreDeploymentSignalStore.appendRows(
             store, sheetNames.history,
-            CoreDeploymentSignalSchema.historyHeaders(), rows);
+            CoreDeploymentSignalStore.historyHeaders(), rows);
         },
         appendRun: function (row) {
           CoreDeploymentSignalStore.appendRows(
             store, sheetNames.runs,
-            CoreDeploymentSignalSchema.runHeaders(), [row]);
+            CoreDeploymentSignalStore.runHeaders(), [row]);
         },
         updateRunStatus: function (row) {
           CoreDeploymentSignalStore.appendRows(
             store, sheetNames.runs,
-            CoreDeploymentSignalSchema.runHeaders(), [row]);
+            CoreDeploymentSignalStore.runHeaders(), [row]);
         }
       });
   },
@@ -422,8 +422,8 @@ var CoreDeploymentSignalPersistence = {
       run_status: p.run_status,
       persistence_status: p.persistence_status,
       context_schema_version: p.context_schema_version,
-      signal_schema_version: CoreDeploymentSignalSchema.SIGNAL_SCHEMA_VERSION,
-      normalization_version: CoreDeploymentSignalSchema.NORMALIZATION_VERSION,
+      signal_schema_version: CoreDeploymentSignalStore.SIGNAL_SCHEMA_VERSION,
+      normalization_version: CoreDeploymentSignalStore.NORMALIZATION_VERSION,
       agent_reference: p.agent_reference,
       source_reasoning_run_ref: p.source_reasoning_run_ref,
       error_message: p.error_message,
@@ -440,8 +440,8 @@ var CoreDeploymentSignalPersistence = {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sh = ss.getSheetByName(cfg.deploymentSignal.signalsSheetName);
     if (!sh) return [];
-    return CoreDeploymentSignalWorkbook.readDataRows(
-      sh, CoreDeploymentSignalSchema.currentHeaders());
+    return CoreDeploymentSignalStore.readDataRows(
+      sh, CoreDeploymentSignalStore.currentHeaders());
   },
 
   /** @private */
@@ -453,8 +453,8 @@ var CoreDeploymentSignalPersistence = {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sh = ss.getSheetByName(cfg.deploymentSignal.signalHistorySheetName);
     if (!sh) return [];
-    return CoreDeploymentSignalWorkbook.readDataRows(
-      sh, CoreDeploymentSignalSchema.historyHeaders());
+    return CoreDeploymentSignalStore.readDataRows(
+      sh, CoreDeploymentSignalStore.historyHeaders());
   },
 
   /** @private */
@@ -466,8 +466,8 @@ var CoreDeploymentSignalPersistence = {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sh = ss.getSheetByName(cfg.deploymentSignal.signalRunsSheetName);
     if (!sh) return [];
-    return CoreDeploymentSignalWorkbook.readDataRows(
-      sh, CoreDeploymentSignalSchema.runHeaders());
+    return CoreDeploymentSignalStore.readDataRows(
+      sh, CoreDeploymentSignalStore.runHeaders());
   },
 
   /** @private */

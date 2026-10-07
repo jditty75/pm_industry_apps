@@ -155,7 +155,7 @@ var CoreDeploymentSignalLifecycle = {
     var rec = ctx.record;
     var runMeta = ctx.runMeta;
     return {
-      schema_version: CoreDeploymentSignalSchema.SIGNAL_SCHEMA_VERSION,
+      schema_version: CoreDeploymentSignalStore.SIGNAL_SCHEMA_VERSION,
       signal_id: ctx.signalId,
       deployment_id: rec.deployment_id,
       signal_run_id: runMeta.signal_run_id,
@@ -175,7 +175,7 @@ var CoreDeploymentSignalLifecycle = {
       context_ref: rec.context_ref,
       source_reasoning_run_ref: runMeta.source_reasoning_run_ref || '',
       prior_signal_id: ctx.priorSignalId || '',
-      normalization_version: CoreDeploymentSignalSchema.NORMALIZATION_VERSION,
+      normalization_version: CoreDeploymentSignalStore.NORMALIZATION_VERSION,
       reasoning_prose_original: rec.reasoning_prose_original || '',
       first_active_at: ctx.firstActiveAt,
       last_updated_at: ctx.timestamps.persistedAt,

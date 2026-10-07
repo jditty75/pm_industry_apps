@@ -59,7 +59,7 @@ Sana supplies **one record per surfaced deployment** (structured or parseable pr
 
 GAS supplies: `schema_version`, `signal_id`, `signal_run_id`, timestamps, `lifecycle_state`, `signal_status`, health/stage snapshots when provided, normalization version, persistence metadata.
 
-Optional alternate input: `sana_batch_text` (Stage-1-style blocks) on the approved run payload — normalized by the same rules as `CoreDeploymentSignalStage1Ingest`.
+Optional alternate input: `sana_batch_text` (verbatim Sana portfolio blocks) on the approved run payload — parsed and normalized by `CoreDeploymentSignalNormalize` (same field rules as structured `records`).
 
 ## Normalization policy
 
@@ -130,11 +130,9 @@ Stewardship conditions remain in the deterministic stewardship lane (`CoreDeploy
 
 | Module | Role |
 |--------|------|
-| `CoreDeploymentSignalSchema.js` | Headers / versions |
-| `CoreDeploymentSignalNormalize.js` | Substantive normalization |
+| `CoreDeploymentSignals.js` | Context assembler + substantive normalization (`CoreDeploymentSignalContext`, `CoreDeploymentSignalNormalize`) |
+| `CoreDeploymentSignalStore.js` | Headers / versions, Spreadsheet IO, in-memory test store |
 | `CoreDeploymentSignalLifecycle.js` | Pure lifecycle plan |
 | `CoreDeploymentSignalPersistence.js` | Orchestration + public API |
-| `CoreDeploymentSignalWorkbook.js` | Spreadsheet IO |
-| `CoreDeploymentSignalStore.js` | Test store + row mapping |
 
 Tests: `libraries/DepMngr/test/deployment-signal-persistence.test.js`.

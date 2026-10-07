@@ -20,7 +20,7 @@ function loadContext() {
     fs.readFileSync(path.join(__dirname, '..', 'src', 'CoreDeploymentTrajectoryMetrics.js'), 'utf8'),
     sandbox);
   vm.runInContext(
-    fs.readFileSync(path.join(__dirname, '..', 'src', 'CoreDeploymentSignalContext.js'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'CoreDeploymentSignals.js'), 'utf8'),
     sandbox);
   return sandbox.CoreDeploymentSignalContext;
 }
@@ -132,7 +132,7 @@ test('isEnabled follows deploymentSignal gate', () => {
     fs.readFileSync(path.join(__dirname, '..', 'src', 'CoreDeploymentTrajectoryMetrics.js'), 'utf8'),
     sandbox);
   vm.runInContext(
-    fs.readFileSync(path.join(__dirname, '..', 'src', 'CoreDeploymentSignalContext.js'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '..', 'src', 'CoreDeploymentSignals.js'), 'utf8'),
     sandbox);
   assert.equal(sandbox.CoreDeploymentSignalContext.isEnabled({ deploymentSignal: { enabled: false } }), false);
 });

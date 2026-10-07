@@ -48,39 +48,46 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 
 **Deployment** is the first pilot domain. Do not generalize implementation into a shared framework until the pilot proves value. Reuse this **pattern** in documentation for future domains.
 
-## Engineering references
+## Authoritative references (production)
 
 | Document | Purpose |
 |----------|---------|
-| [pilot-closeout.md](./pilot-closeout.md) | Accepted pilot outcome, scorecard, conclusion |
-| [ai-reasoning-contract.md](./ai-reasoning-contract.md) | Preferred concise AI instruction + boundary |
 | [deployment-signal-domain.md](./deployment-signal-domain.md) | Trajectory v2 sheets, sources, grain, limitations |
+| [deployment-signal-context-v1.md](./deployment-signal-context-v1.md) | Context packet schema |
+| [context-assembler.md](./context-assembler.md) | Assembler architecture and portfolio workflow |
+| [ai-reasoning-contract.md](./ai-reasoning-contract.md) | AI instruction boundary (facts vs interpretation) |
 | [structured-signals-contract.md](./structured-signals-contract.md) | `deployment-signal-v1` field contract |
 | [deployment-signal-persistence.md](./deployment-signal-persistence.md) | SLG sheets, APIs, Sana handoff, lifecycle |
 | [signal-lifecycle-roadmap.md](./signal-lifecycle-roadmap.md) | Lifecycle semantics + POSITIVE modeling |
+| [deployment-data-stewardship-v1.md](./deployment-data-stewardship-v1.md) | Data Stewardship condition contract |
 | [weekly-operating-governance-model.md](./weekly-operating-governance-model.md) | Daily/weekly cadence, approval boundary, email + DM consumption |
 | [llm-guardrails.md](./llm-guardrails.md) | Evidence/safety guardrails (companion to AI contract) |
-| [data-stewardship-rule-audit.md](./data-stewardship-rule-audit.md) | Stewardship rule precision audit |
-| [stage-2-legacy-embedded-contract.md](./stage-2-legacy-embedded-contract.md) | Superseded embedded Stage-2 rubric (audit) |
-| [deployment-trajectory-v2-pilot-freeze.md](./deployment-trajectory-v2-pilot-freeze.md) | Pilot-frozen trajectory v2 contract |
-| [deployment-signal-context-v1.md](./deployment-signal-context-v1.md) | Context packet schema |
-| [context-assembler.md](./context-assembler.md) | Assembler architecture and portfolio workflow |
-| [stage-2-portfolio-compression.md](./stage-2-portfolio-compression.md) | Stage 2 compression, stewardship lane, workflow |
-| [deployment-signal-candidate-v1.md](./deployment-signal-candidate-v1.md) | Normalized Stage-1 candidate contract |
-| [deployment-data-stewardship-v1.md](./deployment-data-stewardship-v1.md) | Data Stewardship condition contract |
-| [human-validation-package.md](./human-validation-package.md) | Ten-deployment review format |
-| [engineering-baseline-2026-10.md](./engineering-baseline-2026-10.md) | Reconciliation matrix and Git/runtime ownership |
 
-## Code ownership
+## Pilot history and audits
+
+| Document | Classification |
+|----------|----------------|
+| [pilot-closeout.md](./pilot-closeout.md) | **PILOT HISTORY** — 184 → 17 → 11 accepted result |
+| [deployment-trajectory-v2-pilot-freeze.md](./deployment-trajectory-v2-pilot-freeze.md) | **PILOT HISTORY** — frozen trajectory v2 contract |
+| [stage-2-portfolio-compression.md](./stage-2-portfolio-compression.md) | **PILOT HISTORY** — Stage 2 compression workflow |
+| [deployment-signal-candidate-v1.md](./deployment-signal-candidate-v1.md) | **PILOT HISTORY** — Stage-1 candidate schema (Python + test helper) |
+| [human-validation-package.md](./human-validation-package.md) | **PILOT HISTORY** — ten-deployment review format |
+| [data-stewardship-rule-audit.md](./data-stewardship-rule-audit.md) | **PILOT HISTORY** — rule precision audit |
+| [engineering-baseline-2026-10.md](./engineering-baseline-2026-10.md) | **MERGE CANDIDATE** — reconciliation matrix (see code map below) |
+| [stage-2-legacy-embedded-contract.md](./stage-2-legacy-embedded-contract.md) | **SUPERSEDED** — embedded Stage-2 rubric |
+
+## Code ownership (post-consolidation)
 
 | Layer | Location |
 |-------|----------|
-| Trajectory engine | `libraries/DepMngr/src/CoreDeploymentTrajectory*.js` |
-| Context Assembler | `libraries/DepMngr/src/CoreDeploymentSignalContext.js` |
-| Signal persistence | `CoreDeploymentSignalPersistence.js`, `CoreDeploymentSignalNormalize.js`, `CoreDeploymentSignalLifecycle.js` |
-| Defaults / gating | `libraries/DepMngr/src/CoreConfig.js` (`deploymentSignal`, schema version **2**, `persistenceEnabled` default **false**) |
-| Local packet / harness | `scripts/generate-deployment-signal-context-packets.py`, `scripts/deployment-signal-portfolio-pilot-harness.py`, `scripts/deployment-signal-stage2-harness.py` |
-| Data Stewardship | `CoreDeploymentDataStewardship.js`, `deployment_trajectory_validation/data_stewardship.py` |
-| SLG pilot enablement | `solutions/SLG_DM/src/Config_SLG.js`, `Code.js` (trajectory + `persistApprovedSlgSignalRun`) |
-| Tests | `deployment-signal-persistence.test.js`, `deployment-trajectory-*.test.js`, `deployment-signal-*.test.js` |
-| Local PF history diagnostic | `scripts/diagnose-deployment-trajectory-pf-history.js` |
+| Trajectory domain | `CoreDeploymentTrajectory.js`, `CoreDeploymentTrajectoryMetrics.js`, `CoreDeploymentTrajectorySchedule.js` |
+| Trajectory sheet store | `CoreDeploymentTrajectoryStore.js` |
+| Context + normalization | `CoreDeploymentSignals.js` (`CoreDeploymentSignalContext`, `CoreDeploymentSignalNormalize`) |
+| Signal persistence API | `CoreDeploymentSignalPersistence.js` |
+| Lifecycle | `CoreDeploymentSignalLifecycle.js` |
+| Signal workbook store | `CoreDeploymentSignalStore.js` (schema, Spreadsheet IO, in-memory test store) |
+| Data Stewardship | `CoreDeploymentDataStewardship.js` |
+| Defaults / gating | `CoreConfig.js` (`deploymentSignal`, schema version **2**, `persistenceEnabled` default **false**) |
+| SLG orchestration | `solutions/SLG_DM/src/Config_SLG.js`, `Code.js` (trajectory refresh, persistence wrappers) |
+| Pilot / local harness | `scripts/deployment_trajectory_validation/`, `scripts/deployment-signal-stage2-harness.py`, `libraries/DepMngr/test/helpers/stage1-candidate-pilot.js` |
+| Tests | `libraries/DepMngr/test/deployment-*.test.js` |

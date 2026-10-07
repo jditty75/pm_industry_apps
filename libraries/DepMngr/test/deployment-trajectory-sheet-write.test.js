@@ -5,12 +5,12 @@ const path = require('path');
 const vm = require('vm');
 
 const src = fs.readFileSync(
-  path.join(__dirname, '..', 'src', 'CoreDeploymentTrajectorySheetWrite.js'),
+  path.join(__dirname, '..', 'src', 'CoreDeploymentTrajectoryStore.js'),
   'utf8');
-const sandbox = { TrajectorySheetWrite: null };
+const sandbox = { CoreDeploymentTrajectoryStore: null };
 vm.createContext(sandbox);
 vm.runInContext(src, sandbox);
-const W = sandbox.TrajectorySheetWrite;
+const W = sandbox.CoreDeploymentTrajectoryStore;
 
 test('bodySetValuesNumRows matches data length (184 rows => 184 numRows)', () => {
   assert.equal(W.bodySetValuesNumRows(184), 184);

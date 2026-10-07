@@ -90,7 +90,7 @@ Pilot note: lifetime gross parent movement can be positive while net is zero whe
 | `Deployment_Trajectory_MtpEvents` | Schedule events | Types: `PARENT_*`, `FUNCTION_*` |
 | `Deployment_Trajectory_ActionHistory_Index` | Action rows linked to deployment | IDs/counts/dates — **no** raw narrative copied into trajectory |
 
-Writes replace sheet body with idempotent full refresh (`CoreDeploymentTrajectorySheetWrite`).
+Writes replace sheet body with idempotent full refresh (`CoreDeploymentTrajectoryStore`).
 
 ## Intervention context
 

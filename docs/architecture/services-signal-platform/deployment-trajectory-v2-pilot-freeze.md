@@ -19,7 +19,7 @@
 | Component | Location |
 |-----------|----------|
 | Trajectory engine | `libraries/DepMngr/src/CoreDeploymentTrajectory*.js` |
-| Context Assembler | `libraries/DepMngr/src/CoreDeploymentSignalContext.js` |
+| Context Assembler | `libraries/DepMngr/src/CoreDeploymentSignals.js` (`CoreDeploymentSignalContext`) |
 | Local portfolio generation | `scripts/generate-deployment-signal-context-packets.py` |
 
 ## Calibration acceptance (reasoning patterns — not deterministic rules)

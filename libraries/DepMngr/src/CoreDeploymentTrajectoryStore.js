@@ -1,11 +1,11 @@
 /**
- * CoreDeploymentTrajectorySheetWrite.js
+ * CoreDeploymentTrajectoryStore.js
  *
- * Pure helpers for derived-sheet rectangular writes (no SpreadsheetApp).
+ * Pure helpers for derived trajectory sheet rectangular writes (no SpreadsheetApp).
  * Sheet.getRange(row, column, numRows, numColumns) uses counts, not end indices.
  */
 
-var TrajectorySheetWrite = {
+var CoreDeploymentTrajectoryStore = {
 
   /** @return {number} */
   headerRow: function () {
@@ -42,8 +42,8 @@ var TrajectorySheetWrite = {
    * @return {number}
    */
   trailingBodyClearNumRows: function (previousSheetLastRow, newDataRowCount) {
-    var prevBody = TrajectorySheetWrite.previousBodyRowCount(previousSheetLastRow);
-    var newBody = TrajectorySheetWrite.bodySetValuesNumRows(newDataRowCount);
+    var prevBody = CoreDeploymentTrajectoryStore.previousBodyRowCount(previousSheetLastRow);
+    var newBody = CoreDeploymentTrajectoryStore.bodySetValuesNumRows(newDataRowCount);
     if (prevBody <= newBody) return 0;
     return prevBody - newBody;
   },
@@ -54,7 +54,7 @@ var TrajectorySheetWrite = {
    * @return {number}
    */
   writeMatrixRowCount: function (dataRowCount) {
-    return 1 + TrajectorySheetWrite.bodySetValuesNumRows(dataRowCount);
+    return 1 + CoreDeploymentTrajectoryStore.bodySetValuesNumRows(dataRowCount);
   },
 
   /**

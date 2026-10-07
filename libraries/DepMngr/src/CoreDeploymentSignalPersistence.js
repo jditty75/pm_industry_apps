@@ -25,19 +25,26 @@ var CoreDeploymentSignalPersistence = {
     CoreDeploymentSignalPersistence._assertSlgPersistence_(cfg);
     var sig = cfg.deploymentSignal;
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    Logger.log('CoreDeploymentSignalPersistence.initializeSignalSheets: workbook resolved');
     var names = [
       sig.signalsSheetName,
       sig.signalHistorySheetName,
       sig.signalRunsSheetName
     ];
-    CoreDeploymentSignalStore.ensureSheetHeaders(
-      ss, sig.signalsSheetName, CoreDeploymentSignalStore.currentHeaders());
-    CoreDeploymentSignalStore.ensureSheetHeaders(
-      ss, sig.signalHistorySheetName, CoreDeploymentSignalStore.historyHeaders());
-    CoreDeploymentSignalStore.ensureSheetHeaders(
-      ss, sig.signalRunsSheetName, CoreDeploymentSignalStore.runHeaders());
-    Logger.log('CoreDeploymentSignalPersistence.initializeSignalSheets: ' +
-      JSON.stringify(names));
+    var specs = [
+      { label: 'Deployment_Signals', name: sig.signalsSheetName,
+        headers: CoreDeploymentSignalStore.currentHeaders() },
+      { label: 'Deployment_Signal_History', name: sig.signalHistorySheetName,
+        headers: CoreDeploymentSignalStore.historyHeaders() },
+      { label: 'Deployment_Signal_Runs', name: sig.signalRunsSheetName,
+        headers: CoreDeploymentSignalStore.runHeaders() }
+    ];
+    specs.forEach(function (spec) {
+      CoreDeploymentSignalStore.ensureSheetHeaders(ss, spec.name, spec.headers);
+      Logger.log('CoreDeploymentSignalPersistence.initializeSignalSheets: ' +
+        spec.label + ' initialized');
+    });
+    Logger.log('CoreDeploymentSignalPersistence.initializeSignalSheets: initialization PASS');
     return { sheets: names };
   },
 

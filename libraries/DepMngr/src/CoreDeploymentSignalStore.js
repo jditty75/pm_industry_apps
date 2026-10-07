@@ -91,29 +91,67 @@ var CoreDeploymentSignalStore = {
   },
 
   /**
+   * @param {Array<string>} existing trimmed cells (canonical width)
+   * @param {Array<string>} canonical
+   * @return {boolean}
+   * @private
+   */
+  _headersMatchCanonical_: function (existing, canonical) {
+    if (!canonical || !canonical.length) return false;
+    if (!existing || existing.length !== canonical.length) return false;
+    for (var i = 0; i < canonical.length; i++) {
+      if (existing[i] !== canonical[i]) return false;
+    }
+    return true;
+  },
+
+  /**
+   * Idempotent header row for Signal sheets (bounded reads; no getLastColumn scan).
+   *
    * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
    * @param {string} sheetName
-   * @param {Array<string>} headers
+   * @param {Array<string>} headers canonical ordered schema
+   * @return {GoogleAppsScript.Spreadsheet.Sheet}
    */
   ensureSheetHeaders: function (ss, sheetName, headers) {
+    var canonical = (headers || []).slice();
+    var schemaWidth = canonical.length;
+    var logPrefix = 'CoreDeploymentSignalStore.ensureSheetHeaders: sheet="' +
+      sheetName + '" schemaWidth=' + schemaWidth;
+    if (!schemaWidth) {
+      throw new Error(logPrefix + ' empty header schema');
+    }
+
     var sheet = ss.getSheetByName(sheetName);
+    var created = false;
     if (!sheet) {
       sheet = ss.insertSheet(sheetName);
+      created = true;
     }
-    var lastCol = Math.max(sheet.getLastColumn(), 1);
-    var existing = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+
+    if (created) {
+      Logger.log(logPrefix + ' created=true op=setValues_header');
+      sheet.getRange(1, 1, 1, schemaWidth).setValues([canonical]);
+      return sheet;
+    }
+
+    var existing = sheet.getRange(1, 1, 1, schemaWidth).getValues()[0]
       .map(function (h) { return String(h || '').trim(); });
-    var merged = existing.slice();
-    var changed = false;
-    (headers || []).forEach(function (h) {
-      if (merged.indexOf(h) < 0) {
-        merged.push(h);
-        changed = true;
-      }
-    });
-    if (changed || !existing.length) {
-      sheet.getRange(1, 1, 1, merged.length).setValues([merged]);
+    if (CoreDeploymentSignalStore._headersMatchCanonical_(existing, canonical)) {
+      Logger.log(logPrefix + ' created=false op=no-op');
+      return sheet;
     }
+
+    var lastRow = sheet.getLastRow();
+    var hasBodyData = lastRow > 1;
+    if (hasBodyData) {
+      throw new Error(logPrefix + ' incompatible headers with existing signal data' +
+        ' (lastRow=' + lastRow + '); manual remediation required');
+    }
+
+    Logger.log(logPrefix + ' created=false op=setValues_header partialOrEmpty=true' +
+      ' lastRow=' + lastRow);
+    sheet.getRange(1, 1, 1, schemaWidth).setValues([canonical]);
     return sheet;
   },
 
@@ -163,7 +201,7 @@ var CoreDeploymentSignalStore = {
   appendBodyRows: function (sheet, headers, rows) {
     if (!rows || !rows.length) return;
     CoreDeploymentSignalStore.ensureSheetHeaders(
-      SpreadsheetApp.getActiveSpreadsheet(), sheet.getName(), headers);
+      sheet.getParent(), sheet.getName(), headers);
     var start = Math.max(sheet.getLastRow(), 1) + 1;
     if (sheet.getLastRow() < 1) {
       sheet.getRange(1, 1, 1, headers.length).setValues([headers]);

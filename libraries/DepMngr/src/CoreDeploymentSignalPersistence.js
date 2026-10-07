@@ -405,14 +405,12 @@ var CoreDeploymentSignalPersistence = {
       var validation = CoreDeploymentSignalPersistence.validateSubmittedSignalRunUnit(
         runRow, signalRows, validIds);
       if (!validation.ok) {
-        io.updateRun(runId, {
-          run_status: CoreDeploymentSignalStore.RUN_STATUS_FAILED,
-          persistence_status: 'FAILED',
-          error_message: validation.errors.join('; ')
-        });
+        var validationErr = validation.errors.join('; ');
+        CoreDeploymentSignalPersistence._tryUpdateRunFailed_(
+          io, runId, validationErr);
         return {
           ok: false,
-          error: validation.errors.join('; '),
+          error: validationErr,
           failed_run_id: runId,
           processed: processed
         };
@@ -452,12 +450,9 @@ var CoreDeploymentSignalPersistence = {
         }, options);
 
       if (!result.ok) {
-        io.updateRun(runId, {
-          run_status: CoreDeploymentSignalStore.RUN_STATUS_FAILED,
-          persistence_status: 'FAILED',
-          error_message: result.error || 'persist failed'
-        });
-        return { ok: false, error: result.error, failed_run_id: runId, processed: processed };
+        var persistErr = result.error || 'persist failed';
+        CoreDeploymentSignalPersistence._tryUpdateRunFailed_(io, runId, persistErr);
+        return { ok: false, error: persistErr, failed_run_id: runId, processed: processed };
       }
 
       var emailHandoff = CoreNotify.applyDeploymentSignalPostCompleteHandoff(
@@ -935,5 +930,26 @@ var CoreDeploymentSignalPersistence = {
   _fail_: function (message) {
     Logger.log('CoreDeploymentSignalPersistence: FAIL ' + message);
     return { ok: false, error: message };
+  },
+
+  /**
+   * Record FAILED on the run row without masking the original persistence error.
+   *
+   * @param {{ updateRun: function(string, Object) }} io
+   * @param {string} runId
+   * @param {string} errorMessage
+   * @private
+   */
+  _tryUpdateRunFailed_: function (io, runId, errorMessage) {
+    try {
+      io.updateRun(runId, {
+        run_status: CoreDeploymentSignalStore.RUN_STATUS_FAILED,
+        persistence_status: 'FAILED',
+        error_message: errorMessage
+      });
+    } catch (updateErr) {
+      Logger.log('CoreDeploymentSignalPersistence._tryUpdateRunFailed_: could not write' +
+        ' FAILED status for run ' + runId + ': ' + updateErr);
+    }
   }
 };

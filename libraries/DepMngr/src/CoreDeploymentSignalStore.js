@@ -168,11 +168,27 @@ var CoreDeploymentSignalStore = {
    * @param {Array<string>} headers
    * @return {Array<Object>}
    */
+  /**
+   * Rectangular body write (GAS getRange row/col/numRows/numColumns).
+   *
+   * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+   * @param {number} startRow 1-based first body row
+   * @param {number} numCols
+   * @param {Array<Array>} matrix
+   * @private
+   */
+  _setBodyMatrix_: function (sheet, startRow, numCols, matrix) {
+    if (!matrix || !matrix.length) return;
+    var numRows = matrix.length;
+    sheet.getRange(startRow, 1, numRows, numCols).setValues(matrix);
+  },
+
   readDataRows: function (sheet, headers) {
     var lastRow = sheet.getLastRow();
     if (lastRow < 2) return [];
     var width = Math.max(headers.length, sheet.getLastColumn());
-    var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    var bodyRowCount = lastRow - 1;
+    var values = sheet.getRange(2, 1, bodyRowCount, width).getValues();
     var hdr = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (h) {
       return String(h || '').trim();
     });
@@ -218,7 +234,7 @@ var CoreDeploymentSignalStore = {
     var matrix = rows.map(function (r) {
       return CoreDeploymentSignalStore.rowToArray(r, headers);
     });
-    sheet.getRange(start, 1, start + matrix.length - 1, headers.length).setValues(matrix);
+    CoreDeploymentSignalStore._setBodyMatrix_(sheet, start, headers.length, matrix);
   },
 
   /**
@@ -339,7 +355,8 @@ var CoreDeploymentSignalStore = {
     var lastRow = sheet.getLastRow();
     if (lastRow < 2) return false;
     var width = headers.length;
-    var values = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    var bodyRowCount = lastRow - 1;
+    var values = sheet.getRange(2, 1, bodyRowCount, width).getValues();
     var hdr = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (h) {
       return String(h || '').trim();
     });
@@ -356,7 +373,7 @@ var CoreDeploymentSignalStore = {
     var merged = Object.assign(
       CoreDeploymentSignalStore.arrayToRow(values[rowIndex], hdr), patch || {});
     var arr = CoreDeploymentSignalStore.rowToArray(merged, headers);
-    sheet.getRange(rowIndex + 2, 1, rowIndex + 2, width).setValues([arr]);
+    CoreDeploymentSignalStore._setBodyMatrix_(sheet, rowIndex + 2, width, [arr]);
     return true;
   }
 };

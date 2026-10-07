@@ -8,11 +8,11 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 - Git source: `97348a6` (CoreLib client binding) / SLG pin to CoreLib **158**
 - Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
 - Previous GAS version: **201**
-- Live GAS version: _(post-deploy capture)_
+- Live GAS version: **203**
 - CoreLib: **158** (`Signals UI client landing normalization`, git 97348a6)
 - Description: fix(signals): bind Deployment Signals UI to server landing payload
 - Verification: DepMngr **184/184** local tests; SLG preview structural PASS; production browser smoke pending Jeff
-- Result: _(pending deploy completion)_
+- Result: success
 
 ### 2026-10-07 — SLG_DM — deploy
 

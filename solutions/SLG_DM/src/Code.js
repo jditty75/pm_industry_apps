@@ -496,31 +496,45 @@ function tickSlgDeploymentSignalSubmittedProcessor() {
   processSubmittedSlgDeploymentSignalRuns();
 }
 
+/** Time-based trigger handler — scheduled notification dispatcher (hourly). */
+function tickSlgScheduledNotificationDispatch() {
+  return CoreLib.CoreNotify.runScheduledNotificationDispatch(APP_CONFIG, {});
+}
+
 /**
  * Install SLG Signal operating-loop triggers (30-minute cadence; no duplicates).
  *
  * @return {Array<Object>}
  */
 function installSlgDeploymentSignalOperatingLoopTriggers() {
-  var handlers = [
-    'tickSlgDeploymentSignalEvidenceRefresh',
-    'tickSlgDeploymentSignalSubmittedProcessor'
+  var specs = [
+    { handlerName: 'tickSlgDeploymentSignalEvidenceRefresh', everyMinutes: 30 },
+    { handlerName: 'tickSlgDeploymentSignalSubmittedProcessor', everyMinutes: 30 },
+    { handlerName: 'tickSlgScheduledNotificationDispatch', everyHours: 1 }
   ];
-  var minutes = 30;
-  return handlers.map(function (handlerName) {
+  return specs.map(function (spec) {
+    var handlerName = spec.handlerName;
     var triggers = ScriptApp.getProjectTriggers();
     triggers.forEach(function (t) {
       if (t.getHandlerFunction && t.getHandlerFunction() === handlerName) {
         ScriptApp.deleteTrigger(t);
       }
     });
-    ScriptApp.newTrigger(handlerName)
-      .timeBased()
-      .everyMinutes(minutes)
-      .create();
-    Logger.log('installSlgDeploymentSignalOperatingLoopTriggers: ' +
-      handlerName + ' every ' + minutes + 'm');
-    return { ok: true, handlerName: handlerName, everyMinutes: minutes };
+    var builder = ScriptApp.newTrigger(handlerName).timeBased();
+    if (spec.everyHours) {
+      builder.everyHours(spec.everyHours).create();
+    } else {
+      builder.everyMinutes(spec.everyMinutes || 30).create();
+    }
+    Logger.log('installSlgDeploymentSignalOperatingLoopTriggers: ' + handlerName +
+      (spec.everyHours ? ' every ' + spec.everyHours + 'h' :
+        ' every ' + spec.everyMinutes + 'm'));
+    return {
+      ok: true,
+      handlerName: handlerName,
+      everyMinutes: spec.everyMinutes,
+      everyHours: spec.everyHours
+    };
   });
 }
 

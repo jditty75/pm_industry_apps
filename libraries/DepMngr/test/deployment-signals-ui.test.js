@@ -251,6 +251,38 @@ test('SUBMITTED current rows excluded from landing; ACTIVE included', () => {
   assert.equal(payload.signals.length, 1);
 });
 
+test('my-portfolio view scope with no matching deployments returns zero Signals', () => {
+  const store = Store.createMemoryStore();
+  Store.replaceBody(
+    store, 'Deployment_Signals', Store.currentHeaders(), [baseRow('DEP_A', 'NEW', 'HIGH')]);
+  Store.appendRows(store, 'Deployment_Signal_Runs', Store.runHeaders(), [{
+    signal_run_id: 'RUN-1',
+    signal_as_of: '2026-10-05',
+    run_status: 'COMPLETE',
+    lifecycle_new_count: 1
+  }]);
+  const priorUi = S.CoreData.getAllDeploymentsForUI;
+  S.CoreData.getAllDeploymentsForUI = function (_cfg, viewOpts) {
+    if (viewOpts && viewOpts.viewMode === 'my') {
+      return { rows: [] };
+    }
+    return priorUi();
+  };
+  try {
+    const scoped = Persist.getDeploymentSignalsLandingForUI(
+      SLG_CFG,
+      { viewMode: 'my', ddDisplayName: 'No Match DD' },
+      {},
+      { store: store });
+    assert.equal(scoped.signals.length, 0);
+    const unscoped = Persist.getDeploymentSignalsLandingForUI(
+      SLG_CFG, {}, {}, { store: store });
+    assert.equal(unscoped.signals.length, 1);
+  } finally {
+    S.CoreData.getAllDeploymentsForUI = priorUi;
+  }
+});
+
 test('diagnose aggregates exclusion reasons without narratives', () => {
   const store = Store.createMemoryStore();
   Store.replaceBody(store, 'Deployment_Signals', Store.currentHeaders(), [

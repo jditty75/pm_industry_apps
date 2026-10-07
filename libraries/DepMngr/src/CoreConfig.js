@@ -1341,6 +1341,9 @@ var CoreConfig = (function () {
     if (cfg.deploymentIntelligence.autoSendBaseline === undefined) {
       cfg.deploymentIntelligence.autoSendBaseline = false;
     }
+    if (cfg.deploymentIntelligence.sendNotBeforeHourLocal === undefined) {
+      cfg.deploymentIntelligence.sendNotBeforeHourLocal = 8;
+    }
 
     return cfg;
   }

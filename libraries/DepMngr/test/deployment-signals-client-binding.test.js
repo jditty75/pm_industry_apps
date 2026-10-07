@@ -45,17 +45,34 @@ function makeSignalsDom() {
   };
 }
 
-function loadSignalsClientApi() {
+function loadSignalsClientApi(extra) {
   const dom = makeSignalsDom();
   const js = fs.readFileSync(path.join(SRC, 'CoreUI_Js.js'), 'utf8');
+  const captured = { viewOpts: null, productOpts: null, opts: null };
   const sandbox = {
     document: dom.document,
-    window: {},
+    window: Object.assign({
+      APP_UI_CONFIG: {
+        personalization: { enabled: true },
+        productFilter: { enabled: true }
+      },
+      __USER_ACCESS__: { role: 'ADMIN' }
+    }, (extra && extra.window) || {}),
     google: {
       script: {
         run: {
           withSuccessHandler: function () {
-            return { withFailureHandler: function () { return {}; } };
+            return {
+              withFailureHandler: function () {
+                return {
+                  getDeploymentSignalsLandingForUI: function (viewOpts, productOpts, opts) {
+                    captured.viewOpts = viewOpts;
+                    captured.productOpts = productOpts;
+                    captured.opts = opts;
+                  }
+                };
+              }
+            };
           }
         }
       }
@@ -81,7 +98,10 @@ function loadSignalsClientApi() {
       'renderSignalsDashboard_: renderSignalsDashboard_,' +
       'renderSignalsList_: renderSignalsList_,' +
       'signalsUiFilters: signalsUiFilters,' +
-      'setSignalsLandingData_: function (d) { signalsLandingData = d; }' +
+      'setSignalsLandingData_: function (d) { signalsLandingData = d; },' +
+      'loadSignalsTab: loadSignalsTab,' +
+      'viewState: viewState,' +
+      'productFilterState: productFilterState' +
       '};'
   );
   const api = runner(
@@ -91,7 +111,7 @@ function loadSignalsClientApi() {
     URLSearchParams,
     sandbox.Event
   );
-  return { api, dom };
+  return { api, dom, captured };
 }
 
 function baseSignal(i, overrides) {
@@ -215,6 +235,19 @@ test('missing signal_status on wire still renders when activeCount matches', () 
   api.renderSignalsDashboard_(landing);
   assert.equal(api.getFilteredSignals_().length, 16);
   assert.ok(dom.nodes['sig-list'].innerHTML.includes('sig-item'));
+});
+
+test('loadSignalsTab RPC passes unscoped view/product options', () => {
+  const { api, dom, captured } = loadSignalsClientApi();
+  dom.document.getElementById('signals-tab');
+  dom.document.getElementById('sig-loading');
+  api.viewState.viewMode = 'my';
+  api.viewState.ddDisplayName = 'Example DD';
+  api.productFilterState.product = 'Financials';
+  api.loadSignalsTab(true);
+  assert.deepEqual(captured.viewOpts, {});
+  assert.deepEqual(captured.productOpts, {});
+  assert.equal(captured.opts.includeResolved, false);
 });
 
 test('include resolved retains RESOLVED rows when enabled', () => {

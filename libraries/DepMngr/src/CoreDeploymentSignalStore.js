@@ -124,7 +124,9 @@ var CoreDeploymentSignalStore = {
       'slack_status',
       'slack_sent_at',
       'finalized_at',
-      'updated_at'
+      'updated_at',
+      'email_last_error',
+      'email_attempt_count'
     ];
   },
 
@@ -182,6 +184,28 @@ var CoreDeploymentSignalStore = {
 
     var lastRow = sheet.getLastRow();
     var hasBodyData = lastRow > 1;
+    if (hasBodyData) {
+      var sheetLastCol = Math.max(sheet.getLastColumn(), schemaWidth);
+      var existingWide = sheet.getRange(1, 1, 1, sheetLastCol).getValues()[0]
+        .map(function (h) { return String(h || '').trim(); });
+      while (existingWide.length && !existingWide[existingWide.length - 1]) {
+        existingWide.pop();
+      }
+    }
+    if (hasBodyData && existingWide && existingWide.length < canonical.length) {
+      var prefixOk = true;
+      for (var pi = 0; pi < existingWide.length; pi++) {
+        if (existingWide[pi] !== canonical[pi]) {
+          prefixOk = false;
+          break;
+        }
+      }
+      if (prefixOk) {
+        Logger.log(logPrefix + ' created=false op=extend_header_columns lastRow=' + lastRow);
+        sheet.getRange(1, 1, 1, canonical.length).setValues([canonical]);
+        return sheet;
+      }
+    }
     if (hasBodyData) {
       throw new Error(logPrefix + ' incompatible headers with existing signal data' +
         ' (lastRow=' + lastRow + '); manual remediation required');

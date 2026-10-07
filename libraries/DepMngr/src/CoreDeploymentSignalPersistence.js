@@ -2391,9 +2391,10 @@ var CoreDeploymentSignalPersistence = {
       dataRequiringAttention = {
         headline: 'Data requiring attention',
         body: stewCount === 1 ?
-          '1 deployment discussed this week has a material system-of-record condition requiring review.' :
-          stewCount + ' deployments discussed this week have material system-of-record conditions ' +
-          'requiring review.'
+          '1 deployment currently in leadership view has a material system-of-record condition ' +
+          'requiring review.' :
+          stewCount + ' deployments currently in leadership view have material system-of-record ' +
+          'conditions requiring review.'
       };
     }
 

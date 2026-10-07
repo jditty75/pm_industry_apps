@@ -67,7 +67,8 @@ var APP_CONFIG = {
 
   deploymentIntelligence: {
     enabled: true,
-    displayName: 'SLG Deployment Intelligence'
+    displayName: 'SLG Deployment Intelligence',
+    sendNotBeforeHourLocal: 8
   },
   
   sheets: {

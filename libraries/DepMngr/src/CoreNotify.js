@@ -1984,6 +1984,218 @@ var CoreNotify = (function () {
    * @return {{ email_status: string, payload: (Object|null), sent: boolean }}
    */
   var DEPLOYMENT_INTELLIGENCE_NOTIFICATION_KEY = 'deployment_intelligence_weekly';
+  var DEPLOYMENT_INTELLIGENCE_EMAIL_MAX_ATTEMPTS_ = 5;
+
+  /**
+   * @param {Object=} options
+   * @return {Date}
+   * @private
+   */
+  function _dispatchNow_(options) {
+    return options && options.now ? new Date(options.now) : new Date();
+  }
+
+  /**
+   * @param {string} message
+   * @return {string}
+   * @private
+   */
+  function _sanitizeDiEmailError_(message) {
+    var s = String(message || '').trim();
+    if (!s) return 'send_failed';
+    if (s.length > 240) s = s.slice(0, 240);
+    return s.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[email]');
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {number}
+   * @private
+   */
+  function _diNotBeforeHour_(cfg) {
+    var h = parseInt((cfg.deploymentIntelligence || {}).sendNotBeforeHourLocal, 10);
+    if (isNaN(h) || h < 0) return 8;
+    if (h > 23) return 23;
+    return h;
+  }
+
+  /**
+   * GAS formatDate u: Sunday=1 … Saturday=7.
+   *
+   * @param {string} tz
+   * @param {Date} now
+   * @return {{ weekday: number, hour: number }}
+   * @private
+   */
+  function _localWeekdayAndHour_(tz, now) {
+    return {
+      weekday: parseInt(Utilities.formatDate(now, tz, 'u'), 10) || 1,
+      hour: parseInt(Utilities.formatDate(now, tz, 'H'), 10) || 0
+    };
+  }
+
+  /**
+   * @param {Object} notificationRow
+   * @param {string} tz
+   * @param {Date} now
+   * @return {boolean}
+   * @private
+   */
+  function _isDiWeeklySendDay_(notificationRow, tz, now) {
+    var sdRaw = notificationRow && notificationRow.sendDay;
+    if (sdRaw === '' || sdRaw == null) return false;
+    var target = parseInt(sdRaw, 10);
+    if (isNaN(target) || target < 1 || target > 7) return false;
+    return _localWeekdayAndHour_(tz, now).weekday === target;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {string} tz
+   * @param {Date} now
+   * @return {boolean}
+   * @private
+   */
+  function _isDiNotBeforeHourMet_(cfg, tz, now) {
+    return _localWeekdayAndHour_(tz, now).hour >= _diNotBeforeHour_(cfg);
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {Object=} options
+   * @return {Object|null}
+   * @private
+   */
+  function _resolveExpectedIntelligenceRun_(cfg, options) {
+    var latest = CoreDeploymentSignalPersistence.getLatestApprovedSlgSignalRun(
+      cfg, options || {});
+    if (!latest) return null;
+    var expectedId = 'INT-' + String(latest.signal_run_id || '').trim();
+    if (!expectedId || expectedId === 'INT-') return null;
+    var rows = CoreDeploymentSignalPersistence._readIntelligenceRows_(cfg, options.store);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i].intelligence_run_id || '').trim() === expectedId) {
+        return rows[i];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * @param {Object} row
+   * @return {boolean}
+   * @private
+   */
+  function _diEmailStatusEligibleForAuto_(row) {
+    var st = String(row.email_status || '').trim();
+    if (st === CoreDeploymentSignalStore.EMAIL_STATUS_SENT) return false;
+    if (st === CoreDeploymentSignalStore.EMAIL_STATUS_NOT_REQUIRED) return false;
+    if (st === CoreDeploymentSignalStore.EMAIL_STATUS_PENDING) return true;
+    if (st === CoreDeploymentSignalStore.EMAIL_STATUS_FAILED) {
+      var attempts = parseInt(row.email_attempt_count, 10) || 0;
+      return attempts < DEPLOYMENT_INTELLIGENCE_EMAIL_MAX_ATTEMPTS_;
+    }
+    return false;
+  }
+
+  /**
+   * @param {Object} notificationRow
+   * @param {AppConfig} cfg
+   * @return {boolean}
+   * @private
+   */
+  function _diProductionRecipientsNonEmpty_(notificationRow, cfg) {
+    if (!notificationRow || !_isEnabled_(notificationRow.enabled)) return false;
+    return _resolveRecipients_(notificationRow, null, {}, cfg, 'to').length > 0;
+  }
+
+  /**
+   * Production automatic Deployment Intelligence email gates (schedule, audience, artifact).
+   *
+   * @param {AppConfig} cfg
+   * @param {Object} runRow
+   * @param {Object|null} notificationRow
+   * @param {Object=} options
+   * @return {boolean}
+   * @private
+   */
+  function _deploymentIntelligenceAutoSendEligible_(cfg, runRow, notificationRow, options) {
+    options = options || {};
+    if (options.explicitTestSend) return true;
+    if (!options.productionSend) return true;
+    if (!CoreConfig.isDeploymentIntelligenceEnabled(cfg)) return false;
+    if (!isDeploymentIntelligenceEmailEligible(runRow, cfg)) return false;
+    if (!_diEmailStatusEligibleForAuto_(runRow)) return false;
+    if (!_diProductionRecipientsNonEmpty_(notificationRow, cfg)) return false;
+
+    var isBaseline = runRow.is_baseline === true ||
+      String(runRow.is_baseline).toUpperCase() === 'TRUE';
+    if (isBaseline && cfg.deploymentIntelligence.autoSendBaseline !== true) {
+      return false;
+    }
+
+    if (!options.intelligence_run_id) {
+      var expected = _resolveExpectedIntelligenceRun_(cfg, options);
+      if (!expected || String(expected.intelligence_run_id) !==
+          String(runRow.intelligence_run_id)) {
+        return false;
+      }
+    }
+
+    var tz = Session.getScriptTimeZone();
+    var now = _dispatchNow_(options);
+    if (!_isDiWeeklySendDay_(notificationRow, tz, now)) return false;
+    if (!_isDiNotBeforeHourMet_(cfg, tz, now)) return false;
+    return true;
+  }
+
+  /**
+   * Hourly scheduled notification dispatcher (one lock per invocation).
+   *
+   * @param {AppConfig} appConfig
+   * @param {Object=} options { store, now }
+   * @return {Object}
+   */
+  function runScheduledNotificationDispatch(appConfig, options) {
+    options = options || {};
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    Logger.log('CoreNotify.runScheduledNotificationDispatch: start appId=' + cfg.appId);
+    var lock = LockService.getDocumentLock();
+    if (!lock.tryLock(30000)) {
+      Logger.log('CoreNotify.runScheduledNotificationDispatch: lock timeout');
+      return { ok: false, reason: 'lock_timeout' };
+    }
+    try {
+      if (!cfg.notify.enabled) {
+        return { ok: true, skipped: true, reason: 'notify_master_disabled' };
+      }
+      var validation = validateNotificationConfig(cfg);
+      var enabledRows = validation.valid.filter(function (row) {
+        return _isEnabled_(row.enabled);
+      });
+      var dispatchResults = [];
+      enabledRows.forEach(function (row) {
+        var type = String(row.type || '').trim();
+        if (type === 'deployment_intelligence') {
+          var di = processDeploymentIntelligenceEmailQueue(cfg, {
+            productionSend: true,
+            notificationRow: row,
+            store: options.store,
+            now: options.now
+          });
+          dispatchResults.push({
+            type: type,
+            notificationKey: row.notificationKey,
+            sentCount: di.sentCount,
+            results: di.results
+          });
+        }
+      });
+      return { ok: true, results: dispatchResults };
+    } finally {
+      lock.releaseLock();
+    }
+  }
 
   /**
    * Weekly Deployment Intelligence email is eligible when intelligence is READY (even quiet weeks).
@@ -2196,27 +2408,45 @@ var CoreNotify = (function () {
       return { sentCount: 0, results: results };
     }
 
-    var rows = CoreDeploymentSignalPersistence._readIntelligenceRows_(
-      cfg, options.store);
     var appId = String(cfg.appId || '').trim();
     var targetId = String(options.intelligence_run_id || '').trim();
+    if (options.productionSend && !options.explicitTestSend && !targetId) {
+      var expectedRow = _resolveExpectedIntelligenceRun_(cfg, options);
+      if (!expectedRow) {
+        results.push({ skipped: true, reason: 'expected_artifact_missing' });
+        return { sentCount: 0, results: results };
+      }
+      targetId = String(expectedRow.intelligence_run_id || '').trim();
+    }
+
+    var notificationRow = options.notificationRow || null;
+    if (options.productionSend && !options.explicitTestSend && !notificationRow) {
+      var configRows = readNotificationConfig_(cfg);
+      var notifyKey = (cfg.deploymentIntelligence &&
+          cfg.deploymentIntelligence.emailNotificationKey) ||
+        DEPLOYMENT_INTELLIGENCE_NOTIFICATION_KEY;
+      for (var ni = 0; ni < configRows.length; ni++) {
+        if (String(configRows[ni].notificationKey || '').trim() === notifyKey) {
+          notificationRow = configRows[ni];
+          break;
+        }
+      }
+    }
+
+    var rows = CoreDeploymentSignalPersistence._readIntelligenceRows_(
+      cfg, options.store);
     rows.forEach(function (row) {
       if (String(row.app_id || '').trim() !== appId) return;
       if (targetId && String(row.intelligence_run_id || '').trim() !== targetId) return;
       if (String(row.intelligence_status) !== CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY) {
         return;
       }
-      if (String(row.email_status) === CoreDeploymentSignalStore.EMAIL_STATUS_SENT) return;
-      if (String(row.email_status) === CoreDeploymentSignalStore.EMAIL_STATUS_NOT_REQUIRED) return;
-
-      var isBaseline = row.is_baseline === true ||
-        String(row.is_baseline).toUpperCase() === 'TRUE';
-      if (isBaseline && !options.explicitTestSend &&
-          cfg.deploymentIntelligence.autoSendBaseline !== true) {
+      if (!options.explicitTestSend &&
+          !_deploymentIntelligenceAutoSendEligible_(cfg, row, notificationRow, options)) {
         results.push({
           intelligence_run_id: row.intelligence_run_id,
           skipped: true,
-          reason: 'baseline_auto_send_disabled'
+          reason: 'production_send_not_eligible'
         });
         return;
       }
@@ -2230,7 +2460,7 @@ var CoreNotify = (function () {
         testMode: !!options.explicitTestSend,
         explicitTestSend: !!options.explicitTestSend,
         productionSend: !!options.productionSend && !options.explicitTestSend,
-        notificationRow: options.notificationRow || null
+        notificationRow: notificationRow
       };
       var outcome = sendDeploymentIntelligenceEmail(cfg, artifact, sendOpts);
       results.push({
@@ -2245,7 +2475,18 @@ var CoreNotify = (function () {
           cfg, row.intelligence_run_id, {
             email_status: CoreDeploymentSignalStore.EMAIL_STATUS_SENT,
             email_sent_at: sentAt,
-            updated_at: sentAt
+            updated_at: sentAt,
+            email_last_error: ''
+          }, options.store);
+      } else if (options.productionSend && !options.explicitTestSend &&
+          outcome.email_status === CoreDeploymentSignalStore.EMAIL_STATUS_FAILED) {
+        var attempts = (parseInt(row.email_attempt_count, 10) || 0) + 1;
+        CoreDeploymentSignalPersistence.updateIntelligenceRunRow(
+          cfg, row.intelligence_run_id, {
+            email_status: CoreDeploymentSignalStore.EMAIL_STATUS_FAILED,
+            email_last_error: _sanitizeDiEmailError_(outcome.error),
+            email_attempt_count: attempts,
+            updated_at: new Date().toISOString()
           }, options.store);
       }
     });
@@ -2339,7 +2580,8 @@ var CoreNotify = (function () {
       sent: sentOk,
       email_status: sentOk ? CoreDeploymentSignalStore.EMAIL_STATUS_SENT :
         CoreDeploymentSignalStore.EMAIL_STATUS_FAILED,
-      html: html
+      html: html,
+      error: sentOk ? '' : 'gmail_send_failed'
     };
   }
 
@@ -2386,6 +2628,9 @@ var CoreNotify = (function () {
     buildDeploymentIntelligenceEmailHtml: buildDeploymentIntelligenceEmailHtml,
     sendDeploymentIntelligenceEmail: sendDeploymentIntelligenceEmail,
     processDeploymentIntelligenceEmailQueue: processDeploymentIntelligenceEmailQueue,
+    runScheduledNotificationDispatch: runScheduledNotificationDispatch,
+    DEPLOYMENT_INTELLIGENCE_EMAIL_MAX_ATTEMPTS:
+      DEPLOYMENT_INTELLIGENCE_EMAIL_MAX_ATTEMPTS_,
     applyDeploymentSignalPostCompleteHandoff: applyDeploymentSignalPostCompleteHandoff,
     _resolveRecipients_:           _resolveRecipients_,
     _renderTemplate_:              _renderTemplate_,

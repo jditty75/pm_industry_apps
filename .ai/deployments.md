@@ -2,6 +2,18 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-07 — SLG_DM — deploy (Signals UI client binding)
+
+- Authorization: user (Deployment Signals UI client data-binding regression, 2026-10-07)
+- Git source: `97348a6` (CoreLib client binding) / SLG pin to CoreLib **158**
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: **201**
+- Live GAS version: _(post-deploy capture)_
+- CoreLib: **158** (`Signals UI client landing normalization`, git 97348a6)
+- Description: fix(signals): bind Deployment Signals UI to server landing payload
+- Verification: DepMngr **184/184** local tests; SLG preview structural PASS; production browser smoke pending Jeff
+- Result: _(pending deploy completion)_
+
 ### 2026-10-07 — SLG_DM — deploy
 
 - Authorization: user (Deployment Signals UI worklist regression pass, 2026-10-07)

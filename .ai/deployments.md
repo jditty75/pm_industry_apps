@@ -2,6 +2,18 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-07 — SLG_DM — deploy
+
+- Authorization: user (Deployment Signals UI worklist regression pass, 2026-10-07)
+- Git source: `86e0536` (SLG pin) / `e8f5024` (CoreLib fix)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: **200**
+- Live GAS version: **201**
+- CoreLib: **157** (`Signals UI scope matching`, git e8f5024)
+- Description: fix(signals): restore UI worklist via canonical deployment scope matching
+- Verification: DepMngr **179/179** local tests; production browser smoke not run (Execution API unavailable)
+- Result: success
+
 ### 2026-10-05 — CSAT Responses SLG storage canary — **VERIFIED (editor runtime)**
 
 - Authorization: prior SLG first-write authorization (2026-10-05)

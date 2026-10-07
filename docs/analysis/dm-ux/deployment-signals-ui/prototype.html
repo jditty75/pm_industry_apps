@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Deployment Signals — UX prototype (sanitized)</title>
+  <style>
+    :root {
+      --color-primary: #0F4C81;
+      --color-text: #1a1a1a;
+      --color-text-muted: #5f6368;
+      --color-border: #e0e0e0;
+      --color-surface: #fff;
+      --color-surface-alt: #f8fafc;
+      --radius-md: 6px;
+      --radius-pill: 999px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-5: 20px;
+    }
+    body { font-family: "Segoe UI", system-ui, sans-serif; margin: 0; background: #eef2f6; color: var(--color-text); }
+    .proto-banner { background: #1e293b; color: #fbbf24; font-size: 12px; padding: 6px 12px; text-align: center; }
+    .shell { max-width: 1360px; margin: 0 auto; padding: 16px 20px 40px; }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--color-border); margin-bottom: 12px; }
+    .tab { padding: 8px 14px; border: none; background: transparent; cursor: default; font-size: 13px; color: var(--color-text-muted); }
+    .tab.active { color: var(--color-primary); border-bottom: 2px solid var(--color-primary); font-weight: 600; }
+    /* reuse production sig-* rules (subset) */
+    .sig-header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-3); }
+    .sig-title { font-size: 1.25rem; margin: 0 0 4px; }
+    .sig-freshness { font-size: 12px; color: var(--color-text-muted); }
+    .sig-change-strip { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+    .sig-change-chip { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--color-border); background: var(--color-surface-alt); color: var(--color-text-muted); }
+    .sig-change-chip strong { color: var(--color-text); margin-right: 4px; }
+    .sig-change-chip--new { border-color: #c62828; color: #8b1a1a; background: #fff5f5; }
+    .sig-change-chip--escalated { border-color: #e65100; color: #bf360c; background: #fff8f0; }
+    .sig-change-chip--improving { border-color: #2e7d32; color: #1b5e20; background: #f1f8f4; }
+    .sig-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); align-items: center; }
+    .sig-filter-chip { font-size: 11px; padding: 4px 10px; border-radius: var(--radius-pill); border: 1px solid var(--color-border); background: var(--color-surface); }
+    .sig-filter-chip.active { border-color: var(--color-primary); background: #e8eff6; color: #0a3359; font-weight: 600; }
+    .sig-search-input { font-size: 12px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+    .sig-list { display: flex; flex-direction: column; gap: 6px; }
+    .sig-item { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+    .sig-item-summary { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: var(--space-2); padding: 8px 12px; width: 100%; text-align: left; border: none; background: transparent; cursor: pointer; font: inherit; }
+    .sig-line-1 { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--color-text-muted); margin-bottom: 4px; }
+    .sig-line-2 { font-size: 13px; line-height: 1.35; }
+    .sig-lifecycle { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: var(--radius-pill); border: 1px solid var(--color-border); }
+    .sig-lifecycle--NEW, .sig-lifecycle--ESCALATED { border-color: #c62828; color: #8b1a1a; }
+    .sig-lifecycle--DE_ESCALATED { border-color: #2e7d32; color: #1b5e20; }
+    .sig-attention { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 1px 6px; border-radius: var(--radius-pill); }
+    .sig-attention--HIGH { background: #ffebee; color: #b71c1c; }
+    .sig-attention--WATCH { background: #fff8e1; color: #e65100; }
+    .sig-attention--INFORMATIONAL { background: var(--color-surface-alt); color: var(--color-text-muted); }
+    .sig-attention--POSITIVE { background: #e8f5e9; color: #2e7d32; }
+    .sig-type { font-size: 11px; }
+    .sig-dep-link { font-weight: 600; color: var(--color-primary); }
+    .sig-detail { border-top: 1px solid var(--color-border); padding: 10px 12px; background: var(--color-surface-alt); font-size: 13px; }
+    .sig-prose-eyebrow { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); margin-bottom: 4px; }
+    .sig-prose-eyebrow--ai { color: #5e35b1; }
+    .sig-quiet { padding: var(--space-5); text-align: center; border: 1px dashed var(--color-border); border-radius: 8px; background: var(--color-surface-alt); color: var(--color-text-muted); }
+    .sig-history-item { display: grid; grid-template-columns: 88px 1fr; gap: var(--space-2); padding: 6px 0; border-bottom: 1px solid var(--color-border); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="proto-banner">LOCAL UX PROTOTYPE — sanitized fixtures only · not production HTML</div>
+  <div class="shell" id="app"></div>
+  <script>
+    const ACCOUNTS = ['Example County','Sample Health System','Preview University','Demo Agency','Synthetic District'];
+    const TYPES = ['CUSTOMER_DEPENDENCY_RISK','COMPOUND','SCHEDULE','INTERVENTION','HEALTH'];
+    const LC = ['NEW','ESCALATED','CONTINUING','DE_ESCALATED'];
+    const ATT = ['HIGH','WATCH','INFORMATIONAL','POSITIVE'];
+
+    function labelType(t) {
+      return t.replace(/_/g,' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    }
+    function lcLabel(c) {
+      return {NEW:'New',ESCALATED:'Escalated',CONTINUING:'Continuing',DE_ESCALATED:'Improving'}[c] || c;
+    }
+    function buildSignal(i, overrides) {
+      const o = overrides || {};
+      const lc = o.lifecycle_state || LC[i % LC.length];
+      const att = o.attention || ATT[i % ATT.length];
+      const type = o.signal_type || TYPES[i % TYPES.length];
+      return Object.assign({
+        signal_id: 'SIG-P-' + String(i).padStart(3,'0'),
+        deployment_id: 'PREVIEW_DEP_' + String(i).padStart(4,'0'),
+        lifecycle_state: lc,
+        attention: att,
+        signal_type: type,
+        signal_type_label: labelType(type),
+        account_name: ACCOUNTS[i % ACCOUNTS.length],
+        deployment_name: 'Preview Deployment ' + (i + 1),
+        current_health: ['Green','Yellow','Red'][i % 3],
+        stage: ['On-Boarding','Test','Deploy'][i % 3],
+        takeaway: 'Sanitized leadership takeaway for preview row ' + (i + 1) + '.',
+        observation: 'Deterministic evidence summary (fixture).',
+        interpretation: 'AI strategic interpretation (fixture).',
+        why_it_matters: o.why_it_matters || 'Why it matters (fixture).',
+        leadership_question: 'Leadership question (fixture)?',
+        confidence_label: 'Medium',
+        evidence_limitations: o.evidence_limitations || '',
+        first_active_at: '2026-10-05',
+        last_updated_at: '2026-10-05',
+        signal_status: 'ACTIVE'
+      }, o);
+    }
+    const SCENARIOS = {
+      'portfolio-16': () => Array.from({length:16}, (_,i) => buildSignal(i)),
+      'new-escalated': () => [
+        buildSignal(0, {lifecycle_state:'NEW', attention:'HIGH'}),
+        buildSignal(1, {lifecycle_state:'ESCALATED', attention:'HIGH'}),
+        buildSignal(2, {lifecycle_state:'NEW', attention:'WATCH'})
+      ],
+      'continuing': () => Array.from({length:8}, (_,i) => buildSignal(i, {lifecycle_state:'CONTINUING', attention:'WATCH'})),
+      'improving': () => [
+        buildSignal(0, {lifecycle_state:'DE_ESCALATED', attention:'WATCH'}),
+        buildSignal(1, {lifecycle_state:'DE_ESCALATED', attention:'POSITIVE'})
+      ],
+      'evidence-limited': () => [buildSignal(0, {evidence_limitations:'Trajectory history incomplete for prior quarter (fixture).'})],
+      'quiet': () => [],
+      'expanded': () => [buildSignal(0, {lifecycle_state:'NEW', attention:'HIGH'})],
+      'history': () => [buildSignal(0)]
+    };
+    function scenario() {
+      const q = new URLSearchParams(location.search).get('scenario') || 'portfolio-16';
+      return SCENARIOS[q] ? q : 'portfolio-16';
+    }
+    function counts(signals) {
+      const c = {NEW:0,CONTINUING:0,ESCALATED:0,DE_ESCALATED:0};
+      signals.forEach(s => { if (c[s.lifecycle_state] !== undefined) c[s.lifecycle_state]++; });
+      return c;
+    }
+    function renderDetail(sig, showHistory) {
+      let h = '<div class="sig-prose-eyebrow">Observation (evidence)</div><p>'+sig.observation+'</p>';
+      h += '<div class="sig-prose-eyebrow sig-prose-eyebrow--ai">Strategic interpretation (AI)</div><p>'+sig.interpretation+'</p>';
+      if (sig.evidence_limitations) h += '<div class="sig-prose-eyebrow">Evidence limitations</div><p>'+sig.evidence_limitations+'</p>';
+      if (showHistory) {
+        h += '<div class="sig-prose-eyebrow">Signal history</div>';
+        ['2026-09-21 NEW','2026-09-28 CONTINUING','2026-10-05 ESCALATED'].forEach(row => {
+          const p = row.split(' ');
+          h += '<div class="sig-history-item"><div>'+p[0]+'<br><span class="sig-lifecycle">'+lcLabel(p[1])+'</span></div><div>Historical reasoning preserved at run (fixture).</div></div>';
+        });
+      }
+      return h;
+    }
+    function render() {
+      const sc = scenario();
+      const signals = SCENARIOS[sc]();
+      const c = counts(signals);
+      const expanded = sc === 'expanded' || sc === 'history' || sc === 'evidence-limited';
+      const showHist = sc === 'history';
+      const root = document.getElementById('app');
+      let html = '<div class="tabs"><span class="tab">Deployments</span><span class="tab active">Signals</span><span class="tab">Go Lives</span></div>';
+      html += '<div class="sig-header-row"><div><h2 class="sig-title">Deployment Signals</h2>';
+      html += '<div class="sig-freshness">As of Oct 5, 2026 · '+signals.length+' active Signals · scenario: '+sc+'</div></div></div>';
+      html += '<div class="sig-change-strip">';
+      html += '<span class="sig-change-chip sig-change-chip--new"><strong>'+c.NEW+'</strong>New</span>';
+      html += '<span class="sig-change-chip sig-change-chip--escalated"><strong>'+c.ESCALATED+'</strong>Escalated</span>';
+      html += '<span class="sig-change-chip"><strong>'+c.CONTINUING+'</strong>Continuing</span>';
+      html += '<span class="sig-change-chip sig-change-chip--improving"><strong>'+c.DE_ESCALATED+'</strong>Improving</span></div>';
+      html += '<div class="sig-toolbar"><span class="sig-filter-chip active">All lifecycle</span><span class="sig-filter-chip">High attention</span></div>';
+      if (!signals.length) {
+        html += '<div class="sig-quiet"><h3>No active deployment Signals</h3><p>No current portfolio conditions meet the leadership Signal threshold as of the latest completed analysis.</p></div>';
+      } else {
+        html += '<div class="sig-list">';
+        signals.forEach((sig, idx) => {
+          const open = expanded && idx === 0;
+          html += '<article class="sig-item"><button type="button" class="sig-item-summary"><div><div class="sig-line-1">';
+          html += '<span class="sig-lifecycle sig-lifecycle--'+sig.lifecycle_state+'">'+lcLabel(sig.lifecycle_state)+'</span>';
+          html += '<span class="sig-dep-link">'+sig.account_name+'</span>';
+          html += '<span class="sig-attention sig-attention--'+sig.attention+'">'+sig.attention+'</span>';
+          html += '<span class="sig-type">'+sig.signal_type_label+'</span>';
+          html += '<span class="sig-type">'+sig.current_health+' · '+sig.stage+'</span></div>';
+          html += '<div class="sig-line-2">'+sig.takeaway+'</div></div><span style="font-size:11px;color:#0F4C81">Details</span></button>';
+          if (open) html += '<div class="sig-detail">'+renderDetail(sig, showHist)+'</div>';
+          html += '</article>';
+        });
+        html += '</div>';
+      }
+      root.innerHTML = html;
+    }
+    render();
+  </script>
+</body>
+</html>

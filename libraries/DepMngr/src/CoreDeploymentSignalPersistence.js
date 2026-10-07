@@ -201,6 +201,123 @@ var CoreDeploymentSignalPersistence = {
   },
 
   /**
+   * Deployment Signals landing payload for SLG UI (active intelligence; COMPLETE runs only).
+   *
+   * @param {AppConfig} appConfig
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {Object=} options { store, includeResolved }
+   * @return {Object}
+   */
+  getDeploymentSignalsLandingForUI: function (appConfig, viewModeOpts, productOpts, options) {
+    options = options || {};
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    if (!CoreConfig.isDeploymentSignalsUiEnabled(cfg)) {
+      return { ok: true, enabled: false, status: 'disabled' };
+    }
+    var depIndex = CoreDeploymentSignalPersistence._buildDeploymentIndexForUi_(
+      cfg, viewModeOpts, productOpts);
+    var scopeIds = depIndex.scopeIds;
+
+    var signals = CoreDeploymentSignalPersistence.getCurrentSlgDeploymentSignals(cfg, {
+      store: options.store,
+      activeOnly: true
+    });
+    if (scopeIds) {
+      signals = signals.filter(function (s) {
+        return !!scopeIds[String(s.deployment_id || '').trim()];
+      });
+    }
+
+    if (options.includeResolved) {
+      var resolved = CoreDeploymentSignalPersistence._readRecentResolvedForUi_(
+        cfg, options.store, 40);
+      if (scopeIds) {
+        resolved = resolved.filter(function (s) {
+          return !!scopeIds[String(s.deployment_id || '').trim()];
+        });
+      }
+      var seen = {};
+      signals.forEach(function (s) { seen[String(s.signal_id)] = true; });
+      resolved.forEach(function (s) {
+        if (!seen[s.signal_id]) signals.push(s);
+      });
+    }
+
+    signals = signals.map(function (row) {
+      return CoreDeploymentSignalPersistence._enrichSignalRowForUi_(row, depIndex.byId);
+    });
+    signals = CoreDeploymentSignalNormalize.sortSignalsForLanding(signals);
+
+    var latestRun = CoreDeploymentSignalPersistence.getLatestApprovedSlgSignalRun(
+      cfg, options);
+    var lifecycleSummary = CoreDeploymentSignalPersistence._lifecycleSummaryFromSignals_(signals);
+    if (latestRun) {
+      lifecycleSummary.fromLatestRun = {
+        new: parseInt(latestRun.lifecycle_new_count, 10) || 0,
+        continuing: parseInt(latestRun.lifecycle_continuing_count, 10) || 0,
+        escalated: parseInt(latestRun.lifecycle_escalated_count, 10) || 0,
+        deEscalated: parseInt(latestRun.lifecycle_de_escalated_count, 10) || 0,
+        resolved: parseInt(latestRun.lifecycle_resolved_count, 10) || 0
+      };
+    }
+
+    return {
+      ok: true,
+      enabled: true,
+      status: signals.length ? 'ready' : 'quiet',
+      signals: signals,
+      activeCount: signals.filter(function (s) {
+        return String(s.signal_status) === CoreDeploymentSignalStore.SIGNAL_STATUS_ACTIVE;
+      }).length,
+      lifecycleSummary: lifecycleSummary,
+      latestRun: latestRun ? CoreDeploymentSignalPersistence._publicRunMeta_(latestRun) : null,
+      evidenceFreshness: CoreDeploymentSignalPersistence._signalEvidenceFreshness_(cfg)
+    };
+  },
+
+  /**
+   * Bounded deployment Signal history for UI timeline (on demand).
+   *
+   * @param {AppConfig} appConfig
+   * @param {string} deploymentId
+   * @param {Object=} options { store, signalId, limit }
+   * @return {Object}
+   */
+  getDeploymentSignalHistoryForUI: function (appConfig, deploymentId, options) {
+    options = options || {};
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    if (!CoreConfig.isDeploymentSignalsUiEnabled(cfg)) {
+      return { ok: true, enabled: false, events: [] };
+    }
+    var depId = String(deploymentId || '').trim();
+    if (!depId) {
+      return { ok: false, enabled: true, error: 'deployment_id required', events: [] };
+    }
+    var limit = options.limit != null ? options.limit : 80;
+    var rows = CoreDeploymentSignalPersistence.getSlgDeploymentSignalHistory(cfg, {
+      store: options.store,
+      deploymentId: depId,
+      limit: limit
+    });
+    var signalFilter = String(options.signalId || '').trim();
+    if (signalFilter) {
+      rows = rows.filter(function (r) {
+        return String(r.signal_id) === signalFilter;
+      });
+    }
+    rows.sort(function (a, b) {
+      var ta = String(a.history_event_at || a.persisted_at || a.signal_as_of || '');
+      var tb = String(b.history_event_at || b.persisted_at || b.signal_as_of || '');
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
+    var events = rows.map(function (row) {
+      return CoreDeploymentSignalPersistence._enrichHistoryEventForUi_(row);
+    });
+    return { ok: true, enabled: true, deploymentId: depId, events: events };
+  },
+
+  /**
    * @param {Object} runRow
    * @param {Array<Object>} signalRows
    * @param {Object} validIds map deploymentId -> true
@@ -878,6 +995,147 @@ var CoreDeploymentSignalPersistence = {
       error_message: p.error_message,
       email_status: 'PENDING'
     };
+  },
+
+  /** @private */
+  _publicRunMeta_: function (runRow) {
+    runRow = runRow || {};
+    return {
+      signal_run_id: runRow.signal_run_id,
+      signal_as_of: runRow.signal_as_of,
+      persisted_at: runRow.persisted_at,
+      received_at: runRow.received_at,
+      run_status: runRow.run_status,
+      deployments_evaluated: runRow.deployments_evaluated,
+      signals_persisted: runRow.signals_persisted
+    };
+  },
+
+  /** @private */
+  _enrichSignalRowForUi_: function (row, depById) {
+    row = row || {};
+    var dep = depById[String(row.deployment_id || '').trim()] || {};
+    var conf = CoreDeploymentSignalNormalize.formatConfidenceForUi(
+      row.confidence, row.confidence);
+    return Object.assign({}, row, {
+      deployment_name: dep.deploymentName || dep.deployment_name || '',
+      account_name: dep.accountName || dep.account_name || '',
+      signal_type_label: CoreDeploymentSignalNormalize.formatSignalTypeLabel(row.signal_type),
+      confidence_tier: conf.tier,
+      confidence_label: conf.label,
+      confidence_detail: conf.detail,
+      takeaway: String(row.why_it_matters || row.interpretation || '').trim()
+    });
+  },
+
+  /** @private */
+  _enrichHistoryEventForUi_: function (row) {
+    row = row || {};
+    var conf = CoreDeploymentSignalNormalize.formatConfidenceForUi(
+      row.confidence, row.confidence);
+    return {
+      signal_id: row.signal_id,
+      signal_run_id: row.signal_run_id,
+      signal_as_of: row.signal_as_of,
+      lifecycle_state: row.lifecycle_state,
+      attention: row.attention,
+      signal_type: row.signal_type,
+      signal_type_label: CoreDeploymentSignalNormalize.formatSignalTypeLabel(row.signal_type),
+      observation: row.observation,
+      interpretation: row.interpretation,
+      why_it_matters: row.why_it_matters,
+      leadership_question: row.leadership_question,
+      confidence_label: conf.label,
+      confidence_detail: conf.detail,
+      evidence_limitations: row.evidence_limitations,
+      history_event_at: row.history_event_at,
+      history_event_type: row.history_event_type
+    };
+  },
+
+  /** @private */
+  _lifecycleSummaryFromSignals_: function (signals) {
+    var counts = { NEW: 0, CONTINUING: 0, ESCALATED: 0, DE_ESCALATED: 0, RESOLVED: 0 };
+    (signals || []).forEach(function (s) {
+      var lc = String(s.lifecycle_state || '').trim();
+      if (counts[lc] !== undefined) counts[lc]++;
+    });
+    return { counts: counts };
+  },
+
+  /** @private */
+  _buildDeploymentIndexForUi_: function (cfg, viewModeOpts, productOpts) {
+    var byId = {};
+    var scopeIds = null;
+    try {
+      if (typeof CoreData !== 'undefined' &&
+          typeof CoreData.getAllDeploymentsForUI === 'function') {
+        var payload = CoreData.getAllDeploymentsForUI(
+          cfg, viewModeOpts || {}, productOpts || {});
+        var rows = payload && payload.rows ? payload.rows : payload;
+        if (Array.isArray(rows)) {
+          scopeIds = {};
+          rows.forEach(function (r) {
+            var id = String(r.deploymentId || r.deployment_id || '').trim();
+            if (!id) return;
+            scopeIds[id] = true;
+            byId[id] = r;
+          });
+        }
+      }
+    } catch (err) {
+      Logger.log('CoreDeploymentSignalPersistence._buildDeploymentIndexForUi_: ' + err);
+    }
+    return { byId: byId, scopeIds: scopeIds };
+  },
+
+  /** @private */
+  _readRecentResolvedForUi_: function (cfg, store, limit) {
+    limit = limit || 30;
+    var rows = CoreDeploymentSignalPersistence._readHistoryRows_(cfg, store);
+    var out = [];
+    var seen = {};
+    for (var i = rows.length - 1; i >= 0 && out.length < limit; i--) {
+      var row = rows[i];
+      if (String(row.lifecycle_state) !== CoreDeploymentSignalLifecycle.LIFECYCLE_RESOLVED) {
+        continue;
+      }
+      var sid = String(row.signal_id || '').trim();
+      if (!sid || seen[sid]) continue;
+      seen[sid] = true;
+      out.push(Object.assign({}, row, {
+        signal_status: CoreDeploymentSignalStore.SIGNAL_STATUS_RESOLVED
+      }));
+    }
+    return out;
+  },
+
+  /** @private */
+  _signalEvidenceFreshness_: function (cfg) {
+    var sig = cfg.deploymentSignal || {};
+    var sheets = sig.signalEvidenceSourceSheets || [];
+    if (!sheets.length) return null;
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (!ss || !CoreFreshnessMonitor ||
+          typeof CoreFreshnessMonitor.getLatestSuccessRefreshBySheet !== 'function') {
+        return null;
+      }
+      var bundle = CoreFreshnessMonitor.getLatestSuccessRefreshBySheet(ss, {
+        requiredSheets: sheets
+      });
+      var bySheet = bundle.latestSuccessBySheet || {};
+      var oldestIso = null;
+      sheets.forEach(function (sheetName) {
+        var entry = bySheet[sheetName];
+        if (!entry || !entry.refreshIso) return;
+        if (!oldestIso || entry.refreshIso < oldestIso) oldestIso = entry.refreshIso;
+      });
+      return oldestIso ? { oldestSourceRefreshAt: oldestIso } : null;
+    } catch (err) {
+      Logger.log('CoreDeploymentSignalPersistence._signalEvidenceFreshness_: ' + err);
+      return null;
+    }
   },
 
   /** @private */

@@ -1355,6 +1355,21 @@ var CoreConfig = (function () {
   }
 
   /**
+   * True when Deployment Signals intelligence UI should render (SLG persistence + tab gate).
+   *
+   * @param {AppConfig} appConfig
+   * @return {boolean}
+   */
+  function isDeploymentSignalsUiEnabled(appConfig) {
+    var cfg = withDefaults(appConfig || {});
+    if (cfg.appId !== 'SLG') return false;
+    var sig = cfg.deploymentSignal || {};
+    if (sig.enabled !== true || sig.persistenceEnabled !== true) return false;
+    var tab = (cfg.ui && cfg.ui.signalsTab) || {};
+    return tab.enabled !== false;
+  }
+
+  /**
    * True when the app uses ProductMode union (EVI, AI, and future ProductMode apps).
    *
    * @param {AppConfig} appConfig
@@ -1587,6 +1602,7 @@ var CoreConfig = (function () {
     isExecutiveWatchEnabled: isExecutiveWatchEnabled,
     isNotableEnabled: isNotableEnabled,
     isEscalationsEnabled: isEscalationsEnabled,
+    isDeploymentSignalsUiEnabled: isDeploymentSignalsUiEnabled,
     isProductModeApp: isProductModeApp,
     getPortfolioGroupingField: getPortfolioGroupingField,
     getPortfolioGroupingLabel: getPortfolioGroupingLabel,

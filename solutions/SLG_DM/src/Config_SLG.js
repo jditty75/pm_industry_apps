@@ -206,6 +206,12 @@ var APP_CONFIG = {
     // Phase 2 canonical tab structure. Note: 'upcoming' tab removed (merged
     // into 'golives'); 'overrides' tab added at end.
     // MGM/PGL tab added (feature/mgm-pgl).
+    signalsTab: {
+      enabled: true,
+      label: 'Signals',
+      insertAfter: 'deployments'
+    },
+
     tabs: [
       { id: 'deployments', label: 'Deployments' },
       { id: 'golives',     label: 'Go Lives' },

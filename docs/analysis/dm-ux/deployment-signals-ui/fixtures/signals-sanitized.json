@@ -1,0 +1,55 @@
+{
+  "latestRun": {
+    "signal_run_id": "SLG-2026-10-05",
+    "signal_as_of": "2026-10-05",
+    "run_status": "COMPLETE"
+  },
+  "signals": [
+    {
+      "signal_id": "SIG-001",
+      "deployment_id": "PREVIEW_DEP_0001",
+      "lifecycle_state": "NEW",
+      "attention": "HIGH",
+      "signal_type": "CUSTOMER_DEPENDENCY_RISK",
+      "signal_type_label": "Customer Dependency Risk",
+      "account_name": "Example County",
+      "deployment_name": "Core Financials Phase 1",
+      "current_health": "Yellow",
+      "stage": "Test",
+      "takeaway": "Customer test participation is lagging schedule-critical milestones.",
+      "observation": "MTP slipped 14 days; customer UAT window has not been confirmed.",
+      "interpretation": "Dependency risk is compounding delivery confidence for the next gate.",
+      "why_it_matters": "Leadership should understand whether the customer can absorb the revised timeline.",
+      "leadership_question": "What executive alignment is needed to secure customer test capacity?",
+      "confidence_label": "Medium",
+      "confidence_detail": "Medium — schedule evidence is current; customer commitment is inferred.",
+      "evidence_limitations": "Customer confirmation not in SFDC.",
+      "first_active_at": "2026-10-05",
+      "last_updated_at": "2026-10-05",
+      "signal_status": "ACTIVE"
+    },
+    {
+      "signal_id": "SIG-002",
+      "deployment_id": "PREVIEW_DEP_0002",
+      "lifecycle_state": "ESCALATED",
+      "attention": "HIGH",
+      "signal_type": "COMPOUND",
+      "signal_type_label": "Compound",
+      "account_name": "Sample Health System",
+      "deployment_name": "HCM & Payroll",
+      "current_health": "Red",
+      "stage": "Deploy",
+      "takeaway": "Multiple evidence streams align on elevated delivery risk.",
+      "observation": "Health is Red with repeated DHP actions and schedule movement.",
+      "interpretation": "Interventions may not be stabilizing trajectory.",
+      "why_it_matters": "Portfolio leadership needs a coherent read across health, schedule, and actions.",
+      "leadership_question": "Is the current intervention pattern sufficient for the next 30 days?",
+      "confidence_label": "High",
+      "confidence_detail": "",
+      "evidence_limitations": "",
+      "first_active_at": "2026-09-28",
+      "last_updated_at": "2026-10-05",
+      "signal_status": "ACTIVE"
+    }
+  ]
+}

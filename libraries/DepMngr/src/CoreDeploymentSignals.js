@@ -275,6 +275,99 @@ var CoreDeploymentSignalNormalize = {
       }
     });
     return fields;
+  },
+
+  /**
+   * Human-readable signal type label (display only; does not change persisted tokens).
+   *
+   * @param {string} token
+   * @return {string}
+   */
+  formatSignalTypeLabel: function (token) {
+    var raw = String(token || '').trim();
+    if (!raw) return '';
+    return raw
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .replace(/\b\w/g, function (ch) { return ch.toUpperCase(); });
+  },
+
+  /**
+   * UI-safe confidence presentation (canonical tier + optional rich wording).
+   *
+   * @param {string} confidence stored confidence
+   * @param {string=} confidenceRaw optional original prose
+   * @return {{ tier: string, label: string, detail: string }}
+   */
+  formatConfidenceForUi: function (confidence, confidenceRaw) {
+    var tier = String(confidence || '').trim().toUpperCase();
+    var detail = String(confidenceRaw || confidence || '').trim();
+    if (tier === 'HIGH' || tier === 'MEDIUM' || tier === 'LOW') {
+      return {
+        tier: tier,
+        label: tier.charAt(0) + tier.slice(1).toLowerCase(),
+        detail: detail && detail.toUpperCase() !== tier ? detail : ''
+      };
+    }
+    if (/^high\b/i.test(detail)) {
+      return { tier: 'HIGH', label: 'High', detail: detail };
+    }
+    if (/^medium\b/i.test(detail) || /^moderate\b/i.test(detail)) {
+      return { tier: 'MEDIUM', label: 'Medium', detail: detail };
+    }
+    if (/^low\b/i.test(detail)) {
+      return { tier: 'LOW', label: 'Low', detail: detail };
+    }
+    var cleaned = detail.replace(/[_]+/g, ' ').trim();
+    if (!cleaned) {
+      return { tier: '', label: '', detail: '' };
+    }
+    if (cleaned.length > 48) {
+      return { tier: 'CUSTOM', label: 'See detail', detail: cleaned };
+    }
+    return { tier: 'CUSTOM', label: cleaned, detail: cleaned };
+  },
+
+  /** @private */
+  _landingLifecycleRank_: function (lifecycle) {
+    var map = {
+      NEW: 0,
+      ESCALATED: 1,
+      CONTINUING: 2,
+      DE_ESCALATED: 3,
+      RESOLVED: 9
+    };
+    var key = String(lifecycle || '').trim();
+    return map[key] !== undefined ? map[key] : 5;
+  },
+
+  /** @private */
+  _landingAttentionRank_: function (attention) {
+    var map = { HIGH: 0, WATCH: 1, INFORMATIONAL: 2, POSITIVE: 3 };
+    var key = String(attention || '').trim();
+    return map[key] !== undefined ? map[key] : 4;
+  },
+
+  /**
+   * Deterministic sort for leadership worklist (mutates copy).
+   *
+   * @param {Array<Object>} signals
+   * @return {Array<Object>}
+   */
+  sortSignalsForLanding: function (signals) {
+    var list = (signals || []).slice();
+    list.sort(function (a, b) {
+      var lc = CoreDeploymentSignalNormalize._landingLifecycleRank_(a.lifecycle_state) -
+        CoreDeploymentSignalNormalize._landingLifecycleRank_(b.lifecycle_state);
+      if (lc !== 0) return lc;
+      var att = CoreDeploymentSignalNormalize._landingAttentionRank_(a.attention) -
+        CoreDeploymentSignalNormalize._landingAttentionRank_(b.attention);
+      if (att !== 0) return att;
+      var an = String(a.account_name || a.deployment_name || a.deployment_id || '');
+      var bn = String(b.account_name || b.deployment_name || b.deployment_id || '');
+      return an.localeCompare(bn);
+    });
+    return list;
   }
 };
 

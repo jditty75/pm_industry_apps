@@ -608,6 +608,47 @@ function _warmCaches() {
 // N4 — DATA FRESHNESS MONITORING
 // ============================================================================
 
+// ============================================================================
+// DEPLOYMENT SIGNALS — intelligence landing (SLG only)
+// ============================================================================
+
+/**
+ * Deployment Signals landing payload (active intelligence; COMPLETE runs only).
+ *
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @param {Object=} options { includeResolved: boolean }
+ * @return {Object}
+ */
+function getDeploymentSignalsLandingForUI(viewModeOpts, productOpts, options) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  try {
+    return CoreLib.CoreDeploymentSignalPersistence.getDeploymentSignalsLandingForUI(
+      cfg, viewModeOpts || {}, productOpts || {}, options || {});
+  } catch (err) {
+    Logger.log('getDeploymentSignalsLandingForUI: ' + err);
+    return { ok: false, enabled: true, error: String(err) };
+  }
+}
+
+/**
+ * Bounded deployment Signal history timeline (on demand).
+ *
+ * @param {string} deploymentId
+ * @param {Object=} options { signalId, limit }
+ * @return {Object}
+ */
+function getDeploymentSignalHistoryForUI(deploymentId, options) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  try {
+    return CoreLib.CoreDeploymentSignalPersistence.getDeploymentSignalHistoryForUI(
+      cfg, deploymentId, options || {});
+  } catch (err) {
+    Logger.log('getDeploymentSignalHistoryForUI: ' + err);
+    return { ok: false, enabled: true, error: String(err) };
+  }
+}
+
 /**
  * Returns data-freshness signal for the header badge (L1).
  * @return {Object}

@@ -153,6 +153,30 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
     }
   }
 
+  // Deployment Signals intelligence (SLG persistence + ui.signalsTab gate).
+  if (CoreConfig.isDeploymentSignalsUiEnabled(cfg)) {
+    var sigTabCfg = (cfg.ui && cfg.ui.signalsTab) || {};
+    var sigTabDef = {
+      id:    'signals',
+      label: sigTabCfg.label || 'Signals'
+    };
+    var sigInsertAfterId = sigTabCfg.insertAfter || 'deployments';
+    var sigInsertIdx = -1;
+    for (var si2 = 0; si2 < filteredUi.tabs.length; si2++) {
+      if (filteredUi.tabs[si2].id === sigInsertAfterId) {
+        sigInsertIdx = si2;
+        break;
+      }
+    }
+    if (sigInsertIdx >= 0) {
+      filteredUi.tabs = filteredUi.tabs.slice(0, sigInsertIdx + 1)
+        .concat([sigTabDef])
+        .concat(filteredUi.tabs.slice(sigInsertIdx + 1));
+    } else {
+      filteredUi.tabs = filteredUi.tabs.concat([sigTabDef]);
+    }
+  }
+
   var parts = [];
 
   parts.push(_CoreUI_Markup_buildHeader_(filteredUi, access, cfg));
@@ -187,6 +211,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if (tabIds.indexOf('execsummary') !== -1 || tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportingTab_(filteredUi, cfg));
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi, cfg));
   if (tabIds.indexOf('escalations') !== -1) parts.push(_CoreUI_Markup_buildEscalationsTab_(cfg));
+  if (tabIds.indexOf('signals') !== -1) parts.push(_CoreUI_Markup_buildSignalsTab_(filteredUi));
   if (tabIds.indexOf('notable') !== -1) parts.push(_CoreUI_Markup_buildNotableTab_(filteredUi, cfg));
   if (tabIds.indexOf('overrides') !== -1) parts.push(_CoreUI_Markup_buildOverridesTab_(filteredUi));
   if (tabIds.indexOf('trends') !== -1 && ui.trendsTab && ui.trendsTab.enabled) parts.push(_CoreUI_Markup_buildTrendsTab_(filteredUi, cfg));
@@ -2362,6 +2387,43 @@ function _CoreUI_Markup_buildTrendsTabLegacy_(ui) {
  * @param {AppConfig} cfg
  * @return {string}
  */
+/**
+ * Deployment Signals landing (SLG intelligence worklist).
+ *
+ * @param {Object} ui filtered cfg.ui
+ * @return {string}
+ */
+function _CoreUI_Markup_buildSignalsTab_(ui) {
+  return [
+    '<div id="signals-tab" class="tab-content">',
+    '  <div class="sig-header-row">',
+    '    <div class="sig-header-text">',
+    '      <h2 class="sig-title">Deployment Signals</h2>',
+    '      <div id="sig-freshness" class="sig-freshness" aria-live="polite"></div>',
+    '    </div>',
+    '    <button type="button" id="sig-refresh-btn" class="btn btn-secondary btn-sm"',
+    '            onclick="loadSignalsTab(true)">Refresh</button>',
+    '  </div>',
+    '  <div id="sig-change-strip" class="sig-change-strip" aria-label="Lifecycle change summary"></div>',
+    '  <div class="sig-toolbar">',
+    '    <div id="sig-filter-chips" class="sig-filter-chips" role="group" aria-label="Signal filters"></div>',
+    '    <label class="sig-search-wrap">',
+    '      <span class="visually-hidden">Search signals</span>',
+    '      <input type="search" id="sig-search-input" class="sig-search-input"',
+    '             placeholder="Search deployment or signal type" autocomplete="off"',
+    '             oninput="onSignalsSearchInput_()">',
+    '    </label>',
+    '  </div>',
+    '  <div id="sig-loading" class="report-loading sig-loading hidden">',
+    '    <div class="spinner-large"></div>',
+    '    <p>Loading deployment Signals&hellip;</p>',
+    '  </div>',
+    '  <div id="sig-quiet" class="sig-quiet hidden" role="status"></div>',
+    '  <div id="sig-list" class="sig-list" role="list" aria-label="Active deployment Signals"></div>',
+    '</div>'
+  ].join('\n');
+}
+
 function _CoreUI_Markup_buildEscalationsTab_(cfg) {
   return [
     '<div id="escalations-tab" class="tab-content">',

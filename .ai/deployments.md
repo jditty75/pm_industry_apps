@@ -2,6 +2,18 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-07 — SLG_DM — deploy (Deployment Intelligence v1)
+
+- Authorization: user (DI v1 bounded implementation — Signals scope + scheduled notification engine, 2026-10-07)
+- Git source: `4d6bf0b`
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: **203**
+- Live GAS version: **204**
+- CoreLib: **159** (`DI v1: Signals unscoped RPC + scheduled notification dispatch`)
+- Description: feat(di-v1): unscoped Signals landing RPC; CoreNotify.runScheduledNotificationDispatch; SLG hourly dispatcher trigger installer
+- Verification: DepMngr **203/203** local tests; SLG preview structural PASS; GAS triggers not installed; no email/Slack sent
+- Result: success
+
 ### 2026-10-07 — SLG_DM — deploy (Signals UI client binding)
 
 - Authorization: user (Deployment Signals UI client data-binding regression, 2026-10-07)

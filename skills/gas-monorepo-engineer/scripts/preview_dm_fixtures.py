@@ -565,6 +565,19 @@ def build_dm_mock_script(app_id: str, scenario: str) -> str:
       if (sinceDays === 0) return log.slice(0, 500);
       return log;
     }},
+    getCsatTabDataForUI: function (_vm, _horizon, _prod) {{
+      var b = materializedBundle().bundle;
+      var p = b.vocTabPreview || {{}};
+      return Object.assign({{
+        success: true,
+        productName: 'VoC',
+        productSubtitle: 'Voice of the Customer',
+        lastUpdatedText: 'Preview harness — synthetic VoC data only'
+      }}, p);
+    }},
+    getDistributionLogDataForUI: function (_opts) {{
+      return materializedBundle().bundle.distributionLogPreview || {{ rows: [], total: 0 }};
+    }},
     updateDeploymentWithMetaAndOverride: function (_rowIndex, deploymentId, _meta, overrideData, notes) {{
       var mat = materializedBundle();
       var dep = findDeploymentInBundle(mat.bundle, deploymentId);

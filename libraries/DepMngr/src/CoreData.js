@@ -10417,71 +10417,30 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @private
    */
   function _buildGoLiveEvents_(deploymentRow, productRows, clusterDays) {
-    var events = [];
     var pr = productRows || [];
-
-    // ── MDS (target dates) ──────────────────────────────────────────────────
-    if (pr.length > 0) {
-      var targetMap = {}; // 'YYYY-MM-DD' -> { productArea: true }
-      for (var i = 0; i < pr.length; i++) {
-        var d = pr[i].targetGoLive || '';
-        if (!d) continue;
-        if (!targetMap[d]) targetMap[d] = {};
-        if (pr[i].productArea) targetMap[d][pr[i].productArea] = true;
-      }
-      var targetDates = Object.keys(targetMap);
-      for (var ti = 0; ti < targetDates.length; ti++) {
-        var T = targetDates[ti];
-        var products = Object.keys(targetMap[T]).sort();
-        var oneThird = _computeOneThird_(deploymentRow.deploymentStartDate, T);
-        if (oneThird) {
-          events.push({ kind: 'MDS', eventDate: T, oneThirdPoint: oneThird, products: products });
-        }
-      }
-    } else {
-      if (deploymentRow.deploymentStartDate && deploymentRow.mtpDate) {
-        var oneThird2 = _computeOneThird_(deploymentRow.deploymentStartDate, deploymentRow.mtpDate);
-        if (oneThird2) {
-          events.push({
-            kind: 'MDS',
-            eventDate: deploymentRow.mtpDate,
-            oneThirdPoint: oneThird2,
-            products: []
-          });
-        }
-      }
-    }
-
-    // ── PGL (actual dates; fall back to MTP) ────────────────────────────────
-    if (pr.length > 0) {
-      var actualMap = {}; // 'YYYY-MM-DD' -> { productArea: true }
-      for (var j = 0; j < pr.length; j++) {
-        var da = pr[j].actualGoLive || '';
-        if (!da) continue;
-        if (!actualMap[da]) actualMap[da] = {};
-        if (pr[j].productArea) actualMap[da][pr[j].productArea] = true;
-      }
-      var actualDates = Object.keys(actualMap);
-      if (actualDates.length > 0) {
-        for (var ai = 0; ai < actualDates.length; ai++) {
-          var A = actualDates[ai];
-          var aProducts = Object.keys(actualMap[A]).sort();
-          events.push({ kind: 'PGL', eventDate: A, oneThirdPoint: null, products: aProducts });
-        }
-      } else {
-        // No actuals — fall back to MTP
-        if (deploymentRow.mtpDate) {
-          events.push({ kind: 'PGL', eventDate: deploymentRow.mtpDate, oneThirdPoint: null, products: [] });
-        }
-      }
-    } else {
-      if (deploymentRow.mtpDate) {
-        events.push({ kind: 'PGL', eventDate: deploymentRow.mtpDate, oneThirdPoint: null, products: [] });
-      }
-    }
-
+    var exact = CoreCsatVoc.buildExactCohortEvents(deploymentRow, pr);
+    var events = exact.map(function (ev) {
+      var cohortKey = _toDateKey_(ev.cohortDate) || ev.cohortDate;
+      var oneThird = (ev.kind === 'MDS')
+        ? _computeOneThird_(deploymentRow.deploymentStartDate, cohortKey)
+        : null;
+      return {
+        kind: ev.kind,
+        eventDate: cohortKey,
+        oneThirdPoint: oneThird,
+        products: ev.products || [],
+        sourceEventDates: [cohortKey],
+        clusteredEventDates: [cohortKey],
+        clusteredFromMultipleEventDates: false
+      };
+    });
     events = _dedupeEvents_(events);
-    return _clusterMdsPglGoLiveEvents_(events, clusterDays, deploymentRow);
+    // Durable survey identity uses exact PF cohort dates — do not cluster for row emission.
+    if (clusterDays > 0) {
+      Logger.log('CoreData._buildGoLiveEvents_: goLiveEventClusterDays ignored for survey identity (' +
+        clusterDays + '); exact cohort dates preserved.');
+    }
+    return events;
   }
 
   /**
@@ -10511,6 +10470,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       function pushException_(missingType, hasProducts) {
         if (exceptionSeen[canonDep]) return;
         exceptionSeen[canonDep] = true;
+        var awareness = CoreCsatVoc.awarenessConditionsForLegacyException(missingType);
         exceptionRows.push({
           deploymentId:        canonDep || depId,
           accountName:         r.accountName,
@@ -10518,7 +10478,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           deploymentStartDate: depStart || null,
           missingType:         missingType,
           hasProducts:         hasProducts,
-          deliveryDirector:    r.damFullName || null
+          deliveryDirector:    r.damFullName || null,
+          awarenessConditions: awareness
         });
       }
 
@@ -10939,43 +10900,149 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @return {Array<Object>}
    * @private
    */
-  function _buildMdsPglSurveyRowsFromActive_(cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth, metaMap, ddMap) {
+  /**
+   * @param {Date} anchor
+   * @param {number} offsetMonths negative = past
+   * @param {string} tz
+   * @return {string} YYYY-MM
+   * @private
+   */
+  function _yearMonthWithOffset_(anchor, offsetMonths, tz) {
+    var d = new Date(anchor.getFullYear(), anchor.getMonth() + offsetMonths, 1);
+    return Utilities.formatDate(d, tz, 'yyyy-MM');
+  }
+
+  /**
+   * Month keys covering operational lookback + forward horizon.
+   * @param {AppConfig} cfg
+   * @param {number} horizonMonths
+   * @param {Date} now
+   * @param {string} tz
+   * @return {string[]}
+   * @private
+   */
+  function _buildMdsPglBatchMonthKeys_(cfg, horizonMonths, now, tz) {
+    var lookbackDays = CoreCsatVoc.getOperationalLookbackDays(cfg);
+    var pastMonths = Math.min(24, Math.ceil(lookbackDays / 28) + 1);
+    var keys = [];
+    var seen = {};
+    for (var back = pastMonths; back >= 0; back--) {
+      var ymPast = _yearMonthWithOffset_(now, -back, tz);
+      if (!seen[ymPast]) {
+        seen[ymPast] = true;
+        keys.push(ymPast);
+      }
+    }
+    for (var fwd = 1; fwd < horizonMonths; fwd++) {
+      var ymFwd = _yearMonthWithOffset_(now, fwd, tz);
+      if (!seen[ymFwd]) {
+        seen[ymFwd] = true;
+        keys.push(ymFwd);
+      }
+    }
+    return keys;
+  }
+
+  /**
+   * @param {string} ym
+   * @return {Object}
+   * @private
+   */
+  function _resolveSurveyScheduleMonth_(ym) {
+    return CoreSurveySchedule.resolve(ym);
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {Object} row partial survey row
+   * @param {Object} scheduleEntry
+   * @param {Object} cohortCounts
+   * @param {Object} vocEvidence
+   * @return {Object}
+   * @private
+   */
+  function _attachVocFieldsToMdsPglRow_(cfg, row, scheduleEntry, cohortCounts, vocEvidence) {
+    vocEvidence = vocEvidence || {};
+    var cohortKey = _toDateKey_(row.cohortDate || row.eventDate) || row.eventDate;
+    var surveyEventId = CoreCsatVoc.computeSurveyEventId(
+      row.deploymentId, row.surveyType, cohortKey, _sha256Hex_);
+    var multiCohort = (row.surveyType === 'MDS' && cohortCounts.mdsCohortCount > 1) ||
+      (row.surveyType === 'PGL' && cohortCounts.pglCohortCount > 1);
+    var awareness = CoreCsatVoc.buildAwarenessConditions({
+      missingDeploymentStart: row.surveyType === 'MDS' && !row.startDate,
+      multiCohort: multiCohort,
+      plannedMultiplePglTargets: cohortCounts.plannedPglTargetDateCount > 1,
+      batchPassedNoIssuance: vocEvidence.batchPassedNoIssuance,
+      inflightLinkAmbiguous: vocEvidence.inflightLinkAmbiguous,
+      missingPartner: !String(row.partner || '').trim()
+    });
+    var state = CoreCsatVoc.computeSurveyState(
+      row,
+      vocEvidence.todayKey || '',
+      scheduleEntry,
+      {
+        sent: !!vocEvidence.sent,
+        responded: !!vocEvidence.responded
+      }
+    );
+    return CoreCsatVoc.attachBatchVocFields(row, {
+      surveyEventId: surveyEventId,
+      cohortDate: cohortKey,
+      surveyTargetDate: row.surveyTargetDate || row.targetDate || '',
+      batchYearMonth: scheduleEntry ? scheduleEntry.yearMonth : '',
+      surveyOpen: scheduleEntry ? scheduleEntry.surveyOpen : '',
+      reminder1: scheduleEntry ? scheduleEntry.reminder1 : '',
+      reminder2: scheduleEntry ? scheduleEntry.reminder2 : '',
+      surveyClose: scheduleEntry ? scheduleEntry.surveyClose : '',
+      cohortCount: row.surveyType === 'MDS' ? cohortCounts.mdsCohortCount :
+        cohortCounts.pglCohortCount,
+      multiCohort: multiCohort,
+      surveyState: state,
+      awarenessConditions: awareness,
+      targetDate: row.surveyTargetDate || row.oneThirdPoint || row.eventDate
+    });
+  }
+
+  function _buildMdsPglSurveyRowsFromActive_(cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth, metaMap, ddMap, vocContext) {
     var clusterDays = CoreConfig.getMgmPglGoLiveEventClusterDays(cfg);
+    vocContext = vocContext || {};
+    var tz = Session.getScriptTimeZone();
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var firstYm = (scheduleByMonth && scheduleByMonth.length)
+      ? scheduleByMonth[0].yearMonth
+      : _yearMonthWithOffset_(now, 0, tz);
+
     var allRows = [];
     activeRows.forEach(function (r) {
       var canonDep = _canonicalId_(r.deploymentId);
       if (!canonDep) return;
       var prRows = productRowsByDep[canonDep] || [];
+      var cohortCounts = CoreCsatVoc.countDeploymentCohorts(prRows);
       var events = _buildGoLiveEvents_(r, prRows, clusterDays);
 
-      var mdsCount = 0;
-      var pglCount = 0;
-      for (var ei = 0; ei < events.length; ei++) {
-        if (events[ei].kind === 'MDS') mdsCount++;
-        else pglCount++;
-      }
-      var deploymentMultipleGoLives = (mdsCount > 1) || (pglCount > 1);
+      var deploymentMultipleGoLives = (cohortCounts.mdsCohortCount > 1) ||
+        (cohortCounts.pglCohortCount > 1);
 
       for (var evi = 0; evi < events.length; evi++) {
         var ev = events[evi];
-        var targetDate = (ev.kind === 'MDS') ? ev.oneThirdPoint : ev.eventDate;
-        if (!targetDate) continue;
+        var cohortKey = _toDateKey_(ev.eventDate) || ev.eventDate;
+        var surveyTargetDate = CoreCsatVoc.computeSurveyTargetDate(
+          ev.kind, r.deploymentStartDate, cohortKey);
+        if (!surveyTargetDate) continue;
 
-        var scheduleEntry = null;
-        for (var si = 0; si < scheduleByMonth.length; si++) {
-          var s = scheduleByMonth[si];
-          var win = (ev.kind === 'MDS') ? s.mdsOneThirdWindow : s.pglFirstMtpWindow;
-          if (targetDate >= win.start && targetDate <= win.end) {
-            scheduleEntry = s;
-            break;
-          }
+        var scheduleEntry = CoreCsatVoc.resolveScheduleEntryForTarget(
+          scheduleByMonth, ev.kind, surveyTargetDate);
+        if (!scheduleEntry) {
+          scheduleEntry = CoreCsatVoc.resolveScheduleEntryWithScan(
+            _resolveSurveyScheduleMonth_, ev.kind, surveyTargetDate, firstYm, 36);
         }
         if (!scheduleEntry) continue;
 
         var sourceDates = ev.sourceEventDates ||
-          _mergeMdsPglSourceEventDateKeys_([], [_toDateKey_(ev.eventDate) || ev.eventDate]);
+          _mergeMdsPglSourceEventDateKeys_([], [cohortKey]);
         var rowMultipleGoLives = deploymentMultipleGoLives ||
-          !!ev.clusteredFromMultipleEventDates ||
           sourceDates.length > 1 ||
           ((ev.products || []).length > 1);
 
@@ -10984,7 +11051,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         var ddList = (ddMap && (ddMap[canonDep] || ddMap[r.deploymentId])) || [];
         var ddResolved = _resolveMdsPglDeliveryDirector_(r, metaEntry, contactsEntry, ddList);
 
-        allRows.push({
+        var evidenceKey = canonDep + '|' + ev.kind + '|' + cohortKey;
+        var evState = (vocContext.eventEvidence && vocContext.eventEvidence[evidenceKey]) || {};
+
+        var baseRow = {
           deploymentId:      canonDep,
           accountName:       r.accountName,
           deploymentName:    r.deploymentName,
@@ -10992,18 +11062,28 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           partner:           r.partner || '',
           isExecutiveWatch:  CoreConfig.isExecutiveWatchEnabled(cfg) && !!r.isExecutiveWatch,
           surveyType:        ev.kind,
-          eventDate:         _coerceUiDateField_(ev.eventDate),
+          eventDate:         _coerceUiDateField_(cohortKey),
+          cohortDate:        cohortKey,
           sourceEventDates:  sourceDates,
           clusteredEventDates: ev.clusteredEventDates || sourceDates,
           clusteredFromMultipleEventDates: !!ev.clusteredFromMultipleEventDates,
           products:          ev.products,
           isMultipleGoLives: rowMultipleGoLives,
           oneThirdPoint:     _coerceUiDateField_(ev.oneThirdPoint, null),
+          surveyTargetDate:  surveyTargetDate,
           startDate:         _coerceUiDateField_(r.deploymentStartDate, null),
           currentMtp:        _coerceUiDateField_(r.mtpDate, null),
           contacts:          contactsMap[canonDep] || null,
           _batchYearMonth:   scheduleEntry.yearMonth
-        });
+        };
+
+        var openPassed = scheduleEntry.surveyOpen && todayKey >= scheduleEntry.surveyOpen;
+        allRows.push(_attachVocFieldsToMdsPglRow_(cfg, baseRow, scheduleEntry, cohortCounts, {
+          todayKey: todayKey,
+          sent: evState.sent,
+          responded: evState.responded,
+          batchPassedNoIssuance: openPassed && !evState.sent
+        }));
       }
     });
     return allRows;
@@ -11061,12 +11141,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     now.setHours(0, 0, 0, 0);
     var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
 
-    // Build month keys: [current YYYY-MM, +1, +2, …] up to horizonMonths entries.
-    var monthKeys = [];
-    for (var mi = 0; mi < horizonMonths; mi++) {
-      var md = new Date(now.getFullYear(), now.getMonth() + mi, 1);
-      monthKeys.push(Utilities.formatDate(md, tz, 'yyyy-MM'));
-    }
+    var monthKeys = _buildMdsPglBatchMonthKeys_(cfg, horizonMonths, now, tz);
 
     var scheduleByMonth = monthKeys.map(function (ym) {
       return CoreSurveySchedule.resolve(ym);
@@ -11117,9 +11192,12 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     // Exceptions list (verbatim logic from prior getUpcomingSurveys).
     var exceptions = _buildMgmPglExceptions_(cfg, activeRows, productRowsByDep);
 
+    var vocEvidence = _buildVocEventEvidenceIndex_(cfg, activeRows, productRowsByDep);
+
     // Build all rows, then emit-time dedupe.
     var builtRows = _buildMdsPglSurveyRowsFromActive_(
-      cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth, metaMap, ddMap);
+      cfg, activeRows, productRowsByDep, contactsMap, scheduleByMonth, metaMap, ddMap,
+      { eventEvidence: vocEvidence });
     var dedupeResult = _dedupeMdsPglSurveyRows_(builtRows);
     var allRows = dedupeResult.rows;
     if (dedupeResult.beforeCount !== dedupeResult.afterCount) {
@@ -11436,6 +11514,225 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       Logger.log('OK: Bellingham not in exceptions (Bellingham fix confirmed).');
     }
     Logger.log('=== END ===');
+  }
+
+  // ===========================================================================
+  // VoC: survey-event evidence + ledger (additive; internal CSAT sheet names)
+  // ===========================================================================
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {GoogleAppsScript.Spreadsheet.Sheet|null}
+   * @private
+   */
+  function _getOrCreateCsatSurveyEventsSheet_(cfg) {
+    var ss = getSpreadsheet_();
+    var sheetName = (cfg.sheets && cfg.sheets.csatSurveyEvents) || 'CSAT_SurveyEvents';
+    var cols = CoreCsatVoc.SURVEY_EVENT_COLUMNS;
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = ss.insertSheet(sheetName);
+      sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
+      sheet.setFrozenRows(1);
+    }
+    return sheet;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @return {Object.<string, Object>}
+   * @private
+   */
+  function _readCsatSurveyEventLedgerIndex_(cfg) {
+    var sheetName = (cfg.sheets && cfg.sheets.csatSurveyEvents) || 'CSAT_SurveyEvents';
+    var ss = getSpreadsheet_();
+    var sheet = ss.getSheetByName(sheetName);
+    var out = {};
+    if (!sheet || sheet.getLastRow() < 2) return out;
+    var cols = CoreCsatVoc.SURVEY_EVENT_COLUMNS;
+    var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, cols.length).getValues();
+    values.forEach(function (cells) {
+      var row = {};
+      for (var i = 0; i < cols.length; i++) {
+        row[cols[i]] = cells[i];
+      }
+      if (row.survey_event_id) out[String(row.survey_event_id)] = row;
+    });
+    return out;
+  }
+
+  /**
+   * Builds sent/responded evidence keyed by deployment|type|cohortDate.
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} activeRows
+   * @param {Object} productRowsByDep
+   * @return {Object.<string, {sent:boolean, responded:boolean}>}
+   * @private
+   */
+  function _buildVocEventEvidenceIndex_(cfg, activeRows, productRowsByDep) {
+    var index = {};
+    var inFlight = _readCsatInFlightRows_(cfg);
+    inFlight.forEach(function (row) {
+      var depId = _canonicalId_(row.deployment_id);
+      var typeKey = _normalizeCsatSurveyTypeKey_(row.survey_type);
+      if (!depId || !typeKey) return;
+      var candidates = [];
+      (activeRows || []).forEach(function (r) {
+        var canon = _canonicalId_(r.deploymentId);
+        if (canon !== depId) return;
+        var pr = productRowsByDep[canon] || [];
+        var events = CoreCsatVoc.buildExactCohortEvents(r, pr);
+        events.forEach(function (ev) {
+          if (ev.kind !== typeKey) return;
+          var cohortKey = _toDateKey_(ev.cohortDate) || ev.cohortDate;
+          var sid = CoreCsatVoc.computeSurveyEventId(depId, typeKey, cohortKey, _sha256Hex_);
+          candidates.push({
+            deploymentId: depId,
+            surveyType: typeKey,
+            surveyEventId: sid,
+            cohortDate: cohortKey
+          });
+        });
+      });
+      var link = CoreCsatVoc.reconcileInFlightToCohort({
+        canonicalDeploymentId: depId,
+        surveyType: typeKey,
+        candidateEvents: candidates
+      });
+      if (link.surveyEventId) {
+        var cohortDate = link.cohortDate ||
+          (candidates.length === 1 ? candidates[0].cohortDate : '');
+        var key = depId + '|' + typeKey + '|' + cohortDate;
+        if (!index[key]) index[key] = { sent: false, responded: false };
+        index[key].sent = true;
+        if (String(row.tracking_status || '').toLowerCase().indexOf('complete') >= 0) {
+          index[key].responded = true;
+        }
+      }
+    });
+
+    try {
+      var responses = _readCsatResponsesRows_(cfg);
+      responses.forEach(function (resp) {
+        var depId = _canonicalId_(resp.deployment_id);
+        var typeKey = _normalizeCsatSurveyTypeKey_(resp.survey_type);
+        if (!depId || !typeKey) return;
+        Object.keys(index).forEach(function (k) {
+          if (k.indexOf(depId + '|' + typeKey + '|') === 0) {
+            index[k].responded = true;
+          }
+        });
+      });
+    } catch (e) {
+      Logger.log('CoreData._buildVocEventEvidenceIndex_: responses read failed: ' + e);
+    }
+    return index;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {Array<Object>} inFlightStorageRows
+   * @private
+   */
+  function _persistCsatSurveyEventsFromInFlight_(cfg, inFlightStorageRows) {
+    if (!inFlightStorageRows || !inFlightStorageRows.length) return;
+    var sheet = _getOrCreateCsatSurveyEventsSheet_(cfg);
+    var cols = CoreCsatVoc.SURVEY_EVENT_COLUMNS;
+    var existing = _readCsatSurveyEventLedgerIndex_(cfg);
+    var rowsToAppend = [];
+    var nowIso = new Date().toISOString();
+
+    var productRowsByDep = {};
+    try {
+      readSfdcProductFunctionsRaw_(cfg).forEach(function (pf) {
+        if (!pf.deploymentFk) return;
+        var canon = _canonicalId_(pf.deploymentFk);
+        if (!productRowsByDep[canon]) productRowsByDep[canon] = [];
+        productRowsByDep[canon].push(pf);
+      });
+    } catch (e) {
+      Logger.log('CoreData._persistCsatSurveyEventsFromInFlight_: pf read failed: ' + e);
+      return;
+    }
+
+    var activeRows = _resolveMdsPglActiveRows_(cfg);
+    var activeByDep = {};
+    activeRows.forEach(function (r) {
+      activeByDep[_canonicalId_(r.deploymentId)] = r;
+    });
+
+    inFlightStorageRows.forEach(function (row) {
+      var depId = _canonicalId_(row.deployment_id);
+      var typeKey = _normalizeCsatSurveyTypeKey_(row.survey_type);
+      var sentKey = _toDateKey_(row.sent_date);
+      if (!depId || !typeKey || !sentKey) return;
+      var depRow = activeByDep[depId];
+      if (!depRow) return;
+      var pr = productRowsByDep[depId] || [];
+      var candidates = CoreCsatVoc.buildExactCohortEvents(depRow, pr).filter(function (ev) {
+        return ev.kind === typeKey;
+      });
+      if (candidates.length !== 1) return;
+      var cohortKey = _toDateKey_(candidates[0].cohortDate) || candidates[0].cohortDate;
+      var surveyEventId = CoreCsatVoc.computeSurveyEventId(
+        depId, typeKey, cohortKey, _sha256Hex_);
+      if (!surveyEventId || existing[surveyEventId]) return;
+      var targetDate = CoreCsatVoc.computeSurveyTargetDate(
+        typeKey, depRow.deploymentStartDate, cohortKey);
+      rowsToAppend.push([
+        surveyEventId,
+        depId,
+        typeKey,
+        cohortKey,
+        targetDate || '',
+        '',
+        sentKey,
+        nowIso,
+        CoreCsatVoc.LINK_INFERRED_BATCH,
+        CoreCsatVoc.LEDGER_CONTRACT_VERSION
+      ]);
+      existing[surveyEventId] = true;
+    });
+
+    if (rowsToAppend.length) {
+      var start = sheet.getLastRow() + 1;
+      sheet.getRange(start, 1, start + rowsToAppend.length - 1, cols.length)
+        .setValues(rowsToAppend);
+    }
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {Object=} viewModeOpts
+   * @return {{ rows: Array<Object>, total: number }}
+   * @private
+   */
+  function _buildCsatResponsesListForUI_(cfg, viewModeOpts) {
+    var stored = _readCsatResponsesRows_(cfg);
+    var list = [];
+    stored.forEach(function (row) {
+      var depId = _canonicalId_(row.deployment_id);
+      var typeKey = _normalizeCsatSurveyTypeKey_(row.survey_type);
+      var linkage = {
+        surveyEventId: '',
+        linkMethod: CoreCsatVoc.LINK_LEGACY_UNKNOWN,
+        cohortDate: row.target_go_live_date || ''
+      };
+      if (depId && typeKey && row.target_go_live_date) {
+        linkage.surveyEventId = CoreCsatVoc.computeSurveyEventId(
+          depId, typeKey, _toDateKey_(row.target_go_live_date) || row.target_go_live_date,
+          _sha256Hex_);
+        linkage.linkMethod = CoreCsatVoc.LINK_INFERRED_BATCH;
+      }
+      list.push(CoreCsatVoc.buildResponseListItem(row, linkage));
+    });
+    list.sort(function (a, b) {
+      return String(b.responseDate || '').localeCompare(String(a.responseDate || ''));
+    });
+    if (viewModeOpts && viewModeOpts.viewMode && viewModeOpts.viewMode !== 'all') {
+      list = applyViewModeFilter_(cfg, list, viewModeOpts);
+    }
+    return { rows: list, total: list.length };
   }
 
   // ===========================================================================
@@ -12383,6 +12680,11 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         }
       }
       var replaceResult = _replaceCsatInFlightSafely_(cfg, built.storageRows);
+      try {
+        _persistCsatSurveyEventsFromInFlight_(cfg, built.storageRows);
+      } catch (ledgerErr) {
+        Logger.log('CoreData.ingestCsatInFlight: survey-event ledger skipped: ' + ledgerErr);
+      }
       _setCsatLastImportAt_(cfg);
       _clearCache(cfg);
       return { built: built, replaceResult: replaceResult };
@@ -12457,10 +12759,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @private
    */
   function _normalizeCsatSurveyTypeKey_(surveyType) {
-    var s = String(surveyType || '').trim().toUpperCase();
-    if (s === 'MGM' || s === 'MDS') return 'MDS';
-    if (s === 'PGL') return 'PGL';
-    return s;
+    return CoreCsatVoc.normalizeSurveyTypeKey(surveyType);
   }
 
   /**
@@ -12701,8 +13000,13 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       Logger.log('getCsatTabDataForUI SERIALIZE FAIL: ' + ser);
     }
 
+    var responsesPayload = _buildCsatResponsesListForUI_(cfg, viewModeOpts);
+    var partnerDefaults = CoreCsatVoc.getDefaultPartnerScopeNames(cfg);
+
     return {
       success:          true,
+      productName:      'VoC',
+      productSubtitle:  'Voice of the Customer',
       lastUpdatedText:  freshnessStr,
       coveragePct:      coveragePct,
       kpis:             kpis,
@@ -12710,6 +13014,9 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
       inFlightRows:     inFlightRows,
       upcomingBatches:  upcomingBatches,
       exceptions:       upcomingBatches.exceptions || [],
+      responseRows:     responsesPayload.rows,
+      responseTotal:    responsesPayload.total,
+      vocPartnerDefaults: partnerDefaults,
       notificationKeys: notificationKeys,
       notificationRules: notificationRules,
       notificationValidation: notificationValidation,
@@ -12900,7 +13207,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         deploymentStartDate: depStart || null,
         missingType:         missingType,
         hasProducts:         hasProducts,
-        deliveryDirector:    dep.deliveryDirector || null
+        deliveryDirector:    dep.deliveryDirector || null,
+        awarenessConditions: CoreCsatVoc.awarenessConditionsForLegacyException(missingType)
       });
     }
 

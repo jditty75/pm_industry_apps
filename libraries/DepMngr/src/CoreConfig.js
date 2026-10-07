@@ -1015,8 +1015,9 @@ var CoreConfig = (function () {
     // V2.8: migrate legacy mgmPgl tab id to unified csat tab.
     cfg.ui.tabs = cfg.ui.tabs.map(function (t) {
       if (t.id === 'mgmPgl') {
-        return { id: 'csat', label: (t.label && t.label !== 'MDS/PGL' && t.label !== 'MGM / PGL')
-          ? t.label : 'CSAT' };
+        return { id: 'csat', label: (t.label && t.label !== 'MDS/PGL' && t.label !== 'MGM / PGL' &&
+          t.label !== 'CSAT')
+          ? t.label : 'VoC' };
       }
       return t;
     });
@@ -1118,6 +1119,12 @@ var CoreConfig = (function () {
     if (!cfg.ui.csatTab.defaultHorizon) cfg.ui.csatTab.defaultHorizon = 3;
     if (!Array.isArray(cfg.ui.csatTab.horizonOptions))
       cfg.ui.csatTab.horizonOptions = [3, 6];
+    if (!cfg.ui.csatTab.operationalLookbackDays) {
+      cfg.ui.csatTab.operationalLookbackDays = 180;
+    }
+    if (!cfg.ui.mgmPglTab.operationalLookbackDays) {
+      cfg.ui.mgmPglTab.operationalLookbackDays = cfg.ui.csatTab.operationalLookbackDays;
+    }
 
     // Stage 1: Role-based tab visibility.
     // Maps access role -> list of tab IDs the user is allowed to see.

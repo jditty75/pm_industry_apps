@@ -1433,23 +1433,23 @@ var CoreNotify = (function () {
           var daysUntil = _daysUntil_(dep.eventDate, today);
           if (daysUntil !== targetDays) return;
 
-          var antiKey = dep.deploymentId + '|' +
-            Utilities.formatDate(new Date(dep.eventDate), tz, 'yyyy-MM-dd') + '|' +
-            dep.surveyType + '|' + stage;
-          if (sent[antiKey]) {
-            Logger.log('CoreNotify.runNotifications: already sent ' + antiKey);
+          var dedupeKeys = CoreCsatVoc.buildEmReminderDedupeKeys(dep, stage, tz);
+          if (CoreCsatVoc.emReminderAlreadySent(sent, dedupeKeys)) {
+            Logger.log('CoreNotify.runNotifications: already sent ' + dedupeKeys.canonical +
+              (dedupeKeys.legacy !== dedupeKeys.canonical ? ' (legacy ' + dedupeKeys.legacy + ')' : ''));
             return;
           }
 
           var recipients = _resolveRecipients_(row, dep, contactsMap, cfg, 'to');
           if (!recipients.length) {
-            Logger.log('CoreNotify.runNotifications: 0 recipients for ' + antiKey + '; skipped.');
+            Logger.log('CoreNotify.runNotifications: 0 recipients for ' + dedupeKeys.canonical + '; skipped.');
             return;
           }
 
           if (_sendEmReminder_(row, dep, contactsMap, cfg, false, '', daysUntil)) {
-            sent[antiKey] = new Date().toISOString();
-            Logger.log('CoreNotify.runNotifications: sent em_reminder ' + antiKey);
+            var sentAt = new Date().toISOString();
+            CoreCsatVoc.markEmReminderSent(sent, dedupeKeys, sentAt);
+            Logger.log('CoreNotify.runNotifications: sent em_reminder ' + dedupeKeys.canonical);
           }
         });
       }

@@ -26,9 +26,13 @@ M2_WRITE_HANDLERS = (
 
 M2_HANDLERS = tuple(M2_READ_HANDLERS) + tuple(M2_WRITE_HANDLERS) + tuple(NOTABLE_READ_HANDLERS)
 
+M3_VOC_HANDLERS = (
+    "getCsatTabDataForUI",
+    "getDistributionLogDataForUI",
+)
+
 M3_PLUS_METHODS = (
     "getTrendsDashboardData",
-    "getCsatTabDataForUI",
     "getStudentTabData",
     "getEscalationsDashboardData",
     "getReportSendConfigForUI",
@@ -341,7 +345,98 @@ def enrich_m2_bundle(bundle: dict[str, Any], scenario: str) -> dict[str, Any]:
     bundle["golivesExplorer"] = golives_explorer_from_rows(recent, upcoming, scenario)
     bundle["activeOverrides"] = overrides
     bundle["overrideAuditLog"] = seed_audit_log(overrides)
+    bundle["vocTabPreview"] = csat_tab_payload_for_bundle(bundle)
+    bundle["distributionLogPreview"] = distribution_log_preview_payload()
     return attach_notable_bundle(bundle, scenario)
+
+
+def csat_tab_payload_for_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Synthetic VoC tab payload for local DM preview (no production RPC)."""
+    deps = bundle.get("deployments") or []
+    dep = deps[0] if deps else {}
+    dep_id = dep.get("deploymentId") or "PREVIEW_DEP_0001"
+    batch_row = {
+        "deploymentId": dep_id,
+        "accountName": dep.get("accountName") or "Preview Account",
+        "deploymentName": dep.get("deploymentName") or "Preview Deployment",
+        "surveyType": "MDS",
+        "eventDate": _add_days(21),
+        "cohortDate": _add_days(60),
+        "surveyEventId": "SE_PREVIEW_MDS_001",
+        "surveyState": "UPCOMING",
+        "multiCohort": False,
+        "awarenessConditions": [],
+        "partner": dep.get("partner") or "Workday Professional Services",
+    }
+    month_key = _today_key()[:7]
+    return {
+        "inFlightRows": [
+            {
+                "deploymentId": dep_id,
+                "accountName": batch_row["accountName"],
+                "deploymentName": batch_row["deploymentName"],
+                "surveyType": "Mid-Deployment Survey",
+                "trackingStatus": "Sent",
+                "responseReceived": "",
+                "partner": batch_row["partner"],
+                "sentDate": _add_days(-7),
+                "surveyEventId": batch_row["surveyEventId"],
+                "cohortLinkMethod": "INFERRED_BATCH",
+            }
+        ],
+        "upcomingBatches": {
+            "groups": [
+                {
+                    "yearMonth": month_key,
+                    "label": month_key,
+                    "mdsRows": [batch_row],
+                    "pglRows": [],
+                }
+            ],
+            "exceptions": [],
+        },
+        "exceptions": [],
+        "responseRows": [
+            {
+                "responseId": "PREVIEW_RESP_001",
+                "deploymentId": dep_id,
+                "accountName": batch_row["accountName"],
+                "deploymentName": batch_row["deploymentName"],
+                "surveyType": "PGL",
+                "responseDate": _add_days(-3),
+                "overallSatisfaction": 4,
+                "npsScore": 8,
+                "cohortDate": "",
+                "surveyEventId": "",
+                "linkMethod": "LEGACY_UNKNOWN",
+            }
+        ],
+        "summary": {
+            "inFlightCount": 1,
+            "upcomingBatchCount": 1,
+            "coveragePct": 100,
+            "notificationStatus": "Preview — rules not validated",
+            "invalidRuleCount": 0,
+        },
+        "totalMasterDeployments": len(deps),
+        "notificationKeys": ["em_reminder_first", "em_reminder_final", "dd_digest"],
+    }
+
+
+def distribution_log_preview_payload() -> dict[str, Any]:
+    return {
+        "rows": [
+            {
+                "timestamp": f"{_today_key()}T10:00:00.000Z",
+                "notificationKey": "em_reminder_first",
+                "category": "Survey Notification",
+                "deploymentId": "PREVIEW_DEP_0001",
+                "surveyType": "MDS",
+                "status": "Preview",
+            }
+        ],
+        "total": 1,
+    }
 
 
 def build_scenario_bundle(app_id: str, scenario: str, m1_builder) -> dict[str, Any]:

@@ -65,6 +65,14 @@ test('CoreUI client JS bundle parses as executable script', () => {
   });
 });
 
+test('VoC client surfaces include Responses and Administration', () => {
+  const js = getBundleString();
+  assert.ok(js.includes('renderVocResponses_'));
+  assert.ok(js.includes('switchVocAdminView'));
+  assert.ok(js.includes('Loading VoC data'));
+  assert.ok(js.includes('setVocNeedsAttentionFilter'));
+});
+
 test('Signals detail HTML builder string is syntactically closed', () => {
   const js = getBundleString();
   assert.ok(js.includes('\'Open deployment</button></div>\';'));

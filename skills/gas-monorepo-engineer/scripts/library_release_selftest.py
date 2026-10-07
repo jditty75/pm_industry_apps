@@ -51,10 +51,10 @@ class TestDiscovery(unittest.TestCase):
         dep = registry["DepMngr"]
         consumers = discover_consumers(REPO, dep["userSymbol"], dep["consumerDirPattern"])
         slg = next(c for c in consumers if c.app_id == "SLG_DM")
-        self.assertEqual(slg.version, "160")
+        self.assertEqual(slg.version, "161")
         self.assertFalse(slg.consumes_head)
         hc = next(c for c in consumers if c.app_id == "HC_DM")
-        self.assertEqual(hc.version, "146")
+        self.assertEqual(hc.version, "161")
         self.assertFalse(hc.consumes_head)
 
     def test_golives_consumers(self):

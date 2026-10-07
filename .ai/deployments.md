@@ -2,6 +2,56 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-07 — DepMngr CoreLib 161 — shared VoC platform (library cut)
+
+- Authorization: user (Shared VoC Platform PRODUCTION RELEASE, 2026-10-07)
+- Git source: `408c99c`
+- Library: CoreLib **161** — `feat(voc): shared cohort-aware Voice of the Customer platform`
+- Previous immutable library version: **160**
+- Rollback library version: **160**
+- Consumer pin updates (this release): SLG_DM **160 → 161**; HC_DM **146 → 161**; HENP_DM **146 → 161**
+- Unchanged at CoreLib **146**: EVI_DM, PDX_DM, HS_DM (VoC hidden; no push/deploy)
+- Verification: DepMngr **221/221** local tests; library release selftest PASS; SLG/HC/HENP preview structural PASS; `clasp push` library + consumers; immutable **161** verified via `clasp versions`
+- Result: success (library cut; consumer deploys below)
+
+### 2026-10-07 — SLG_DM — deploy (shared VoC platform CoreLib 161)
+
+- Authorization: user (Shared VoC Platform PRODUCTION RELEASE, 2026-10-07)
+- Git source: `408c99c` (manifest pin; library **161**)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: **206**
+- Live GAS version: **207**
+- CoreLib: **161**
+- Description: feat(voc): shared VoC platform; canonical exposed label VoC; Deployment Intelligence unchanged
+- Verification: structural preview PASS; production browser SSO smoke not automated (Workday domain)
+- Result: success
+
+### 2026-10-07 — HC_DM — deploy (shared VoC platform CoreLib 161)
+
+- Authorization: user (Shared VoC Platform PRODUCTION RELEASE, 2026-10-07)
+- Git source: `408c99c` (manifest pin; library **161**)
+- Deployment ID: `AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA`
+- Previous GAS version: **88**
+- Live GAS version: **89**
+- CoreLib: **161**
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA/exec
+- Description: feat(voc): Healthcare VoC exposure (Upcoming / In-Flight / Responses / Administration)
+- Verification: structural preview PASS; production interactive VoC RPC smoke requires Jeff browser (SSO)
+- Result: success
+
+### 2026-10-07 — HENP_DM — deploy (shared VoC platform CoreLib 161)
+
+- Authorization: user (Shared VoC Platform PRODUCTION RELEASE, 2026-10-07)
+- Git source: `408c99c` (manifest pin; library **161**)
+- Deployment ID: `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`
+- Previous GAS version: **109**
+- Live GAS version: **110**
+- CoreLib: **161**
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ/exec
+- Description: feat(voc): HENP VoC exposure (four subtabs)
+- Verification: structural preview PASS; production browser SSO smoke not automated
+- Result: success
+
 ### 2026-10-07 — SLG_DM — deploy (Signals GAS transport DTO)
 
 - Authorization: user (Signals UI FINAL proven GAS serialization fix, 2026-10-07)

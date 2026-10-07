@@ -45,3 +45,5 @@ Agents handle routine Git work: status, branches, staging, meaningful **Conventi
 ## More context
 
 - [`CLAUDE.md`](CLAUDE.md) — concise Claude-oriented entry point (points back to this hierarchy).
+
+Deployment Intelligence is shared across Deployment Manager applications: source/history evidence and configuration may be app-specific, but Signal, lifecycle, persistence, intelligence, distribution, and investigation capabilities must not be forked by app.

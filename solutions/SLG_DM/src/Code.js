@@ -388,23 +388,79 @@ function finalizeWeeklySlgDeploymentIntelligence(options) {
  */
 function renderSlgDeploymentIntelligenceEmailPreview(options) {
   options = Object.assign({ dryRun: true, testMode: true }, options || {});
-  var finalized = CoreLib.CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun(
-    APP_CONFIG, options);
-  if (!finalized.ok || !finalized.artifact) {
-    return finalized;
+  var intelligenceRunId = String(options.intelligence_run_id || 'INT-SLG-2026-10-05').trim();
+  var rows = CoreLib.CoreDeploymentSignalPersistence.getLatestReadyDeploymentIntelligence(
+    APP_CONFIG);
+  var artifact = null;
+  var runRow = null;
+  if (rows && String(rows.intelligence_run_id || '').trim() === intelligenceRunId) {
+    runRow = rows;
+    artifact = CoreLib.CoreDeploymentSignalPersistence.parseArtifactFromRunRow(rows);
+  }
+  if (!artifact) {
+    var finalized = CoreLib.CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun(
+      APP_CONFIG, options);
+    if (!finalized.ok || !finalized.artifact) {
+      return finalized;
+    }
+    artifact = finalized.artifact;
+    runRow = finalized.run;
   }
   var email = CoreLib.CoreNotify.sendDeploymentIntelligenceEmail(
-    APP_CONFIG, finalized.artifact, {
+    APP_CONFIG, artifact, {
       dryRun: true,
       testMode: true,
-      runRow: finalized.run
+      runRow: runRow
     });
   return {
     ok: true,
-    intelligence_run_id: finalized.intelligence_run_id,
+    intelligence_run_id: intelligenceRunId,
     html: email.html,
     email_status: email.email_status
   };
+}
+
+/**
+ * Controlled baseline repair + aggregate validation (no email/Slack send).
+ *
+ * @param {Object=} options intelligence_run_id, signal_run_id, reasonCodes
+ * @return {Object}
+ */
+function runSlgDeploymentIntelligenceBaselineRepairAndValidation(options) {
+  options = options || {};
+  var repair = CoreLib.CoreDeploymentSignalPersistence.repairDeploymentIntelligenceBaselineRun(
+    APP_CONFIG, {
+      intelligence_run_id: options.intelligence_run_id || 'INT-SLG-2026-10-05',
+      signal_run_id: options.signal_run_id || 'SLG-2026-10-05',
+      reasonCodes: options.reasonCodes
+    });
+  Logger.log('runSlgDeploymentIntelligenceBaselineRepairAndValidation: ' +
+    JSON.stringify({
+      ok: repair.ok,
+      intelligence_run_id: repair.intelligence_run_id,
+      validation: repair.validation,
+      audit: repair.audit
+    }));
+  return repair;
+}
+
+/**
+ * Send Deployment Intelligence email to configured test recipient only.
+ *
+ * @param {Object=} options { intelligence_run_id }
+ * @return {Object}
+ */
+function sendSlgDeploymentIntelligenceTestEmail(options) {
+  options = options || {};
+  var intelligenceRunId = String(
+    options.intelligence_run_id || 'INT-SLG-2026-10-05').trim();
+  var outcome = CoreLib.CoreNotify.processDeploymentIntelligenceEmailQueue(
+    APP_CONFIG, {
+      explicitTestSend: true,
+      intelligence_run_id: intelligenceRunId
+    });
+  Logger.log('sendSlgDeploymentIntelligenceTestEmail: ' + JSON.stringify(outcome));
+  return outcome;
 }
 
 /**

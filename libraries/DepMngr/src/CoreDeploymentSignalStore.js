@@ -381,6 +381,61 @@ var CoreDeploymentSignalStore = {
    * @param {Object} patch
    * @return {boolean}
    */
+  /**
+   * Patch a single intelligence run row (last matching intelligence_run_id).
+   *
+   * @param {Object} store in-memory store
+   * @param {string} sheetName
+   * @param {string} intelligenceRunId
+   * @param {Object} patch
+   * @return {boolean}
+   */
+  updateIntelligenceRowInStore: function (store, sheetName, intelligenceRunId, patch) {
+    var sh = store && store.sheets && store.sheets[sheetName];
+    if (!sh || !sh.rows) return false;
+    var target = String(intelligenceRunId || '').trim();
+    for (var i = sh.rows.length - 1; i >= 0; i--) {
+      if (String(sh.rows[i].intelligence_run_id || '').trim() === target) {
+        sh.rows[i] = Object.assign({}, sh.rows[i], patch || {});
+        return true;
+      }
+    }
+    return false;
+  },
+
+  /**
+   * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+   * @param {Array<string>} headers
+   * @param {string} intelligenceRunId
+   * @param {Object} patch
+   * @return {boolean}
+   */
+  updateIntelligenceRowByIntelligenceRunId: function (sheet, headers, intelligenceRunId, patch) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow < 2) return false;
+    var width = headers.length;
+    var bodyRowCount = lastRow - 1;
+    var values = sheet.getRange(2, 1, bodyRowCount, width).getValues();
+    var hdr = sheet.getRange(1, 1, 1, width).getValues()[0].map(function (h) {
+      return String(h || '').trim();
+    });
+    var target = String(intelligenceRunId || '').trim();
+    var rowIndex = -1;
+    for (var i = values.length - 1; i >= 0; i--) {
+      var obj = CoreDeploymentSignalStore.arrayToRow(values[i], hdr);
+      if (String(obj.intelligence_run_id || '').trim() === target) {
+        rowIndex = i;
+        break;
+      }
+    }
+    if (rowIndex < 0) return false;
+    var merged = Object.assign(
+      CoreDeploymentSignalStore.arrayToRow(values[rowIndex], hdr), patch || {});
+    var arr = CoreDeploymentSignalStore.rowToArray(merged, headers);
+    CoreDeploymentSignalStore._setBodyMatrix_(sheet, rowIndex + 2, width, [arr]);
+    return true;
+  },
+
   updateRunRowBySignalRunId: function (sheet, headers, runId, patch) {
     var lastRow = sheet.getLastRow();
     if (lastRow < 2) return false;

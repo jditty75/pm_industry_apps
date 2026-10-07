@@ -51,10 +51,10 @@ class TestDiscovery(unittest.TestCase):
         dep = registry["DepMngr"]
         consumers = discover_consumers(REPO, dep["userSymbol"], dep["consumerDirPattern"])
         slg = next(c for c in consumers if c.app_id == "SLG_DM")
-        self.assertEqual(slg.version, "139")
-        self.assertTrue(slg.consumes_head)
+        self.assertEqual(slg.version, "154")
+        self.assertFalse(slg.consumes_head)
         hc = next(c for c in consumers if c.app_id == "HC_DM")
-        self.assertEqual(hc.version, "139")
+        self.assertEqual(hc.version, "146")
         self.assertFalse(hc.consumes_head)
 
     def test_golives_consumers(self):
@@ -96,8 +96,7 @@ class TestBlastRadius(unittest.TestCase):
     def test_head_blast_radius_in_plan(self):
         plan = build_release_plan(REPO, "DepMngr")
         head = plan["headBlastRadius"]["immediateOnLibraryPush"]
-        self.assertIn("SLG_DM", head)
-        self.assertTrue(len(head) >= 1)
+        self.assertEqual(head, [])
 
 
 class TestRollbackPlan(unittest.TestCase):
@@ -109,10 +108,10 @@ class TestRollbackPlan(unittest.TestCase):
             c.app_id: {"version": c.version, "developmentMode": c.development_mode}
             for c in consumers
         }
-        rb = build_rollback_plan("DepMngr", consumers, "139", pins, ["SLG_DM"])
+        rb = build_rollback_plan("DepMngr", consumers, "154", pins, ["SLG_DM"])
         self.assertEqual(rb["strategy"], "forward_git_repoint_production")
         head_entries = [x for x in rb["perConsumer"] if x.get("wasHead")]
-        self.assertTrue(any(x["appId"] == "SLG_DM" for x in head_entries))
+        self.assertEqual(head_entries, [])
 
 
 class TestManifestFingerprint(unittest.TestCase):

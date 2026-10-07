@@ -1338,6 +1338,9 @@ var CoreConfig = (function () {
     if (!cfg.deploymentIntelligence.emailNotificationKey) {
       cfg.deploymentIntelligence.emailNotificationKey = 'deployment_intelligence_weekly';
     }
+    if (cfg.deploymentIntelligence.autoSendBaseline === undefined) {
+      cfg.deploymentIntelligence.autoSendBaseline = false;
+    }
 
     return cfg;
   }

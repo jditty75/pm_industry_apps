@@ -1410,6 +1410,18 @@ var CoreNotify = (function () {
       var type = String(row.type || '').trim();
       var key = String(row.notificationKey || '').trim();
 
+      if (type === 'deployment_intelligence') {
+        var diResults = processDeploymentIntelligenceEmailQueue(cfg, {
+          notificationRow: row,
+          productionSend: true
+        });
+        if (diResults && diResults.sentCount) {
+          Logger.log('CoreNotify.runNotifications: deployment_intelligence sent=' +
+            diResults.sentCount);
+        }
+        return;
+      }
+
       if (type === 'em_reminder') {
         var stage = _reminderStage_(key);
         var targetDays = stage === 'final' ?
@@ -2138,12 +2150,115 @@ var CoreNotify = (function () {
    * @param {Object=} options { dryRun, testMode, runRow }
    * @return {{ sent: boolean, email_status: string, html: string }}
    */
+  /**
+   * @param {AppConfig} cfg
+   * @return {string}
+   * @private
+   */
+  function _deploymentIntelligenceTestRecipient_(cfg) {
+    var di = cfg.deploymentIntelligence || {};
+    var notable = (cfg.notable && cfg.notable.notify) || {};
+    return String(di.testEmail || notable.testEmail ||
+      cfg.notify.testDefaultRecipient || 'jeffrey.ditty@workday.com').trim();
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {Object} notificationRow
+   * @return {string}
+   * @private
+   */
+  function _deploymentIntelligenceSubject_(cfg, notificationRow) {
+    var di = cfg.deploymentIntelligence || {};
+    var fromRow = notificationRow && String(notificationRow.subject || '').trim();
+    if (fromRow) return fromRow;
+    var label = String(di.displayName || 'Deployment Intelligence').trim();
+    return label + ' — weekly';
+  }
+
+  /**
+   * Deliver READY intelligence emails (production config or explicit test send).
+   *
+   * @param {AppConfig} appConfig
+   * @param {Object=} options
+   * @param {boolean=} options.explicitTestSend send only to configured test recipient
+   * @param {boolean=} options.productionSend honor NotificationConfig when enabled
+   * @param {string=} options.intelligence_run_id optional single-run target
+   * @param {Object=} options.notificationRow NotificationConfig row (production)
+   * @return {{ sentCount: number, results: Array<Object> }}
+   */
+  function processDeploymentIntelligenceEmailQueue(appConfig, options) {
+    options = options || {};
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    var results = [];
+    var sentCount = 0;
+    if (!CoreConfig.isDeploymentIntelligenceEnabled(cfg)) {
+      return { sentCount: 0, results: results };
+    }
+
+    var rows = CoreDeploymentSignalPersistence._readIntelligenceRows_(
+      cfg, options.store);
+    var appId = String(cfg.appId || '').trim();
+    var targetId = String(options.intelligence_run_id || '').trim();
+    rows.forEach(function (row) {
+      if (String(row.app_id || '').trim() !== appId) return;
+      if (targetId && String(row.intelligence_run_id || '').trim() !== targetId) return;
+      if (String(row.intelligence_status) !== CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY) {
+        return;
+      }
+      if (String(row.email_status) === CoreDeploymentSignalStore.EMAIL_STATUS_SENT) return;
+      if (String(row.email_status) === CoreDeploymentSignalStore.EMAIL_STATUS_NOT_REQUIRED) return;
+
+      var isBaseline = row.is_baseline === true ||
+        String(row.is_baseline).toUpperCase() === 'TRUE';
+      if (isBaseline && !options.explicitTestSend &&
+          cfg.deploymentIntelligence.autoSendBaseline !== true) {
+        results.push({
+          intelligence_run_id: row.intelligence_run_id,
+          skipped: true,
+          reason: 'baseline_auto_send_disabled'
+        });
+        return;
+      }
+
+      var artifact = CoreDeploymentSignalPersistence.parseArtifactFromRunRow(row);
+      if (!artifact) return;
+
+      var sendOpts = {
+        runRow: row,
+        dryRun: false,
+        testMode: !!options.explicitTestSend,
+        explicitTestSend: !!options.explicitTestSend,
+        productionSend: !!options.productionSend && !options.explicitTestSend,
+        notificationRow: options.notificationRow || null
+      };
+      var outcome = sendDeploymentIntelligenceEmail(cfg, artifact, sendOpts);
+      results.push({
+        intelligence_run_id: row.intelligence_run_id,
+        sent: outcome.sent,
+        email_status: outcome.email_status
+      });
+      if (outcome.sent) {
+        sentCount++;
+        var sentAt = new Date().toISOString();
+        CoreDeploymentSignalPersistence.updateIntelligenceRunRow(
+          cfg, row.intelligence_run_id, {
+            email_status: CoreDeploymentSignalStore.EMAIL_STATUS_SENT,
+            email_sent_at: sentAt,
+            updated_at: sentAt
+          }, options.store);
+      }
+    });
+    return { sentCount: sentCount, results: results };
+  }
+
   function sendDeploymentIntelligenceEmail(appConfig, artifact, options) {
     options = options || {};
     var cfg = CoreConfig.withDefaults(appConfig || {});
     var runRow = options.runRow || {};
     var dist = artifact && artifact.distributionState ? artifact.distributionState : {};
-    if (String(dist.email_status) === CoreDeploymentSignalStore.EMAIL_STATUS_SENT) {
+    if (String(runRow.email_status || dist.email_status) ===
+        CoreDeploymentSignalStore.EMAIL_STATUS_SENT) {
       return {
         sent: false,
         email_status: CoreDeploymentSignalStore.EMAIL_STATUS_SENT,
@@ -2151,7 +2266,8 @@ var CoreNotify = (function () {
       };
     }
     if (!isDeploymentIntelligenceEmailEligible(
-      Object.assign({}, runRow, { intelligence_status: dist.intelligence_status }), cfg)) {
+      Object.assign({}, runRow, { intelligence_status: dist.intelligence_status ||
+        CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY }), cfg)) {
       return {
         sent: false,
         email_status: CoreDeploymentSignalStore.EMAIL_STATUS_NOT_REQUIRED,
@@ -2162,17 +2278,67 @@ var CoreNotify = (function () {
     var key = (cfg.deploymentIntelligence && cfg.deploymentIntelligence.emailNotificationKey) ||
       DEPLOYMENT_INTELLIGENCE_NOTIFICATION_KEY;
     Logger.log('CoreNotify.sendDeploymentIntelligenceEmail: key=' + key +
-      ' dryRun=' + !!(options.dryRun || options.testMode));
-    if (options.dryRun || options.testMode || options.noSend) {
+      ' dryRun=' + !!(options.dryRun && !options.explicitTestSend) +
+      ' explicitTestSend=' + !!options.explicitTestSend);
+
+    if ((options.dryRun || options.testMode) && !options.explicitTestSend) {
       return {
         sent: false,
         email_status: CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
         html: html
       };
     }
+    if (options.noSend) {
+      return {
+        sent: false,
+        email_status: CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+        html: html
+      };
+    }
+
+    var notificationRow = options.notificationRow || null;
+    if (!notificationRow && options.productionSend) {
+      var configRows = readNotificationConfig_(cfg);
+      for (var i = 0; i < configRows.length; i++) {
+        if (String(configRows[i].notificationKey || '').trim() === key) {
+          notificationRow = configRows[i];
+          break;
+        }
+      }
+    }
+    if (options.productionSend && (!notificationRow || !_isEnabled_(notificationRow.enabled))) {
+      return {
+        sent: false,
+        email_status: CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+        html: html
+      };
+    }
+
+    var toList = [];
+    if (options.explicitTestSend) {
+      toList = [_deploymentIntelligenceTestRecipient_(cfg)];
+    } else if (notificationRow) {
+      toList = _resolveRecipients_(notificationRow, null, {}, cfg, 'to');
+    }
+    if (!toList.length) {
+      return {
+        sent: false,
+        email_status: CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+        html: html
+      };
+    }
+
+    var fromAlias = notificationRow ?
+      String(notificationRow.fromAlias || '').trim() :
+      String((cfg.notify.allowedFromAliases || [])[0] || '').trim();
+    var subject = _deploymentIntelligenceSubject_(cfg, notificationRow);
+    var cc = notificationRow ? String(notificationRow.cc || '').trim() : '';
+    var sentOk = _gmailSend_(
+      toList.join(','), subject, html, fromAlias, cc, cfg.notify.allowedFromAliases, '');
     return {
-      sent: false,
-      email_status: CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+      sent: sentOk,
+      email_status: sentOk ? CoreDeploymentSignalStore.EMAIL_STATUS_SENT :
+        CoreDeploymentSignalStore.EMAIL_STATUS_FAILED,
       html: html
     };
   }
@@ -2219,6 +2385,7 @@ var CoreNotify = (function () {
     isDeploymentIntelligenceEmailEligible: isDeploymentIntelligenceEmailEligible,
     buildDeploymentIntelligenceEmailHtml: buildDeploymentIntelligenceEmailHtml,
     sendDeploymentIntelligenceEmail: sendDeploymentIntelligenceEmail,
+    processDeploymentIntelligenceEmailQueue: processDeploymentIntelligenceEmailQueue,
     applyDeploymentSignalPostCompleteHandoff: applyDeploymentSignalPostCompleteHandoff,
     _resolveRecipients_:           _resolveRecipients_,
     _renderTemplate_:              _renderTemplate_,

@@ -2959,7 +2959,8 @@ var CorePortfolioHealth = (function () {
 
       var mtpRaw = r.currentMtp || r.goLiveDate || r.mtpDate || '';
       if (!mtpRaw) return;
-      var mtpKey = String(mtpRaw).slice(0, 10);
+      var mtpKey = CoreUtils.toCalendarDateKey(mtpRaw, tz);
+      if (!mtpKey) return;
       var days = TrajectoryMetrics.signedDaysBetween(todayStr, mtpKey);
       if (days !== null && days >= 0 && days <= 90) {
         mtpWithin90Days++;

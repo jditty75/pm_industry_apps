@@ -10,7 +10,7 @@ const SRC = path.join(__dirname, '..', 'src');
 function loadPlatform() {
   var coreConfigSrc = fs.readFileSync(path.join(SRC, 'CoreConfig.js'), 'utf8');
   var sandbox = {
-    CoreUtils: { escapeHtml: function (s) { return String(s || ''); } },
+    CoreUtils: null,
     Logger: { log: function () {} },
     Utilities: {
       formatDate: function (d, tz, fmt) {
@@ -40,6 +40,7 @@ function loadPlatform() {
     },
     CoreDeploymentTrajectory: { _writeSheet_: function () {} },
     MailApp: { sendEmail: function () {} },
+    GmailApp: { sendEmail: function () { return true; } },
     PropertiesService: {
       getScriptProperties: function () {
         return { getProperty: function () { return null; }, setProperty: function () {} };
@@ -47,6 +48,7 @@ function loadPlatform() {
     }
   };
   vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(SRC, 'CoreUtils.js'), 'utf8'), sandbox);
   vm.runInContext(coreConfigSrc, sandbox);
   var files = [
     'CoreDeploymentTrajectoryMetrics.js',
@@ -65,13 +67,14 @@ function loadPlatform() {
 }
 
 function slgCfg(overrides) {
-  return {
+  return Object.assign({
     appId: 'SLG',
     ui: { webApp: { baseUrl: 'https://example.test/dm', defaultEndpoint: 'exec' } },
     deploymentSignal: { enabled: true, persistenceEnabled: true },
     deploymentIntelligence: { enabled: true, displayName: 'Test Deployment Intelligence' },
+    notify: { enabled: true, allowedFromAliases: ['sender@example.test'] },
     salesforce: { statusValues: { active: 'Active' } }
-  };
+  }, overrides || {});
 }
 
 function pilotCfg() {
@@ -140,6 +143,21 @@ test('portfolio pulse — active health MTP and zero denominator', () => {
     S.CoreConfig.withDefaults(slgCfg()), {}, {});
   assert.equal(empty.totalActive, 0);
   assert.equal(empty.greenPct, 0);
+});
+
+test('portfolio pulse — normalizes Date.toString MTP (SFDC cellStr parity)', () => {
+  var S = loadPlatform();
+  var decMtp = new Date('2026-12-01T12:00:00');
+  S.CoreData.getActiveCountDeployments = function () {
+    return [{
+      health: 'Yellow',
+      excludeFromReport: false,
+      mtpDate: decMtp.toString()
+    }];
+  };
+  var pulse = S.CorePortfolioHealth.buildDeploymentIntelligencePortfolioPulse(
+    S.CoreConfig.withDefaults(slgCfg()), {}, {});
+  assert.equal(pulse.mtpWithin90Days, 1);
 });
 
 test('baseline snapshot and NEW leadership suppression', () => {
@@ -276,6 +294,72 @@ test('data confidence leadership intersection', () => {
   assert.ok(artifact.editorial.dataRequiringAttention);
 });
 
+test('data confidence excludes non-leadership stewardship codes', () => {
+  var S = loadPlatform();
+  var cfg = S.CoreConfig.withDefaults(slgCfg());
+  var store = S.CoreDeploymentSignalStore.createMemoryStore();
+  persistRun(S, cfg, 'RUN-DC-FILTER', [baseRecord(DEP_A, 'COMPOUND', 'HIGH')], store);
+  var runs = S.CoreDeploymentSignalStore.readBody(store, 'Deployment_Signal_Runs');
+  var runRow = runs[runs.length - 1];
+  var artifact = S.CoreDeploymentSignalPersistence.buildDeploymentIntelligenceReadModel(
+    cfg, runRow, {
+      store: store,
+      getContextPacketForDeployment: function (depId) {
+        if (depId !== DEP_A) return null;
+        return {
+          metadata: { deployment_id: DEP_A },
+          current_state: {
+            current_health: 'Green', deployment_stage: 'Deploy', current_mtp: '2026-12-01'
+          },
+          health_trajectory: { reconciliation: { health_current_matches_last_event_new_health: true } },
+          schedule_trajectory: { parent_reconciliation_status: 'MATCH' },
+          product_function: {
+            product_function_count: 3,
+            functions_completed: 0,
+            functions_remaining: 0,
+            product_function_rollup_reconciled: false
+          },
+          intervention: { has_open_health_plan: false }
+        };
+      }
+    });
+  assert.equal(artifact.dataConfidence.deploymentsWithStewardshipCount, 0);
+  assert.equal(artifact.editorial.dataRequiringAttention, null);
+});
+
+test('production context resolver uses single portfolio context build', () => {
+  var S = loadPlatform();
+  var cfg = S.CoreConfig.withDefaults(slgCfg());
+  var store = S.CoreDeploymentSignalStore.createMemoryStore();
+  persistRun(S, cfg, 'RUN-BATCH', [baseRecord(DEP_A, 'COMPOUND', 'HIGH')], store);
+  var runs = S.CoreDeploymentSignalStore.readBody(store, 'Deployment_Signal_Runs');
+  var runRow = runs[runs.length - 1];
+  var portfolioCalls = 0;
+  var perDepCalls = 0;
+  S.CoreDeploymentSignalContext.buildDeploymentSignalPortfolioContext = function () {
+    portfolioCalls++;
+    return {
+      skipped: false,
+      packets: [{
+        metadata: { deployment_id: DEP_A },
+        current_state: { current_health: 'Green', deployment_stage: 'Deploy', current_mtp: '' },
+        health_trajectory: { reconciliation: { health_current_matches_last_event_new_health: true } },
+        schedule_trajectory: { parent_reconciliation_status: 'MATCH' },
+        product_function: { product_function_count: 0 },
+        intervention: { has_open_health_plan: false }
+      }]
+    };
+  };
+  S.CoreDeploymentSignalContext.buildDeploymentSignalContext = function () {
+    perDepCalls++;
+    return null;
+  };
+  S.CoreDeploymentSignalPersistence.buildDeploymentIntelligenceReadModel(
+    cfg, runRow, { store: store });
+  assert.equal(portfolioCalls, 1);
+  assert.equal(perDepCalls, 0);
+});
+
 test('production context resolver wires stewardship without override', () => {
   var S = loadPlatform();
   var cfg = S.CoreConfig.withDefaults(slgCfg());
@@ -283,15 +367,17 @@ test('production context resolver wires stewardship without override', () => {
   persistRun(S, cfg, 'RUN-PROD-DC', [baseRecord(DEP_A, 'COMPOUND', 'HIGH')], store);
   var runs = S.CoreDeploymentSignalStore.readBody(store, 'Deployment_Signal_Runs');
   var runRow = runs[runs.length - 1];
-  S.CoreDeploymentSignalContext.buildDeploymentSignalContext = function (_cfg, depId) {
-    if (depId !== DEP_A) return null;
+  S.CoreDeploymentSignalContext.buildDeploymentSignalPortfolioContext = function () {
     return {
-      metadata: { deployment_id: DEP_A },
-      current_state: { current_health: 'Green', deployment_stage: 'Deploy', current_mtp: '' },
-      health_trajectory: { reconciliation: { health_current_matches_last_event_new_health: true } },
-      schedule_trajectory: { parent_reconciliation_status: 'MATCH' },
-      product_function: { product_function_count: 0 },
-      intervention: { has_open_health_plan: false }
+      skipped: false,
+      packets: [{
+        metadata: { deployment_id: DEP_A },
+        current_state: { current_health: 'Green', deployment_stage: 'Deploy', current_mtp: '' },
+        health_trajectory: { reconciliation: { health_current_matches_last_event_new_health: true } },
+        schedule_trajectory: { parent_reconciliation_status: 'MATCH' },
+        product_function: { product_function_count: 0 },
+        intervention: { has_open_health_plan: false }
+      }]
     };
   };
   var artifact = S.CoreDeploymentSignalPersistence.buildDeploymentIntelligenceReadModel(
@@ -525,6 +611,98 @@ test('app isolation on intelligence sheet', () => {
   var latest = S.CoreDeploymentSignalPersistence.getLatestReadyDeploymentIntelligence(
     cfg, { store: store });
   assert.equal(latest, null);
+});
+
+test('baseline repair replaces artifact and preserves distribution state', () => {
+  var S = loadPlatform();
+  var store = S.CoreDeploymentSignalStore.createMemoryStore();
+  var cfg = S.CoreConfig.withDefaults(slgCfg());
+  var sheet = cfg.deploymentIntelligence.intelligenceRunsSheetName;
+  var headers = S.CoreDeploymentSignalStore.intelligenceRunHeaders();
+  var signalRunId = 'SLG-REPAIR-1';
+  var intelligenceRunId = 'INT-' + signalRunId;
+  S.CoreDeploymentSignalStore.appendRows(store, cfg.deploymentSignal.signalRunsSheetName,
+    S.CoreDeploymentSignalStore.runHeaders(), [{
+      signal_run_id: signalRunId,
+      signal_as_of: '2026-10-05',
+      run_status: S.CoreDeploymentSignalStore.RUN_STATUS_COMPLETE,
+      persistence_status: 'COMPLETE'
+    }]);
+  S.CoreDeploymentSignalStore.appendRows(store, sheet, headers, [{
+    intelligence_run_id: intelligenceRunId,
+    app_id: 'SLG',
+    signal_run_id: signalRunId,
+    as_of_date: '2026-10-05',
+    is_baseline: true,
+    intelligence_status: S.CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY,
+    artifact_schema_version: 'deployment-intelligence-v1',
+    artifact_json: JSON.stringify({
+      identity: { is_baseline: true },
+      portfolioPulse: { mtpWithin90Days: 0 }
+    }),
+    email_status: S.CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+    email_sent_at: '',
+    slack_status: S.CoreDeploymentSignalStore.SLACK_STATUS_PENDING,
+    slack_sent_at: '',
+    finalized_at: '2026-10-05T12:00:00Z',
+    updated_at: '2026-10-05T12:00:00Z'
+  }]);
+  var res = S.CoreDeploymentSignalPersistence.repairDeploymentIntelligenceBaselineRun(cfg, {
+    intelligence_run_id: intelligenceRunId,
+    signal_run_id: signalRunId,
+    store: store,
+    reasonCodes: ['MTP_DATE_NORMALIZATION_DEFECT']
+  });
+  assert.equal(res.ok, true);
+  assert.equal(res.validation.portfolio_pulse.mtpWithin90Days >= 0, true);
+  var rows = S.CoreDeploymentSignalStore.readBody(store, sheet);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].email_status, S.CoreDeploymentSignalStore.EMAIL_STATUS_PENDING);
+  assert.notEqual(rows[0].artifact_json.indexOf('portfolioPulse'), -1);
+});
+
+test('explicit test email send targets test recipient only', () => {
+  var S = loadPlatform();
+  var cfg = S.CoreConfig.withDefaults(slgCfg());
+  cfg.notable = { notify: { testEmail: 'test-recipient@example.test' } };
+  var store = S.CoreDeploymentSignalStore.createMemoryStore();
+  var sheet = cfg.deploymentIntelligence.intelligenceRunsSheetName;
+  var headers = S.CoreDeploymentSignalStore.intelligenceRunHeaders();
+  var intelligenceRunId = 'INT-EMAIL-1';
+  S.CoreDeploymentSignalStore.appendRows(store, sheet, headers, [{
+    intelligence_run_id: intelligenceRunId,
+    app_id: 'SLG',
+    signal_run_id: 'EMAIL-1',
+    as_of_date: '2026-10-05',
+    is_baseline: true,
+    intelligence_status: S.CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY,
+    artifact_schema_version: 'deployment-intelligence-v1',
+    artifact_json: JSON.stringify({
+      identity: { display_name: 'Test DI', is_baseline: true },
+      portfolioPulse: { totalActive: 1, greenPct: 100, yellowPct: 0, redPct: 0, mtpWithin90Days: 0 },
+      signalMovement: { leadership: { new: 0 } },
+      talkingPoints: [],
+      currentAttention: { redDeployments: 0, yellowDeployments: 0, continuingSignals: 0 },
+      links: { exploreDeploymentIntelligenceUrl: 'https://example.test/dm' },
+      distributionState: {
+        intelligence_status: S.CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY,
+        email_status: S.CoreDeploymentSignalStore.EMAIL_STATUS_PENDING
+      }
+    }),
+    email_status: S.CoreDeploymentSignalStore.EMAIL_STATUS_PENDING,
+    slack_status: S.CoreDeploymentSignalStore.SLACK_STATUS_PENDING
+  }]);
+  var sentTo = '';
+  S.GmailApp.sendEmail = function (to) { sentTo = to; };
+  var outcome = S.CoreNotify.processDeploymentIntelligenceEmailQueue(cfg, {
+    explicitTestSend: true,
+    intelligence_run_id: intelligenceRunId,
+    store: store
+  });
+  assert.equal(outcome.sentCount, 1);
+  assert.equal(sentTo, 'test-recipient@example.test');
+  var row = S.CoreDeploymentSignalStore.readBody(store, sheet)[0];
+  assert.equal(row.email_status, S.CoreDeploymentSignalStore.EMAIL_STATUS_SENT);
 });
 
 test('artifact parse from run row for Slack-ready consumption', () => {

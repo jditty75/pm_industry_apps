@@ -594,11 +594,14 @@ var CoreDeploymentSignalPersistence = {
       });
 
       priorCurrent = result.current || [];
+      var intelligenceFin = CoreDeploymentSignalPersistence
+        ._finalizeAfterSignalRunIfEnabled_(cfg, runId, options);
       processed.push({
         signal_run_id: runId,
         lifecycle_counts: result.lifecycle_counts,
         signals_persisted: result.signals_persisted,
-        email_status: emailHandoff.email_status
+        email_status: emailHandoff.email_status,
+        intelligence_finalization: intelligenceFin
       });
     }
 
@@ -1254,9 +1257,10 @@ var CoreDeploymentSignalPersistence = {
 
     var getPacketFn = options.getContextPacketForDeployment;
     if (!getPacketFn) {
+      var packetMap = CoreDeploymentSignalPersistence._buildPortfolioContextPacketMap_(cfg);
       getPacketFn = function (depId) {
-        return CoreDeploymentSignalPersistence._getProductionContextPacketForDeployment_(
-          cfg, depId);
+        var id = String(depId || '').trim();
+        return id ? (packetMap[id] || null) : null;
       };
     }
 
@@ -1439,13 +1443,29 @@ var CoreDeploymentSignalPersistence = {
         }
       }
 
+      var emailHandoff = null;
+      if (typeof CoreNotify !== 'undefined' &&
+          typeof CoreNotify.processDeploymentIntelligenceEmailQueue === 'function') {
+        try {
+          emailHandoff = CoreNotify.processDeploymentIntelligenceEmailQueue(cfg, {
+            productionSend: true,
+            intelligence_run_id: intelligenceRunId,
+            store: options.store
+          });
+        } catch (emailErr) {
+          Logger.log('CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun: ' +
+            'email handoff failed ' + emailErr);
+        }
+      }
+
       return {
         ok: true,
         idempotentReplay: false,
         intelligence_run_id: intelligenceRunId,
         signal_run_id: signalRunId,
         run: row,
-        artifact: artifact
+        artifact: artifact,
+        email_handoff: emailHandoff
       };
     } catch (err) {
       Logger.log('CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun: ' + err);
@@ -1480,6 +1500,167 @@ var CoreDeploymentSignalPersistence = {
    * @param {Object=} options { store }
    * @return {Object|null}
    */
+  /**
+   * Idempotent finalization hook after a Signal run reaches COMPLETE (SUBMITTED processor).
+   *
+   * @param {AppConfig} appConfig
+   * @param {string} signalRunId
+   * @param {Object=} options { store }
+   * @return {Object}
+   */
+  finalizeDeploymentIntelligenceForCompletedSignalRun: function (appConfig, signalRunId, options) {
+    return CoreDeploymentSignalPersistence._finalizeAfterSignalRunIfEnabled_(
+      appConfig, signalRunId, options || {});
+  },
+
+  /**
+   * Controlled maintenance repair for an existing READY baseline intelligence row.
+   * Rebuilds artifact_json with current shared logic; preserves distribution state.
+   *
+   * @param {AppConfig} appConfig
+   * @param {Object} options
+   * @param {string} options.intelligence_run_id required
+   * @param {string} options.signal_run_id required
+   * @param {Array<string>=} options.reasonCodes audit reason codes
+   * @param {Object=} options.store in-memory test store
+   * @return {Object}
+   */
+  repairDeploymentIntelligenceBaselineRun: function (appConfig, options) {
+    options = options || {};
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    if (!CoreConfig.isDeploymentIntelligenceEnabled(cfg)) {
+      return CoreDeploymentSignalPersistence._fail_('Deployment Intelligence is not enabled');
+    }
+
+    var intelligenceRunId = String(options.intelligence_run_id || '').trim();
+    var signalRunId = String(options.signal_run_id || '').trim();
+    if (!intelligenceRunId || !signalRunId) {
+      return CoreDeploymentSignalPersistence._fail_(
+        'intelligence_run_id and signal_run_id are required');
+    }
+    if (intelligenceRunId !== 'INT-' + signalRunId) {
+      return CoreDeploymentSignalPersistence._fail_(
+        'intelligence_run_id must equal INT-{signal_run_id}');
+    }
+
+    var rows = CoreDeploymentSignalPersistence._readIntelligenceRows_(cfg, options.store);
+    var target = null;
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (String(rows[i].intelligence_run_id || '').trim() === intelligenceRunId) {
+        target = rows[i];
+        break;
+      }
+    }
+    if (!target) {
+      return CoreDeploymentSignalPersistence._fail_('target intelligence row not found');
+    }
+    if (String(target.signal_run_id || '').trim() !== signalRunId) {
+      return CoreDeploymentSignalPersistence._fail_('signal_run_id mismatch on target row');
+    }
+    if (target.is_baseline !== true && String(target.is_baseline).toUpperCase() !== 'TRUE') {
+      return CoreDeploymentSignalPersistence._fail_('target row is not baseline');
+    }
+    if (String(target.intelligence_status) !== CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY) {
+      return CoreDeploymentSignalPersistence._fail_('target row is not READY');
+    }
+
+    var runRows = CoreDeploymentSignalPersistence._readRunRows_(cfg, options.store);
+    var signalRun = CoreDeploymentSignalStore.findLatestRunRow(runRows, signalRunId);
+    if (!signalRun ||
+        String(signalRun.run_status) !== CoreDeploymentSignalStore.RUN_STATUS_COMPLETE) {
+      return CoreDeploymentSignalPersistence._fail_('COMPLETE signal run required for repair');
+    }
+
+    var priorSchema = String(target.artifact_schema_version || '').trim();
+    var priorFinalized = String(target.finalized_at || target.updated_at || '').trim();
+    var reasonCodes = (options.reasonCodes || [
+      'MTP_DATE_NORMALIZATION_DEFECT',
+      'LEADERSHIP_STEWARDSHIP_FILTER_REFINEMENT',
+      'CONTEXT_RESOLVER_BATCH_FIX'
+    ]).map(function (c) { return String(c || '').trim(); }).filter(Boolean);
+
+    var preservedEmailStatus = String(target.email_status || '').trim() ||
+      CoreDeploymentSignalStore.EMAIL_STATUS_PENDING;
+    var preservedSlackStatus = String(target.slack_status || '').trim() ||
+      CoreDeploymentSignalStore.SLACK_STATUS_PENDING;
+
+    try {
+      var artifact = CoreDeploymentSignalPersistence.buildDeploymentIntelligenceReadModel(
+        cfg, signalRun, options);
+      var nowIso = new Date().toISOString();
+      var patch = {
+        intelligence_run_id: intelligenceRunId,
+        app_id: String(cfg.appId || '').trim(),
+        signal_run_id: signalRunId,
+        as_of_date: artifact.identity.as_of_date,
+        is_baseline: true,
+        intelligence_status: CoreDeploymentSignalStore.INTELLIGENCE_STATUS_READY,
+        artifact_schema_version: artifact.identity.artifact_schema_version,
+        artifact_json: JSON.stringify(artifact),
+        email_status: preservedEmailStatus,
+        email_sent_at: String(target.email_sent_at || '').trim(),
+        slack_status: preservedSlackStatus,
+        slack_sent_at: String(target.slack_sent_at || '').trim(),
+        finalized_at: priorFinalized || nowIso,
+        updated_at: nowIso
+      };
+
+      var sheetName = cfg.deploymentIntelligence.intelligenceRunsSheetName;
+      var headers = CoreDeploymentSignalStore.intelligenceRunHeaders();
+      var updated = false;
+      if (options.store) {
+        updated = CoreDeploymentSignalStore.updateIntelligenceRowInStore(
+          options.store, sheetName, intelligenceRunId, patch);
+      } else {
+        var lock = LockService.getDocumentLock();
+        if (!lock.tryLock(30000)) {
+          return CoreDeploymentSignalPersistence._fail_('could not acquire document lock');
+        }
+        try {
+          CoreDeploymentSignalPersistence.initializeDeploymentIntelligenceSheets(cfg);
+          var ss = SpreadsheetApp.getActiveSpreadsheet();
+          var sh = ss.getSheetByName(sheetName);
+          updated = CoreDeploymentSignalStore.updateIntelligenceRowByIntelligenceRunId(
+            sh, headers, intelligenceRunId, patch);
+        } finally {
+          lock.releaseLock();
+        }
+      }
+      if (!updated) {
+        return CoreDeploymentSignalPersistence._fail_('could not update baseline intelligence row');
+      }
+
+      Logger.log('CoreDeploymentSignalPersistence.repairDeploymentIntelligenceBaselineRun: ' +
+        JSON.stringify({
+          intelligence_run_id: intelligenceRunId,
+          signal_run_id: signalRunId,
+          prior_schema_version: priorSchema,
+          prior_finalized_at: priorFinalized,
+          repair_at: nowIso,
+          reason_codes: reasonCodes,
+          validation: CoreDeploymentSignalPersistence._sanitizedRepairValidation_(artifact)
+        }));
+
+      return {
+        ok: true,
+        intelligence_run_id: intelligenceRunId,
+        signal_run_id: signalRunId,
+        run: patch,
+        artifact: artifact,
+        audit: {
+          prior_schema_version: priorSchema,
+          prior_finalized_at: priorFinalized,
+          repair_at: nowIso,
+          reason_codes: reasonCodes
+        },
+        validation: CoreDeploymentSignalPersistence._sanitizedRepairValidation_(artifact)
+      };
+    } catch (err) {
+      Logger.log('CoreDeploymentSignalPersistence.repairDeploymentIntelligenceBaselineRun: ' + err);
+      return CoreDeploymentSignalPersistence._fail_(String(err));
+    }
+  },
+
   getLatestReadyDeploymentIntelligence: function (appConfig, options) {
     options = options || {};
     var cfg = CoreConfig.withDefaults(appConfig || {});
@@ -1642,7 +1823,9 @@ var CoreDeploymentSignalPersistence = {
       if (h !== 'Green') {
         var mtpRaw = r.currentMtp || r.goLiveDate || r.mtpDate || '';
         if (!mtpRaw) return;
-        var days = TrajectoryMetrics.signedDaysBetween(todayStr, String(mtpRaw).slice(0, 10));
+        var mtpKey = CoreUtils.toCalendarDateKey(mtpRaw, tz);
+        if (!mtpKey) return;
+        var days = TrajectoryMetrics.signedDaysBetween(todayStr, mtpKey);
         if (days !== null && days >= 0 && days <= 90) ids[depId] = true;
       }
     });
@@ -1661,6 +1844,10 @@ var CoreDeploymentSignalPersistence = {
       var analyzed = CoreDeploymentDataStewardship.analyzePacket(packet);
       (analyzed.deployment_data_stewardship || []).forEach(function (cond) {
         if (String(cond.lane) !== CoreDeploymentDataStewardship.LANE_STEWARDSHIP) return;
+        if (!CoreDeploymentSignalPersistence._isLeadershipActionableStewardshipCode_(
+            cond.condition_code)) {
+          return;
+        }
         items.push({
           deployment_id: depId,
           condition_code: cond.condition_code,
@@ -1686,6 +1873,53 @@ var CoreDeploymentSignalPersistence = {
       if (it.deployment_id) set[it.deployment_id] = true;
     });
     return Object.keys(set);
+  },
+
+  /**
+   * One portfolio context build indexed by deployment id (avoids N full source ingests).
+   *
+   * @param {AppConfig} cfg
+   * @return {Object<string, Object>}
+   * @private
+   */
+  _buildPortfolioContextPacketMap_: function (cfg) {
+    var map = {};
+    if (typeof CoreDeploymentSignalContext === 'undefined' ||
+        typeof CoreDeploymentSignalContext.buildDeploymentSignalPortfolioContext !== 'function') {
+      return map;
+    }
+    try {
+      var bundle = CoreDeploymentSignalContext.buildDeploymentSignalPortfolioContext(cfg, {});
+      if (bundle && bundle.skipped) return map;
+      (bundle.packets || []).forEach(function (pkt) {
+        var id = pkt.metadata && String(pkt.metadata.deployment_id || '').trim();
+        if (id) map[id] = pkt;
+      });
+    } catch (err) {
+      Logger.log('CoreDeploymentSignalPersistence._buildPortfolioContextPacketMap_: ' + err);
+    }
+    return map;
+  },
+
+  /**
+   * Stewardship codes leadership should treat as system-of-record cleanup (not extract QA noise).
+   *
+   * @param {string} code
+   * @return {boolean}
+   * @private
+   */
+  _isLeadershipActionableStewardshipCode_: function (code) {
+    var c = String(code || '').trim();
+    if (!c) return false;
+    var actionable = {
+      CURRENT_MTP_MISSING: true,
+      HEALTH_STATE_RECONCILIATION_MISMATCH: true,
+      PF_COMPLETE_STAGE_NOT_TERMINAL: true,
+      PARENT_MTP_RECONCILIATION_MISMATCH: true,
+      OPEN_HEALTH_PLAN_STALE_MAINTENANCE: true,
+      INTERVENTION_HEALTH_STATUS_DIVERGENCE: true
+    };
+    return !!actionable[c];
   },
 
   /**
@@ -2054,6 +2288,96 @@ var CoreDeploymentSignalPersistence = {
    * @param {string} errorMessage
    * @private
    */
+  /**
+   * @param {AppConfig} cfg
+   * @param {string} signalRunId
+   * @param {Object=} options
+   * @return {Object}
+   * @private
+   */
+  _finalizeAfterSignalRunIfEnabled_: function (cfg, signalRunId, options) {
+    options = options || {};
+    if (typeof CoreConfig.isDeploymentIntelligenceEnabled !== 'function' ||
+        !CoreConfig.isDeploymentIntelligenceEnabled(cfg)) {
+      return { ok: true, skipped: true, reason: 'disabled' };
+    }
+    try {
+      return CoreDeploymentSignalPersistence.finalizeDeploymentIntelligenceRun(cfg, {
+        signal_run_id: signalRunId,
+        store: options.store
+      });
+    } catch (err) {
+      Logger.log('CoreDeploymentSignalPersistence._finalizeAfterSignalRunIfEnabled_: ' + err);
+      return { ok: false, error: String(err) };
+    }
+  },
+
+  /**
+   * Aggregate validation summary for baseline repair (no IDs/names).
+   *
+   * @param {Object} artifact
+   * @return {Object}
+   * @private
+   */
+  _sanitizedRepairValidation_: function (artifact) {
+    artifact = artifact || {};
+    var pulse = artifact.portfolioPulse || {};
+    var movement = artifact.signalMovement || {};
+    var raw = movement.raw || {};
+    var leadership = movement.leadership || {};
+    var dc = artifact.dataConfidence || artifact.dataConfidenceSummary || {};
+    var dcSummary = dc.summary || dc;
+    var items = dcSummary.items || [];
+    var stewardshipCodes = {};
+    items.forEach(function (it) {
+      var code = String(it.condition_code || '').trim();
+      if (code) stewardshipCodes[code] = (stewardshipCodes[code] || 0) + 1;
+    });
+    return {
+      portfolio_pulse: {
+        totalActive: pulse.totalActive || 0,
+        greenPct: pulse.greenPct || 0,
+        yellowPct: pulse.yellowPct || 0,
+        redPct: pulse.redPct || 0,
+        mtpWithin90Days: pulse.mtpWithin90Days || 0
+      },
+      signal_movement: {
+        raw_new: raw.new || 0,
+        leadership_new: leadership.new || 0,
+        talking_points: (artifact.talkingPoints || []).length
+      },
+      is_baseline: !!(artifact.identity && artifact.identity.is_baseline),
+      data_requiring_attention: {
+        leadership_visible_deployments: dcSummary.leadershipVisibleDeploymentCount || 0,
+        deployments_with_stewardship: dcSummary.deploymentsWithStewardshipCount || 0,
+        stewardship_code_counts: stewardshipCodes
+      },
+      distribution: artifact.distributionState || {}
+    };
+  },
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {string} intelligenceRunId
+   * @param {Object} patch
+   * @param {Object=} store
+   * @return {boolean}
+   */
+  updateIntelligenceRunRow: function (cfg, intelligenceRunId, patch, store) {
+    cfg = CoreConfig.withDefaults(cfg || {});
+    var sheetName = cfg.deploymentIntelligence.intelligenceRunsSheetName;
+    var headers = CoreDeploymentSignalStore.intelligenceRunHeaders();
+    if (store) {
+      return CoreDeploymentSignalStore.updateIntelligenceRowInStore(
+        store, sheetName, intelligenceRunId, patch);
+    }
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh) return false;
+    return CoreDeploymentSignalStore.updateIntelligenceRowByIntelligenceRunId(
+      sh, headers, intelligenceRunId, patch);
+  },
+
   _tryUpdateRunFailed_: function (io, runId, errorMessage) {
     try {
       io.updateRun(runId, {

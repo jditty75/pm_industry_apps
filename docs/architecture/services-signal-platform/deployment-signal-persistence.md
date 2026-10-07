@@ -186,6 +186,10 @@ Sana Deployment Intelligence distribution agent:
 4. Distribute when `slack_status = PENDING` (set `slack_sent_at` / `slack_status` after post via Sana-owned process).
 5. Do not recalculate KPIs, lifecycle, or stewardship — render from the artifact only.
 
+**Workbook write-back (Sana-owned):** after successful Slack post, update the matching `Deployment_Intelligence_Runs` row: `slack_status` → `SENT`, `slack_sent_at` → ISO timestamp. Do not modify `artifact_json`, Signal sheets, or email fields. GAS does not implement Slack.
+
+**Product:** Deployment Intelligence gives leadership weekly portfolio talking points — where the portfolio is, what changed, what matters, relevant system-of-record confidence issues on leadership-visible deployments, and where to investigate in Deployment Manager. Email (GAS) and Slack (Sana) are delivery surfaces; DM is the investigative surface.
+
 ### APIs
 
 | API | Role |
@@ -193,10 +197,13 @@ Sana Deployment Intelligence distribution agent:
 | `initializeDeploymentIntelligenceSheets` | Header provisioning |
 | `buildDeploymentIntelligenceReadModel` | Pure artifact builder (tests/previews) |
 | `finalizeDeploymentIntelligenceRun` | Persist READY row |
+| `finalizeDeploymentIntelligenceForCompletedSignalRun` | Auto-finalize after COMPLETE Signal run |
+| `repairDeploymentIntelligenceBaselineRun` | Controlled baseline artifact repair (maintenance) |
 | `getLatestReadyDeploymentIntelligence` | Latest READY row per app |
 | `parseArtifactFromRunRow` | Parse `artifact_json` |
 | `CorePortfolioHealth.buildDeploymentIntelligencePortfolioPulse` | Deterministic KPIs |
 | `CoreNotify.buildDeploymentIntelligenceEmailHtml` | Leadership email HTML |
+| `CoreNotify.processDeploymentIntelligenceEmailQueue` | Weekly/test email delivery (GAS) |
 | `CoreConfig.buildDeploymentManagerInvestigationUrl` | DM deep links |
 
 ## Weekly Signal email handoff (leadership Signals)

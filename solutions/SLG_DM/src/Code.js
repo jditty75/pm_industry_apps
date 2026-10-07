@@ -314,6 +314,55 @@ function debugDeploymentTrajectoryForDeployment(deploymentId) {
   return result;
 }
 
+/**
+ * Provisions Deployment Signal persistence sheets (headers only; idempotent).
+ *
+ * @return {Object}
+ */
+function initializeSlgDeploymentSignalSheets() {
+  var result = CoreLib.CoreDeploymentSignalPersistence.initializeSignalSheets(APP_CONFIG);
+  Logger.log('initializeSlgDeploymentSignalSheets: ' + JSON.stringify(result));
+  return result;
+}
+
+/**
+ * Persists an approved weekly Signal run (sole supported write path).
+ *
+ * @param {Object} runInput Approved substantive records + signal_run_id metadata
+ * @return {Object}
+ */
+function persistApprovedSlgSignalRun(runInput) {
+  var result = CoreLib.CoreDeploymentSignalPersistence.persistApprovedSlgSignalRun(
+    APP_CONFIG, runInput);
+  Logger.log('persistApprovedSlgSignalRun: ' + JSON.stringify(result));
+  return result;
+}
+
+/**
+ * @param {Object=} options deploymentId, activeOnly
+ * @return {Array<Object>}
+ */
+function getCurrentSlgDeploymentSignals(options) {
+  return CoreLib.CoreDeploymentSignalPersistence.getCurrentSlgDeploymentSignals(
+    APP_CONFIG, options || {});
+}
+
+/**
+ * @param {Object=} options deploymentId, signalRunId, limit
+ * @return {Array<Object>}
+ */
+function getSlgDeploymentSignalHistory(options) {
+  return CoreLib.CoreDeploymentSignalPersistence.getSlgDeploymentSignalHistory(
+    APP_CONFIG, options || {});
+}
+
+/**
+ * @return {Object|null}
+ */
+function getLatestApprovedSlgSignalRun() {
+  return CoreLib.CoreDeploymentSignalPersistence.getLatestApprovedSlgSignalRun(APP_CONFIG);
+}
+
 // ============================================================================
 // 4. DEBUG HELPERS (OPTIONAL, LOCAL IMPLEMENTATIONS)
 // ============================================================================

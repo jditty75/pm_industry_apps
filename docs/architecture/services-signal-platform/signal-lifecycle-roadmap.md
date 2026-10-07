@@ -1,6 +1,6 @@
-# Signal lifecycle roadmap (design only)
+# Signal lifecycle (SLG persistence)
 
-No production persistence in the pilot closeout phase.
+Implemented in `CoreDeploymentSignalLifecycle` for SLG approved weekly runs. See [deployment-signal-persistence.md](./deployment-signal-persistence.md).
 
 ## Lifecycle states
 
@@ -11,7 +11,7 @@ No production persistence in the pilot closeout phase.
 | `ESCALATED` | What became more important (attention, scope, or evidence)? |
 | `DE_ESCALATED` | What became less important while still tracked? |
 | `RESOLVED` | What closed or no longer merits attention? |
-| `POSITIVE` | What materially improved or stabilized in a leadership-relevant way? |
+| *(attention `POSITIVE`)* | Portfolio-relative **attention** level — not a `lifecycle_state` (email/DM sections use `attention` + `DE_ESCALATED` / `CONTINUING`) |
 
 Recurring reporting must answer: what is new, what continues, what escalated/de-escalated, what resolved, and what improved.
 

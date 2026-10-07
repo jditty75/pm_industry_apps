@@ -1299,6 +1299,21 @@ var CoreConfig = (function () {
     if (cfg.deploymentSignal.schemaVersion === undefined) {
       cfg.deploymentSignal.schemaVersion = 2;
     }
+    if (cfg.deploymentSignal.persistenceEnabled === undefined) {
+      cfg.deploymentSignal.persistenceEnabled = false;
+    }
+    if (!cfg.deploymentSignal.signalsSheetName) {
+      cfg.deploymentSignal.signalsSheetName = 'Deployment_Signals';
+    }
+    if (!cfg.deploymentSignal.signalHistorySheetName) {
+      cfg.deploymentSignal.signalHistorySheetName = 'Deployment_Signal_History';
+    }
+    if (!cfg.deploymentSignal.signalRunsSheetName) {
+      cfg.deploymentSignal.signalRunsSheetName = 'Deployment_Signal_Runs';
+    }
+    if (!cfg.deploymentSignal.signalRecordSchemaVersion) {
+      cfg.deploymentSignal.signalRecordSchemaVersion = 'deployment-signal-v1';
+    }
 
     return cfg;
   }

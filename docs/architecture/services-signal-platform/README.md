@@ -17,9 +17,9 @@ Stage 1 — Sana candidate discovery (manual; 184 → 17 accepted pilot)
         ↓
 Stage 2 — portfolio compression + Data Stewardship (deterministic harness → manual Sana)
         ↓
-Post-reasoning normalization → deployment-signal-v1 (documented only)
+Post-reasoning normalization → deployment-signal-v1 (SLG persistence — GAS)
         ↓
-Signal lifecycle → leadership experiences / drill-down in DM
+Signal lifecycle → leadership email (future) / Deployment Manager (future UI)
 ```
 
 **Pilot closeout:** [pilot-closeout.md](./pilot-closeout.md) (184 → 17 → 11 accepted result).
@@ -55,8 +55,9 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 | [pilot-closeout.md](./pilot-closeout.md) | Accepted pilot outcome, scorecard, conclusion |
 | [ai-reasoning-contract.md](./ai-reasoning-contract.md) | Preferred concise AI instruction + boundary |
 | [deployment-signal-domain.md](./deployment-signal-domain.md) | Trajectory v2 sheets, sources, grain, limitations |
-| [structured-signals-contract.md](./structured-signals-contract.md) | `deployment-signal-v1` planned shape (no storage yet) |
-| [signal-lifecycle-roadmap.md](./signal-lifecycle-roadmap.md) | NEW/CONTINUING/ESCALATED/… design |
+| [structured-signals-contract.md](./structured-signals-contract.md) | `deployment-signal-v1` field contract |
+| [deployment-signal-persistence.md](./deployment-signal-persistence.md) | SLG sheets, APIs, Sana handoff, lifecycle |
+| [signal-lifecycle-roadmap.md](./signal-lifecycle-roadmap.md) | Lifecycle semantics + POSITIVE modeling |
 | [weekly-operating-governance-model.md](./weekly-operating-governance-model.md) | Daily/weekly cadence, approval boundary, email + DM consumption |
 | [llm-guardrails.md](./llm-guardrails.md) | Evidence/safety guardrails (companion to AI contract) |
 | [data-stewardship-rule-audit.md](./data-stewardship-rule-audit.md) | Stewardship rule precision audit |
@@ -76,9 +77,10 @@ The production **HENP Exec Summary_GAS** Sauna agent (daily 7:00 AM, per-industr
 |-------|----------|
 | Trajectory engine | `libraries/DepMngr/src/CoreDeploymentTrajectory*.js` |
 | Context Assembler | `libraries/DepMngr/src/CoreDeploymentSignalContext.js` |
-| Defaults / gating | `libraries/DepMngr/src/CoreConfig.js` (`deploymentSignal`, schema version **2**) |
+| Signal persistence | `CoreDeploymentSignalPersistence.js`, `CoreDeploymentSignalNormalize.js`, `CoreDeploymentSignalLifecycle.js` |
+| Defaults / gating | `libraries/DepMngr/src/CoreConfig.js` (`deploymentSignal`, schema version **2**, `persistenceEnabled` default **false**) |
 | Local packet / harness | `scripts/generate-deployment-signal-context-packets.py`, `scripts/deployment-signal-portfolio-pilot-harness.py`, `scripts/deployment-signal-stage2-harness.py` |
 | Data Stewardship | `CoreDeploymentDataStewardship.js`, `deployment_trajectory_validation/data_stewardship.py` |
-| SLG pilot enablement | `solutions/SLG_DM/src/Config_SLG.js`, `Code.js` (`refreshDeploymentTrajectory`) |
-| Tests | `libraries/DepMngr/test/deployment-trajectory-*.test.js`, `pf-history-export-analysis.test.js` |
+| SLG pilot enablement | `solutions/SLG_DM/src/Config_SLG.js`, `Code.js` (trajectory + `persistApprovedSlgSignalRun`) |
+| Tests | `deployment-signal-persistence.test.js`, `deployment-trajectory-*.test.js`, `deployment-signal-*.test.js` |
 | Local PF history diagnostic | `scripts/diagnose-deployment-trajectory-pf-history.js` |

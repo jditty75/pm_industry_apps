@@ -55,7 +55,7 @@ These are **guardrails**, not a deterministic scoring model.
 |-------|------|
 | GAS / Context Assembler | Facts, trajectory, evidence quality, stewardship detection, traceability |
 | AI | Strategic interpretation, portfolio-relative attention, leadership questions |
-| Post-reasoning normalizer (future) | Validate and map prose → `deployment-signal-v1` |
+| Post-reasoning normalizer (GAS) | `CoreDeploymentSignalNormalize` → `deployment-signal-v1` ([deployment-signal-persistence.md](./deployment-signal-persistence.md)) |
 
 ## Superseded (audit only)
 

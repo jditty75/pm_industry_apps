@@ -41,6 +41,7 @@ var APP_CONFIG = {
 
   deploymentSignal: {
     enabled: true,
+    persistenceEnabled: true,
     trajectorySheetName: 'Deployment_Trajectory',
     actionHistorySheetName: 'SFDC_DHPActionHistory',
     healthEventsSheetName: 'Deployment_Trajectory_HealthEvents',
@@ -48,7 +49,11 @@ var APP_CONFIG = {
     actionHistoryIndexSheetName: 'Deployment_Trajectory_ActionHistory_Index',
     productFunctionsSheetName: 'SFDC_DeploymentProductFunctions',
     productFunctionHistorySheetName: 'SFDC_DeploymentProductFunctionHistory',
-    schemaVersion: 2
+    signalsSheetName: 'Deployment_Signals',
+    signalHistorySheetName: 'Deployment_Signal_History',
+    signalRunsSheetName: 'Deployment_Signal_Runs',
+    schemaVersion: 2,
+    signalRecordSchemaVersion: 'deployment-signal-v1'
   },
   
   sheets: {

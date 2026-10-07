@@ -1,43 +1,29 @@
-# deployment-signal-v1 (structured contract — design only)
+# deployment-signal-v1 (structured contract)
 
-No production storage in the pilot closeout. Reasoning quality comes first; persistence follows via a **normalizer / validator** after AI output.
+Implemented for **SLG** persistence. See [deployment-signal-persistence.md](./deployment-signal-persistence.md) for sheets, APIs, and governance.
 
-## Design decision
-
-Do not constrain reasoning excessively to ease persistence. Flow:
+## Flow
 
 ```text
-AI reasoning output → normalizer / validator → deployment-signal-v1
+AI substantive output → CoreDeploymentSignalNormalize → lifecycle (CoreDeploymentSignalLifecycle)
+  → persistApprovedSlgSignalRun → Deployment_Signals / History / Runs
 ```
 
-Preserve original AI prose in an audit field where useful.
+Preserve original AI prose in `reasoning_prose_original` when supplied.
 
-## Schema (planned)
+## Substantive fields (Sana)
 
-| Field | Purpose |
-|-------|---------|
-| `schema_version` | `deployment-signal-v1` |
-| `deployment_id` | Deployment identifier |
-| `reasoning_run_id` | Stable id for the weekly (or event) Signal Agent run that produced this record |
-| `generated_at` | ISO timestamp |
-| `attention` | `HIGH` \| `WATCH` \| `INFORMATIONAL` \| `POSITIVE` (portfolio-relative) |
-| `signal_type` | Category: HEALTH, SCHEDULE, LIFECYCLE, INTERVENTION, COMPOUND, POSITIVE, etc. |
-| `observation` | Factual condition (deterministic-backed where possible) |
-| `evidence_summary` | Pointers / short summary of supporting trajectory context |
-| `interpretation` | AI strategic reading (not fact) |
-| `why_it_matters` | Leadership relevance |
-| `leadership_question` | Investigative prompt |
-| `confidence` | `HIGH` \| `MEDIUM` \| `LOW` (interpretive, not evidence_quality) |
-| `evidence_limitations` | Known gaps affecting interpretation |
-| `deterministic_context_ref` | Link to context packet / trace (e.g. deployment-signal-context-v1 id + checksum) |
-| `source_reasoning_run_ref` | Stage/run id, model agent version, input checksum |
-| `reasoning_prose_original` | Optional full AI text for audit |
-| `data_stewardship_present` | Whether stewardship conditions exist (boolean; details in stewardship lane) |
+- `deployment_id`, `attention`, `signal_type`, `observation`, `interpretation`, `why_it_matters`, `leadership_question`, `confidence`, `evidence_limitations`
+- Optional: `context_ref`, `reasoning_prose_original`, `current_health`, `stage`
+
+## System fields (GAS)
+
+- `schema_version` (`deployment-signal-v1`), `signal_id`, `signal_run_id`, `signal_as_of`, `generated_at`/`received_at`/`persisted_at`, `lifecycle_state`, `signal_status`, `source_reasoning_run_ref`, `prior_signal_id`, `normalization_version`
 
 ## Attention vs evidence quality
 
-- `evidence_quality.classification` in context packets is **deterministic** (HIGH/MEDIUM/LOW completeness).
-- Signal `confidence` is **interpretive** and assigned during reasoning or normalization — do not conflate.
+- Context packet `evidence_quality` is deterministic.
+- Signal `confidence` is interpretive — do not conflate.
 
 ## Related contracts
 

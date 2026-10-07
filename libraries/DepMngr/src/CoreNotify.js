@@ -17,7 +17,9 @@ var CoreNotify = (function () {
   var EM_TOKENS_ = ['emName', 'account', 'deploymentName', 'surveyType', 'eventDate', 'dd', 'daysUntil', 'mtpDate', 'contactList'];
   var DIGEST_TOKENS_ = ['ddName', 'upcomingList', 'windowDays', 'periodLabel'];
 
-  var SEED_KEYS_ = ['em_reminder_first', 'em_reminder_final', 'dd_digest'];
+  var SEED_KEYS_ = [
+    'em_reminder_first', 'em_reminder_final', 'dd_digest', 'deployment_intelligence_weekly'
+  ];
 
   // ---------------------------------------------------------------------------
   // Sheet helpers
@@ -1268,7 +1270,9 @@ var CoreNotify = (function () {
       var key = String(row.notificationKey || '').trim();
 
       if (!key) errors.push('missing notificationKey');
-      if (['em_reminder', 'dd_digest'].indexOf(type) < 0) errors.push('invalid type');
+      if (['em_reminder', 'dd_digest', 'deployment_intelligence'].indexOf(type) < 0) {
+        errors.push('invalid type');
+      }
 
       var enabledVal = row.enabled;
       if (enabledVal !== true && enabledVal !== false &&
@@ -1315,13 +1319,15 @@ var CoreNotify = (function () {
         if (sd !== '' && sd != null && isNaN(parseInt(sd, 10))) errors.push('sendDay must be numeric');
       }
 
-      var allowedTokens = type === 'dd_digest' ? DIGEST_TOKENS_ : EM_TOKENS_;
-      _extractTokens_(row.subject).forEach(function (t) {
-        if (allowedTokens.indexOf(t) < 0) errors.push('unknown token in subject: {{' + t + '}}');
-      });
-      _extractTokens_(row.bodyTemplate).forEach(function (t) {
-        if (allowedTokens.indexOf(t) < 0) errors.push('unknown token in body: {{' + t + '}}');
-      });
+      if (type !== 'deployment_intelligence') {
+        var allowedTokens = type === 'dd_digest' ? DIGEST_TOKENS_ : EM_TOKENS_;
+        _extractTokens_(row.subject).forEach(function (t) {
+          if (allowedTokens.indexOf(t) < 0) errors.push('unknown token in subject: {{' + t + '}}');
+        });
+        _extractTokens_(row.bodyTemplate).forEach(function (t) {
+          if (allowedTokens.indexOf(t) < 0) errors.push('unknown token in body: {{' + t + '}}');
+        });
+      }
 
       var fromAlias = String(row.fromAlias || '').trim();
       if (!fromAlias) {
@@ -1707,7 +1713,7 @@ var CoreNotify = (function () {
     sheet.getRange(startRow, col('enabled'), endRow, col('enabled')).setDataValidation(enabledRule);
 
     var typeRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(['em_reminder', 'dd_digest'], true).build();
+      .requireValueInList(['em_reminder', 'dd_digest', 'deployment_intelligence'], true).build();
     sheet.getRange(startRow, col('type'), endRow, col('type')).setDataValidation(typeRule);
 
     var roleRule = SpreadsheetApp.newDataValidation()
@@ -1728,7 +1734,7 @@ var CoreNotify = (function () {
     var fromAlias = cfg.notify.allowedFromAliases[0] || 'jeffrey.ditty@workday.com';
     var testTo = cfg.notify.testDefaultRecipient || 'jeffrey.ditty@workday.com';
 
-    return [
+    var rows = [
       [
         'em_reminder_first', 'FALSE', 'em_reminder', 'engagementManager', testTo, '',
         fromAlias, '', 10, 3, '', '', '',
@@ -1756,6 +1762,18 @@ var CoreNotify = (function () {
         ''
       ]
     ];
+    if (CoreConfig.isDeploymentIntelligenceEnabled(cfg)) {
+      var diLabel = (cfg.deploymentIntelligence && cfg.deploymentIntelligence.displayName) ||
+        'Deployment Intelligence';
+      rows.push([
+        'deployment_intelligence_weekly', 'FALSE', 'deployment_intelligence', '', testTo, '',
+        fromAlias, '', '', '', '', '', '',
+        diLabel + ' — weekly',
+        '',
+        ''
+      ]);
+    }
+    return rows;
   }
 
   /**

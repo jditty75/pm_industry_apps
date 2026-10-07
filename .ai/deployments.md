@@ -276,3 +276,16 @@ Append-only release records. Deployment IDs match per-app `gas.config.json` (not
 - Result: success
 - Note: Apps Script **HEAD** / development source was not reverted by this rollback; only the configured production deployment was repointed.
 - CLASP user: jeffrey.ditty@workday.com
+
+### 2026-10-07 — SLG_DM — deploy
+
+- Git source: `d270121` (+ CoreNotify NotificationConfig seed for Deployment Intelligence weekly rule; GAS CoreLib 154)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: 197
+- Live GAS version: 198
+- Production URL: https://script.google.com/a/macros/workday.com/s/AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA/exec
+- Description: Deployment Intelligence v1 activation — CoreLib pin 154 (scoped SLG only)
+- Verification: DepMngr 165/165 local; SLG clasp push; production deploy @198; workbook baseline finalization deferred to bound-script editor (container requires active spreadsheet)
+- Result: partial (deploy complete; intelligence workbook steps pending editor)
+- Authorized by: User (Deployment Intelligence v1 production activation task, 2026-10-07)
+- CLASP user: jeffrey.ditty@workday.com

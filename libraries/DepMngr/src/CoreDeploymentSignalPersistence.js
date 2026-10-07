@@ -152,10 +152,95 @@ var CoreDeploymentSignalPersistence = {
     var depFilter = String(options.deploymentId || '').trim();
     var activeOnly = options.activeOnly !== false;
     return rows.filter(function (r) {
-      if (activeOnly && r.signal_status !== 'ACTIVE') return false;
+      if (activeOnly &&
+          !CoreDeploymentSignalPersistence._isActiveSignalStatus_(r.signal_status)) {
+        return false;
+      }
       if (depFilter && String(r.deployment_id) !== depFilter) return false;
       return true;
     });
+  },
+
+  /**
+   * Aggregate read-model diagnostics for Signals UI (counts only; no customer data).
+   *
+   * @param {AppConfig} appConfig
+   * @param {Object=} viewModeOpts
+   * @param {Object=} productOpts
+   * @param {Object=} options { store }
+   * @return {Object}
+   */
+  diagnoseDeploymentSignalsLandingReadModel: function (
+    appConfig, viewModeOpts, productOpts, options) {
+    options = options || {};
+    var cfg = CoreConfig.withDefaults(appConfig || {});
+    var out = {
+      ok: true,
+      uiEnabled: CoreConfig.isDeploymentSignalsUiEnabled(cfg),
+      persistenceEnabled: CoreDeploymentSignalPersistence.isEnabled(cfg),
+      signalSheetBodyRows: 0,
+      completeRunCount: 0,
+      rowsOnLatestCompleteRun: 0,
+      rowsPassingActiveStatus: 0,
+      scopedDeploymentIds: 0,
+      activeRowsMatchingScope: 0,
+      finalLandingRowCount: 0,
+      exclusions: {
+        notActiveStatus: 0,
+        outsideDeploymentScope: 0,
+        submittedStatus: 0
+      }
+    };
+    if (!out.uiEnabled) return out;
+
+    var allRows = CoreDeploymentSignalPersistence._readCurrentRows_(cfg, options.store);
+    out.signalSheetBodyRows = allRows.length;
+
+    var runRows = CoreDeploymentSignalPersistence._readRunRows_(cfg, options.store);
+    runRows.forEach(function (r) {
+      if (String(r.run_status) === CoreDeploymentSignalStore.RUN_STATUS_COMPLETE) {
+        out.completeRunCount++;
+      }
+    });
+    var latestRun = CoreDeploymentSignalPersistence.getLatestApprovedSlgSignalRun(
+      cfg, options);
+    if (latestRun) {
+      var runId = String(latestRun.signal_run_id || '').trim();
+      allRows.forEach(function (r) {
+        if (String(r.signal_run_id || '').trim() === runId) out.rowsOnLatestCompleteRun++;
+      });
+    }
+
+    var depIndex = CoreDeploymentSignalPersistence._buildDeploymentIndexForUi_(
+      cfg, viewModeOpts, productOpts);
+    if (depIndex.scopeIds) {
+      out.scopedDeploymentIds = Object.keys(depIndex.scopeIds).length;
+    }
+
+    allRows.forEach(function (r) {
+      var status = String(r.signal_status || '').trim();
+      if (status === CoreDeploymentSignalStore.SIGNAL_STATUS_SUBMITTED) {
+        out.exclusions.submittedStatus++;
+        return;
+      }
+      if (!CoreDeploymentSignalPersistence._isActiveSignalStatus_(status)) {
+        out.exclusions.notActiveStatus++;
+        return;
+      }
+      out.rowsPassingActiveStatus++;
+      if (depIndex.scopeIds &&
+          !CoreDeploymentSignalPersistence._signalMatchesUiScope_(
+            r.deployment_id, depIndex.scopeIds)) {
+        out.exclusions.outsideDeploymentScope++;
+        return;
+      }
+      out.activeRowsMatchingScope++;
+    });
+
+    var landing = CoreDeploymentSignalPersistence.getDeploymentSignalsLandingForUI(
+      cfg, viewModeOpts, productOpts, options);
+    out.finalLandingRowCount = landing && landing.signals ? landing.signals.length : 0;
+    return out;
   },
 
   /**
@@ -225,7 +310,8 @@ var CoreDeploymentSignalPersistence = {
     });
     if (scopeIds) {
       signals = signals.filter(function (s) {
-        return !!scopeIds[String(s.deployment_id || '').trim()];
+        return CoreDeploymentSignalPersistence._signalMatchesUiScope_(
+          s.deployment_id, scopeIds);
       });
     }
 
@@ -234,7 +320,8 @@ var CoreDeploymentSignalPersistence = {
         cfg, options.store, 40);
       if (scopeIds) {
         resolved = resolved.filter(function (s) {
-          return !!scopeIds[String(s.deployment_id || '').trim()];
+          return CoreDeploymentSignalPersistence._signalMatchesUiScope_(
+            s.deployment_id, scopeIds);
         });
       }
       var seen = {};
@@ -1017,7 +1104,8 @@ var CoreDeploymentSignalPersistence = {
   /** @private */
   _enrichSignalRowForUi_: function (row, depById) {
     row = row || {};
-    var dep = depById[String(row.deployment_id || '').trim()] || {};
+    var dep = CoreDeploymentSignalPersistence._lookupUiDeploymentRow_(
+        row.deployment_id, depById) || {};
     var conf = CoreDeploymentSignalNormalize.formatConfidenceForUi(
       row.confidence, row.confidence);
     return Object.assign({}, row, {
@@ -1067,6 +1155,72 @@ var CoreDeploymentSignalPersistence = {
   },
 
   /** @private */
+  /** @private */
+  _isActiveSignalStatus_: function (status) {
+    return String(status || '').trim() === CoreDeploymentSignalStore.SIGNAL_STATUS_ACTIVE;
+  },
+
+  /**
+   * Candidate deployment-id keys for UI scope/enrichment (canonical + 15-char prefix).
+   *
+   * @private
+   * @param {string} deploymentId
+   * @return {Array<string>}
+   */
+  _uiDeploymentIdKeys_: function (deploymentId) {
+    var raw = String(deploymentId || '').trim();
+    var keys = [];
+    if (!raw) return keys;
+    keys.push(raw);
+    if (typeof CoreData !== 'undefined' &&
+        typeof CoreData.canonicalDeploymentId === 'function') {
+      var canon = String(CoreData.canonicalDeploymentId(raw) || '').trim();
+      if (canon && keys.indexOf(canon) === -1) keys.push(canon);
+      if (canon.length >= 15) {
+        var p15 = canon.slice(0, 15);
+        if (keys.indexOf(p15) === -1) keys.push(p15);
+      }
+    } else if (raw.length >= 15) {
+      var p15raw = raw.slice(0, 15);
+      if (keys.indexOf(p15raw) === -1) keys.push(p15raw);
+    }
+    return keys;
+  },
+
+  /** @private */
+  _registerUiScopeDeployment_: function (row, scopeIds, byId) {
+    var candidates = [
+      row.deploymentId, row.deployment_id,
+      row.parentDeploymentId, row.parent_deployment_id
+    ];
+    candidates.forEach(function (candidate) {
+      CoreDeploymentSignalPersistence._uiDeploymentIdKeys_(candidate).forEach(function (key) {
+        scopeIds[key] = true;
+        if (!byId[key]) byId[key] = row;
+      });
+    });
+  },
+
+  /** @private */
+  _signalMatchesUiScope_: function (deploymentId, scopeIds) {
+    if (!scopeIds) return true;
+    var keys = CoreDeploymentSignalPersistence._uiDeploymentIdKeys_(deploymentId);
+    for (var i = 0; i < keys.length; i++) {
+      if (scopeIds[keys[i]]) return true;
+    }
+    return false;
+  },
+
+  /** @private */
+  _lookupUiDeploymentRow_: function (deploymentId, byId) {
+    byId = byId || {};
+    var keys = CoreDeploymentSignalPersistence._uiDeploymentIdKeys_(deploymentId);
+    for (var i = 0; i < keys.length; i++) {
+      if (byId[keys[i]]) return byId[keys[i]];
+    }
+    return null;
+  },
+
   _buildDeploymentIndexForUi_: function (cfg, viewModeOpts, productOpts) {
     var byId = {};
     var scopeIds = null;
@@ -1079,10 +1233,7 @@ var CoreDeploymentSignalPersistence = {
         if (Array.isArray(rows)) {
           scopeIds = {};
           rows.forEach(function (r) {
-            var id = String(r.deploymentId || r.deployment_id || '').trim();
-            if (!id) return;
-            scopeIds[id] = true;
-            byId[id] = r;
+            CoreDeploymentSignalPersistence._registerUiScopeDeployment_(r, scopeIds, byId);
           });
         }
       }

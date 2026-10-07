@@ -632,6 +632,24 @@ function getDeploymentSignalsLandingForUI(viewModeOpts, productOpts, options) {
 }
 
 /**
+ * Aggregate Signals landing read-model diagnostics (counts only; safe for production logs).
+ *
+ * @param {Object=} viewModeOpts
+ * @param {Object=} productOpts
+ * @return {Object}
+ */
+function diagnoseSlgDeploymentSignalsLanding(viewModeOpts, productOpts) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  try {
+    return CoreLib.CoreDeploymentSignalPersistence.diagnoseDeploymentSignalsLandingReadModel(
+      cfg, viewModeOpts || {}, productOpts || {}, {});
+  } catch (err) {
+    Logger.log('diagnoseSlgDeploymentSignalsLanding: ' + err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+/**
  * Bounded deployment Signal history timeline (on demand).
  *
  * @param {string} deploymentId

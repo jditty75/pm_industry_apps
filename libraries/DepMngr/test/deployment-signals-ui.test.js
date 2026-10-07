@@ -30,7 +30,8 @@ function loadPlatform() {
     },
     CoreData: {
       canonicalDeploymentId: function (id) {
-        return String(id || '').trim();
+        var s = String(id || '').trim();
+        return s.length >= 18 ? s.slice(0, 18) : s;
       },
       getAllDeploymentsForUI: function () {
         return {
@@ -184,4 +185,82 @@ test('privacy: no email-like strings in empty landing payload', () => {
   const payload = Persist.getDeploymentSignalsLandingForUI(
     SLG_CFG, {}, {}, { store: store });
   assert.ok(!JSON.stringify(payload).match(/@[a-z]+\.com/i));
+});
+
+test('landing scopes 15-char UI ids to 18-char persisted signal deployment ids', () => {
+  const dep18 = 'a0X0000000ABC12XYZ';
+  const dep15 = dep18.slice(0, 15);
+  const priorUi = S.CoreData.getAllDeploymentsForUI;
+  S.CoreData.getAllDeploymentsForUI = function () {
+    return {
+      rows: [{ deploymentId: dep15, deploymentName: 'Scope Test', accountName: 'Acct' }]
+    };
+  };
+  try {
+    const store = Store.createMemoryStore();
+    Store.replaceBody(
+      store, 'Deployment_Signals', Store.currentHeaders(),
+      [baseRow(dep18, 'NEW', 'HIGH')]);
+    Store.appendRows(store, 'Deployment_Signal_Runs', Store.runHeaders(), [{
+      signal_run_id: 'RUN-1',
+      signal_as_of: '2026-10-05',
+      run_status: 'COMPLETE',
+      lifecycle_new_count: 0
+    }]);
+    const payload = Persist.getDeploymentSignalsLandingForUI(
+      SLG_CFG, {}, {}, { store: store });
+    assert.equal(payload.signals.length, 1);
+    assert.equal(payload.activeCount, 1);
+  } finally {
+    S.CoreData.getAllDeploymentsForUI = priorUi;
+  }
+});
+
+test('baseline leadership_new suppression does not empty investigative worklist', () => {
+  const store = Store.createMemoryStore();
+  const rows = [];
+  for (let i = 0; i < 16; i++) {
+    rows.push(Object.assign(baseRow('DEP_A', 'NEW', 'HIGH'), {
+      signal_id: 'SIG-BASE-' + i,
+      signal_type: 'RISK_' + i
+    }));
+  }
+  Store.replaceBody(store, 'Deployment_Signals', Store.currentHeaders(), rows);
+  Store.appendRows(store, 'Deployment_Signal_Runs', Store.runHeaders(), [{
+    signal_run_id: 'RUN-1',
+    signal_as_of: '2026-10-05',
+    run_status: 'COMPLETE',
+    lifecycle_new_count: 0,
+    lifecycle_continuing_count: 0
+  }]);
+  const payload = Persist.getDeploymentSignalsLandingForUI(
+    SLG_CFG, {}, {}, { store: store });
+  assert.equal(payload.signals.length, 16);
+  assert.equal(payload.lifecycleSummary.fromLatestRun.new, 0);
+  assert.equal(payload.lifecycleSummary.counts.NEW, 16);
+});
+
+test('SUBMITTED current rows excluded from landing; ACTIVE included', () => {
+  const store = Store.createMemoryStore();
+  Store.replaceBody(store, 'Deployment_Signals', Store.currentHeaders(), [
+    baseRow('DEP_A', 'NEW', 'HIGH'),
+    Object.assign(baseRow('DEP_B', 'NEW', 'HIGH'), { signal_status: 'SUBMITTED' })
+  ]);
+  const payload = Persist.getDeploymentSignalsLandingForUI(
+    SLG_CFG, {}, {}, { store: store });
+  assert.equal(payload.signals.length, 1);
+});
+
+test('diagnose aggregates exclusion reasons without narratives', () => {
+  const store = Store.createMemoryStore();
+  Store.replaceBody(store, 'Deployment_Signals', Store.currentHeaders(), [
+    baseRow('DEP_A', 'NEW', 'HIGH'),
+    Object.assign(baseRow('DEP_B', 'NEW', 'HIGH'), { signal_status: 'SUBMITTED' })
+  ]);
+  const diag = Persist.diagnoseDeploymentSignalsLandingReadModel(
+    SLG_CFG, {}, {}, { store: store });
+  assert.equal(diag.signalSheetBodyRows, 2);
+  assert.equal(diag.rowsPassingActiveStatus, 1);
+  assert.equal(diag.exclusions.submittedStatus, 1);
+  assert.ok(!JSON.stringify(diag).match(/observation|interpretation/i));
 });

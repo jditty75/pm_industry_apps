@@ -206,3 +206,42 @@ test('response list item does not require cohort link', () => {
   assert.equal(item.responseId, 'R1');
   assert.equal(item.overallSatisfaction, 4);
 });
+
+test('resolveScheduleEntryWithScan assigns MDS when UI horizon starts later', () => {
+  const schedule = {
+    '2026-09': {
+      yearMonth: '2026-09',
+      mdsOneThirdWindow: { start: '2026-07-31', end: '2026-08-30' },
+      pglFirstMtpWindow: { start: '2026-07-01', end: '2026-07-31' }
+    },
+    '2026-10': {
+      yearMonth: '2026-10',
+      mdsOneThirdWindow: { start: '2026-08-31', end: '2026-09-30' },
+      pglFirstMtpWindow: { start: '2026-08-01', end: '2026-08-31' }
+    }
+  };
+  const resolver = (ym) => schedule[ym] || null;
+  const uiHorizonFirst = '2026-10';
+  const sepBatch = V.resolveScheduleEntryWithScan(
+    resolver, 'MDS', '2026-08-15', uiHorizonFirst, 36);
+  assert.equal(sepBatch.yearMonth, '2026-09');
+  const octBatch = V.resolveScheduleEntryWithScan(
+    resolver, 'MDS', '2026-09-15', uiHorizonFirst, 36);
+  assert.equal(octBatch.yearMonth, '2026-10');
+});
+
+test('scheduleScanStartYearMonth anchors on survey target month', () => {
+  assert.equal(V.scheduleScanStartYearMonth('2026-09-20'), '2026-07');
+});
+
+test('computeMdsOneThirdPoint accepts Date objects from spreadsheet reads', () => {
+  const start = new Date(2026, 0, 1);
+  const target = '2026-10-01';
+  const oneThird = V.computeMdsOneThirdPoint(start, target);
+  assert.ok(oneThird);
+  const events = V.buildExactCohortEvents(
+    { deploymentStartDate: start },
+    [{ targetGoLive: target, productArea: 'HCM' }]
+  );
+  assert.equal(events.filter((e) => e.kind === 'MDS').length, 1);
+});

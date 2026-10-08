@@ -85,14 +85,41 @@ var CoreCsatVoc = (function () {
   }
 
   /**
+   * Coerces sheet/API values to YYYY-MM-DD for schedule math.
+   * @param {*} val
+   * @return {string}
+   * @private
+   */
+  function _coerceYmdDateKey_(val) {
+    if (val == null || val === '') return '';
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      var y = val.getFullYear();
+      var m = val.getMonth() + 1;
+      var day = val.getDate();
+      return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+    }
+    var s = String(val).trim();
+    if (s.length >= 10 && s.charAt(4) === '-' && s.charAt(7) === '-') {
+      return s.substring(0, 10);
+    }
+    var parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) {
+      return _coerceYmdDateKey_(parsed);
+    }
+    return '';
+  }
+
+  /**
    * @param {string} startDate
    * @param {string} targetDate
    * @return {string|null}
    */
   function computeMdsOneThirdPoint(startDate, targetDate) {
-    if (!startDate || !targetDate) return null;
-    var t0 = new Date(startDate + 'T12:00:00').getTime();
-    var t1 = new Date(targetDate + 'T12:00:00').getTime();
+    var startKey = _coerceYmdDateKey_(startDate);
+    var targetKey = _coerceYmdDateKey_(targetDate);
+    if (!startKey || !targetKey) return null;
+    var t0 = new Date(startKey + 'T12:00:00').getTime();
+    var t1 = new Date(targetKey + 'T12:00:00').getTime();
     if (isNaN(t0) || isNaN(t1) || t1 <= t0) return null;
     var oneThird = t0 + (t1 - t0) / 3;
     var d = new Date(oneThird);
@@ -133,21 +160,22 @@ var CoreCsatVoc = (function () {
 
     for (var i = 0; i < pr.length; i++) {
       var pf = pr[i];
-      var t = pf.targetGoLive || '';
+      var t = _coerceYmdDateKey_(pf.targetGoLive);
       if (t) {
         if (!targetMap[t]) targetMap[t] = {};
         if (pf.productArea) targetMap[t][pf.productArea] = true;
       }
-      var a = pf.actualGoLive || '';
+      var a = _coerceYmdDateKey_(pf.actualGoLive);
       if (a) {
         if (!actualMap[a]) actualMap[a] = {};
         if (pf.productArea) actualMap[a][pf.productArea] = true;
       }
     }
 
+    var depStartKey = _coerceYmdDateKey_(deploymentRow.deploymentStartDate);
     Object.keys(targetMap).sort().forEach(function (T) {
       var products = Object.keys(targetMap[T]).sort();
-      var oneThird = computeMdsOneThirdPoint(deploymentRow.deploymentStartDate, T);
+      var oneThird = computeMdsOneThirdPoint(depStartKey, T);
       if (oneThird) {
         events.push({ kind: 'MDS', cohortDate: T, products: products });
       }
@@ -202,36 +230,59 @@ var CoreCsatVoc = (function () {
   }
 
   /**
-   * Scans full schedule list (may extend beyond horizon) for batch assignment.
-   * @param {function(string): Object} scheduleResolver
-   * @param {string} surveyType
-   * @param {string} surveyTargetDate
-   * @param {string} startYearMonth first month to scan YYYY-MM
-   * @param {number} maxMonths
-   * @return {Object|null}
+   * @param {string} yearMonth YYYY-MM
+   * @param {number} deltaMonths
+   * @return {string|null}
+   * @private
    */
-  function resolveScheduleEntryWithScan(scheduleResolver, surveyType, surveyTargetDate,
-    startYearMonth, maxMonths) {
-    if (!scheduleResolver || !surveyTargetDate) return null;
-    var parts = String(startYearMonth || '').split('-');
+  function _shiftYearMonth_(yearMonth, deltaMonths) {
+    var parts = String(yearMonth || '').split('-');
     if (parts.length !== 2) return null;
     var y = parseInt(parts[0], 10);
     var m = parseInt(parts[1], 10);
     if (isNaN(y) || isNaN(m)) return null;
-    for (var i = 0; i < maxMonths; i++) {
-      var ym = y + '-' + (m < 10 ? '0' : '') + m;
+    m += deltaMonths;
+    while (m < 1) {
+      m += 12;
+      y--;
+    }
+    while (m > 12) {
+      m -= 12;
+      y++;
+    }
+    return y + '-' + (m < 10 ? '0' : '') + m;
+  }
+
+  /**
+   * Batch-month scan anchor for schedule resolution (target month, not UI horizon).
+   * @param {string} surveyTargetDate YYYY-MM-DD
+   * @return {string|null} YYYY-MM
+   */
+  function scheduleScanStartYearMonth(surveyTargetDate) {
+    var key = String(surveyTargetDate || '').trim();
+    if (key.length < 7) return null;
+    return _shiftYearMonth_(key.substring(0, 7), -2);
+  }
+
+  function resolveScheduleEntryWithScan(scheduleResolver, surveyType, surveyTargetDate,
+    startYearMonth, maxMonths) {
+    if (!scheduleResolver || !surveyTargetDate) return null;
+    var fwd = (maxMonths > 0) ? maxMonths : 36;
+    var anchorYm = scheduleScanStartYearMonth(surveyTargetDate) ||
+      String(startYearMonth || '').trim();
+    if (!anchorYm) return null;
+    // Scan backward then forward so targets that map to batches before the UI
+    // horizon month are still assigned (forward-only Upcoming Batches presentation).
+    var backMonths = 24;
+    for (var i = -backMonths; i < fwd; i++) {
+      var ym = _shiftYearMonth_(anchorYm, i);
+      if (!ym) continue;
       var entry = scheduleResolver(ym);
-      if (entry) {
-        var kind = normalizeSurveyTypeKey(surveyType);
-        var win = (kind === 'MDS') ? entry.mdsOneThirdWindow : entry.pglFirstMtpWindow;
-        if (win && surveyTargetDate >= win.start && surveyTargetDate <= win.end) {
-          return entry;
-        }
-      }
-      m++;
-      if (m > 12) {
-        m = 1;
-        y++;
+      if (!entry) continue;
+      var kind = normalizeSurveyTypeKey(surveyType);
+      var win = (kind === 'MDS') ? entry.mdsOneThirdWindow : entry.pglFirstMtpWindow;
+      if (win && surveyTargetDate >= win.start && surveyTargetDate <= win.end) {
+        return entry;
       }
     }
     return null;
@@ -892,6 +943,7 @@ var CoreCsatVoc = (function () {
     countDeploymentCohorts: countDeploymentCohorts,
     resolveScheduleEntryForTarget: resolveScheduleEntryForTarget,
     resolveScheduleEntryWithScan: resolveScheduleEntryWithScan,
+    scheduleScanStartYearMonth: scheduleScanStartYearMonth,
     getOperationalLookbackDays: getOperationalLookbackDays,
     buildUpcomingBatchMonthKeys: buildUpcomingBatchMonthKeys,
     getDefaultPartnerScopeNames: getDefaultPartnerScopeNames,

@@ -10992,10 +10992,6 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var now = new Date();
     now.setHours(0, 0, 0, 0);
     var todayKey = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
-    var firstYm = (scheduleByMonth && scheduleByMonth.length)
-      ? scheduleByMonth[0].yearMonth
-      : _yearMonthWithOffset_(now, 0, tz);
-
     var allRows = [];
     activeRows.forEach(function (r) {
       var canonDep = _canonicalId_(r.deploymentId);
@@ -11018,7 +11014,8 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           scheduleByMonth, ev.kind, surveyTargetDate);
         if (!scheduleEntry) {
           scheduleEntry = CoreCsatVoc.resolveScheduleEntryWithScan(
-            _resolveSurveyScheduleMonth_, ev.kind, surveyTargetDate, firstYm, 36);
+            _resolveSurveyScheduleMonth_, ev.kind, surveyTargetDate,
+            CoreCsatVoc.scheduleScanStartYearMonth(surveyTargetDate), 36);
         }
         if (!scheduleEntry) continue;
 

@@ -22,6 +22,60 @@ DEFAULT_XLSX = REPO / "docs" / "migrations" / "Healthcare DeploymentHealth_v1.xl
 WD_PS = "workday professional services"
 LOOKBACK_DAYS = 180
 
+# FY27 MDS one-third windows (batch month -> window), verbatim from CoreSurveySchedule.
+FY27_MDS_WINDOWS = {
+    "2026-02": ("2026-01-01", "2026-01-31"),
+    "2026-03": ("2026-02-01", "2026-02-28"),
+    "2026-04": ("2026-03-01", "2026-03-31"),
+    "2026-05": ("2026-04-01", "2026-04-30"),
+    "2026-06": ("2026-05-01", "2026-05-31"),
+    "2026-07": ("2026-05-31", "2026-06-30"),
+    "2026-08": ("2026-07-01", "2026-07-30"),
+    "2026-09": ("2026-07-31", "2026-08-30"),
+    "2026-10": ("2026-08-31", "2026-09-30"),
+    "2026-11": ("2026-10-01", "2026-10-30"),
+    "2026-12": ("2026-10-31", "2026-11-30"),
+    "2027-01": ("2026-12-01", "2026-12-30"),
+}
+
+
+def _shift_ym(ym: str, delta: int) -> str:
+    y, m = int(ym[:4]), int(ym[5:7])
+    m += delta
+    while m < 1:
+        m += 12
+        y -= 1
+    while m > 12:
+        m -= 12
+        y += 1
+    return f"{y:04d}-{m:02d}"
+
+
+def _resolve_mds_batch_old(target: str, horizon_first: str = "2026-10") -> str | None:
+    """Pre-fix: forward scan only from UI horizon first month."""
+    y, m = int(horizon_first[:4]), int(horizon_first[5:7])
+    for _ in range(36):
+        ym = f"{y:04d}-{m:02d}"
+        win = FY27_MDS_WINDOWS.get(ym)
+        if win and win[0] <= target <= win[1]:
+            return ym
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return None
+
+
+def _resolve_mds_batch_new(target: str, horizon_first: str = "2026-10") -> str | None:
+    """Post-fix: anchor on target month, scan backward then forward."""
+    anchor = _shift_ym(target[:7], -2)
+    for i in range(-24, 36):
+        ym = _shift_ym(anchor, i)
+        win = FY27_MDS_WINDOWS.get(ym)
+        if win and win[0] <= target <= win[1]:
+            return ym
+    return None
+
 
 def _canon_id(raw: str) -> str:
     s = (raw or "").strip()
@@ -139,6 +193,10 @@ def main() -> int:
     mds_upcoming = mds_overdue = 0
     pgl_upcoming = pgl_overdue = 0
     pgl_planned_complexity = 0
+    oct_mds_old = oct_mds_new = 0
+    mds_unassigned_old = mds_unassigned_new = 0
+    horizon_mds_old = horizon_mds_new = 0
+    horizon = {"2026-10", "2026-11", "2026-12"}
 
     for d in active:
         dep_id = _canon_id(str(d.get("Id") or ""))
@@ -158,6 +216,7 @@ def main() -> int:
             awareness["MISSING_DEPLOYMENT_START"] += 1
         if not targets and not pr:
             awareness["NO_PF_COHORT"] += 1
+        partner_wd = str(d.get("Deployment_Partner_Name__c") or "").strip().lower() == WD_PS
         for t in targets:
             mds_cohorts += 1
             one_third = _mds_one_third(start or "", t) if start else None
@@ -171,6 +230,21 @@ def main() -> int:
                 mds_upcoming += 1
             elif td >= lookback_start:
                 mds_overdue += 1
+            if partner_wd:
+                batch_old = _resolve_mds_batch_old(one_third)
+                batch_new = _resolve_mds_batch_new(one_third)
+                if batch_old == "2026-10":
+                    oct_mds_old += 1
+                if batch_new == "2026-10":
+                    oct_mds_new += 1
+                if batch_old in horizon:
+                    horizon_mds_old += 1
+                if batch_new in horizon:
+                    horizon_mds_new += 1
+                if batch_old is None:
+                    mds_unassigned_old += 1
+                if batch_new is None:
+                    mds_unassigned_new += 1
         for a in actuals:
             pgl_cohorts += 1
             tgt = _pgl_target(a)
@@ -251,6 +325,13 @@ def main() -> int:
     print(f"  include_partners_view: {include_partners}")
     print("Responses:")
     print(f"  CSAT_Responses_sheet_present: {has_responses}")
+    print("October 2026 MDS batch (WD PS Active, FY27 windows in script):")
+    print(f"  assigned_oct_2026_old_scan: {oct_mds_old}")
+    print(f"  assigned_oct_2026_new_scan: {oct_mds_new}")
+    print(f"  unassigned_mds_old_scan: {mds_unassigned_old}")
+    print(f"  unassigned_mds_new_scan: {mds_unassigned_new}")
+    print(f"  horizon_oct_nov_dec_old_scan: {horizon_mds_old}")
+    print(f"  horizon_oct_nov_dec_new_scan: {horizon_mds_new}")
     return 0
 
 

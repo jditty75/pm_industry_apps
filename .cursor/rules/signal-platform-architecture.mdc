@@ -1,0 +1,400 @@
+---
+description: Deployment Signal Platform architecture and module-surface guardrails
+alwaysApply: true
+---
+
+# Deployment Signal Platform Architecture Guardrail
+
+The Deployment Signal Platform has completed an explicit architecture-consolidation pass.
+
+Preserve that architecture.
+
+## Hard Rule: Do Not Expand the Production Module Surface
+
+Do NOT create a new production source file matching any of these patterns without explicit user approval:
+
+- `CoreDeploymentSignal*.js`
+- `CoreDeploymentTrajectory*.js`
+- `CoreDeploymentDataStewardship*.js`
+
+This applies regardless of whether the proposed file is described as a helper, service, processor, manager, orchestrator, adapter, trigger, store, refresh module, notification module, or other abstraction.
+
+Do not work around this rule by creating the same abstraction under a different filename.
+
+Before creating any new production module for Deployment Signals, Deployment Trajectory, or Deployment Data Stewardship:
+
+1. Identify the responsibility being added.
+2. Identify the existing production module that most closely owns that responsibility.
+3. Extend that existing owner when the responsibility is coherent with it.
+4. If no existing module is suitable, STOP before creating the file and request explicit user approval.
+
+## Current Production Ownership
+
+### `CoreDeploymentTrajectory.js`
+
+Owns:
+
+- trajectory orchestration
+- deterministic trajectory build behavior
+- source-aware trajectory/evidence refresh orchestration
+
+### `CoreDeploymentTrajectoryMetrics.js`
+
+Owns:
+
+- trajectory metric calculations
+
+### `CoreDeploymentTrajectorySchedule.js`
+
+Owns:
+
+- schedule/MTP trajectory semantics and calculations
+
+### `CoreDeploymentTrajectoryStore.js`
+
+Owns:
+
+- trajectory workbook persistence
+- trajectory reads/writes
+
+### `CoreDeploymentSignals.js`
+
+Owns:
+
+- Deployment Signal domain behavior
+- Signal Context assembly
+- Signal normalization
+
+### `CoreDeploymentSignalLifecycle.js`
+
+Owns:
+
+- stable Signal identity
+- cross-run lifecycle comparison
+- NEW / CONTINUING / ESCALATED / DE_ESCALATED / RESOLVED semantics
+
+### `CoreDeploymentSignalPersistence.js`
+
+Owns:
+
+- Signal persistence orchestration
+- SUBMITTED Signal-run processing
+- run validation/finalization
+- coordination of normalization, lifecycle, history, and current state
+
+### `CoreDeploymentSignalStore.js`
+
+Owns:
+
+- Signal workbook schemas
+- Signal workbook reads/writes
+- current Signal storage
+- Signal history storage
+- Signal run storage
+
+### `CoreDeploymentDataStewardship.js`
+
+Owns:
+
+- deterministic Deployment Data Stewardship / QA logic
+
+### `CoreFreshnessMonitor.js`
+
+Owns generic Deployment Manager freshness infrastructure, including:
+
+- `Auto Refresh Execution Log` access
+- source-refresh freshness inspection
+- reusable refresh-state behavior
+
+Do not create a separate Signal-specific refresh-log module.
+
+### `CoreNotify.js`
+
+Owns Deployment Manager notification infrastructure, including:
+
+- Signal notification eligibility handoff
+- Signal notification payload integration
+- interaction with the existing notification engine
+
+Do not create a separate Signal notification module.
+
+## App-Specific Ownership
+
+App-specific Signal behavior belongs in the application's existing configuration and orchestration surfaces.
+
+For SLG:
+
+### `Config_SLG.js`
+
+Owns:
+
+- Signal feature configuration
+- SLG Signal source dependencies
+- SLG-specific Signal settings
+- sheet/config references
+
+### SLG `Code.js`
+
+Owns:
+
+- SLG Signal entry-point wrappers
+- SLG Signal orchestration wrappers
+- trigger handlers
+- trigger installation functions
+
+Do not create shared production modules solely for SLG orchestration.
+
+## Responsibilities That Do NOT Justify New Production Modules
+
+Do not create a new production module merely to:
+
+- read `Auto Refresh Execution Log`
+- perform source-freshness checks
+- orchestrate Signal evidence refresh
+- poll for SUBMITTED Signal runs
+- process SUBMITTED Signal runs
+- install Signal triggers
+- host Signal trigger handlers
+- determine Signal notification eligibility
+- construct Signal notification payloads
+- wrap SLG-specific Signal orchestration
+- isolate a helper function
+- reduce the size of an existing function
+- mirror a conceptual workflow step with a physical source file
+
+These responsibilities already have owners.
+
+## Explicit Approval Required for New Modules
+
+If a genuinely new production module appears necessary, STOP before creating it.
+
+Report to the user:
+
+1. proposed filename
+2. proposed responsibility
+3. expected callers
+4. expected dependencies
+5. which existing owners were considered
+6. why each existing owner is unsuitable
+7. why adding the responsibility to an existing owner would materially reduce cohesion or maintainability
+
+Then ask for explicit approval.
+
+Without explicit user approval, do not create the production file.
+
+## Allowed Without Additional Approval
+
+This rule does NOT prohibit:
+
+- focused test files
+- sanitized test fixtures
+- updates to existing documentation
+- local diagnostic scripts
+- local validation tooling
+- modifications to existing production modules
+
+provided they follow repository conventions and do not introduce a disguised new production runtime abstraction.
+
+## Architectural Principle
+
+New production files are an architectural decision, not an implementation convenience.
+
+For Deployment Signal Platform work, default to:
+
+> Extend the existing architecture. Do not expand the module surface.
+
+Prefer cohesive modules over both:
+
+- one-file-per-feature/workflow-step sprawl
+- oversized monolithic modules
+
+Preserve the consolidated Deployment Signal Platform architecture unless the user explicitly approves changing it.
+
+## Multi-App Deployment Intelligence Architecture
+
+Deployment Intelligence is a shared Deployment Manager platform capability.
+
+SLG is the first production consumer and reference implementation. It is NOT a separate or app-specific Deployment Intelligence architecture.
+
+### Core Principle
+
+> Source evidence is app-specific. Deployment Intelligence is shared.
+
+Deployment Manager applications may require additional source and history datasets before they can enable Deployment Signals / Deployment Intelligence.
+
+Once an application's workbook satisfies the shared evidence contract, the application must reuse the shared platform implementation.
+
+Do NOT rebuild or fork Deployment Intelligence by application.
+
+### App-Specific Responsibilities
+
+An individual Deployment Manager app may own/configure:
+
+- workbook/source-sheet availability
+- additional Salesforce/source extracts required by the evidence contract
+- historical source datasets
+- source-sheet names where configuration is necessary
+- `Auto Refresh Execution Log` dependencies
+- portfolio scope/configuration
+- feature enablement
+- email recipients/audience
+- Slack destination
+- workbook/application URLs
+- minimal GAS wrapper entry points required by Apps Script
+- app identity and display name
+
+These differences belong in source provisioning and configuration, not duplicated intelligence implementations.
+
+### Shared Platform Responsibilities
+
+The following are shared DepMngr platform capabilities and must NOT be reimplemented per app:
+
+- Deployment Trajectory semantics
+- trajectory metrics
+- schedule/MTP semantics
+- trajectory persistence
+- source-freshness behavior
+- Data Stewardship framework
+- Signal context/evidence contract
+- Signal normalization
+- Signal persistence
+- stable Signal identity
+- Signal lifecycle
+- Signal history
+- SUBMITTED-run processing
+- weekly portfolio snapshots
+- portfolio KPI movement
+- Deployment Intelligence payload/read model
+- leadership talking-point selection contract
+- data-confidence intersection for leadership-visible deployments
+- email rendering/distribution integration
+- Slack distribution contract
+- Deployment Manager Signal investigation UI
+- Signal history UI
+- deep-link behavior
+
+Do not create app-specific copies of these capabilities.
+
+### No App Forks
+
+Forbidden without explicit user approval:
+
+- `SlgDeploymentIntelligence*`
+- `HcDeploymentIntelligence*`
+- `EviDeploymentIntelligence*`
+- app-specific Signal engines
+- app-specific lifecycle implementations
+- app-specific Signal persistence implementations
+- app-specific Deployment Intelligence renderers
+- copied Signal UI implementations
+- copied email templates containing duplicated intelligence logic
+
+If app-specific behavior appears necessary, first determine whether it is:
+
+1. missing source evidence,
+2. configuration,
+3. an actual shared-platform capability gap.
+
+Prefer solving (1) or (2).
+
+If a true platform capability gap exists, extend the shared platform.
+
+### Enablement Model
+
+Adding Deployment Intelligence to another Deployment Manager app should primarily mean:
+
+1. provide the source/history datasets required by the shared evidence contract;
+2. add them to the app's connector/refresh process;
+3. configure the app's Signal evidence dependencies;
+4. validate the shared deterministic trajectory against representative deployments;
+5. configure the standard Deployment Signal Sana workflow for that workbook/portfolio;
+6. enable shared Signal persistence and lifecycle;
+7. configure Deployment Intelligence audience/distribution;
+8. enable the shared investigation UI.
+
+It must NOT require rebuilding the Signal Platform.
+
+### Standard Agent Philosophy
+
+Deployment Signal reasoning principles are shared across Deployment Manager applications.
+
+Do not create fundamentally different reasoning semantics merely because the app/portfolio changes.
+
+The shared reasoning contract includes:
+
+- deterministic evidence establishes facts;
+- current health alone is not a Signal;
+- recency matters;
+- historical volatility is not automatically current deterioration;
+- intervention does not establish causality;
+- unavailable evidence is not evidence of stability;
+- evidence inconsistencies must be surfaced rather than invented away;
+- deterministic facts and strategic interpretation remain distinct;
+- unsupported prediction is prohibited;
+- causal attribution must remain evidence-bound;
+- attention compression is expected;
+- most deployments may legitimately produce NO_SIGNAL.
+
+App adoption requires validation of the shared reasoning contract against representative app data, not creation of a new intelligence model by default.
+
+### Standard Leadership Product
+
+Every enabled application should produce the same recognizable leadership experience:
+
+> [App] Deployment Intelligence
+>
+> Here are your talking points for this week.
+
+The shared product answers:
+
+1. Where is the portfolio now?
+2. What changed since the previous week?
+3. What should leadership know and be talking about?
+4. Are there material system-of-record confidence issues affecting the deployments being discussed?
+5. Where can leadership investigate further?
+
+Email and Slack are primary leadership delivery surfaces.
+
+Deployment Manager is the operational and investigative surface.
+
+### Distribution Architecture
+
+Deployment Intelligence must produce one canonical finalized intelligence payload.
+
+Channel implementations consume that payload.
+
+They must not independently calculate or reinterpret portfolio intelligence.
+
+Conceptually:
+
+Deployment Manager source data
+→ deterministic evidence
+→ Signals
+→ deterministic lifecycle
+→ Deployment Intelligence
+→ Email / Slack
+→ Deployment Manager investigation
+
+Email and Slack are delivery channels, not independent intelligence engines.
+
+### Data Confidence
+
+Data Stewardship remains shared and deterministic.
+
+Deployment Intelligence should surface Data Stewardship primarily when it affects deployments already relevant to leadership attention.
+
+Do not turn general portfolio data hygiene into executive noise.
+
+Platform evidence limitations must remain distinct from actionable system-of-record stewardship conditions.
+
+### Architectural Test
+
+When onboarding the second Deployment Manager app, use this question:
+
+> Can this app adopt Deployment Intelligence primarily by adding required source/history data, configuration, validation, and agent setup?
+
+If substantial Signal, lifecycle, persistence, distribution, or UI code must be copied or rebuilt, STOP.
+
+That indicates the shared platform architecture has not been generalized correctly.
+
+Do not solve that problem by creating an app-specific fork.

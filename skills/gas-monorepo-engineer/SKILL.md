@@ -22,6 +22,7 @@ Act as the developer/operator. The user supplies product intent and production a
 11. Never claim validation/testing that was not actually performed.
 12. Treat production rollback as a deployment-state operation by default. Do not revert Git, push source, or rewrite development state unless separately required and authorized by the task.
 13. **GAS runtime from automation:** In Jeff's Workday environment, `scripts.run` and `clasp run` are **not** reliable defaults (repeated `403 PERMISSION_DENIED`). Do not use them for routine validation. Follow [references/gas-runtime-execution.md](references/gas-runtime-execution.md): local tests → read-only remote → authorized CLASP mutations → **GAS editor** for runtime proof → production triggers. On Execution API 403, record once and hand off to the editor; do not retry OAuth/GCP/deploy loops unless Jeff explicitly asks to enable remote execution.
+13.  **Existing-first / minimal change:** Before introducing a new module, schema, abstraction, or workflow, verify that existing repository capabilities cannot satisfy the requirement. Prefer the smallest correct change. Do not expand scope, refactor unrelated functionality, or implement speculative future requirements without explicit authorization.
 
 ## Start every task
 
@@ -41,6 +42,7 @@ Act as the developer/operator. The user supplies product intent and production a
 6. Inspect the diff for unrelated changes, IDs/secrets, and accidental generated content.
 7. Commit the completed logical change with a meaningful Conventional Commit and push automatically, subject to pre-push audit.
 8. Report release readiness using the state vocabulary below. Stop before production unless explicitly authorized.
+9. **Shared UI regression gate:** Changes affecting shared client JavaScript, tab navigation, rendering, or initialization must validate the complete assembled client bundle and representative existing tabs across affected application configurations. Structural preview success alone is insufficient. Before multi-app production rollout, require authenticated runtime validation of one canary application. If that validation cannot be performed, stop before broader deployment and report the limitation.
 
 ## Release state vocabulary
 

@@ -165,7 +165,7 @@ var APP_CONFIG = {
 
     distribution: {
       enabled: false,
-      fromAlias: 'jeffrey.ditty@workday.com',
+      fromAlias: 'evisortpm@workday.com',
       to: [],
       cc: [],
       bcc: ['jeffrey.ditty@workday.com','sunil.wadhwa@workday.com'],
@@ -284,6 +284,7 @@ var APP_CONFIG = {
   notify: {
     enabled: false,
     allowedFromAliases: [
+      'evisortpm@workday.com',
       'sunil.wadhwa@workday.com',
       'earl.begonia@workday.com',
       'mridhula.raghupathy@workday.com',

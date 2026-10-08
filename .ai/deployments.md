@@ -2,6 +2,16 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-08 — P0 rollback — CoreLib 163 blank-tab regression (SLG / HC / HENP)
+
+- Authorization: user (P0 production incident recovery, 2026-10-08)
+- Action: repoint existing production Deployment IDs to last known-good immutable GAS versions (no new deployment IDs; no spreadsheet changes; no CoreLib version cut)
+- SLG_DM deployment `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`: **209 → 208** (CoreLib **162**)
+- HC_DM deployment `AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA`: **91 → 90** (CoreLib **162**)
+- HENP_DM deployment `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`: **112 → 111** (CoreLib **162**)
+- Verification: `clasp deployments` on each app confirms production IDs on restored versions; authenticated browser smoke **not** performed in agent session
+- Result: success (deployment repoint only)
+
 ### 2026-10-08 — DepMngr CoreLib 163 — shared VoC UX completion
 
 - Authorization: user (SHARED VOC production completion, 2026-10-08)

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VoC Response Modal — Synthetic Preview</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #f5f6f8; }
+    .note { color: #5f6368; font-size: 14px; margin-bottom: 16px; }
+    .modal { max-width: 960px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.12); overflow: hidden; }
+    .header { padding: 20px 24px; border-bottom: 1px solid #e8eaed; position: sticky; top: 0; background: #fff; }
+    .body { padding: 24px; max-height: 70vh; overflow: auto; }
+    h3 { margin: 24px 0 12px; font-size: 16px; }
+    .score { display: inline-block; padding: 12px 16px; background: #eef4ff; border-radius: 8px; margin-right: 12px; }
+    .comment { border-left: 3px solid #0875e1; padding: 12px 16px; background: #f8f9fa; white-space: pre-wrap; }
+    a { color: #0875e1; }
+  </style>
+</head>
+<body>
+  <p class="note">Synthetic local preview only — no production data. Full DM chrome: <code>.preview-out/SLG_DM.html?scenario=csat</code></p>
+  <div class="modal" role="dialog" aria-label="Response detail sample">
+    <div class="header">
+      <h2 style="margin:0;font-size:18px;"><a href="#">Synthetic Account</a> · <a href="#">Synthetic Deployment</a></h2>
+      <div style="color:#5f6368;font-size:14px;margin-top:6px;">PGL · 1/15/26 · Project Manager · Stage: Go-Live</div>
+    </div>
+    <div class="body">
+      <h3>Survey Overview</h3>
+      <div class="score"><strong>4</strong><br><span style="font-size:12px;">Overall satisfaction</span></div>
+      <div class="score"><strong>9</strong><br><span style="font-size:12px;">NPS (0–10)</span></div>
+      <h3>Customer Feedback</h3>
+      <div class="comment"><strong>What are the main reasons for your scores?</strong><br><br>Line one of synthetic comment.\n\nLine two preserved.</div>
+      <p style="font-size:13px;color:#5f6368;">Qualtrics · Sentiment: Positive · Topics: Communication</p>
+    </div>
+  </div>
+</body>
+</html>

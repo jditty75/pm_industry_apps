@@ -99,6 +99,17 @@ function getCsatTabDataForUI(viewModeOpts, windowMonths, productOpts) {
 }
 
 /**
+ * Authorized VoC response detail (lazy load by response ID).
+ * @param {string} responseId
+ * @param {Object=} viewModeOpts
+ * @return {Object}
+ */
+function getCsatResponseDetailForUI(responseId, viewModeOpts) {
+  var cfg = CoreLib.CoreConfig.withDefaults(APP_CONFIG);
+  return CoreLib.CoreData.getCsatResponseDetailForUI(cfg, responseId, viewModeOpts);
+}
+
+/**
  * Read-only VoC CSAT tab RPC diagnostic (shape/transport only; no customer payloads).
  * @param {Object=} viewModeOpts
  * @param {number=} windowMonths

@@ -75,6 +75,29 @@ var CoreUtils = (function () {
   }
 
   /**
+   * VoC table display: M/DD/YY (no leading zero on month, zero-padded day, two-digit year).
+   * Calendar-safe for date-only and ISO-prefix strings; timestamps use timeZone calendar date.
+   *
+   * @param {*} value
+   * @param {string=} timeZone
+   * @return {string} Formatted date or em dash when missing/invalid.
+   */
+  function formatVocTableDate(value, timeZone) {
+    var key = toCalendarDateKey(value, timeZone);
+    if (!key) return '\u2014';
+    var parts = key.split('-');
+    if (parts.length !== 3) return '\u2014';
+    var y = parseInt(parts[0], 10);
+    var mo = parseInt(parts[1], 10);
+    var day = parseInt(parts[2], 10);
+    if (isNaN(y) || isNaN(mo) || isNaN(day)) return '\u2014';
+    var yy = String(y % 100);
+    if (yy.length < 2) yy = '0' + yy;
+    var dd = day < 10 ? '0' + day : String(day);
+    return mo + '/' + dd + '/' + yy;
+  }
+
+  /**
    * Parses a display value ("34%", "0.34", "34") into 0–100,
    * or returns null if it cannot be interpreted as a percentage.
    *
@@ -168,6 +191,7 @@ var CoreUtils = (function () {
     formatDateToIsoString: formatDateToIsoString,
     extractIsoCalendarDateKey: extractIsoCalendarDateKey,
     toCalendarDateKey: toCalendarDateKey,
+    formatVocTableDate: formatVocTableDate,
     parsePercentage: parsePercentage,
     escapeHtml: escapeHtml,
     normalizeText: normalizeText,

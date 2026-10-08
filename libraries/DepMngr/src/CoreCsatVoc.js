@@ -249,6 +249,33 @@ var CoreCsatVoc = (function () {
   }
 
   /**
+   * Forward-looking batch month keys for Upcoming Batches (current month + horizon).
+   * Operational lookback is used for lifecycle evidence only, not month-group presentation.
+   *
+   * @param {number} horizonMonths 3 or 6
+   * @param {Date} anchor Local calendar anchor (typically start-of-today in app TZ)
+   * @param {string} tz Script time zone
+   * @return {string[]} YYYY-MM ascending
+   */
+  function buildUpcomingBatchMonthKeys(horizonMonths, anchor, tz) {
+    var count = (horizonMonths === 6) ? 6 : 3;
+    var keys = [];
+    var seen = {};
+    var base = (anchor && typeof anchor.getTime === 'function' && !isNaN(anchor.getTime()))
+      ? anchor
+      : new Date();
+    for (var off = 0; off < count; off++) {
+      var d = new Date(base.getFullYear(), base.getMonth() + off, 1);
+      var ym = Utilities.formatDate(d, tz, 'yyyy-MM');
+      if (!seen[ym]) {
+        seen[ym] = true;
+        keys.push(ym);
+      }
+    }
+    return keys;
+  }
+
+  /**
    * @param {Object} cfg
    * @return {string[]}
    */
@@ -421,6 +448,81 @@ var CoreCsatVoc = (function () {
     return String(val);
   }
 
+  var LIKERT_5_SAT = '1\u20135, Extremely Dissatisfied to Extremely Satisfied';
+  var LIKERT_5_AGREE = '1\u20135, Strongly Disagree to Strongly Agree';
+  var NPS_0_10 = '0\u201310, Not at all Likely to Extremely Likely';
+
+  /**
+   * @param {*} v
+   * @return {boolean}
+   */
+  function hasScoreValue_(v) {
+    return v !== undefined && v !== null && v !== '';
+  }
+
+  /**
+   * @param {string} role
+   * @return {boolean}
+   */
+  function isExecutiveSponsorRole_(role) {
+    var r = String(role || '').trim().toLowerCase();
+    if (!r) return false;
+    return (r.indexOf('executive') >= 0 && r.indexOf('sponsor') >= 0) ||
+      r === 'es' || r.indexOf('exec sponsor') >= 0;
+  }
+
+  /**
+   * @param {Object} row
+   * @param {string} typeKey MDS|PGL
+   * @return {{ value:*, label:string, scale:string }|null}
+   */
+  function pickOverallSatisfactionPresentation_(row, typeKey) {
+    var overall = row.overall_satisfaction;
+    var specific = typeKey === 'PGL' ? row.pgl_satisfaction : row.mds_satisfaction;
+    var label = typeKey === 'PGL'
+      ? 'How satisfied are you with your Workday deployment?'
+      : 'How satisfied are you with your Workday deployment so far?';
+    if (hasScoreValue_(overall)) {
+      return { value: overall, label: label, scale: LIKERT_5_SAT };
+    }
+    if (hasScoreValue_(specific)) {
+      return { value: specific, label: label, scale: LIKERT_5_SAT };
+    }
+    return null;
+  }
+
+  /**
+   * @param {string} question
+   * @param {*} value
+   * @param {string} scale
+   * @return {Object|null}
+   */
+  function ratingItem_(question, value, scale) {
+    if (!hasScoreValue_(value)) return null;
+    return {
+      question: question,
+      value: value,
+      scale: scale || LIKERT_5_SAT
+    };
+  }
+
+  /**
+   * @param {string} text
+   * @return {Object|null}
+   */
+  function qualtricsBundle_(sentiment, score, topics) {
+    var hasSent = sentiment !== undefined && sentiment !== null && String(sentiment).trim() !== '';
+    var hasTopics = topics !== undefined && topics !== null && String(topics).trim() !== '';
+    var hasScore = hasScoreValue_(score);
+    if (!hasSent && !hasTopics && !hasScore) return null;
+    return {
+      attribution: 'Qualtrics',
+      sentiment: hasSent ? String(sentiment) : '',
+      sentimentScore: hasScore ? score : '',
+      topics: hasTopics ? String(topics) : ''
+    };
+  }
+
   /**
    * @param {Object} storageRow CSAT_Responses row
    * @param {Object} linkage from reconcile
@@ -442,6 +544,7 @@ var CoreCsatVoc = (function () {
     return {
       responseId: storageRow.response_id || '',
       deploymentId: storageRow.deployment_id || '',
+      accountId: storageRow.account_id || '',
       accountName: storageRow.account_name || '',
       deploymentName: storageRow.deployment_name || '',
       surveyType: typeKey,
@@ -475,29 +578,198 @@ var CoreCsatVoc = (function () {
 
   /**
    * @param {Object} row stored response
-   * @return {Object} curated detail (no full 63-col dump)
+   * @param {Object} linkage
+   * @return {Object} curated detail DTO for VoC response modal (RPC-safe scalars)
    */
   function buildResponseDetailDto(row, linkage) {
     row = row || {};
     linkage = linkage || {};
+    var typeKey = normalizeSurveyTypeKey(row.survey_type);
     var list = buildResponseListItem(row, linkage);
+    var role = String(row.respondent_role || '').trim();
+    var esRole = isExecutiveSponsorRole_(role);
+
+    var overview = [];
+    var overall = pickOverallSatisfactionPresentation_(row, typeKey);
+    if (overall) {
+      overview.push(ratingItem_(overall.label, overall.value, overall.scale));
+    }
+    if (typeKey === 'PGL' && hasScoreValue_(row.nps_score)) {
+      overview.push(ratingItem_(
+        'Based on your recent deployment experience, how likely are you to recommend ' +
+          'Workday to a friend or colleague?',
+        row.nps_score,
+        NPS_0_10
+      ));
+    }
+    if (role) {
+      overview.push({ question: 'Respondent role', value: role, scale: '' });
+    }
+    if (row.deployment_stage_at_response) {
+      overview.push({
+        question: 'Deployment stage at response',
+        value: String(row.deployment_stage_at_response),
+        scale: ''
+      });
+    }
+
+    var expectations = [];
+    if (typeKey === 'MDS') {
+      var mdsExp = [
+        ['The transition from the Workday Sales team to the Workday Deployment team was managed well.',
+          row.agree_sales_transition],
+        ['The deployment so far is meeting the expectations set during the sales cycle.',
+          row.agree_sales_expectations]
+      ];
+      mdsExp.forEach(function (pair) {
+        var item = ratingItem_(pair[0], pair[1], LIKERT_5_AGREE);
+        if (item) expectations.push(item);
+      });
+    } else if (typeKey === 'PGL') {
+      var pglExp = [
+        ['Project team set appropriate expectations for the effort required to deploy Workday.',
+          row.agree_sales_expectations],
+        ['We were prepared to go live and support Workday upon completion of the project.',
+          row.agree_prepared_go_live]
+      ];
+      pglExp.forEach(function (pair) {
+        var item = ratingItem_(pair[0], pair[1], LIKERT_5_AGREE);
+        if (item) expectations.push(item);
+      });
+      if (esRole || hasScoreValue_(row.agree_met_business_case)) {
+        var bc = ratingItem_(
+          'Workday deployment met the objectives of our original business case.',
+          row.agree_met_business_case,
+          LIKERT_5_AGREE
+        );
+        if (bc) expectations.push(bc);
+      }
+    }
+
+    var depValueLabel = typeKey === 'PGL'
+      ? 'Value delivered considering the defined scope of this engagement'
+      : 'Scope as defined by Statement of Work';
+    var depExp = [
+      ['Workday Methodology (Plan, Architect/Configure' +
+        (typeKey === 'PGL' ? ', Test, Deploy' : '') + ')', row.aspect_methodology],
+      ['Schedule Management', row.aspect_schedule],
+      ['Communications (Status, Risks & Issues)', row.aspect_communications],
+      [depValueLabel, row.aspect_value]
+    ];
+    var deploymentExperience = [];
+    depExp.forEach(function (pair) {
+      var item = ratingItem_(pair[0], pair[1], LIKERT_5_SAT);
+      if (item) deploymentExperience.push(item);
+    });
+
+    var teamQs = [
+      ['Understanding of your business needs', row.team_understanding],
+      ['Collaboration with your team', row.team_collaboration],
+      ['Responsiveness', row.team_responsiveness],
+      ['Technical competence', row.team_technical_competence],
+      ['Workday recommended guidance', row.team_guidance]
+    ];
+    var projectTeam = [];
+    teamQs.forEach(function (pair) {
+      var item = ratingItem_('How satisfied are you with your Workday project team\u2019s: ' + pair[0],
+        pair[1], LIKERT_5_SAT);
+      if (item) projectTeam.push(item);
+    });
+
+    var customerFeedback = [];
+    function pushComment_(question, text, qual) {
+      var body = text != null ? String(text) : '';
+      if (!body.trim()) return;
+      customerFeedback.push({
+        question: question,
+        text: body,
+        qualtrics: qual || null
+      });
+    }
+    if (typeKey === 'MDS') {
+      pushComment_('What are the main reasons for your scores?', row.comment_reasons,
+        qualtricsBundle_(row.reasons_sentiment, row.reasons_sentiment_score, row.reasons_parent_topics));
+      pushComment_('What could we improve moving forward?', row.comment_improve,
+        qualtricsBundle_(row.improve_sentiment, row.improve_sentiment_score, row.improve_parent_topics));
+      pushComment_('What is working well that you would like to continue?', row.comment_working_well,
+        qualtricsBundle_(row.working_well_sentiment, row.working_well_sentiment_score,
+          row.working_well_parent_topics));
+    } else {
+      pushComment_('What are the main reasons for your scores?', row.comment_reasons,
+        qualtricsBundle_(row.reasons_sentiment, row.reasons_sentiment_score, row.reasons_parent_topics));
+      pushComment_('Is there anything else you would like to share with us?', row.comment_additional,
+        qualtricsBundle_(row.additional_sentiment, row.additional_sentiment_score,
+          row.additional_parent_topics));
+    }
+
+    var qualtricsAnalytics = [];
+    customerFeedback.forEach(function (fb) {
+      if (fb.qualtrics) {
+        qualtricsAnalytics.push({
+          question: fb.question,
+          sentiment: fb.qualtrics.sentiment,
+          sentimentScore: fb.qualtrics.sentimentScore,
+          topics: fb.qualtrics.topics,
+          attribution: fb.qualtrics.attribution
+        });
+      }
+    });
+
+    var deploymentContext = [];
+    function ctx_(label, val) {
+      if (val === undefined || val === null || String(val).trim() === '') return;
+      deploymentContext.push({ label: label, value: String(val) });
+    }
+    ctx_('Account', row.account_name);
+    ctx_('Deployment', row.deployment_name);
+    ctx_('Deployment type', row.deployment_type);
+    ctx_('Services approach', row.services_approach);
+    ctx_('Priming partner type', row.priming_partner_type);
+    ctx_('Deployment partner', row.partner_name);
+    ctx_('Engagement Manager', row.engagement_manager);
+    ctx_('Deployment start', row.deployment_start_date);
+    ctx_('Target go-live', row.target_go_live_date);
+    ctx_('Product areas', row.product_areas);
+    ctx_('Product area groups', row.product_area_groups);
+    ctx_('Sub-region', row.sub_region);
+
+    var sourceAudit = [];
+    function audit_(label, val) {
+      if (val === undefined || val === null || String(val).trim() === '') return;
+      sourceAudit.push({ label: label, value: coerceRpcScalarField(val) });
+    }
+    audit_('Response ID', row.response_id);
+    audit_('Survey ID', row.survey_id);
+    audit_('First imported', row.first_imported_at);
+    audit_('Updated', row.updated_at);
+    audit_('Revision', row.revision);
+    audit_('Contract version', row.contract_version);
+    audit_('Link method', linkage.linkMethod);
+    audit_('Survey event ID', linkage.surveyEventId);
+
     return Object.assign({}, list, {
-      targetGoLiveDate: row.target_go_live_date || '',
-      deploymentStage: row.deployment_stage_at_response || '',
-      productAreas: row.product_areas || '',
-      productAreaGroups: row.product_area_groups || '',
-      teamUnderstanding: row.team_understanding,
-      teamCollaboration: row.team_collaboration,
-      teamResponsiveness: row.team_responsiveness,
-      teamTechnicalCompetence: row.team_technical_competence,
-      teamGuidance: row.team_guidance,
-      reasonsSentiment: row.reasons_sentiment,
-      improveSentiment: row.improve_sentiment,
-      commentReasons: row.comment_reasons || '',
-      commentImprove: row.comment_improve || '',
-      commentWorkingWell: row.comment_working_well || '',
-      commentAdditional: row.comment_additional || '',
-      contractVersion: row.contract_version || ''
+      respondentRole: role,
+      scoreScaleVersion: coerceRpcScalarField(row.score_scale_version),
+      targetGoLiveDate: coerceRpcScalarField(row.target_go_live_date),
+      deploymentStage: coerceRpcScalarField(row.deployment_stage_at_response),
+      deploymentType: coerceRpcScalarField(row.deployment_type),
+      servicesApproach: coerceRpcScalarField(row.services_approach),
+      primingPartnerType: coerceRpcScalarField(row.priming_partner_type),
+      engagementManager: coerceRpcScalarField(row.engagement_manager),
+      deploymentStartDate: coerceRpcScalarField(row.deployment_start_date),
+      productAreas: coerceRpcScalarField(row.product_areas),
+      productAreaGroups: coerceRpcScalarField(row.product_area_groups),
+      subRegion: coerceRpcScalarField(row.sub_region),
+      sections: {
+        overview: overview,
+        expectations: expectations,
+        deploymentExperience: deploymentExperience,
+        projectTeam: projectTeam,
+        customerFeedback: customerFeedback,
+        deploymentContext: deploymentContext,
+        qualtricsAnalytics: qualtricsAnalytics,
+        sourceAudit: sourceAudit
+      }
     });
   }
 
@@ -621,6 +893,7 @@ var CoreCsatVoc = (function () {
     resolveScheduleEntryForTarget: resolveScheduleEntryForTarget,
     resolveScheduleEntryWithScan: resolveScheduleEntryWithScan,
     getOperationalLookbackDays: getOperationalLookbackDays,
+    buildUpcomingBatchMonthKeys: buildUpcomingBatchMonthKeys,
     getDefaultPartnerScopeNames: getDefaultPartnerScopeNames,
     partnerMatchesScope: partnerMatchesScope,
     rowVisibleForPartnerScope: rowVisibleForPartnerScope,

@@ -10922,25 +10922,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @private
    */
   function _buildMdsPglBatchMonthKeys_(cfg, horizonMonths, now, tz) {
-    var lookbackDays = CoreCsatVoc.getOperationalLookbackDays(cfg);
-    var pastMonths = Math.min(24, Math.ceil(lookbackDays / 28) + 1);
-    var keys = [];
-    var seen = {};
-    for (var back = pastMonths; back >= 0; back--) {
-      var ymPast = _yearMonthWithOffset_(now, -back, tz);
-      if (!seen[ymPast]) {
-        seen[ymPast] = true;
-        keys.push(ymPast);
-      }
-    }
-    for (var fwd = 1; fwd < horizonMonths; fwd++) {
-      var ymFwd = _yearMonthWithOffset_(now, fwd, tz);
-      if (!seen[ymFwd]) {
-        seen[ymFwd] = true;
-        keys.push(ymFwd);
-      }
-    }
-    return keys;
+    return CoreCsatVoc.buildUpcomingBatchMonthKeys(horizonMonths, now, tz);
   }
 
   /**
@@ -11056,6 +11038,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
 
         var baseRow = {
           deploymentId:      canonDep,
+          accountId:         r.accountId || '',
           accountName:       r.accountName,
           deploymentName:    r.deploymentName,
           deliveryDirector:  ddResolved.name,
@@ -11707,10 +11690,81 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
    * @return {{ rows: Array<Object>, total: number }}
    * @private
    */
+  /**
+   * @param {AppConfig} cfg
+   * @param {Object} storageRow
+   * @param {Object=} viewModeOpts
+   * @return {boolean}
+   * @private
+   */
+  function _csatResponseAuthorizedForView_(cfg, storageRow, viewModeOpts) {
+    if (!storageRow) return false;
+    var eligibleIds = _csatResponsesEligibleDeploymentIds_(cfg);
+    var depId = _canonicalId_(storageRow.deployment_id);
+    if (!depId || !eligibleIds[depId]) return false;
+    if (!viewModeOpts || !viewModeOpts.viewMode || viewModeOpts.viewMode === 'all') {
+      return true;
+    }
+    var metaMap = getDeploymentsMetaMap_(cfg) || {};
+    var meta = metaMap[depId] || {};
+    var probe = {
+      deploymentId: depId,
+      accountId: storageRow.account_id || meta.accountId || '',
+      deliveryDirector: meta.deliveryDirector || ''
+    };
+    return applyViewModeFilter_(cfg, [probe], viewModeOpts).length > 0;
+  }
+
+  /**
+   * @param {AppConfig} cfg
+   * @param {string} responseId
+   * @param {Object=} viewModeOpts
+   * @return {Object}
+   */
+  function getCsatResponseDetailForUI(cfg, responseId, viewModeOpts) {
+    var rid = String(responseId || '').trim();
+    if (!rid) {
+      return { ok: false, error: 'missing_id' };
+    }
+    var stored = _readCsatResponsesRows_(cfg);
+    var found = null;
+    for (var i = 0; i < stored.length; i++) {
+      if (String(stored[i].response_id || '').trim() === rid) {
+        found = stored[i];
+        break;
+      }
+    }
+    if (!found) {
+      return { ok: false, error: 'not_found' };
+    }
+    if (!_csatResponseAuthorizedForView_(cfg, found, viewModeOpts)) {
+      return { ok: false, error: 'unauthorized' };
+    }
+    var depId = _canonicalId_(found.deployment_id);
+    var typeKey = _normalizeCsatSurveyTypeKey_(found.survey_type);
+    var linkage = {
+      surveyEventId: '',
+      linkMethod: CoreCsatVoc.LINK_LEGACY_UNKNOWN,
+      cohortDate: found.target_go_live_date || ''
+    };
+    if (depId && typeKey && found.target_go_live_date) {
+      linkage.surveyEventId = CoreCsatVoc.computeSurveyEventId(
+        depId, typeKey, _toDateKey_(found.target_go_live_date) || found.target_go_live_date,
+        _sha256Hex_);
+      linkage.linkMethod = CoreCsatVoc.LINK_INFERRED_BATCH;
+    }
+    var detail = CoreCsatVoc.buildResponseDetailDto(found, linkage);
+    return {
+      ok: true,
+      detail: _sanitizeCsatTabPayloadForGasTransport_(detail)
+    };
+  }
+
   function _buildCsatResponsesListForUI_(cfg, viewModeOpts) {
     var stored = _readCsatResponsesRows_(cfg);
     var list = [];
     stored.forEach(function (row) {
+      if (!_csatResponseAuthorizedForView_(cfg, row, viewModeOpts)) return;
       var depId = _canonicalId_(row.deployment_id);
       var typeKey = _normalizeCsatSurveyTypeKey_(row.survey_type);
       var linkage = {
@@ -13082,9 +13136,13 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     var totalMasterDeployments = masterDeps.length;
 
     var rawRows = _readCsatInFlightRows_(cfg);
+    var depMetaForCsat = getDeploymentsMetaMap_(cfg) || {};
     var inFlightRows = rawRows.map(function (r) {
+      var canonDep = _canonicalId_(r.deployment_id);
+      var meta = canonDep ? (depMetaForCsat[canonDep] || {}) : {};
       return {
         deploymentId:       r.deployment_id || '\u2014',
+        accountId:          meta.accountId || '',
         accountName:        r.account_name || '\u2014',
         deploymentName:     r.deployment_name || '',
         surveyType:         r.survey_type || '',
@@ -16521,6 +16579,7 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     verifyCsatResponsesStorage:  verifyCsatResponsesStorage,
     uploadCsatInFlightCsvForUI:  uploadCsatInFlightCsvForUI,
     getCsatTabDataForUI:         getCsatTabDataForUI,
+    getCsatResponseDetailForUI:  getCsatResponseDetailForUI,
     diagnoseVocCsatTabDataForUI: diagnoseVocCsatTabDataForUI,
     getDistributionLogDataForUI: getDistributionLogDataForUI,
 

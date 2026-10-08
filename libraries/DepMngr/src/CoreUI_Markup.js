@@ -207,6 +207,7 @@ function _CoreUI_Markup_getAppShell(cfg, userAccess) {
   if ((tabIds.indexOf('csat') !== -1 || tabIds.indexOf('mgmPgl') !== -1) &&
       ui.csatTab && ui.csatTab.enabled !== false) {
     parts.push(_CoreUI_Markup_buildCsatTab_(filteredUi));
+    parts.push(_CoreUI_Markup_buildVocResponseModal_(filteredUi));
   }
   if (tabIds.indexOf('execsummary') !== -1 || tabIds.indexOf('report') !== -1) parts.push(_CoreUI_Markup_buildReportingTab_(filteredUi, cfg));
   if (tabIds.indexOf('portfolio') !== -1) parts.push(_CoreUI_Markup_buildPortfolioTab_(filteredUi, cfg));
@@ -1019,7 +1020,6 @@ function _CoreUI_Markup_buildCsatTab_(ui) {
     '          <tbody id="voc-responses-tbody"></tbody>',
     '        </table>',
     '      </div>',
-    '      <div id="voc-response-detail" class="voc-response-detail hidden"></div>',
     '    </div>',
     '  </div>',
 
@@ -1857,6 +1857,41 @@ function _CoreUI_Markup_buildGoLivesModal_(ui) {
 }
 
 // ---------------------------------------------------------------------------
+// MODAL: VoC RESPONSE DETAIL
+// ---------------------------------------------------------------------------
+
+/**
+ * Large modal for a single CSAT/VoC response (lazy-loaded detail).
+ * @param {Object} ui
+ * @return {string}
+ */
+function _CoreUI_Markup_buildVocResponseModal_(ui) {
+  return [
+    '<div id="voc-response-modal" class="modal-overlay voc-response-modal" role="dialog"',
+    '     aria-modal="true" aria-labelledby="voc-response-modal-title"',
+    '     onclick="onVocResponseModalBackdropClick_(event)">',
+    '  <div class="modal modal-voc-response" onclick="event.stopPropagation()">',
+    '    <div class="voc-response-modal-header modal-header">',
+    '      <div class="voc-response-modal-header-main">',
+    '        <h2 id="voc-response-modal-title">Response Detail</h2>',
+    '        <div id="voc-response-modal-subtitle" class="voc-response-modal-subtitle"></div>',
+    '      </div>',
+    '      <button type="button" class="modal-close" id="voc-response-modal-close"',
+    '              aria-label="Close response detail" onclick="closeVocResponseModal()">&times;</button>',
+    '    </div>',
+    '    <div class="voc-response-modal-body modal-body" id="voc-response-modal-body">',
+    '      <div class="report-loading"><div class="spinner-large"></div><p>Loading&hellip;</p></div>',
+    '    </div>',
+    '    <div class="modal-footer voc-response-modal-footer">',
+    '      <button type="button" class="btn btn-secondary" id="voc-response-open-deployment"',
+    '              style="display:none;" onclick="vocResponseModalOpenDeployment_()">Open deployment</button>',
+    '      <button type="button" class="btn btn-secondary" onclick="closeVocResponseModal()">Close</button>',
+    '    </div>',
+    '  </div>',
+    '</div>'
+  ].join('\n');
+}
+
 // MODAL: CSAT NOTIFICATION RULE EDITOR (V2.8)
 // ---------------------------------------------------------------------------
 

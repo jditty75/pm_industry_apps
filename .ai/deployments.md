@@ -2,6 +2,44 @@
 
 Append-only release records. Deployment IDs match per-app `gas.config.json` (not Script IDs).
 
+### 2026-10-08 — DepMngr CoreLib 163 — shared VoC UX completion
+
+- Authorization: user (SHARED VOC production completion, 2026-10-08)
+- Git source: `c592b08` (feature), `ebb94de` (consumer pins)
+- Library: CoreLib **163** — `feat(voc): forward upcoming batches, response modal, and M/DD/YY tables`
+- Previous immutable library version: **162**
+- Rollback library version: **162**
+- Consumer pin updates: SLG_DM **162 → 163**; HC_DM **162 → 163**; HENP_DM **162 → 163**
+- Verification: DepMngr **234/234** local tests; SLG/HC/HENP structural preview PASS (`scenario=csat`)
+- Result: success (library cut; consumer deploys below)
+
+### 2026-10-08 — SLG_DM — deploy (VoC UX CoreLib 163)
+
+- Authorization: user (SHARED VOC production completion, 2026-10-08)
+- Deployment ID: `AKfycby-jfATrWku_C29_Ia_q9pJMeBL0aoybzugY4gOhlf_Tcw_HH88wf3CbxwqhyBMJp4tEA`
+- Previous GAS version: **208**
+- Live GAS version: **209**
+- CoreLib: **163**
+- Result: success
+
+### 2026-10-08 — HC_DM — deploy (VoC UX CoreLib 163)
+
+- Authorization: user (SHARED VOC production completion, 2026-10-08)
+- Deployment ID: `AKfycbzPyDHuZsIe5-CB3guXVU57Ow0NfjhuEKZK8TZMi4UzG3_nyVtJI1fjBX53aBf57XZKVA`
+- Previous GAS version: **90**
+- Live GAS version: **91**
+- CoreLib: **163**
+- Result: success
+
+### 2026-10-08 — HENP_DM — deploy (VoC UX CoreLib 163)
+
+- Authorization: user (SHARED VOC production completion, 2026-10-08)
+- Deployment ID: `AKfycbz8eIK0zeEGStLFbs7m_juC_0kf_IDswxLP1SSPZizk_SWP3S8fnTGPhv9M-ahhDBXqAQ`
+- Previous GAS version: **111**
+- Live GAS version: **112**
+- CoreLib: **163**
+- Result: success
+
 ### 2026-10-07 — DepMngr CoreLib 162 — VoC CSAT tab GAS transport hotfix
 
 - Authorization: user (VoC production regression hotfix, 2026-10-07)

@@ -11600,11 +11600,16 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
         var depId = _canonicalId_(resp.deployment_id);
         var typeKey = _normalizeCsatSurveyTypeKey_(resp.survey_type);
         if (!depId || !typeKey) return;
-        Object.keys(index).forEach(function (k) {
-          if (k.indexOf(depId + '|' + typeKey + '|') === 0) {
-            index[k].responded = true;
-          }
-        });
+        var respCohort = _toDateKey_(resp.target_go_live_date) || '';
+        var prefix = depId + '|' + typeKey + '|';
+        if (respCohort) {
+          var exactKey = prefix + respCohort;
+          if (index[exactKey]) index[exactKey].responded = true;
+        } else {
+          Object.keys(index).forEach(function (k) {
+            if (k.indexOf(prefix) === 0) index[k].responded = true;
+          });
+        }
       });
     } catch (e) {
       Logger.log('CoreData._buildVocEventEvidenceIndex_: responses read failed: ' + e);
@@ -11786,7 +11791,10 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
     if (viewModeOpts && viewModeOpts.viewMode && viewModeOpts.viewMode !== 'all') {
       list = applyViewModeFilter_(cfg, list, viewModeOpts);
     }
-    return { rows: list, total: list.length };
+    var total = list.length;
+    var RESPONSE_LIST_LIMIT = 50;
+    if (list.length > RESPONSE_LIST_LIMIT) list = list.slice(0, RESPONSE_LIST_LIMIT);
+    return { rows: list, total: total };
   }
 
   // ===========================================================================

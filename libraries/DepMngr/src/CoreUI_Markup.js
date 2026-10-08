@@ -1085,6 +1085,7 @@ function _CoreUI_Markup_buildCsatTab_(ui) {
     '    </div>',
     '    </div>',
     '  </div>',
+    '  </div>', // #csat-panel-admin
 
     '</div>' // #csat-tab
   ].join('\n');

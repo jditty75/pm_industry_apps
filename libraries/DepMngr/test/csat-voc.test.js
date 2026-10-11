@@ -234,6 +234,11 @@ test('scheduleScanStartYearMonth anchors on survey target month', () => {
   assert.equal(V.scheduleScanStartYearMonth('2026-09-20'), '2026-07');
 });
 
+test('scheduleScanAnchorYearMonth — PGL uses survey-target month (batch), MDS uses −2', () => {
+  assert.equal(V.scheduleScanAnchorYearMonth('PGL', '2026-09-15', '2026-11-15'), '2026-11');
+  assert.equal(V.scheduleScanAnchorYearMonth('MDS', '2026-10-01', '2026-08-20'), '2026-06');
+});
+
 test('computeMdsOneThirdPoint accepts Date objects from spreadsheet reads', () => {
   const start = new Date(2026, 0, 1);
   const target = '2026-10-01';

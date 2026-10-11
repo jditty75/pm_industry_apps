@@ -264,6 +264,44 @@ var CoreCsatVoc = (function () {
     return _shiftYearMonth_(key.substring(0, 7), -2);
   }
 
+  /**
+   * Date used to match official schedule windows (MDS one-third vs PGL first-MTP).
+   * PGL windows are keyed on actual go-live; display target remains +2 months.
+   *
+   * @param {string} surveyType
+   * @param {string} cohortDate YYYY-MM-DD actual or target cohort date
+   * @param {string} surveyTargetDate YYYY-MM-DD computed survey target
+   * @return {string|null}
+   */
+  function scheduleMatchDateForSurvey(surveyType, cohortDate, surveyTargetDate) {
+    var kind = normalizeSurveyTypeKey(surveyType);
+    if (kind === 'PGL') {
+      var actual = _coerceYmdDateKey_(cohortDate);
+      return actual || String(cohortDate || '').trim() || null;
+    }
+    return surveyTargetDate || null;
+  }
+
+  /**
+   * Batch-month scan anchor for resolveScheduleEntryWithScan (MDS: target −2; PGL: batch month).
+   *
+   * @param {string} surveyType
+   * @param {string} cohortDate
+   * @param {string} surveyTargetDate
+   * @return {string|null} YYYY-MM
+   */
+  function scheduleScanAnchorYearMonth(surveyType, cohortDate, surveyTargetDate) {
+    var kind = normalizeSurveyTypeKey(surveyType);
+    if (kind === 'PGL') {
+      var tgt = surveyTargetDate ||
+        computeSurveyTargetDate('PGL', null, scheduleMatchDateForSurvey('PGL', cohortDate, null));
+      var key = String(tgt || '').trim();
+      if (key.length < 7) return null;
+      return key.substring(0, 7);
+    }
+    return scheduleScanStartYearMonth(surveyTargetDate);
+  }
+
   function resolveScheduleEntryWithScan(scheduleResolver, surveyType, surveyTargetDate,
     startYearMonth, maxMonths) {
     if (!scheduleResolver || !surveyTargetDate) return null;
@@ -943,6 +981,8 @@ var CoreCsatVoc = (function () {
     countDeploymentCohorts: countDeploymentCohorts,
     resolveScheduleEntryForTarget: resolveScheduleEntryForTarget,
     resolveScheduleEntryWithScan: resolveScheduleEntryWithScan,
+    scheduleMatchDateForSurvey: scheduleMatchDateForSurvey,
+    scheduleScanAnchorYearMonth: scheduleScanAnchorYearMonth,
     scheduleScanStartYearMonth: scheduleScanStartYearMonth,
     getOperationalLookbackDays: getOperationalLookbackDays,
     buildUpcomingBatchMonthKeys: buildUpcomingBatchMonthKeys,

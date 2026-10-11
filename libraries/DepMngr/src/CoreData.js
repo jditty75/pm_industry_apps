@@ -11010,12 +11010,17 @@ function getRecentGoLivesForNotablePicker(config, viewModeOpts, lookbackDays) {
           ev.kind, r.deploymentStartDate, cohortKey);
         if (!surveyTargetDate) continue;
 
+        var scheduleMatchDate = CoreCsatVoc.scheduleMatchDateForSurvey(
+          ev.kind, cohortKey, surveyTargetDate);
+        var scheduleScanAnchor = CoreCsatVoc.scheduleScanAnchorYearMonth(
+          ev.kind, cohortKey, surveyTargetDate);
+
         var scheduleEntry = CoreCsatVoc.resolveScheduleEntryForTarget(
-          scheduleByMonth, ev.kind, surveyTargetDate);
+          scheduleByMonth, ev.kind, scheduleMatchDate);
         if (!scheduleEntry) {
           scheduleEntry = CoreCsatVoc.resolveScheduleEntryWithScan(
-            _resolveSurveyScheduleMonth_, ev.kind, surveyTargetDate,
-            CoreCsatVoc.scheduleScanStartYearMonth(surveyTargetDate), 36);
+            _resolveSurveyScheduleMonth_, ev.kind, scheduleMatchDate,
+            scheduleScanAnchor, 36);
         }
         if (!scheduleEntry) continue;
 

@@ -32,7 +32,9 @@ const state = {
   manage: {
     id: null,
     links: [],          // array of { url, title, addedBy, addedAt }
-    presenters: []      // array of presenter names
+    presenters: [],     // array of presenter names
+    driveLinksPreserveMalformed: false,
+    driveLinksTouched: false
   },
   comments: {
     topicId: null,
@@ -77,6 +79,24 @@ function cleanDisplayName(name) {
   return String(name || '')
     .replace(/^['"]+|['"]+$/g, '') // strip leading/trailing quotes
     .trim();
+}
+
+/**
+ * When the sheet has malformed DriveLinks JSON, omit the field from Manage saves
+ * until the admin explicitly edits links (avoids wiping the cell with "[]").
+ * @param {boolean} preserveMalformedCell
+ * @param {boolean} linksTouched
+ * @return {boolean}
+ */
+function shouldOmitDriveLinksFromManageSave_(
+  preserveMalformedCell,
+  linksTouched
+) {
+  return !!preserveMalformedCell && !linksTouched;
+}
+
+function markManageDriveLinksTouched_() {
+  state.manage.driveLinksTouched = true;
 }
 
 /* ================================================================
@@ -1047,6 +1067,8 @@ function openManageModalForCreate() {
   state.manage.id = null;
   state.manage.links = [];
   state.manage.presenters = [];
+  state.manage.driveLinksPreserveMalformed = false;
+  state.manage.driveLinksTouched = false;
 
   document.getElementById('manageModalTitle').textContent =
     'New Topic';
@@ -1103,6 +1125,8 @@ function openManageModal(id) {
   state.manage.id = id;
   state.manage.links = [];
   state.manage.presenters = [];
+  state.manage.driveLinksPreserveMalformed = false;
+  state.manage.driveLinksTouched = false;
 
   document.getElementById('manageModalTitle').textContent =
     'Manage Topic — loading...';
@@ -1206,6 +1230,9 @@ function populateManageModal(t) {
   renderPresenterChips();
 
   // Links
+  state.manage.driveLinksPreserveMalformed =
+    !!t.DriveLinksMalformed;
+  state.manage.driveLinksTouched = false;
   state.manage.links = Array.isArray(t.DriveLinks)
     ? t.DriveLinks.map(L => ({
         url: String(L.url || ''),
@@ -1277,16 +1304,19 @@ function renderLinkRows() {
       row
         .querySelector('.link-title')
         .addEventListener('input', e => {
+          markManageDriveLinksTouched_();
           state.manage.links[i].title = e.target.value;
         });
       row
         .querySelector('.link-url')
         .addEventListener('input', e => {
+          markManageDriveLinksTouched_();
           state.manage.links[i].url = e.target.value;
         });
       row
         .querySelector('.link-remove')
         .addEventListener('click', () => {
+          markManageDriveLinksTouched_();
           state.manage.links.splice(i, 1);
           renderLinkRows();
         });
@@ -1321,6 +1351,7 @@ function renderLinkRows() {
 }
 
 function addLinkRow() {
+  markManageDriveLinksTouched_();
   state.manage.links.push({
     url: '',
     title: '',
@@ -1382,14 +1413,21 @@ function saveManageModal() {
       .value.trim(),
     TargetMonth: document.getElementById('m_targetMonth').value,
     Priority: document.getElementById('m_priority').value,
-    Notes: document.getElementById('m_notes').value,
-    DriveLinks: state.manage.links.map(L => ({
+    Notes: document.getElementById('m_notes').value
+  };
+
+  const omitDriveLinks = shouldOmitDriveLinksFromManageSave_(
+    state.manage.driveLinksPreserveMalformed,
+    state.manage.driveLinksTouched
+  );
+  if (!omitDriveLinks) {
+    patch.DriveLinks = state.manage.links.map(L => ({
       url: String(L.url || '').trim(),
       title: String(L.title || '').trim(),
       addedBy: L.addedBy || '',
       addedAt: L.addedAt || ''
-    }))
-  };
+    }));
+  }
 
   if (!patch.Title || !patch.Description) {
     toast('Title and description are required.');

@@ -335,6 +335,50 @@ function validateDriveUrl_(url) {
 }
 
 /**
+ * True when the sheet cell is non-empty but not valid stored DriveLinks JSON.
+ * Used to avoid overwriting legacy/corrupt values on unrelated Manage saves.
+ * @param {*} raw Cell value
+ * @return {boolean}
+ */
+function driveLinksCellIsMalformed_(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return false;
+  try {
+    const arr = JSON.parse(s);
+    return !Array.isArray(arr);
+  } catch (e) {
+    return true;
+  }
+}
+
+/**
+ * Validate and serialize DriveLinks for Topics sheet storage (JSON string).
+ * @param {Array<{url?: string, title?: string, addedBy?: string, addedAt?: string}>} links
+ * @param {{displayName?: string, email?: string}} user
+ * @return {string}
+ */
+function normalizeDriveLinksForStorage_(links, user) {
+  const list = Array.isArray(links) ? links : [];
+  const cleaned = list.map(l => {
+    const url = String((l && l.url) || '').trim();
+    if (!validateDriveUrl_(url)) {
+      throw new Error('Invalid Drive link URL: ' + url);
+    }
+    return {
+      url: url,
+      title: String((l && l.title) || '').trim(),
+      addedBy: String(
+        (l && l.addedBy) || user.displayName || user.email || ''
+      ).trim(),
+      addedAt: String(
+        (l && l.addedAt) || new Date().toISOString()
+      )
+    };
+  });
+  return JSON.stringify(cleaned);
+}
+
+/**
  * Best-effort metadata lookup. Returns { title } or empty object on failure.
  * Useful when an admin pastes a Drive URL and we want to auto-fill the title.
  */
@@ -405,6 +449,7 @@ function mapTopicRow_(t, isAdmin, commentCounts) {
 
   if (isAdmin) {
     obj.Notes = String(t.Notes || '');
+    obj.DriveLinksMalformed = driveLinksCellIsMalformed_(t.DriveLinks);
   }
 
   return obj;
@@ -683,36 +728,10 @@ function updateTopic(id, patch) {
     }
 
     if (patch.DriveLinks !== undefined) {
-      const links = Array.isArray(patch.DriveLinks)
-        ? patch.DriveLinks
-        : [];
-      const cleaned = links.map(l => {
-        const url = String(
-          (l && l.url) || ''
-        ).trim();
-        if (!validateDriveUrl_(url)) {
-          throw new Error(
-            'Invalid Drive link URL: ' + url
-          );
-        }
-        return {
-          url: url,
-          title: String(
-            (l && l.title) || ''
-          ).trim(),
-          addedBy: String(
-            (l && l.addedBy) ||
-              user.displayName ||
-              user.email ||
-              ''
-          ).trim(),
-          addedAt: String(
-            (l && l.addedAt) ||
-              new Date().toISOString()
-          )
-        };
-      });
-      patch.DriveLinks = JSON.stringify(cleaned);
+      patch.DriveLinks = normalizeDriveLinksForStorage_(
+        patch.DriveLinks,
+        user
+      );
     }
 
     // Apply allowed fields.
@@ -840,7 +859,10 @@ function createTopicFromAdmin(patch) {
     LastEditedBy: user.displayName || user.email,
     Votes: 0,
     CommentsCount: 0,
-    DriveLinks: patch.DriveLinks || []
+    DriveLinks: normalizeDriveLinksForStorage_(
+      patch.DriveLinks !== undefined ? patch.DriveLinks : [],
+      user
+    )
   };
 
   const headers = sh

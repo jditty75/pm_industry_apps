@@ -7,6 +7,7 @@ var SlgCapacityTransform = (function () {
 
   var JUNK = { '': true, '(Blank)': true, 'Total': true, 'nan': true, 'None': true };
   var FQM = { 1: 'Q4', 2: 'Q1', 3: 'Q1', 4: 'Q1', 5: 'Q2', 6: 'Q2', 7: 'Q2', 8: 'Q3', 9: 'Q3', 10: 'Q3', 11: 'Q4', 12: 'Q4' };
+  var WEEK_END_DATE_KEYS = ['Week End Transaction Date', 'Week Ending Date'];
 
   /**
    * @param {*} v
@@ -71,13 +72,32 @@ var SlgCapacityTransform = (function () {
     if (iso) {
       return new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
     }
+    var usSlash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (usSlash) {
+      return new Date(
+        parseInt(usSlash[3], 10),
+        parseInt(usSlash[1], 10) - 1,
+        parseInt(usSlash[2], 10)
+      );
+    }
     var d = new Date(s);
     if (!isNaN(d.getTime())) {
       return new Date(d.getFullYear(), d.getMonth(), d.getDate());
     }
-    var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) {
-      return new Date(parseInt(m[3], 10), parseInt(m[1], 10) - 1, parseInt(m[2], 10));
+    return null;
+  }
+
+  /**
+   * @param {Object.<string, string>} row
+   * @return {Date|null}
+   */
+  function weekEndDateFromRow(row) {
+    if (!row) return null;
+    for (var i = 0; i < WEEK_END_DATE_KEYS.length; i++) {
+      var key = WEEK_END_DATE_KEYS[i];
+      if (!Object.prototype.hasOwnProperty.call(row, key) || row[key] === '') continue;
+      var parsed = parseDate(row[key]);
+      if (parsed) return parsed;
     }
     return null;
   }
@@ -247,7 +267,7 @@ var SlgCapacityTransform = (function () {
       var id = nid(row['Worker ID']);
       var name = String(row.Worker || '').trim();
       var hrs = snum(row['ICP Hours']);
-      var wed = parseDate(row['Week End Transaction Date']);
+      var wed = weekEndDateFromRow(row);
       if (!wed || !id || hrs === 0) return;
       var wk = weekKeyYmd(wed);
       var fq = fqFromWeekend(wed);
@@ -295,7 +315,7 @@ var SlgCapacityTransform = (function () {
         nTerm++;
         return;
       }
-      var wed = parseDate(row['Week End Transaction Date']);
+      var wed = weekEndDateFromRow(row);
       if (!wed || wed < seamStart) return;
       var hrs = snum(row['Forecasted Hours']);
       var regionWorker = String(row['Worker Region'] || '');
@@ -461,7 +481,7 @@ var SlgCapacityTransform = (function () {
     ac.forEach(function (row) {
       var id = nid(row['Worker ID']);
       var icp = snum(row['ICP Hours']);
-      var wed = parseDate(row['Week End Transaction Date']);
+      var wed = weekEndDateFromRow(row);
       if (!id || !wed) return;
       var fq = fqFromWeekend(wed);
       var pk = id + '|' + fq;
@@ -719,6 +739,7 @@ var SlgCapacityTransform = (function () {
     curQuarter: curQuarter,
     computeSeam: computeSeam,
     parseDate: parseDate,
+    weekEndDateFromRow: weekEndDateFromRow,
     weekKeyYmd: weekKeyYmd
   };
 })();

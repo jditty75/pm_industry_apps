@@ -38,14 +38,14 @@ var SlgCapacityPipeline = (function () {
   function detectReportingCycle_(batchTexts) {
     var fc = SlgCapacityCsv.gridToRecords(SlgCapacityCsv.parseCsvText(batchTexts.forecast));
     var ac = SlgCapacityCsv.gridToRecords(SlgCapacityCsv.parseCsvText(batchTexts.actualsPrevCurrent));
-    var maxAc = maxWeekEnd_(ac, 'Week End Transaction Date');
+    var maxAc = maxWeekEnd_(ac);
     if (!maxAc) {
       return {
         ok: false,
         error: 'Could not determine reporting week from Actuals Prev/Current file'
       };
     }
-    var maxFc = maxWeekEnd_(fc, 'Week End Transaction Date');
+    var maxFc = maxWeekEnd_(fc);
     if (!maxFc) {
       return { ok: false, error: 'Could not determine reporting week from Forecast file' };
     }
@@ -60,7 +60,7 @@ var SlgCapacityPipeline = (function () {
     var anchorKey = SlgCapacityTransform.weekKeyYmd(maxAc);
     var forecastCoversAnchor = false;
     fc.forEach(function (row) {
-      var d = SlgCapacityTransform.parseDate(row['Week End Transaction Date']);
+      var d = SlgCapacityTransform.weekEndDateFromRow(row);
       if (d && SlgCapacityTransform.weekKeyYmd(d) === anchorKey) {
         forecastCoversAnchor = true;
       }
@@ -82,13 +82,12 @@ var SlgCapacityPipeline = (function () {
 
   /**
    * @param {Object.<string, string>[]} records
-   * @param {string} col
    * @return {Date|null}
    */
-  function maxWeekEnd_(records, col) {
+  function maxWeekEnd_(records) {
     var max = null;
     records.forEach(function (row) {
-      var d = SlgCapacityTransform.parseDate(row[col]);
+      var d = SlgCapacityTransform.weekEndDateFromRow(row);
       if (d && (!max || d > max)) max = d;
     });
     return max;

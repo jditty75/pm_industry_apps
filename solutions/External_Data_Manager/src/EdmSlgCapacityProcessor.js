@@ -120,7 +120,7 @@ var EdmSlgCapacityProcessor = (function () {
     return {
       ok: body.ok !== false,
       job: job,
-      dryRun: !!body.dryRun,
+      dryRun: body.dryRun != null ? !!body.dryRun : !!(options && options.dryRun),
       reason: body.reason,
       validation: body.validation,
       transform: body.transform,

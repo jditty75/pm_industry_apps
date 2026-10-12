@@ -19,6 +19,8 @@ It does **not** require a developer machine, Cursor, `scripts.run`, or `clasp ru
 
 **CSAT Responses canary:** [csat-responses-storage-canary.md](./csat-responses-storage-canary.md)
 
+**SLG Capacity WoW (four-file Workday → planner):** [edm-slg-capacity-wow-runbook.md](./edm-slg-capacity-wow-runbook.md) — development complete; scheduling activation is property + trigger work only (no new EDM trigger for stage 1).
+
 ## Qualtrics V1 (production)
 
 | Component | State |
@@ -28,7 +30,7 @@ It does **not** require a developer machine, Cursor, `scripts.run`, or `clasp ru
 | EVI / PDX / HS | CoreLib **139** (not Qualtrics destinations) |
 | Ingest | `EDM_QUALTRICS_INGEST_ENABLED=true` (normal ops) |
 | Successful-source delete | `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE=true` |
-| Schedule | One trigger: `runQualtricsInboxScheduled` (~15 min) — InFlight then Responses (each isolated try/catch) |
+| Schedule | One trigger: `runQualtricsInboxScheduled` (~15 min) — InFlight, Responses, then SLG Capacity when `EDM_SLG_CAPACITY_INGEST_ENABLED=true` (each isolated try/catch) |
 | User workflow | Drop full-dashboard Qualtrics CSV in Drive **Qualtrics → Inbox** |
 
 **Operations runbook:** [edm-qualtrics-v1-runbook.md](./edm-qualtrics-v1-runbook.md)
@@ -83,6 +85,12 @@ Healthcare is not routed to HENP. Routing lives in `QualtricsRoutingConfig`, not
 | `QUALTRICS_RESPONSES_FAILED_FOLDER_ID` | Failed Responses sources |
 | `EDM_QUALTRICS_RESPONSES_INGEST_ENABLED` | Must be `true` for scheduled/manual Responses ingest |
 | `EDM_DELETE_SUCCESSFUL_QUALTRICS_RESPONSES_SOURCE` | Must be `true` to delete Responses Inbox file after full success |
+| `SLG_CAPACITY_INBOX_FOLDER_ID` | WoW four-file Inbox |
+| `SLG_CAPACITY_FAILED_FOLDER_ID` | Failed WoW sources |
+| `SLG_CAPACITY_ARCHIVE_FOLDER_ID` | Archived WoW sources after success |
+| `SLG_CAPACITY_HANDOFF_FOLDER_ID` | Consolidated handoff spreadsheets for SLG_Capacity |
+| `EDM_SLG_CAPACITY_INGEST_ENABLED` | Must be `true` for non–dry-run WoW transform + handoff |
+| `EDM_DELETE_SUCCESSFUL_SLG_CAPACITY_SOURCE` | When `true`, delete Inbox files after success instead of archive |
 
 Never commit property **values** or `.clasp.json`.
 
@@ -94,11 +102,16 @@ processQualtricsInboxNow({ dryRun: true });
 
 // Production trigger entry (installed once at V1 activation)
 runQualtricsInboxScheduled();
+
+// SLG Capacity WoW (same schedule when ingest enabled; or manual)
+processSlgCapacityInboxNow({ dryRun: true });
 ```
+
+Planner handoff pickup (container-bound **SLG_Capacity** project, not EDM): `processEdmCapacityHandoffNow()`. See [edm-slg-capacity-wow-runbook.md](./edm-slg-capacity-wow-runbook.md).
 
 ## Duplicate / stale / concurrency
 
-- Script lock: `EdmLocking.QUALTRICS_INGEST_LOCK_KEY`
+- Script lock: `EdmLocking.QUALTRICS_INGEST_LOCK_KEY` (Qualtrics); `EdmLocking.SLG_CAPACITY_INGEST_LOCK_KEY` (WoW four-file)
 - Duplicate successful checksum → reject (`DUPLICATE_SUCCESS_CHECKSUM`); source stays in Inbox (not moved to Failed).
 - Stale export timestamp → reject when a newer successful job exists; override via `allowStaleOverride`.
 - Without trustworthy export timestamp, stale guard does not use Drive upload time.

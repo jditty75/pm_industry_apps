@@ -12,7 +12,7 @@
 
 | Topic | Behavior |
 |--------|----------|
-| Processing latency | Approximately **15 minutes** (time-driven trigger on `runQualtricsInboxScheduled`) |
+| Processing latency | Approximately **15 minutes** (time-driven trigger on `runQualtricsInboxScheduled`; optional SLG Capacity leg when enabled — see [edm-slg-capacity-wow-runbook.md](./edm-slg-capacity-wow-runbook.md)) |
 | Successful files | Removed from Inbox after validated transform, all destination ingests, verification, and audit persistence (`EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE=true`) |
 | Failed files | Remain in **Inbox** or move to **Qualtrics → Failed** for investigation (ingest enabled, non–dry-run failures) |
 | Job status | **Audit ledger** spreadsheet (counts, checksum, per-destination status — **no row-level PII**) |
@@ -47,7 +47,7 @@ Separation preserved for future pipelines (e.g. **SLG_Capacity** as another EDM 
 | `EDM_QUALTRICS_INGEST_ENABLED` | `true` |
 | `EDM_DELETE_SUCCESSFUL_QUALTRICS_SOURCE` | `true` |
 | EDM CoreLib pin | **145** (`developmentMode: false`) |
-| Schedule | **One** time-driven trigger: `runQualtricsInboxScheduled`, ~**15** minutes |
+| Schedule | **One** time-driven trigger: `runQualtricsInboxScheduled`, ~**15** minutes (InFlight → Responses → SLG Capacity WoW when `EDM_SLG_CAPACITY_INGEST_ENABLED=true`) |
 | DM CoreLib pins | SLG / HC / HENP **144**; EVI / PDX / HS **139** (unchanged for Qualtrics V1) |
 
 Activation entry point (one-time, **Apps Script editor**): `runEdmQualtricsV1ProductionActivationNow()`. Remote Execution API / `clasp run` is not used in this environment—see [gas-runtime-execution.md](../../skills/gas-monorepo-engineer/references/gas-runtime-execution.md).

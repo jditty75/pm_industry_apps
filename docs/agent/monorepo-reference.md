@@ -81,7 +81,7 @@ Do **not** treat `clasp run` or `scripts.run` as required for EDM or DM validati
 ### Manual / editor examples
 
 - `SLED_Marketing`: `runSelfTest()` in Apps Script editor.
-- `SLG_Capacity`: `Diagnostics.js` helpers.
+- `SLG_Capacity`: `Diagnostics.js` helpers; WoW EDM handoff: `processEdmCapacityHandoffNow` / manual `api_uploadConsolidatedWorkbook` ([edm-slg-capacity-wow-runbook.md](./edm-slg-capacity-wow-runbook.md)).
 - `*_DM`: Debug menu items in `onOpen()`.
 - **EDM:** `runEdmVerifyOperationalState()`, Qualtrics/Responses controlled ops — editor only unless Jeff enables Execution API.
 - Otherwise: exercise web app / menu, `npm run logs`.

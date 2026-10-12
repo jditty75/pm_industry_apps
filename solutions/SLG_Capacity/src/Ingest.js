@@ -416,9 +416,8 @@ function runConsolidatedPreflight_(tempSs, warnings) {
   }
 
   validateForecastStagedHeaders_(data.Forecast_Staged, recordCheck, warnings);
-  validateSheetHeadersStrict_(
-    'Actuals_Current_Normalized', data.Actuals_Current_Normalized,
-    ACTUALS_CURRENT_STAGED_HEADERS_, recordCheck
+  validateActualsCurrentStagedHeaders_(
+    data.Actuals_Current_Normalized, recordCheck
   );
   validateSheetHeadersStrict_(
     'Utilization_Normalized', data.Utilization_Normalized,
@@ -490,6 +489,30 @@ function validateForecastStagedHeaders_(values, recordCheck, warnings) {
  * @param {Function} recordCheck
  * @private
  */
+/**
+ * Actuals_Current_Normalized preflight: staged headers, optional trailing source_row from EDM.
+ * @param {Array[]} values
+ * @param {Function} recordCheck
+ * @private
+ */
+function validateActualsCurrentStagedHeaders_(values, recordCheck) {
+  if (!values || values.length < 1) {
+    recordCheck('headers:Actuals_Current_Normalized', false, 'Sheet is empty');
+    return;
+  }
+  var header = values[0].map(function (h) { return String(h).trim(); });
+  if (header.length === ACTUALS_HEADERS.length &&
+      header[header.length - 1] === 'source_row') {
+    validateSheetHeadersStrict_(
+      'Actuals_Current_Normalized', values, ACTUALS_HEADERS, recordCheck
+    );
+    return;
+  }
+  validateSheetHeadersStrict_(
+    'Actuals_Current_Normalized', values, ACTUALS_CURRENT_STAGED_HEADERS_, recordCheck
+  );
+}
+
 function validateSheetHeadersStrict_(sheetName, values, expectedHeaders, recordCheck) {
   if (!values || values.length < 1) {
     recordCheck('headers:' + sheetName, false, 'Sheet is empty');
@@ -1266,6 +1289,103 @@ function writeConsolidatedHistory_(values) {
 function api_uploadConsolidatedWorkbook(base64, filename) {
   _requireAuthorized_();
   return uploadConsolidatedWorkbook(base64, filename);
+}
+
+/**
+ * EDM Drive handoff: ingest consolidated workbook already in Google Sheets (no Execution API).
+ *
+ * @param {string} spreadsheetId handoff spreadsheet id
+ * @param {boolean} [trashHandoffAfterSuccess] default true
+ * @return {Object} same shape as uploadConsolidatedWorkbook
+ */
+function ingestConsolidatedWorkbookFromSpreadsheetId(spreadsheetId, trashHandoffAfterSuccess) {
+  var safeId = String(spreadsheetId || '').trim();
+  var warnings = [];
+  if (!safeId) {
+    return _buildConsolidatedResult_(false, 'edm_handoff', {
+      passed: false,
+      checks: [{ label: 'Input', passed: false, detail: 'Missing spreadsheet id.' }]
+    }, null, warnings);
+  }
+  var trash = trashHandoffAfterSuccess !== false;
+  try {
+    var tempSs = SpreadsheetApp.openById(safeId);
+    var preflight = runConsolidatedPreflight_(tempSs, warnings);
+    if (!preflight.passed) {
+      return _buildConsolidatedResult_(false, 'edm_handoff', preflight, null, warnings);
+    }
+    var written = writeConsolidatedWorkbook_(preflight.data, warnings);
+    try {
+      if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
+    } catch (e) {
+      Logger.log('ingestConsolidatedWorkbookFromSpreadsheetId: cache invalidate failed — ' + e);
+    }
+    if (trash) {
+      try {
+        DriveApp.getFileById(safeId).setTrashed(true);
+      } catch (e) {
+        Logger.log('ingestConsolidatedWorkbookFromSpreadsheetId: handoff trash failed — ' + e);
+      }
+    }
+    return _buildConsolidatedResult_(true, 'edm_handoff', preflight, written, warnings);
+  } catch (e) {
+    Logger.log('ingestConsolidatedWorkbookFromSpreadsheetId: ' + e);
+    return _buildConsolidatedResult_(false, 'edm_handoff', {
+      passed: false,
+      checks: [{ label: 'Unexpected error', passed: false, detail: String(e) }]
+    }, null, warnings);
+  }
+}
+
+/**
+ * Process one consolidated handoff spreadsheet from Drive (property SLG_CAPACITY_HANDOFF_INBOX_FOLDER_ID).
+ *
+ * @param {Object=} options
+ * @param {string} [options.handoffFolderId]
+ * @param {string} [options.preferredFileName]
+ * @return {Object}
+ */
+function processEdmCapacityHandoffNow(options) {
+  options = options || {};
+  var props = PropertiesService.getScriptProperties();
+  var folderId = options.handoffFolderId ||
+    props.getProperty('SLG_CAPACITY_HANDOFF_INBOX_FOLDER_ID') ||
+    props.getProperty('EDM_SLG_CAPACITY_HANDOFF_FOLDER_ID');
+  if (!folderId) {
+    return { ok: false, message: 'SLG_CAPACITY_HANDOFF_INBOX_FOLDER_ID not configured' };
+  }
+  var folder = DriveApp.getFolderById(folderId);
+  var files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+  var candidate = null;
+  while (files.hasNext()) {
+    var f = files.next();
+    if (options.preferredFileName && f.getName() !== options.preferredFileName) {
+      continue;
+    }
+    if (!candidate || f.getName().localeCompare(candidate.getName()) < 0) {
+      candidate = f;
+    }
+  }
+  if (!candidate) {
+    return { ok: true, message: 'No handoff spreadsheet in folder' };
+  }
+  var result = ingestConsolidatedWorkbookFromSpreadsheetId(candidate.getId(), true);
+  return {
+    ok: !!result.success,
+    fileName: candidate.getName(),
+    ingest: result
+  };
+}
+
+/**
+ * @param {string} [handoffFolderId]
+ * @return {Object}
+ */
+function api_processEdmCapacityHandoffNow(handoffFolderId) {
+  _requireAuthorized_();
+  return processEdmCapacityHandoffNow({
+    handoffFolderId: handoffFolderId || undefined
+  });
 }
 
 /**

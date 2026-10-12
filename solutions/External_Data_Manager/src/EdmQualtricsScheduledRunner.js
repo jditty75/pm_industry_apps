@@ -9,8 +9,9 @@ var EdmQualtricsScheduledRunner = (function () {
    * @param {Object} deps
    * @param {function(): Object} deps.runInFlight
    * @param {function(): Object} deps.runResponses
+   * @param {function(): Object} [deps.runCapacity]
    * @param {function(string)} [deps.log]
-   * @return {{ ok: boolean, inflight: Object, responses: Object }}
+   * @return {{ ok: boolean, inflight: Object, responses: Object, capacity?: Object }}
    */
   function runScheduledPipelines(deps) {
     var log = deps.log || function (msg) {
@@ -41,12 +42,28 @@ var EdmQualtricsScheduledRunner = (function () {
       };
     }
 
+    var capacityResult;
+    if (deps.runCapacity) {
+      try {
+        capacityResult = deps.runCapacity();
+      } catch (capacityErr) {
+        log('EdmQualtricsScheduledRunner: capacity threw: ' + capacityErr);
+        capacityResult = {
+          ok: false,
+          pipeline: 'slg_capacity_wow',
+          message: String(capacityErr)
+        };
+      }
+    }
+
     var inflightOk = inflightResult && inflightResult.ok !== false;
     var responsesOk = responsesResult && responsesResult.ok !== false;
+    var capacityOk = !deps.runCapacity || (capacityResult && capacityResult.ok !== false);
     return {
-      ok: inflightOk && responsesOk,
+      ok: inflightOk && responsesOk && capacityOk,
       inflight: inflightResult,
-      responses: responsesResult
+      responses: responsesResult,
+      capacity: capacityResult
     };
   }
 

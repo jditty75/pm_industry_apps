@@ -22,6 +22,13 @@ function runQualtricsInboxScheduled(e) {
         ingestEnabled: isQualtricsResponsesIngestEnabled_(),
         deleteSuccessfulSource: isDeleteSuccessfulResponsesSourceEnabled_()
       });
+    },
+    runCapacity: function () {
+      return processSlgCapacityInboxNow({
+        dryRun: false,
+        ingestEnabled: isSlgCapacityIngestEnabled_(),
+        deleteSuccessfulSource: isDeleteSuccessfulSlgCapacitySourceEnabled_()
+      });
     }
   });
 }
@@ -446,6 +453,152 @@ function ensureEdmBootstrapFromDrive_(props) {
       Logger.log('ensureEdmBootstrapFromDrive_: invalid bootstrap skipped');
     }
   }
+}
+
+/**
+ * Process SLG Capacity four-file WoW batch from Drive Inbox (manual / future schedule).
+ *
+ * @param {Object=} options
+ * @param {boolean} [options.dryRun=true]
+ * @param {boolean} [options.ingestEnabled]
+ * @param {boolean} [options.deleteSuccessfulSource]
+ * @param {boolean} [options.allowDuplicateOverride]
+ * @param {string} [options.runDate] ISO date for transform seam (default today)
+ * @return {Object}
+ */
+function processSlgCapacityInboxNow(options) {
+  options = options || {};
+  var dryRun = options.dryRun !== false;
+  var ingestEnabled = !!options.ingestEnabled && isSlgCapacityIngestEnabled_();
+  if (options.ingestEnabled && !dryRun && !ingestEnabled) {
+    return {
+      ok: false,
+      message: 'Ingest requested but EDM_SLG_CAPACITY_INGEST_ENABLED is not true'
+    };
+  }
+
+  var lock = EdmLocking.tryAcquire(EdmLocking.SLG_CAPACITY_INGEST_LOCK_KEY, LockService, 1000);
+  if (!lock.acquired) {
+    return { ok: false, message: 'Another SLG Capacity job is running' };
+  }
+
+  try {
+    var props = PropertiesService.getScriptProperties();
+    ensureEdmBootstrapFromDrive_(props);
+    var inboxId = props.getProperty(EdmProperties.SLG_CAPACITY_INBOX_FOLDER_ID);
+    if (!inboxId) {
+      return { ok: false, message: 'SLG_CAPACITY_INBOX_FOLDER_ID not configured' };
+    }
+
+    var batchFind = EdmSlgCapacityInbox.findCompleteBatch(inboxId, DriveApp);
+    if (!batchFind.ok) {
+      if (batchFind.errors && batchFind.errors[0] &&
+          batchFind.errors[0].indexOf('Incomplete batch') >= 0) {
+        return { ok: true, message: 'No complete four-file batch in Inbox' };
+      }
+      return { ok: false, message: (batchFind.errors || []).join('; ') };
+    }
+
+    var batchTexts = EdmSlgCapacityInbox.readBatchTexts(batchFind.files);
+    var ledgerId = props.getProperty(EdmProperties.AUDIT_LEDGER_SPREADSHEET_ID);
+    var priorJobs = [];
+    if (ledgerId) {
+      var sheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+      priorJobs = EdmJobHistory.toPriorJobRefs(
+        EdmAuditLedgerSheet.readAllJobs(sheet),
+        SlgCapacityPipeline.PIPELINE_ID
+      );
+    }
+
+    var batchLabel = Object.keys(batchFind.batch).map(function (k) {
+      return batchFind.batch[k];
+    }).join(' + ');
+
+    var outcome = EdmSlgCapacityProcessor.processBatchJob(batchTexts, {
+      batchLabel: batchLabel,
+      batchFiles: batchFind.batch,
+      exportTimestamp: new Date().toISOString()
+    }, {
+      dryRun: dryRun,
+      ingestEnabled: ingestEnabled,
+      priorJobs: priorJobs,
+      allowDuplicateOverride: options.allowDuplicateOverride,
+      skipDuplicateCheck: false,
+      runDate: options.runDate
+    });
+
+    var disposition = 'INBOX';
+    var duplicateBlocked = outcome.job &&
+      outcome.job.errorCategory === 'DUPLICATE_SUCCESS_CHECKSUM';
+    if (!outcome.ok && !dryRun && !duplicateBlocked) {
+      var failedId = props.getProperty(EdmProperties.SLG_CAPACITY_FAILED_FOLDER_ID);
+      if (failedId) {
+        try {
+          Object.keys(batchFind.files).forEach(function (slot) {
+            EdmSlgCapacityInbox.moveToFailed(batchFind.files[slot], failedId, DriveApp);
+          });
+          disposition = 'FAILED';
+        } catch (moveErr) {
+          Logger.log('processSlgCapacityInboxNow: moveToFailed skipped: ' + moveErr);
+        }
+      }
+    } else if (outcome.ok && ingestEnabled && !dryRun) {
+      if (options.deleteSuccessfulSource === true &&
+          props.getProperty(EdmProperties.DELETE_SUCCESSFUL_SLG_CAPACITY_SOURCE) === 'true') {
+        Object.keys(batchFind.files).forEach(function (slot) {
+          EdmSlgCapacityInbox.deleteFile(batchFind.files[slot]);
+        });
+        disposition = 'DELETED_AFTER_SUCCESS';
+      } else {
+        var archiveId = props.getProperty(EdmProperties.SLG_CAPACITY_ARCHIVE_FOLDER_ID);
+        if (archiveId) {
+          EdmSlgCapacityInbox.moveBatchToFolder(batchFind.files, archiveId, DriveApp);
+          disposition = 'ARCHIVED_AFTER_SUCCESS';
+        }
+      }
+    }
+
+    if (ledgerId && outcome.job) {
+      var ledgerSheet = EdmAuditLedgerSheet.openLedger(ledgerId, SpreadsheetApp);
+      EdmAuditLedgerSheet.appendJob(ledgerSheet, outcome.job, {
+        sourceDisposition: disposition,
+        overrideFlags: (outcome.overrideFlags || []).join(','),
+        hcEligible: 0,
+        slgEligible: 0,
+        henpEligible: 0
+      });
+    }
+
+    Logger.log('processSlgCapacityInboxNow: job ' + (outcome.job && outcome.job.jobId) +
+      ' status=' + (outcome.job && outcome.job.status) + ' disposition=' + disposition);
+    return {
+      ok: outcome.ok,
+      dryRun: dryRun,
+      jobId: outcome.job && outcome.job.jobId,
+      disposition: disposition,
+      handoff: outcome.handoff,
+      log: outcome.log,
+      outcome: outcome
+    };
+  } finally {
+    lock.release();
+  }
+}
+
+/**
+ * @return {boolean}
+ */
+function isSlgCapacityIngestEnabled_() {
+  return PropertiesService.getScriptProperties()
+    .getProperty(EdmProperties.SLG_CAPACITY_INGEST_ENABLED) === 'true';
+}
+
+/**
+ * @return {boolean}
+ */
+function isDeleteSuccessfulSlgCapacitySourceEnabled_() {
+  return PropertiesService.getScriptProperties()
+    .getProperty(EdmProperties.DELETE_SUCCESSFUL_SLG_CAPACITY_SOURCE) === 'true';
 }
 
 function runQualtricsV1aHarness(csvText) {

@@ -6,6 +6,7 @@ var EdmLocking = (function () {
   'use strict';
 
   var QUALTRICS_INGEST_LOCK_KEY = 'EDM_QUALTRICS_INGEST';
+  var SLG_CAPACITY_INGEST_LOCK_KEY = 'EDM_SLG_CAPACITY_INGEST';
 
   /**
    * @param {string} lockKey
@@ -35,6 +36,7 @@ var EdmLocking = (function () {
 
   return {
     QUALTRICS_INGEST_LOCK_KEY: QUALTRICS_INGEST_LOCK_KEY,
+    SLG_CAPACITY_INGEST_LOCK_KEY: SLG_CAPACITY_INGEST_LOCK_KEY,
     tryAcquire: tryAcquire
   };
 })();

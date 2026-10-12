@@ -40,7 +40,14 @@ const FILES = [
   'EdmOrchestrator.js',
   'EdmProductionActivation.js',
   'EdmQualtricsProcessor.js',
-  'EdmQualtricsInbox.js'
+  'EdmQualtricsInbox.js',
+  'EdmSlgCapacity0Schema.js',
+  'capacity/SlgCapacity1Csv.js',
+  'capacity/SlgCapacity2Transform.js',
+  'capacity/SlgCapacity3Pipeline.js',
+  'EdmSlgCapacityInbox.js',
+  'EdmSlgCapacityHandoff.js',
+  'EdmSlgCapacityProcessor.js'
 ];
 
 /**

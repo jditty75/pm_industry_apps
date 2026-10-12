@@ -9,6 +9,7 @@
     "status": "clasp status",
     "deploy": "clasp push && clasp deploy",
     "version": "clasp version",
-    "logs": "clasp logs"
+    "logs": "clasp logs",
+    "test": "node --test test/**/*.test.js"
   }
 }

@@ -281,8 +281,8 @@ function splitWeekAcrossMonths_(weekStart, hours, basis) {
 // Sheet I/O
 // ============================================================
 
-function getOrCreateSheet_(name, headers) {
-  const ss = SpreadsheetApp.getActive();
+function getOrCreateSheet_(name, headers, optSs) {
+  const ss = optSs || SpreadsheetApp.getActive();
   let sh = ss.getSheetByName(name);
   if (!sh) {
     sh = ss.insertSheet(name);
@@ -301,8 +301,8 @@ function getOrCreateSheet_(name, headers) {
   return sh;
 }
 
-function writeTable_(name, headers, rows) {
-  const sh = getOrCreateSheet_(name, headers);
+function writeTable_(name, headers, rows, optSs) {
+  const sh = getOrCreateSheet_(name, headers, optSs);
   const lastRow = sh.getLastRow();
   const lastCol = Math.max(sh.getLastColumn(), headers.length);
   if (lastRow > 1) sh.getRange(2, 1, lastRow - 1, lastCol).clearContent();
@@ -323,8 +323,9 @@ function writeTable_(name, headers, rows) {
   return (rows || []).length;
 }
 
-function readTable_(name) {
-  const sh = SpreadsheetApp.getActive().getSheetByName(name);
+function readTable_(name, optSs) {
+  const ss = optSs || SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(name);
   if (!sh) return [];
   const values = sh.getDataRange().getValues();
   if (values.length < 2) return [];
@@ -338,8 +339,8 @@ function readTable_(name) {
     });
 }
 
-function appendRow_(name, rowObj, headers) {
-  const sh = getOrCreateSheet_(name, headers);
+function appendRow_(name, rowObj, headers, optSs) {
+  const sh = getOrCreateSheet_(name, headers, optSs);
   const row = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
   sh.appendRow(row);
   // WFM.13: same week_key plain-text guard as writeTable_ (see there for
@@ -440,7 +441,7 @@ function updateRow_(name, idField, idValue, patch, headers) {
  * @param {string} [warnings] pipe-joined contiguity/duplicate warnings from
  *   detectWeekColumns_, for Admin surfacing (Normalization_Log.warnings)
  */
-function logRefresh_(source, rowsIn, rowsOut, weeksDetected, warnings) {
+function logRefresh_(source, rowsIn, rowsOut, weeksDetected, warnings, optSs) {
   appendRow_(REFRESH_LOG, {
     timestamp: now_(),
     source: source,
@@ -449,7 +450,7 @@ function logRefresh_(source, rowsIn, rowsOut, weeksDetected, warnings) {
     weeks_detected: weeksDetected,
     user: getUserEmail_(),
     warnings: warnings || ''
-  }, REFRESH_HEADERS);
+  }, REFRESH_HEADERS, optSs);
 }
 
 // ============================================================

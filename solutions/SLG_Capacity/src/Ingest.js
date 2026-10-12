@@ -250,6 +250,7 @@ function uploadConsolidatedWorkbook(base64, filename) {
     gsId = gsFile.id;
     safeName = String(filename || gsFile.title || safeName);
 
+    var destSs = SpreadsheetApp.getActiveSpreadsheet();
     var tempSs = SpreadsheetApp.openById(gsId);
     tPhase = _logConsolidatedPhase_('drive_conversion', tPhase, safeName);
 
@@ -260,7 +261,7 @@ function uploadConsolidatedWorkbook(base64, filename) {
       return _buildConsolidatedResult_(false, safeName, preflight, null, warnings);
     }
 
-    var written = writeConsolidatedWorkbook_(preflight.data, warnings);
+    var written = writeConsolidatedWorkbook_(preflight.data, warnings, destSs);
     tPhase = _logConsolidatedPhase_('destination_writes_total', tPhase);
 
     try {
@@ -1010,9 +1011,9 @@ function validateUtilizationQuarterCount_(values, recordCheck) {
  * @return {Object}
  * @private
  */
-function writeConsolidatedWorkbook_(data, warnings) {
+function writeConsolidatedWorkbook_(data, warnings, optDestSs) {
   var t0 = new Date().getTime();
-  var destSs = SpreadsheetApp.getActiveSpreadsheet();
+  var destSs = optDestSs || SpreadsheetApp.getActiveSpreadsheet();
   var forecastValues = data.Forecast_Staged;
   var destSheet = destSs.getSheetByName(STAFF_SHEET);
   if (!destSheet) {
@@ -1029,28 +1030,29 @@ function writeConsolidatedWorkbook_(data, warnings) {
     Math.max(forecastValues.length - 1, 0) + ' forecast rows, ' +
     (forecastValues[0] ? forecastValues[0].length : 0) + ' cols');
 
-  var normResult = normalizeStaff();
+  SpreadsheetApp.flush();
+  var normResult = normalizeStaff(destSs);
   normResult.warnings.forEach(function (w) { warnings.push('normalizeStaff: ' + w); });
   t0 = _logConsolidatedPhase_('normalizeStaff', t0,
     (normResult.rowsIn || 0) + ' PSA rows in, ' + (normResult.rowsOut || 0) +
     ' alloc rows out (includes reconcileWorkerExclusions_ + invalidateEnrichedCaches_ + enriched-cache warm inside)');
 
-  var actualsRowsOut = writeConsolidatedActuals_(data.Actuals_Current_Normalized);
+  var actualsRowsOut = writeConsolidatedActuals_(data.Actuals_Current_Normalized, destSs);
   t0 = _logConsolidatedPhase_('write_actuals_normalized', t0, actualsRowsOut + ' rows');
 
-  var summaryRowsOut = writeConsolidatedActualsSummary_(data.Utilization_Normalized);
+  var summaryRowsOut = writeConsolidatedActualsSummary_(data.Utilization_Normalized, destSs);
   t0 = _logConsolidatedPhase_('write_actuals_worker_summary', t0, summaryRowsOut + ' rows');
 
-  var utilQuarterlyRows = writeConsolidatedUtilQuarterly_(data.Utilization_Normalized);
+  var utilQuarterlyRows = writeConsolidatedUtilQuarterly_(data.Utilization_Normalized, destSs);
   t0 = _logConsolidatedPhase_('write_utilization_quarterly', t0, utilQuarterlyRows + ' rows');
 
-  var historyRows = writeConsolidatedHistory_(data.History_Normalized);
+  var historyRows = writeConsolidatedHistory_(data.History_Normalized, destSs);
   t0 = _logConsolidatedPhase_('write_actuals_history', t0, historyRows + ' rows');
 
-  var unstaffedRowsOut = writeConsolidatedUnstaffedDemand_(data[UNSTAFFED_DEMAND_SHEET]);
+  var unstaffedRowsOut = writeConsolidatedUnstaffedDemand_(data[UNSTAFFED_DEMAND_SHEET], destSs);
   t0 = _logConsolidatedPhase_('write_unstaffed_demand', t0, unstaffedRowsOut + ' rows');
 
-  var xorgRowsOut = writeConsolidatedXorgForecast_(data[XORG_FORECAST_AGGREGATE]);
+  var xorgRowsOut = writeConsolidatedXorgForecast_(data[XORG_FORECAST_AGGREGATE], destSs);
   _logConsolidatedPhase_('write_xorg_forecast_aggregate', t0, xorgRowsOut + ' rows');
 
   return {
@@ -1071,9 +1073,9 @@ function writeConsolidatedWorkbook_(data, warnings) {
  * @return {number} data rows written (0 if empty/absent)
  * @private
  */
-function writeConsolidatedXorgForecast_(values) {
+function writeConsolidatedXorgForecast_(values, optDestSs) {
   if (!values || values.length < 2) {
-    writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, []);
+    writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, [], optDestSs);
     invalidateCache_(XORG_FORECAST_AGGREGATE);
     return 0;
   }
@@ -1091,7 +1093,7 @@ function writeConsolidatedXorgForecast_(values) {
       Number(row[idx.forecast_hours]) || 0
     ]);
   }
-  writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, out);
+  writeTable_(XORG_FORECAST_AGGREGATE, XORG_FORECAST_AGGREGATE_HEADERS, out, optDestSs);
   invalidateCache_(XORG_FORECAST_AGGREGATE);
   return out.length;
 }
@@ -1103,9 +1105,9 @@ function writeConsolidatedXorgForecast_(values) {
  * @return {number} data rows written (0 if sheet absent/empty)
  * @private
  */
-function writeConsolidatedUnstaffedDemand_(values) {
+function writeConsolidatedUnstaffedDemand_(values, optDestSs) {
   if (!values || !values.length) return 0;
-  var destSs = SpreadsheetApp.getActiveSpreadsheet();
+  var destSs = optDestSs || SpreadsheetApp.getActiveSpreadsheet();
   var destSheet = destSs.getSheetByName(UNSTAFFED_DEMAND_SHEET);
   if (!destSheet) {
     destSheet = destSs.insertSheet(UNSTAFFED_DEMAND_SHEET);
@@ -1123,9 +1125,9 @@ function writeConsolidatedUnstaffedDemand_(values) {
  * @return {number} rows written
  * @private
  */
-function writeConsolidatedActuals_(values) {
+function writeConsolidatedActuals_(values, optDestSs) {
   if (!values || values.length < 2) {
-    writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, []);
+    writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, [], optDestSs);
     invalidateCache_(ACTUALS_NORM);
     return 0;
   }
@@ -1147,7 +1149,7 @@ function writeConsolidatedActuals_(values) {
       return String(row[idx[h]] || '').trim();
     }));
   }
-  writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, out);
+  writeTable_(ACTUALS_NORM, ACTUALS_HEADERS, out, optDestSs);
   invalidateCache_(ACTUALS_NORM);
 
   try {
@@ -1180,10 +1182,10 @@ function writeConsolidatedActuals_(values) {
  * @return {number} rows written
  * @private
  */
-function writeConsolidatedActualsSummary_(values) {
+function writeConsolidatedActualsSummary_(values, optDestSs) {
   var curQ = fiscalQuarterKey_(new Date());
   if (!values || values.length < 2) {
-    writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, []);
+    writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, [], optDestSs);
     invalidateCache_(ACTUALS_SUMMARY);
     return 0;
   }
@@ -1205,7 +1207,7 @@ function writeConsolidatedActualsSummary_(values) {
       r + 2
     ]);
   }
-  writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, out);
+  writeTable_(ACTUALS_SUMMARY, ACTUALS_SUMMARY_HEADERS, out, optDestSs);
   invalidateCache_(ACTUALS_SUMMARY);
   return out.length;
 }
@@ -1215,9 +1217,9 @@ function writeConsolidatedActualsSummary_(values) {
  * @return {number} rows written
  * @private
  */
-function writeConsolidatedUtilQuarterly_(values) {
+function writeConsolidatedUtilQuarterly_(values, optDestSs) {
   if (!values || values.length < 2) {
-    writeTable_(CFG_UTIL_QUARTERLY, UTIL_QUARTERLY_HEADERS, []);
+    writeTable_(CFG_UTIL_QUARTERLY, UTIL_QUARTERLY_HEADERS, [], optDestSs);
     invalidateCache_(CFG_UTIL_QUARTERLY);
     return 0;
   }
@@ -1235,7 +1237,7 @@ function writeConsolidatedUtilQuarterly_(values) {
       return row[idx[h]] !== undefined && row[idx[h]] !== '' ? row[idx[h]] : '';
     }));
   }
-  writeTable_(CFG_UTIL_QUARTERLY, UTIL_QUARTERLY_HEADERS, out);
+  writeTable_(CFG_UTIL_QUARTERLY, UTIL_QUARTERLY_HEADERS, out, optDestSs);
   invalidateCache_(CFG_UTIL_QUARTERLY);
   return out.length;
 }
@@ -1245,9 +1247,9 @@ function writeConsolidatedUtilQuarterly_(values) {
  * @return {number} rows written
  * @private
  */
-function writeConsolidatedHistory_(values) {
+function writeConsolidatedHistory_(values, optDestSs) {
   if (!values || values.length < 2) {
-    writeTable_(ACTUALS_HISTORY, ACTUALS_HISTORY_HEADERS, []);
+    writeTable_(ACTUALS_HISTORY, ACTUALS_HISTORY_HEADERS, [], optDestSs);
     invalidateCache_(ACTUALS_HISTORY);
     return 0;
   }
@@ -1275,7 +1277,7 @@ function writeConsolidatedHistory_(values) {
       return String(row[idx[h]] || '').trim();
     }));
   }
-  writeTable_(ACTUALS_HISTORY, ACTUALS_HISTORY_HEADERS, out);
+  writeTable_(ACTUALS_HISTORY, ACTUALS_HISTORY_HEADERS, out, optDestSs);
   invalidateCache_(ACTUALS_HISTORY);
   return out.length;
 }
@@ -1309,12 +1311,13 @@ function ingestConsolidatedWorkbookFromSpreadsheetId(spreadsheetId, trashHandoff
   }
   var trash = trashHandoffAfterSuccess !== false;
   try {
+    var destSs = SpreadsheetApp.getActiveSpreadsheet();
     var tempSs = SpreadsheetApp.openById(safeId);
     var preflight = runConsolidatedPreflight_(tempSs, warnings);
     if (!preflight.passed) {
       return _buildConsolidatedResult_(false, 'edm_handoff', preflight, null, warnings);
     }
-    var written = writeConsolidatedWorkbook_(preflight.data, warnings);
+    var written = writeConsolidatedWorkbook_(preflight.data, warnings, destSs);
     try {
       if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_();
     } catch (e) {
@@ -1957,15 +1960,15 @@ function detectWeekColumns_(headerRow) {
  * - Backfills ICP_role per worker so PTO_Holiday and other blank rows
  *   inherit the worker's ICP role from non-PTO allocations.
  */
-function normalizeStaff() {
-  const ss  = SpreadsheetApp.getActive();
+function normalizeStaff(optSs) {
+  const ss  = optSs || SpreadsheetApp.getActive();
   const src = ss.getSheetByName(STAFF_SHEET);
   if (!src) throw new Error('Missing sheet: ' + STAFF_SHEET);
 
   const values = src.getDataRange().getValues();
   if (values.length < 2) {
-    writeTable_(ALLOC_NORM, ALLOC_HEADERS, []);
-    logRefresh_('staff', 0, 0, 0, '');
+    writeTable_(ALLOC_NORM, ALLOC_HEADERS, [], optSs);
+    logRefresh_('staff', 0, 0, 0, '', optSs);
     invalidateCache_(ALLOC_NORM);
     return { rowsIn: 0, rowsOut: 0, weeksDetected: 0, warnings: [] };
   }
@@ -2147,19 +2150,19 @@ function normalizeStaff() {
     }
   }
 
-  writeTable_(ALLOC_NORM, ALLOC_HEADERS, out);
+  writeTable_(ALLOC_NORM, ALLOC_HEADERS, out, optSs);
 
   // WFM-FIX.3: reconcile Config_Worker_Exclusions against this ingest's
   // manager membership + on_leave tags. Read back via readTable_ (not
   // cachedRead_) so we see the just-written on_leave column fresh, not a
   // stale cached copy. Reconciliation failure must never break ingest.
   try {
-    reconcileWorkerExclusions_(readTable_(ALLOC_NORM));
+    reconcileWorkerExclusions_(readTable_(ALLOC_NORM, optSs));
   } catch (e) {
     Logger.log('normalizeStaff: reconcileWorkerExclusions_ failed \u2014 ' + e);
   }
 
-  logRefresh_('staff', values.length, out.length, weeks.length, weekDetection.warnings.join(' | '));
+  logRefresh_('staff', values.length, out.length, weeks.length, weekDetection.warnings.join(' | '), optSs);
   invalidateCache_(ALLOC_NORM);
   // Drop 5: invalidate enriched-data caches that depend on ALLOC_NORM.
   try { if (typeof invalidateEnrichedCaches_ === 'function') invalidateEnrichedCaches_(); } catch(e) {}

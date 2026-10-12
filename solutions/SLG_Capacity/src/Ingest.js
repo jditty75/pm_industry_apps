@@ -717,7 +717,7 @@ function getActualsPeriodRange_(values) {
   var keys = [];
   data.forEach(function (row) {
     var k = '';
-    if (iWeekKey !== undefined) k = String(row[iWeekKey] || '').trim();
+    if (iWeekKey !== undefined) k = normalizeManifestWeek_(row[iWeekKey]);
     else if (iWeekStart !== undefined) k = weekKey_(row[iWeekStart]);
     if (k) keys.push(k);
   });
@@ -913,7 +913,7 @@ function validateConsolidatedWeekKeys_(values, sheetName, recordCheck) {
       return;
     }
     var expectedKey = weekKey_(wsDate);
-    var actualKey = String(row[iWeekKey] || '').trim();
+    var actualKey = normalizeManifestWeek_(row[iWeekKey]);
     if (actualKey !== expectedKey) {
       recordCheck(
         'week_key:' + sheetName,

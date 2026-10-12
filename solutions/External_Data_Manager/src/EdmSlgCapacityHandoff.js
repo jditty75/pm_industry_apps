@@ -38,6 +38,16 @@ var EdmSlgCapacityHandoff = (function () {
       }
       var values = sheets[name] || [['']];
       if (values.length && values[0].length) {
+        // WFM.13: week_key must stay plain text so Sheets does not reinterpret
+        // YYYY-MM-DD strings as Date serials (SLG_Capacity preflight expects strings).
+        if (name === SlgCapacitySchema.OUT_ACTUALS) {
+          var hdr = values[0].map(function (h) { return String(h).trim(); });
+          var wkCol = hdr.indexOf('week_key');
+          var dataRowCount = values.length - 1;
+          if (wkCol >= 0 && dataRowCount > 0) {
+            sh.getRange(2, wkCol + 1, dataRowCount, 1).setNumberFormat('@');
+          }
+        }
         sh.getRange(1, 1, values.length, values[0].length).setValues(values);
       }
     });

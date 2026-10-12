@@ -38,29 +38,46 @@ var SlgCapacityPipeline = (function () {
   function detectReportingCycle_(batchTexts) {
     var fc = SlgCapacityCsv.gridToRecords(SlgCapacityCsv.parseCsvText(batchTexts.forecast));
     var ac = SlgCapacityCsv.gridToRecords(SlgCapacityCsv.parseCsvText(batchTexts.actualsPrevCurrent));
-    var maxFc = maxWeekEnd_(fc, 'Week End Transaction Date');
     var maxAc = maxWeekEnd_(ac, 'Week End Transaction Date');
-    if (!maxFc || !maxAc) {
-      return { ok: false, error: 'Could not determine reporting week from Forecast or Actuals files' };
-    }
-    var fqFc = SlgCapacityTransform.fqFromWeekend(maxFc);
-    var fqAc = SlgCapacityTransform.fqFromWeekend(maxAc);
-    if (fqFc !== fqAc) {
+    if (!maxAc) {
       return {
         ok: false,
-        error: 'Mixed reporting cycle: Forecast max week fiscal quarter ' + fqFc +
-          ' vs Actuals ' + fqAc
+        error: 'Could not determine reporting week from Actuals Prev/Current file'
       };
     }
-    var diffDays = Math.abs(maxFc.getTime() - maxAc.getTime()) / (86400000);
-    if (diffDays > 14) {
+    var maxFc = maxWeekEnd_(fc, 'Week End Transaction Date');
+    if (!maxFc) {
+      return { ok: false, error: 'Could not determine reporting week from Forecast file' };
+    }
+    if (maxFc.getTime() < maxAc.getTime()) {
       return {
         ok: false,
-        error: 'Mixed reporting cycle: Forecast and Actuals max week ends differ by ' +
-          Math.round(diffDays) + ' days'
+        error: 'Mixed reporting cycle: Forecast latest week end ' +
+          SlgCapacityTransform.weekKeyYmd(maxFc) + ' precedes Actuals latest ' +
+          SlgCapacityTransform.weekKeyYmd(maxAc)
       };
     }
-    return { ok: true, warnings: [] };
+    var anchorKey = SlgCapacityTransform.weekKeyYmd(maxAc);
+    var forecastCoversAnchor = false;
+    fc.forEach(function (row) {
+      var d = SlgCapacityTransform.parseDate(row['Week End Transaction Date']);
+      if (d && SlgCapacityTransform.weekKeyYmd(d) === anchorKey) {
+        forecastCoversAnchor = true;
+      }
+    });
+    if (!forecastCoversAnchor) {
+      return {
+        ok: false,
+        error: 'Mixed reporting cycle: Forecast has no rows for Actuals latest week end ' + anchorKey
+      };
+    }
+    return {
+      ok: true,
+      warnings: [
+        'Reporting-cycle check aligns Forecast to Actuals latest week end (' + anchorKey +
+          '); forecast weeks beyond actuals are allowed and export timestamps are not validated.'
+      ]
+    };
   }
 
   /**

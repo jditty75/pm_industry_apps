@@ -67,6 +67,10 @@ var SlgCapacityTransform = (function () {
     }
     var s = String(value || '').trim();
     if (!s) return null;
+    var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso) {
+      return new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+    }
     var d = new Date(s);
     if (!isNaN(d.getTime())) {
       return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -150,7 +154,7 @@ var SlgCapacityTransform = (function () {
   function computeSeam(run) {
     var d = parseDate(run);
     if (!d) throw new Error('Invalid run date');
-    var daysToSat = (5 - pandasDow(d)) % 7;
+    var daysToSat = ((5 - pandasDow(d)) % 7 + 7) % 7;
     var inprogSat = new Date(d.getFullYear(), d.getMonth(), d.getDate() + daysToSat);
     var lastCompleted = new Date(inprogSat.getFullYear(), inprogSat.getMonth(), inprogSat.getDate() - 7);
     return { seamCut: lastCompleted, seamStart: inprogSat };
@@ -573,6 +577,25 @@ var SlgCapacityTransform = (function () {
       if (!actMin || wk < actMin) actMin = wk;
       if (!actMax || wk > actMax) actMax = wk;
     });
+    /**
+     * @param {Array[]} sheet
+     * @param {number} colIndex
+     * @return {{ min: string, max: string }}
+     */
+    function minMaxFqColumn(sheet, colIndex) {
+      if (!sheet || sheet.length < 2) return { min: '', max: '' };
+      var keys = [];
+      for (var r = 1; r < sheet.length; r++) {
+        var fq = String(sheet[r][colIndex] || '').trim();
+        if (fq) keys.push(fq);
+      }
+      if (!keys.length) return { min: '', max: '' };
+      keys.sort(function (a, b) { return compareFq(a, b); });
+      return { min: keys[0], max: keys[keys.length - 1] };
+    }
+
+    var utilFq = minMaxFqColumn(util, 2);
+    var histFq = minMaxFqColumn(hist, 4);
     var header = SlgCapacitySchema.MANIFEST_COLS.slice();
     var body = [
       [SlgCapacitySchema.OUT_FORECAST, Math.max(staffed.length - 1, 0), 'forecast_hours',
@@ -583,12 +606,10 @@ var SlgCapacityTransform = (function () {
         Math.round(actSum * 10) / 10, distinctCol(actuals, 'employee_id'), actMin, actMax],
       [SlgCapacitySchema.OUT_UTIL, Math.max(util.length - 1, 0), 'target_hours',
         util.slice(1).reduce(function (s, row) { return s + snum(row[3]); }, 0),
-        distinctCol(util, 'employee_id'),
-        util.length > 1 ? util[1][2] : '', util.length > 1 ? util[util.length - 1][2] : ''],
+        distinctCol(util, 'employee_id'), utilFq.min, utilFq.max],
       [SlgCapacitySchema.OUT_HISTORY, Math.max(hist.length - 1, 0), 'icp_hours',
         hist.slice(1).reduce(function (s, row) { return s + snum(row[7]); }, 0),
-        distinctCol(hist, 'employee_id'),
-        hist.length > 1 ? hist[1][4] : '', hist.length > 1 ? hist[hist.length - 1][4] : '']
+        distinctCol(hist, 'employee_id'), histFq.min, histFq.max]
     ];
     body.forEach(function (row) {
       if (typeof row[3] === 'number') row[3] = Math.round(row[3] * 10) / 10;

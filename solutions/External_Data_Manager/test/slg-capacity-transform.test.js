@@ -36,6 +36,30 @@ test('SLG Capacity run-date seam matches transform_v4 Saturday rule', () => {
   assert.equal(g.SlgCapacityTransform.weekKeyYmd(seam.seamStart), '2026-05-09');
 });
 
+test('SLG Capacity ISO run date parses as calendar date (no UTC shift)', () => {
+  const g = loadEdmGlobals();
+  var seam = g.SlgCapacityTransform.computeSeam('2026-10-12');
+  assert.equal(g.SlgCapacityTransform.weekKeyYmd(seam.seamCut), '2026-10-10');
+  assert.equal(g.SlgCapacityTransform.weekKeyYmd(seam.seamStart), '2026-10-17');
+});
+
+test('SLG Capacity batch accepts forecast horizon beyond actuals reporting week', () => {
+  const g = loadEdmGlobals();
+  var fc = 'Worker ID,Worker,Week End Transaction Date,Forecasted Hours,Customer Name,Project,Project Role Category,Specialty - Text,Job Profile,Worker Region,Project Region,Worker\'s Manager\n' +
+    '1,Alice,10/31/2026,8,Acct,P1,Role,Spec,JP,Government,GR,M\n' +
+    '1,Alice,07/31/2027,8,Acct,P1,Role,Spec,JP,Government,GR,M\n';
+  var ac = 'Worker ID,Worker,Week End Transaction Date,ICP Hours,Customer Name,Project,Project Role Category,Specialty - Text,Job Profile,Worker Region,Project Region,Worker\'s Manager\n' +
+    '1,Alice,10/31/2026,8,Acct,P1,Role,Spec,JP,Government,GR,M\n';
+  var hist = 'Worker ID,Worker,Region as of Date Worked,Supervisory Organization as of Date Worked,Specialty Practice,Sub-Specialty Practice,Project,Project Role Category,Worked Hours,Non-Billable Hours,ICP Hours,Fiscal Qtr\n';
+  var util = 'h1,h2\n2026-Q1,2026-Q2\nm1,m2\n';
+  var validation = g.SlgCapacityPipeline.validateBatch(
+    { forecast: 'f', actualsPrevCurrent: 'a', actualsHistorical: 'h', utilization: 'u' },
+    { forecast: fc, actualsPrevCurrent: ac, actualsHistorical: hist, utilization: util }
+  );
+  assert.equal(validation.ok, true);
+  assert.ok((validation.warnings || []).join(' ').indexOf('beyond actuals') >= 0);
+});
+
 test('SLG Capacity transform rejects mixed reporting cycle', () => {
   const g = loadEdmGlobals();
   var fc = 'Worker ID,Worker,Week End Transaction Date,Forecasted Hours,Customer Name,Project,Project Role Category,Specialty - Text,Job Profile,Worker Region,Project Region,Worker\'s Manager\n' +
@@ -49,4 +73,5 @@ test('SLG Capacity transform rejects mixed reporting cycle', () => {
     { forecast: fc, actualsPrevCurrent: ac, actualsHistorical: hist, utilization: util }
   );
   assert.equal(validation.ok, false);
+  assert.ok((validation.errors || []).join(' ').indexOf('Actuals latest week end') >= 0);
 });

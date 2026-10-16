@@ -1,0 +1,521 @@
+<!doctype html>
+<html><head><base target="_top"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+:root{font-family:Inter,Arial,sans-serif;color:#172337;background:#f6f8fb}*{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button{cursor:pointer}.shell{max-width:1450px;margin:auto;padding:30px 36px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.logo{font-size:26px;font-weight:800;letter-spacing:-1px}.logo span{color:#2874d0}.subtitle{color:#748196;font-size:13px;margin-top:5px}.tag{background:#eaf1ff;color:#2860aa;border-radius:30px;padding:8px 13px;font-size:12px;font-weight:700}.hero{background:linear-gradient(115deg,#182e52,#28518b);border-radius:20px;padding:27px;color:white;display:flex;justify-content:space-between;align-items:center;gap:16px}.hero h1{margin:0 0 9px;font-size:25px}.hero p{margin:0;color:#cbdaf0;font-size:13px}.monthnav{display:flex;align-items:center;gap:10px}.monthnav button{background:#ffffff24;color:white;border:1px solid #ffffff55;border-radius:9px;padding:9px 12px}.monthnav strong{min-width:135px;text-align:center}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:22px 0}.metric{background:white;border:1px solid #e7ebf2;border-radius:15px;padding:20px}.metric small{color:#738096}.metric b{display:block;font-size:29px;margin-top:7px}.surface{background:white;border:1px solid #e7ebf2;border-radius:16px;overflow:hidden}.toolbar{padding:18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;border-bottom:1px solid #edf0f4}.toolbar input{flex:1;min-width:220px}.toolbar input,.toolbar select{border:1px solid #dce3ed;border-radius:9px;padding:11px;background:white;color:#23334c}.partnerfilter{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:600;color:#33445c;white-space:nowrap;cursor:pointer}.partnerfilter input{accent-color:#2862a9;width:16px;height:16px;min-width:16px;margin:0}.pill.workday{background:#fff1e5;color:#98500e;border:1px solid #f6d5b4}.toolbar button{background:#eaf1ff;color:#2059a0;border:0;border-radius:9px;padding:11px 16px}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;min-width:750px}th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#8190a2;background:#fafbfd;padding:14px 18px}td{padding:16px 18px;border-top:1px solid #edf0f4;font-size:13px}tbody tr{cursor:pointer}tbody tr:hover{background:#f4f8ff}.customer{font-weight:700}.muted{font-size:12px;color:#7b899a;margin-top:5px}.pill{display:inline-block;padding:5px 9px;border-radius:7px;font-size:11px;font-weight:700;background:#e9f1ff;color:#2862a9;margin:2px}.pill.pgl{background:#e8f7ef;color:#177a4b}.pill.warn{background:#fff3df;color:#996115}
+.pill.info{background:#e8f4fd;color:#1a5f8a;border:1px solid #b8d9ef;max-width:220px;white-space:normal;line-height:1.35}
+.pill.survey-insight{background:#e6f2fb;color:#1a568c;border:1px solid #a8cce8;max-width:120px;white-space:normal;line-height:1.3}.status{padding:28px;text-align:center;color:#718096}.overlay{position:fixed;inset:0;background:#14213b70;opacity:0;pointer-events:none;transition:opacity .28s;z-index:10}.overlay.open{opacity:1;pointer-events:auto}.drawer{position:fixed;right:0;top:0;bottom:0;width:min(650px,100vw);background:white;box-shadow:-20px 0 55px #14213b22;transform:translateX(105%);transition:transform .32s cubic-bezier(.2,.8,.2,1);z-index:11;display:flex;flex-direction:column}.drawer.open{transform:translateX(0)}.drawerhead{padding:24px 28px;border-bottom:1px solid #e9edf3;display:flex;justify-content:space-between;gap:15px}.drawerhead h2{margin:0 0 7px;font-size:20px}.close{border:0;background:#f1f4f9;border-radius:9px;width:36px;height:36px;font-size:22px}.drawerbody{overflow:auto;padding:24px 28px}.section{margin-bottom:25px}.section h3{font-size:14px;margin:0 0 12px}.event{border:1px solid #e2e8f0;border-radius:13px;padding:17px;margin-bottom:12px}.eventhead{display:flex;justify-content:space-between;gap:8px}.eventtitle{font-weight:700}.eventdate{font-size:17px;font-weight:800;margin:10px 0}.detailgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.detail{background:#f7f9fc;border-radius:10px;padding:12px;min-width:0}.detail small{display:block;color:#7b899a;margin-bottom:5px}.detail div{overflow-wrap:anywhere;font-size:13px}.notice{background:#fff8ec;border:1px solid #ffe0ab;border-radius:10px;padding:12px;color:#835718;font-size:12px;margin-bottom:8px}.attrs{display:grid;grid-template-columns:1fr 1fr;gap:9px}.contactcard{display:flex;gap:12px;align-items:flex-start;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:10px}.contactavatar{width:38px;height:38px;flex:none;border-radius:50%;background:#eaf1ff;color:#2862a9;display:grid;place-items:center;font-weight:800}.contactmain{min-width:0}.contactmain strong{display:block;font-size:13px}.contactrole{font-size:12px;color:#63748c;margin:4px 0}.contactemail{font-size:12px;color:#2862a9;overflow-wrap:anywhere}.empty{color:#7a8798;font-size:13px}.loading{opacity:.6}@media(max-width:680px){.shell{padding:15px}.hero{display:block}.monthnav{margin-top:20px}.metrics{gap:8px}.metric{padding:12px}.metric b{font-size:22px}.drawerhead,.drawerbody{padding:18px}.attrs,.detailgrid{grid-template-columns:1fr}}
+
+/* VOC V1.1 — Data-First compact layout */
+.shell{max-width:1600px;padding:14px 26px 26px}
+.top{margin-bottom:10px;min-height:43px}
+.brandlockup{display:flex;align-items:center;gap:12px;min-width:0}
+.brandimage{display:none;max-width:190px;max-height:44px;width:auto;height:auto;object-fit:contain}
+.brandimage.visible{display:block}
+.brandlockup.has-image .logo{display:none}
+.logo{font-size:23px}
+.subtitle{font-size:11px;margin-top:1px}
+.tag{padding:6px 10px;font-size:11px}
+.hero{border-radius:12px;padding:12px 18px;min-height:62px}
+.hero h1{font-size:17px;margin:0 0 3px}
+.hero p{font-size:11px}
+.monthnav button{padding:6px 10px;border-radius:7px}
+.monthnav strong{min-width:128px;font-size:13px}
+.metrics{display:flex;gap:0;margin:9px 0 10px;background:#fff;border:1px solid #e7ebf2;border-radius:11px;overflow:hidden}
+.metric{border:0;border-radius:0;padding:9px 16px;display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.metric+.metric{border-left:1px solid #e7ebf2}
+.metric small{font-size:11px}
+.metric b{font-size:19px;margin:0;order:-1;min-width:26px}
+.surface{border-radius:11px}
+.toolbar{padding:9px 12px;gap:8px}
+.toolbar input,.toolbar select{padding:8px 9px;border-radius:7px;font-size:12px}
+.toolbar input{min-width:170px}
+.toolbar button{padding:8px 12px;border-radius:7px;font-size:12px}
+.partnerfilter{font-size:11px;gap:6px}
+.partnerfilter input{width:14px;height:14px;min-width:14px}
+th{padding:10px 13px;font-size:10px}
+td{padding:10px 13px;font-size:12px}
+.customer{font-size:12px}
+.muted{font-size:11px;margin-top:3px}
+.pill{padding:3px 7px;font-size:10px}
+@media(max-width:760px){.shell{padding:10px}.hero{gap:8px}.hero p{display:none}.metrics{flex-wrap:wrap}.metric{padding:8px 10px}.metric small{font-size:10px}.metric b{font-size:17px}.brandimage{max-width:135px;max-height:35px}}
+.cacheline{display:flex;justify-content:flex-end;color:#687d98;font-size:11px;padding:0 2px 9px}.toolbar button:disabled{opacity:.55;cursor:wait}
+/* VOC V1.3: approved compact workspace + tabbed drawer */
+:root{color:#142742;background:#f3f6fb}
+.shell{max-width:1640px;padding:18px 30px 30px}
+.top{margin-bottom:14px;min-height:45px}
+.brandimage{max-width:185px;max-height:46px}
+.hero{background:#fff;border:1px solid #dfe7f2;color:#172b49;padding:9px 14px;border-radius:12px;min-height:52px;box-shadow:none}
+.hero h1{font-size:14px;margin:0 0 3px}
+.hero p{color:#7c8da6;font-size:11px}
+.monthnav button{color:#245c9d;background:#f3f7ff;border:1px solid #dfe7f2;padding:6px 10px}
+.monthnav strong{color:#1c385c;min-width:123px}
+.metrics{margin:8px 0 8px;border-radius:10px}
+.metric{padding:7px 12px}
+.metric b{font-size:16px}
+.metric small{font-size:10px}
+.cacheline{padding:0 2px 8px;font-size:10px}
+.surface{border-color:#dfe7f2}
+.toolbar{padding:10px 12px}
+.toolbar input,.toolbar select{padding:9px 11px}
+.tablewrap table{min-width:760px}
+th{padding:10px 14px;background:#f7f9fd}
+td{padding:10px 14px}
+.drawer{width:min(670px,100vw)}
+.drawerhead{display:block;padding:18px 24px 0;background:#fff;flex:none}
+.drawerhead h2{font-size:19px;margin:2px 0 5px;letter-spacing:-.35px}
+.drawerhead .muted{margin:0}
+.drawerheadrow{display:flex;justify-content:space-between;align-items:start;gap:12px}
+.drawer-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:11px 0 0}
+.drawer-tabs{display:flex;gap:22px;margin-top:15px;overflow:auto}
+.drawer-tab{border:0;border-bottom:2px solid transparent;background:transparent;color:#71839d;padding:0 0 12px;font-size:12px;font-weight:700;white-space:nowrap}
+.drawer-tab.active{color:#22569b;border-color:#22569b}
+.drawerbody{padding:17px 24px 26px;flex:1;overflow-y:auto}
+.drawer-pane{display:none}.drawer-pane.active{display:block}
+.section{margin-bottom:16px}.section h3{font-size:13px;margin:0 0 10px}
+.event{border:1px solid #e1e8f3;border-radius:12px;padding:13px 15px;margin-bottom:10px}
+.eventdate{font-size:18px;color:#16365e;margin:5px 0 7px}
+.calc-strip{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-radius:9px;background:#f5f8fd;font-size:12px}
+.calc-strip b{color:#1d3e69}.calc-arrow{color:#8ca0bb}
+.event-note{font-size:11px;color:#647793;margin-top:7px;line-height:1.5}
+.compact-list{margin-top:8px;font-size:12px;color:#516780}
+.compact-contact{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #eef2f7}
+.compact-contact .contactavatar{width:30px;height:30px;font-size:11px}
+.compact-contact strong{font-size:12px}.compact-contact .contactrole{font-size:11px;margin:3px 0}
+.compact-contact a{font-size:11px;color:#225a9a;text-decoration:none;overflow-wrap:anywhere}
+.kv{display:grid;grid-template-columns:1fr 1fr;column-gap:20px}
+.kvitem{border-bottom:1px solid #eef2f7;padding:9px 0;min-width:0}
+.kvitem small{display:block;color:#7587a0;font-size:11px;margin-bottom:3px}
+.kvitem strong{display:block;font-size:12px;font-weight:600;overflow-wrap:anywhere}
+.drawer-accordion{border:1px solid #e1e8f3;border-radius:10px;margin-top:11px;overflow:hidden}
+.drawer-accordion summary{cursor:pointer;padding:11px 13px;font-size:12px;font-weight:700;list-style:none;display:flex;justify-content:space-between}
+.drawer-accordion summary::-webkit-details-marker{display:none}
+.drawer-accordion summary::after{content:'+';color:#71839d;font-size:16px}
+.drawer-accordion[open] summary::after{content:'−'}
+.drawer-accordion .accordion-body{border-top:1px solid #e1e8f3;padding:10px 13px}
+.productline{padding:8px 0;border-bottom:1px solid #eef2f7;font-size:12px}
+.productline:last-child{border-bottom:0}
+@media(max-width:680px){.shell{padding:12px}.hero{flex-wrap:wrap}.hero p{display:none}.monthnav{margin-top:0}.drawerhead,.drawerbody{padding-left:16px;padding-right:16px}.kv{grid-template-columns:1fr}.compact-contact{grid-template-columns:30px 1fr}.compact-contact a{grid-column:2}}
+
+.filterfield{display:flex;flex-direction:column;gap:4px;flex:none}
+.filterfield span{font-size:10px;font-weight:700;color:#647795;letter-spacing:.02em}
+.filterfield select{padding:7px 10px;min-height:34px}
+.distribution{border:1px solid #e0e8f3;border-radius:11px;margin-bottom:9px;overflow:hidden}
+.distribution summary{list-style:none;cursor:pointer;padding:11px 13px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.distribution summary::-webkit-details-marker{display:none}
+.distribution summary:hover{background:#f7faff}
+.distribution[open] summary{border-bottom:1px solid #e9eef6;background:#f8faff}
+.distribution .distbody{padding:10px 13px}
+.dist-product{padding:9px 0;border-bottom:1px solid #edf1f7}
+.dist-product:last-child{border-bottom:0}
+.dist-product strong{font-size:12px}
+.dist-product .muted{margin-top:4px}
+.dist-meta{font-size:11px;color:#687b96;margin-top:4px}
+.dist-count{font-size:11px;color:#687b96}
+
+/* VOC built-in stakeholder overview */
+.top-actions{display:flex;align-items:center;gap:10px}
+.about-launch{background:#fff;border:1px solid #d8e3f2;border-radius:9px;color:#22569b;padding:8px 12px;font-size:12px;font-weight:700;white-space:nowrap}
+.about-launch:hover{background:#eaf2ff}
+.about-backdrop{position:fixed;inset:0;background:rgba(14,29,52,.57);z-index:30;display:none;align-items:center;justify-content:center;padding:20px}
+.about-backdrop.open{display:flex}
+.about-modal{background:#fff;width:min(760px,100%);max-height:min(88vh,900px);display:flex;flex-direction:column;border-radius:17px;box-shadow:0 25px 80px #14213b44;overflow:hidden}
+.about-head{display:flex;align-items:start;justify-content:space-between;gap:16px;padding:22px 26px 17px;border-bottom:1px solid #e8edf5}
+.about-head h2{font-size:22px;letter-spacing:-.4px;margin:3px 0 4px;color:#17345b}
+.about-head p{font-size:12px;color:#6a7c96;margin:0}
+.about-body{overflow-y:auto;padding:21px 26px 27px;font-size:13px;line-height:1.65;color:#33465e}
+.about-body h3{font-size:14px;color:#17345b;margin:20px 0 6px}
+.about-body h3:first-child{margin-top:0}
+.about-body p{margin:6px 0 10px}
+.about-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:13px 0}
+.about-rule{background:#f5f8fd;border:1px solid #e5ecf6;border-radius:11px;padding:14px}
+.about-rule strong{color:#183d6a;font-size:13px}
+.about-rule ul{padding-left:18px;margin:7px 0 0}
+.about-feature{display:grid;grid-template-columns:165px 1fr;gap:12px;border-bottom:1px solid #eef1f6;padding:8px 0}
+.about-feature strong{color:#1a395f}
+.about-note{background:#f1f6ff;border-left:3px solid #4b82ca;padding:10px 13px;border-radius:5px;margin-top:14px}
+@media(max-width:650px){.about-grid{grid-template-columns:1fr}.about-feature{grid-template-columns:1fr;gap:0}.about-head,.about-body{padding-left:17px;padding-right:17px}.top-actions{gap:5px}.about-launch{padding:7px 8px}}
+
+/* About VOC: compact legend for the exact labels used in the interface. */
+.about-legend{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 16px}
+.about-legend-item{border:1px solid #e5ecf6;border-radius:10px;padding:12px;background:#fbfcff}
+.about-legend-item .pill{margin:0 0 7px}
+.about-legend-item p{margin:0;font-size:12px;line-height:1.5;color:#51627a}
+@media(max-width:650px){.about-legend{grid-template-columns:1fr}}
+.pill.student{background:#eaf4fc;color:#245e90;border:1px solid #cbdff0}
+.pill.duration-short{background:#f4f6f9;color:#5a6d86;border:1px solid #e2e8f0;font-weight:600}
+.duration-cell{min-width:148px}
+.duration-basis{font-size:10px;margin-top:3px}
+th.sortable-duration{cursor:pointer;user-select:none}
+th.sortable-duration:hover{color:#4a6a94}
+.intel-card{border:1px solid #e0e8f4;background:#fbfcff;border-radius:12px;padding:14px 16px;margin-bottom:12px}
+.intel-card h4{margin:0 0 8px;font-size:13px;color:#1c3b64}
+.intel-outlook{font-size:13px;line-height:1.65;color:#283b55;margin:0}
+.intel-list{margin:8px 0 0;padding-left:18px;font-size:12px;line-height:1.6;color:#3a4f6a}
+.intel-disclaimer{margin-top:12px;padding:10px 12px;border-radius:9px;background:#f5f8fd;border:1px solid #e2eaf4;font-size:11px;color:#51627a;line-height:1.55}
+.cohort-block{border:1px solid #e1e8f3;border-radius:11px;padding:12px 14px;margin-bottom:10px;background:#fff}
+.cohort-block h4{margin:0 0 6px;font-size:12px;color:#1d3e69}
+.cohort-meta{font-size:11px;color:#647793;line-height:1.55}
+.qual-meets{color:#177a4b;font-weight:700}
+.qual-short{color:#8a5a12;font-weight:700}
+.qual-undet{color:#6a7c96;font-weight:700}
+</style></head><body>
+<div class="shell"><header class="top"><div class="brandlockup" id="vocBrand"><img class="brandimage" id="vocBrandImage" alt="VOC application logo"><div><div class="logo">VOC<span>.</span></div><div class="subtitle">Voice of Customer / Survey Forecast</div></div></div><div class="top-actions"><button class="about-launch" type="button" onclick="openAbout()" aria-label="About VOC and forecasting rules">ⓘ &nbsp; About VOC</button><div class="tag">V1 · Forecast Explorer</div></div></header>
+<section class="hero"><div><h1>Deployment Survey Forecast</h1><p>Monthly customer and deployment outlook</p></div><div class="monthnav"><button onclick="shiftMonth(-1)" aria-label="Previous month">‹</button><strong id="monthLabel"></strong><button onclick="shiftMonth(1)" aria-label="Next month">›</button></div></section>
+<div class="metrics"><div class="metric"><small>Deployments this month</small><b id="deployCount">—</b></div><div class="metric"><small>Survey distributions</small><b id="eventCount">—</b></div><div class="metric"><small>Review flags</small><b id="flagCount">—</b></div></div>
+<div class="cacheline"><span id="cacheStatus">Checking cached forecast…</span></div>
+<div class="surface"><div class="toolbar"><label class="filterfield"><span>Industry</span><select id="industry" aria-label="Industry" onchange="onIndustryChange()"><option>All</option><option>SLG</option><option>HENP</option><option>HC</option></select></label><label class="filterfield"><span>Survey Type</span><select id="survey" aria-label="Survey type" onchange="load()"><option>All</option><option>MDS</option><option>PGL</option></select></label><label class="partnerfilter" id="studentFilter" style="display:none"><input id="includeStudents" type="checkbox" onchange="load()">Include Student deployments</label><label class="partnerfilter"><input id="includePartners" type="checkbox" onchange="load()">Include partner deployments</label><label class="partnerfilter"><input id="hideShortDuration" type="checkbox" onchange="filterLocal()">Hide deployments ≤16 weeks</label><input id="search" placeholder="Search customer or deployment..." oninput="filterLocal()"><button id="refreshBtn" onclick="manualRefresh()">Refresh data</button></div><div class="tablewrap"><table><thead><tr><th>Customer / Deployment</th><th>Industry</th><th class="sortable-duration" id="durationSortHead" title="Sort by duration (days)" onclick="toggleDurationSort()">Deployment Duration</th><th>Survey distributions</th><th>Distribution date(s)</th><th>Review</th><th></th></tr></thead><tbody id="rows"></tbody></table></div><div id="status" class="status">Loading forecast…</div></div></div>
+<div id="overlay" class="overlay" onclick="closeDrawer()"></div><aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-label="Deployment details"><div class="drawerhead"><div class="drawerheadrow"><div><div class="muted" style="font-size:10px;letter-spacing:.08em;font-weight:700">DEPLOYMENT DETAILS</div><h2 id="drawerTitle">Deployment details</h2><div id="drawerSub" class="muted"></div></div><button class="close" onclick="closeDrawer()" aria-label="Close">×</button></div><div class="drawer-meta" id="drawerMeta"></div><nav class="drawer-tabs" aria-label="Deployment detail sections"><button class="drawer-tab active" data-tab="intelligence" onclick="showDrawerTab('intelligence')">Survey Intelligence</button><button class="drawer-tab" data-tab="contacts" onclick="showDrawerTab('contacts')">Contacts</button><button class="drawer-tab" data-tab="attributes" onclick="showDrawerTab('attributes')">Deployment data</button></nav></div><div class="drawerbody" id="drawerBody"></div></aside>
+
+<div class="about-backdrop" id="vocAboutBackdrop" onclick="if(event.target===this)closeAbout()" aria-hidden="true">
+  <section class="about-modal" role="dialog" aria-modal="true" aria-labelledby="vocAboutTitle" tabindex="-1">
+    <div class="about-head"><div><div class="muted" style="font-size:10px;font-weight:700;letter-spacing:.12em">VOICE OF CUSTOMER</div><h2 id="vocAboutTitle">About the Survey Forecast Explorer</h2><p>Purpose, scheduling logic and how to use VOC</p></div><button class="close" type="button" onclick="closeAbout()" aria-label="Close About VOC">×</button></div>
+    <div class="about-body">
+      <h3>Purpose</h3>
+      <p>The VOC Survey Forecast Explorer provides a forward-looking, month-by-month view of expected Mid-Deployment Surveys (MDS) and Post Go-Live Surveys (PGL), identifying the customers, deployments and products associated with each expected distribution.</p>
+      <h3>How it works</h3>
+      <p>VOC uses Salesforce-derived deployment, product-function and contact data for State and Local Government (SLG), Higher Education and Nonprofit (HENP), and Healthcare (HC). <strong>Active</strong> deployments remain eligible for Mid-Deployment Survey (MDS) and Post Go-Live Survey (PGL) forecasting. <strong>Complete</strong> deployments may still appear when a projected PGL distribution falls in the selected forecast month. Workday Professional Services deployments appear by default; the partner checkbox adds partner deployments.</p>
+      <h3>Completed Deployments and PGL Forecasts</h3>
+      <p>A deployment's Salesforce completion status does not determine whether its projected PGL forecast remains relevant for survey planning. Complete deployments are included <strong>only</strong> in forecast months that contain their projected PGL event; they do not generate MDS forecasts. PGL timing uses each product function's actual production date when recorded, otherwise its target date—the same product-function authority as Active deployments. Records receive an informational <strong>Completed Deployment — PGL Forecast Active</strong> indicator (not a data-quality defect). Historical, current, and future forecast months use the same inclusion rules. These projections do not establish actual Qualtrics survey activity.</p>
+      <div class="about-note"><strong>Example:</strong> A deployment completed in September may still have a projected PGL distribution in November. VoC retains that projection even though the deployment is no longer Active.</div>
+      <div class="about-grid">
+        <div class="about-rule"><strong>MDS · Mid-Deployment</strong><ul><li>Starts with the deployment start date and each product's target Move to Production (MTP) date.</li><li>Calculates the one-third milestone of that timeline.</li><li>Forecasts the first Wednesday of the following month.</li><li>Groups product milestones that fall in the same distribution month into one MDS distribution per deployment.</li></ul></div>
+        <div class="about-rule"><strong>PGL · Post Go-Live</strong><ul><li>Uses each product's actual MTP date where available.</li><li>Forecasts the first Wednesday two calendar months after the go-live month.</li><li>When actual MTP is missing, uses target MTP as a <strong>predicted</strong> PGL date.</li><li>Groups milestones falling in the same distribution month into one PGL distribution per deployment.</li></ul></div>
+      </div>
+      <h3>Key capabilities</h3>
+      <div class="about-feature"><strong>Monthly forecast</strong><span>See the customers and deployments expected to receive surveys in a selected month.</span></div>
+      <div class="about-feature"><strong>Flexible filters</strong><span>Filter by industry, survey type, Workday PS versus partner deployments, short-duration deployments, or customer/deployment search.</span></div>
+      <h3>Product-function dates are authoritative</h3>
+      <p>VOC analyzes <strong>product-function delivery cohorts</strong>—groups of product functions that share the same target Move to Production (MTP) date—not the parent deployment record alone.</p>
+      <ul>
+        <li><strong>Deployment Start Date</strong> — common start for duration and MDS calculations.</li>
+        <li><strong>Product-function target MTP</strong> — planned cohort milestone (<code>Production_Move_Date_Target__c</code>).</li>
+        <li><strong>Product-function actual MTP</strong> — recorded go-live when available (<code>Production_Move_Date_Actual__c</code>).</li>
+        <li><strong>Parent Current / First Actual MTP</strong> — supporting context and reconciliation; they never override valid product-function dates.</li>
+      </ul>
+      <h3>Delivery structure classifications</h3>
+      <div class="about-grid">
+        <div class="about-rule"><strong>Big Bang</strong><ul><li>Every product function shares one valid target MTP.</li><li>Parent target MTP matches that date.</li><li>One planned delivery cohort; parent and product dates corroborate.</li></ul></div>
+        <div class="about-rule"><strong>Multi-Deliverable</strong><ul><li>Multiple distinct product-function target MTP dates.</li><li>Each date is its own planned cohort.</li><li>Parent MTP may match only one cohort.</li></ul></div>
+        <div class="about-rule"><strong>Single Product Cohort</strong><ul><li>All dated product functions share one target MTP.</li><li>Parent target may be blank or disagree; product dates still govern.</li></ul></div>
+        <div class="about-rule"><strong>Insufficient Data</strong><ul><li>Missing start or product milestones prevent reliable cohort duration or forecast.</li><li>VOC does not invent or substitute parent dates for product milestones.</li></ul></div>
+      </div>
+      <h3>Deployment Duration</h3>
+      <ul>
+        <li><strong>Planned cohort duration</strong> — Deployment Start → product-function <strong>target</strong> MTP (whole UTC calendar days).</li>
+        <li><strong>Actual duration</strong> — Deployment Start → product-function <strong>actual</strong> MTP when recorded; never assumed from parent actual MTP alone.</li>
+        <li><strong>Single / Big Bang cohort</strong> — One duration line (actual when every function in the cohort shares the same actual date; otherwise planned).</li>
+        <li><strong>Multi-Deliverable</strong> — Range of planned cohort durations, e.g. <strong>18.0–32.0 weeks · 3 cohorts</strong>; sort uses the longest planned cohort.</li>
+        <li><strong>Display</strong> — Weeks (one decimal), days, approximate months (÷ 30.4375, ~). <strong>Unavailable</strong> when no valid span exists.</li>
+      </ul>
+      <h3>MDS duration qualification (&gt;16 weeks)</h3>
+      <p>Evaluated <strong>per planned delivery cohort</strong>. MDS requires duration <strong>strictly greater than 112 calendar days</strong> (16 weeks): 111 and 112 days do <strong>not</strong> qualify; 113 days qualifies. This does not remove MDS projections—it flags qualification only. PGL has no 16-week rule.</p>
+      <h3>MDS &amp; PGL forecast rules (unchanged formulas)</h3>
+      <ul>
+        <li><strong>MDS</strong> — Per target-date cohort: one-third milestone between start and target MTP → first Wednesday of the following month. Same-month cohorts still group into one monthly distribution.</li>
+        <li><strong>PGL</strong> — Per product function: actual MTP when present, else target → first Wednesday two calendar months after go-live month.</li>
+      </ul>
+      <h3>Duration filter &amp; indicators</h3>
+      <p><strong>Hide deployments ≤16 weeks</strong> (off by default) hides a deployment only when <strong>every</strong> planned cohort has a valid duration at or below 112 days. Deployments with any longer cohort, unknown duration, or partial data stay visible unless all evaluable cohorts are short.</p>
+      <p>The <strong>≤16 weeks</strong> pill shows one short cohort, or the count of short cohorts when several exist.</p>
+      <h3>Survey Opportunity Insights</h3>
+      <p>VoC uses existing Salesforce deployment and product-function dates to highlight noteworthy survey-planning circumstances. These are <strong>informational observations</strong> only—they do not modify MDS/PGL eligibility or forecasting, do not affect distribution inclusion, are not warnings or risk indicators, and do not establish whether Qualtrics has scheduled or distributed a survey. Review supporting dates and product functions in <strong>Survey Intelligence</strong>.</p>
+      <div class="about-grid">
+        <div class="about-rule"><strong>Additional Product Go-Live</strong><ul><li>Identifies a PGL projection tied to a recorded product-function <strong>actual</strong> production date later than the parent deployment's first actual production milestone.</li><li>Uses actual product-function dates only—not target dates.</li></ul></div>
+        <div class="about-rule"><strong>Completed Product Deployment</strong><ul><li>Identifies a <strong>Complete</strong> deployment with a focused product delivery cohort (Big Bang or Single Product Cohort) and a projected PGL distribution in the selected forecast month.</li><li>Classification uses product-function cohort evidence, not deployment naming.</li></ul></div>
+      </div>
+      <h3>Survey Intelligence</h3>
+      <p>The <strong>Survey Intelligence</strong> drawer tab consolidates executive outlook, MDS/PGL planning detail, and the expandable survey timeline. Observations are generated by deterministic Apps Script rules from Salesforce evidence—no AI or Qualtrics execution data.</p>
+      <div class="about-feature"><strong>Deployment details</strong><span>Contacts, Salesforce attributes, product functions, and data-quality flags.</span></div>
+      <div class="about-feature"><strong>Explainable dates</strong><span>Cohort durations, MDS qualification, one-third calculations, and monthly distribution roll-ups.</span></div>
+      <div class="about-feature"><strong>Data quality</strong><span>See review flags for potentially inconsistent dates without automatically changing source data.</span></div>
+      <div class="about-feature"><strong>Data refresh</strong><span>Forecast data refreshes daily; authorized users can request a manual refresh.</span></div>
+      <h3>Labels &amp; indicators</h3>
+      <p>These labels explain how to interpret the forecast. They describe planning information, not proof that a survey invitation has been sent. The <strong>Review</strong> column shows at most one compact indicator per deployment; open <strong>Survey Intelligence</strong> for full explanations.</p>
+      <p><strong>Complete · PGL only</strong> (beneath the deployment name) identifies a <strong>Complete</strong> deployment with a projected PGL distribution in the selected month. That status is not repeated in the Review column. Survey Opportunity Insights are informational only. None of these labels change forecast dates, survey eligibility, or distribution inclusion. Actual survey administration remains managed independently through Qualtrics.</p>
+      <div class="about-legend" aria-label="VOC label guide">
+        <div class="about-legend-item"><span class="pill workday">Workday PS</span><p>Deployment partner is <strong>Workday Professional Services</strong>. These deployments appear by default. Turn on <strong>Include partner deployments</strong> to see others as well.</p></div>
+        <div class="about-legend-item"><span class="pill info">Complete · PGL only</span><p>The deployment is <strong>Complete</strong> in Salesforce but has a projected PGL distribution in the selected forecast period. Shown beneath the deployment name for survey planning—not in the Review column and not a Salesforce data-quality warning.</p></div>
+        <div class="about-legend-item"><span class="pill warn">Review</span><p>Indicates an existing forecast or data-quality consideration that may warrant review. Potentially inconsistent product-level dates need a closer look; VOC preserves source values and projections.</p></div>
+        <div class="about-legend-item"><span class="pill survey-insight">Survey Insight</span><p>An informational observation identifying a potentially noteworthy survey-planning opportunity (for example, an additional product go-live or a completed focused product deployment).</p></div>
+        <div class="about-legend-item"><span class="pill warn">Review + Insight</span><p>Both an existing review consideration and a Survey Opportunity Insight apply. Open Survey Intelligence for each explanation.</p></div>
+        <div class="about-legend-item"><span class="pill">MDS</span><p><strong>Mid-Deployment Survey.</strong> The distribution month is based on the one-third milestone between deployment start and product target MTP.</p></div>
+        <div class="about-legend-item"><span class="pill pgl">PGL</span><p><strong>Post Go-Live Survey.</strong> The distribution month is based on an actual MTP date when available, or a target date for a prediction.</p></div>
+        <div class="about-legend-item"><span class="pill pgl">PGL · Predicted</span><p>No actual MTP date is recorded for the contributing product date group. VOC estimates the PGL distribution from its target MTP date; the month may change.</p></div>
+        <div class="about-legend-item"><span class="pill pgl">PGL · Mixed</span><p>One grouped monthly PGL distribution contains both <strong>actual-date-based</strong> and <strong>target-date-based predicted</strong> product calculations.</p></div>
+        <div class="about-legend-item"><span class="pill pgl">Actual-based</span><p>The PGL timing uses a recorded actual MTP date. This does <strong>not</strong> confirm that the survey was sent.</p></div>
+        <div class="about-legend-item"><span class="pill">2 product-date groups</span><p>Multiple distinct product milestone dates roll up into <strong>one</strong> survey distribution for the same deployment, survey type and month. Expand it to see the products and calculations.</p></div>
+        <div class="about-legend-item"><span class="pill duration-short">≤16 weeks</span><p>At least one planned cohort is at or below 112 days (16 weeks) for MDS duration qualification. Does not suppress MDS projections.</p></div>
+      </div>
+      <h3>Using the explorer</h3>
+      <p>Select a month, choose an industry and survey type, and review the deployment rows. Open <strong>Survey Intelligence</strong> for cohort-level MDS/PGL detail and projected distribution timing.</p>
+      <div class="about-note"><strong>Forecast only. Actual survey administration is managed in Qualtrics.</strong> VOC projects survey timing from Salesforce-derived dates. It does not send surveys, track Qualtrics completion, or label forecasts as missed, sent, or overdue.</div>
+    </div>
+  </section>
+</div>
+<script>
+
+/* ============================================================
+   VOC LOGO CONFIGURATION — EDIT THIS VALUE LOCALLY
+   Paste a DIRECT IMAGE URL (PNG, JPG, SVG), not a Drive /file/d/.../view page.
+   If the image is access-restricted or Drive blocks embedding, it may not load.
+   In that case, use an approved image URL or a data:image/...;base64,... URL.
+   Leave blank to show the original VOC. wordmark.
+   ============================================================ */
+const VOC_LOGO_URL = "https://avatars.slack-edge.com/2025-03-13/8593468002406_268b1623d3d91db2ae29_512.png";
+(function configureVocLogo(){
+  if (!VOC_LOGO_URL.trim()) return;
+  const img=document.getElementById('vocBrandImage');
+  img.onload=()=>{img.classList.add('visible');document.getElementById('vocBrand').classList.add('has-image')};
+  img.onerror=()=>{img.classList.remove('visible');document.getElementById('vocBrand').classList.remove('has-image')};
+  img.src=VOC_LOGO_URL.trim();
+})();
+
+let month = new Date();month.setDate(1);let currentRows=[];let allRows=[];let activeKey=null;let durationSort=0;
+let cachedMonths = new Map(), cachedDetails = new Map(), requestSerial=0, cacheVersion=null;
+const el=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=s=>{
+  if(s===null||s===undefined||s==='')return 'Not recorded';
+  let date;
+  if(typeof s==='number') date=new Date(Math.round((s-25569)*86400000));
+  else if(/^\d{4}-\d{2}-\d{2}/.test(String(s)))date=new Date(String(s).slice(0,10)+'T12:00:00Z');
+  else date=new Date(s);
+  return Number.isNaN(date.getTime())?'Not recorded':date.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric',timeZone:'UTC'});
+};
+const LABELS={Id:'Deployment ID',Name:'Deployment name','Customer__r.Name':'Customer','Customer__r.Industry':'Customer industry','Customer__r.PS_Region_New__c':'PS region','Customer__r.PS_Sub_Region__c':'PS subregion','Customer__r.SubRegion__c':'Subregion','Customer__r.BillingCity':'Billing city','Customer__r.BillingState':'Billing state',Customer__c:'Customer ID',Deployment_Start_Date__c:'Deployment start',Current_MTP_Date__c:'Current MTP',First_Move_to_Production_Date_Actual__c:'First actual MTP',Deployment_Completion_Date__c:'Deployment completion',Overall_Status__c:'Overall status',Overall_Health__c:'Overall health',Deployment_Phase__c:'Deployment phase',Deployment_Stage__c:'Deployment stage',Deployment_Partner_Name__c:'Deployment partner',Deployment_Summary__c:'Deployment summary',Implementation_Partner__c:'Implementation partner',Priming_Partner__c:'Priming partner',Workday_Engagement_Manager__r:'Engagement manager',Delivery_Assurance_Manager__r:'Delivery assurance manager'};
+const DATE_FIELDS=new Set(['Deployment_Start_Date__c','Current_MTP_Date__c','First_Move_to_Production_Date_Actual__c','Deployment_Completion_Date__c']);
+function prettyLabel(key){if(LABELS[key])return LABELS[key];return key.replace(/__r\./g,' · ').replace(/__c$|__r$/g,'').replace(/_/g,' ').replace(/\s+/g,' ').trim().replace(/\b\w/g,c=>c.toUpperCase())}
+function prettyValue(key,value){if(value===null||value===undefined||value==='')return 'Not recorded';if(DATE_FIELDS.has(key))return fmt(value);if(typeof value==='object')return JSON.stringify(value);return String(value)}
+
+function ym(){return month.getFullYear()+'-'+String(month.getMonth()+1).padStart(2,'0')}
+function shiftMonth(n){month.setMonth(month.getMonth()+n);load()}
+function onIndustryChange(){
+  const isHenp=el('industry').value==='HENP';
+  el('studentFilter').style.display=isHenp?'inline-flex':'none';
+  if(!isHenp)el('includeStudents').checked=false;
+  load();
+}
+function cacheQueryKey(){return [ym(),el('industry').value,el('survey').value,el('includePartners').checked,el('includeStudents').checked].join('|')}
+function setCacheStatus(ts, extra=''){
+  el('cacheStatus').textContent=ts?'Source snapshot: '+new Date(ts).toLocaleString()+(extra?' · '+extra:''):'No snapshot available';
+}
+function showRows(data){
+  if(data.cacheVersion && cacheVersion && data.cacheVersion!==cacheVersion){cachedMonths.clear();cachedDetails.clear()}
+  cacheVersion=data.cacheVersion||cacheVersion;
+  setCacheStatus(data.refreshedAt);
+  allRows=data.rows;
+  filterLocal();
+}
+function load(){
+  cachedDetails.clear();
+  el('monthLabel').textContent=month.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  const key=cacheQueryKey();
+  const serial=++requestSerial;
+  if(cachedMonths.has(key)){showRows(cachedMonths.get(key));return}
+  el('status').style.display='block';el('status').textContent='Loading cached forecast…';
+  el('rows').innerHTML='';
+  google.script.run.withSuccessHandler(data=>{
+    cachedMonths.set(key,data);
+    if(serial!==requestSerial)return;
+    showRows(data);
+  }).withFailureHandler(err=>{
+    if(serial!==requestSerial)return;
+    el('status').style.display='block';el('status').textContent='Unable to load forecast: '+err.message;
+  }).vocGetCachedForecast(ym(),el('industry').value,el('survey').value,'',el('includePartners').checked,el('includeStudents').checked);
+}
+function manualRefresh(){
+  if(!confirm('Refresh the VOC snapshot from all three source workbooks now?'))return;
+  const btn=el('refreshBtn');btn.disabled=true;btn.textContent='Refreshing…';
+  el('cacheStatus').textContent='Refreshing source workbooks…';
+  google.script.run.withSuccessHandler(result=>{
+    btn.disabled=false;btn.textContent='Refresh data';
+    cachedMonths.clear();cachedDetails.clear();cacheVersion=null;
+    setCacheStatus(result.refreshedAt,'Updated');load();
+  }).withFailureHandler(err=>{
+    btn.disabled=false;btn.textContent='Refresh data';
+    el('cacheStatus').textContent='Refresh failed (previous snapshot preserved): '+err.message;
+  }).vocManualRefresh();
+}
+function reviewColumn(r){
+  const hasReview=!!(r.flags&&r.flags.length);
+  const hasInsight=Array.isArray(r.surveyOpportunityInsights)&&r.surveyOpportunityInsights.length>0;
+  if(!hasReview&&!hasInsight)return '—';
+  if(hasReview&&hasInsight){
+    const tip=r.surveyOpportunityInsights.map(i=>i.title).join(' · ');
+    return `<span class="pill warn" title="${esc(tip)}">Review + Insight</span>`;
+  }
+  if(hasReview)return '<span class="pill warn">Review</span>';
+  const tip=r.surveyOpportunityInsights.map(i=>i.title).join(' · ');
+  return `<span class="pill survey-insight" title="${esc(tip)}">Survey Insight</span>`;
+}
+function durationCell(r){
+  const label=esc(r.durationLabel||'Unavailable');
+  const basis=r.durationBasis?`<div class="muted duration-basis">${esc(r.durationBasis)}</div>`:'';
+  const partial=r.durationPartialData?'<div class="muted duration-basis">Partial data</div>':'';
+  let short='';
+  const sc=r.shortCohortCount||0, cc=r.cohortCount||0;
+  if(sc>0){
+    short=cc>1?`<span class="pill duration-short">≤16 weeks · ${sc} cohort${sc===1?'':'s'}</span>`:'<span class="pill duration-short">≤16 weeks</span>';
+  }
+  return `<td class="duration-cell"><div>${label}</div>${basis}${partial}${short}</td>`;
+}
+function toggleDurationSort(){durationSort=durationSort===1?-1:1;filterLocal()}
+function updateDurationSortHead(){const h=el('durationSortHead');if(!h)return;h.textContent='Deployment Duration'+(durationSort===1?' ↑':durationSort===-1?' ↓':'');}
+function filterLocal(){
+  const q=el('search').value.trim().toLowerCase();
+  const hideShort=el('hideShortDuration').checked;
+  currentRows=allRows.filter(r=>{
+    if(hideShort&&r.allCohortsShort)return false;
+    return (r.customer+' '+r.deployment).toLowerCase().includes(q);
+  });
+  if(durationSort){
+    const nullSent=durationSort>0?Infinity:-Infinity;
+    currentRows.sort((a,b)=>{
+      const ad=a.durationDays!=null?a.durationDays:nullSent;
+      const bd=b.durationDays!=null?b.durationDays:nullSent;
+      return durationSort*(ad-bd)||String(a.customer).localeCompare(b.customer);
+    });
+  }
+  updateDurationSortHead();
+  el('deployCount').textContent=currentRows.length.toLocaleString();
+  el('eventCount').textContent=currentRows.reduce((s,r)=>s+r.events.length,0).toLocaleString();
+  el('flagCount').textContent=currentRows.filter(r=>r.flags.length).length.toLocaleString();
+  el('rows').innerHTML=currentRows.map((r,i)=>`<tr data-index="${i}"><td><div class="customer">${esc(r.customer||'Unnamed customer')}</div><div class="muted">${esc(r.deployment)} ${r.isWorkdayPS?'<span class="pill workday" title="Workday Professional Services">Workday PS</span>':''}${r.isStudent?'<span class="pill student" title="Student deployment">Student</span>':''}${r.pglForecastOnly?'<span class="pill info" title="PGL forecast only (Complete deployment)">Complete · PGL only</span>':''}</div></td><td>${esc(r.industry)}</td>${durationCell(r)}<td>${r.events.map(e=>`<span class="pill ${e.type==='PGL'?'pgl':''}">${esc(e.type)}${e.basis==='Predicted'?' · Predicted':e.basis==='Mixed'?' · Mixed':''}${e.phaseCount>1?' · '+e.phaseCount+' product-date groups':''}</span>`).join('')}</td><td>${[...new Set(r.events.map(e=>fmt(e.surveyDate)))].join(', ')}</td><td>${reviewColumn(r)}</td><td>›</td></tr>`).join('');
+  el('rows').querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>openDrawer(currentRows[+tr.dataset.index].key)));
+  el('status').style.display=currentRows.length?'none':'block';
+  el('status').textContent='No deployments match this month and filters.';
+}
+function detailCacheKey(key){return key+'|'+ym()}
+function openDrawer(key){activeKey=key;showDrawerTab('intelligence');el('overlay').classList.add('open');el('drawer').classList.add('open');const ck=detailCacheKey(key);if(cachedDetails.has(ck)){renderDetails(cachedDetails.get(ck));return}el('drawerTitle').textContent='Loading deployment…';el('drawerSub').textContent='';el('drawerBody').innerHTML='<p class="empty">Retrieving cached survey details…</p>';google.script.run.withSuccessHandler(d=>{cachedDetails.set(ck,d);if(activeKey!==key)return;renderDetails(d)}).withFailureHandler(err=>{if(activeKey===key)el('drawerBody').textContent='Unable to load details: '+err.message}).vocGetCachedDeploymentDetails(key,ym())}
+function closeDrawer(){activeKey=null;el('overlay').classList.remove('open');el('drawer').classList.remove('open')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
+function showDrawerTab(tab){
+  document.querySelectorAll('.drawer-tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  document.querySelectorAll('.drawer-pane').forEach(p=>p.classList.toggle('active',p.id==='voc-pane-'+tab));
+  if(el('drawerBody'))el('drawerBody').scrollTop=0;
+}
+function kvItem(label,value){return `<div class="kvitem"><small>${esc(label)}</small><strong>${esc(value)}</strong></div>`}
+function groupDrawerEvents(events){
+  const groups=new Map();
+  for(const e of events){
+    const date=String(e.surveyDate||'');
+    const key=e.type+':'+date.slice(0,7);
+    if(!groups.has(key))groups.set(key,{type:e.type,surveyDate:date,phases:[]});
+    const group=groups.get(key);group.phases.push(e);
+    if(date<group.surveyDate)group.surveyDate=date;
+  }
+  return [...groups.values()].sort((a,b)=>a.surveyDate.localeCompare(b.surveyDate)||a.type.localeCompare(b.type));
+}
+function qualLabel(q){
+  if(q==='MEETS')return '<span class="qual-meets">Exceeds 16 weeks (MDS duration qualification)</span>';
+  if(q==='DOES_NOT_MEET')return '<span class="qual-short">At or below 16 weeks (≤112 days)</span>';
+  return '<span class="qual-undet">Undetermined</span>';
+}
+function classificationLabel(c){
+  return ({BIG_BANG:'Big Bang',MULTI_DELIVERABLE:'Multi-Deliverable',SINGLE_PRODUCT_COHORT:'Single Product Cohort',INSUFFICIENT_DATA:'Insufficient Data'})[c]||c||'—';
+}
+function renderDetails(d){
+  if(!d){el('drawerBody').textContent='No deployment details found.';return}
+  el('drawerTitle').textContent=d.customer||'Unnamed customer';
+  el('drawerSub').textContent=[d.name,d.industry].filter(Boolean).join(' · ');
+  const events=Array.isArray(d.events)?d.events:[];
+  const distributions=groupDrawerEvents(events);
+  const children=Array.isArray(d.children)?d.children:[];
+  const contacts=Array.isArray(d.contacts)?d.contacts:[];
+  const flags=Array.isArray(d.flags)?d.flags:[];
+  const infoNotices=Array.isArray(d.infoNotices)?d.infoNotices:[];
+  const delivery=d.delivery||{};
+  const cohorts=Array.isArray(delivery.cohorts)?delivery.cohorts:[];
+  const intel=d.surveyIntelligence||{};
+  const opportunityInsights=Array.isArray(intel.surveyOpportunityInsights)?intel.surveyOpportunityInsights:(Array.isArray(d.surveyOpportunityInsights)?d.surveyOpportunityInsights:[]);
+  const attrs=d.attributes||{};
+  const todayIso=new Date().toISOString().slice(0,10);
+  const isPS=String(d.partnerName||attrs.Deployment_Partner_Name__c||'').trim().toLowerCase()==='workday professional services';
+  el('drawerMeta').innerHTML=`${isPS?'<span class="pill workday">Workday PS</span>':''}${d.isStudent?'<span class="pill student">Student</span>':''}<span class="pill">${esc(d.industry||'')}</span><span class="pill">${classificationLabel(delivery.classification)}</span><span class="pill">${distributions.length} distribution${distributions.length===1?'':'s'}</span>${infoNotices.length?`<span class="pill info" title="${esc(infoNotices[0].message||'')}">${esc(infoNotices[0].title||'')}</span>`:''}${opportunityInsights.length?'<span class="pill survey-insight">Survey Insight</span>':''}${flags.length?'<span class="pill warn">Review</span>':''}`;
+  document.querySelector('[data-tab="contacts"]').textContent='Contacts ('+contacts.length+')';
+  const obs=(intel.observations||[]).map(o=>`<li>${esc(o)}</li>`).join('');
+  const infoCard=infoNotices.length?`<div class="intel-card" style="border-color:#b8d9ef;background:#f3f9fd"><h4>${esc(infoNotices[0].title||'Forecast notice')}</h4><p class="intel-outlook">${esc(infoNotices[0].message||'')}</p></div>`:'';
+  const opportunityCard=opportunityInsights.length?`<div class="section" style="margin-bottom:14px"><h3>Survey Opportunity Insight</h3>${opportunityInsights.map(ins=>{
+    const dates=[];
+    if(ins.parentFirstActualMtp)dates.push('Parent first actual MTP: '+fmt(ins.parentFirstActualMtp));
+    if(ins.laterActualMtp)dates.push('Later product-function actual MTP: '+fmt(ins.laterActualMtp)+(ins.productCount?` (${ins.productCount} product function${ins.productCount===1?'':'s'})`:''));
+    if(ins.pglSurveyDate)dates.push('Projected PGL distribution: '+fmt(ins.pglSurveyDate));
+    if(ins.pglSurveyDates&&ins.pglSurveyDates.length)dates.push('Projected PGL distribution: '+ins.pglSurveyDates.map(fmt).join(', '));
+    return `<div class="intel-card" style="border-color:#a8cce8;background:#f4f9fd;margin-bottom:10px"><h4>${esc(ins.title||'')}</h4><p class="intel-outlook">${esc(ins.narrative||'')}</p>${dates.length?`<ul class="intel-list" style="margin-top:8px">${dates.map(line=>`<li>${esc(line)}</li>`).join('')}</ul>`:''}<p class="muted" style="font-size:11px;margin:10px 0 0;line-height:1.5">${esc(ins.disclaimer||'')}</p></div>`;
+  }).join('')}</div>`:'';
+  const execCard=`<div class="intel-card"><h4>Executive Survey Outlook</h4><p class="intel-outlook">${esc(intel.executiveOutlook||'Survey projections are derived from Salesforce deployment and product-function milestone dates.')}</p>${obs?`<ul class="intel-list">${obs}</ul>`:''}<div class="intel-disclaimer"><strong>${esc(intel.disclaimer||'Forecast only. Actual survey administration is managed in Qualtrics.')}</strong></div></div>`;
+  const mdsByTarget=new Map();
+  events.filter(e=>e.type==='MDS').forEach(e=>{mdsByTarget.set(e.sourceDate,e);});
+  const mdsCohortMarkup=cohorts.map(c=>{
+    const mds=mdsByTarget.get(c.targetMtp);
+    const planned=c.plannedDuration&&c.plannedDuration.available?esc(c.plannedDuration.label)+' ('+esc(c.plannedDuration.basis)+')':'Unavailable';
+    const prodLines=c.products.map(p=>`<div class="muted">${esc([p.area,p.function].filter(Boolean).join(' — ')||'Product function')}</div>`).join('');
+    const timing=mds?`Projected MDS distribution: ${esc(fmt(mds.surveyDate))} · ${mds.surveyDate<todayIso?'Historical projection':'Upcoming projection'}`:'Projected MDS unavailable for this cohort';
+    return `<div class="cohort-block"><h4>Target MTP ${esc(fmt(c.targetMtp))} · ${c.productCount} product function${c.productCount===1?'':'s'}</h4><div class="cohort-meta">Planned duration: ${planned}<br>MDS duration qualification: ${qualLabel(c.mdsDurationQualification)}<br>${timing}</div>${prodLines}</div>`;
+  }).join('');
+  const pglPhases=events.filter(e=>e.type==='PGL');
+  const pglMarkup=pglPhases.length?pglPhases.map(e=>{
+    const basis=e.basis==='Actual'?'Actual go-live-based PGL projection':'Target-based PGL projection';
+    const when=e.surveyDate<todayIso?'Historical projection':'Upcoming projection';
+    return `<div class="cohort-block"><h4>${esc(basis)}</h4><div class="cohort-meta">Production milestone: ${esc(fmt(e.sourceDate))}<br>Projected PGL distribution: ${esc(fmt(e.surveyDate))} · ${when}</div></div>`;
+  }).join(''):'<p class="empty">No calculable PGL projections.</p>';
+  const eventMarkup=distributions.map(g=>{
+    const isMDS=g.type==='MDS';
+    const groupTitle=`${esc(g.type)} · ${esc(fmt(g.surveyDate))}`;
+    const timing=g.surveyDate<todayIso?'Historical projection':'Upcoming projection';
+    const phaseMarkup=g.phases.map(e=>{
+      const cal=e.calculation||{}, products=Array.isArray(e.products)?e.products:[];
+      const calc=isMDS
+        ?`Start ${esc(fmt(d.startDate))} → Target ${esc(fmt(e.sourceDate))} → ⅓ ${esc(fmt(cal.milestoneDate))}`
+        :`${esc(e.basis==='Actual'?'Actual MTP':'Target MTP')}: ${esc(fmt(e.sourceDate))} → +2 calendar months`;
+      let extra=isMDS?`${esc(cal.durationDays??'—')} days total · ${esc(cal.oneThirdDays??'—')} days to one-third milestone`:esc(e.basis==='Actual'?'Actual go-live-based PGL projection':'Target-based PGL projection');
+      if(isMDS&&e.mdsDurationQualification)extra+=` · MDS duration: ${esc(e.mdsDurationQualification==='MEETS'?'Exceeds 16 weeks':e.mdsDurationQualification==='DOES_NOT_MEET'?'At or below 16 weeks':'Undetermined')}`;
+      const productNames=products.map(p=>[p.area,p.function].filter(Boolean).join(' — '));
+      return `<div class="dist-product"><strong>${productNames.length?productNames.map(esc).join('; '):'Product function not specified'}</strong><div class="muted">${calc}</div><div class="dist-meta">${extra}</div></div>`;
+    }).join('');
+    const bases=[...new Set(g.phases.map(p=>p.basis))];
+    const basisLabel=bases.length>1?'Mixed actual & target-based':bases[0]==='Predicted'?'Target-based PGL projection':bases[0]==='Actual'?'Actual go-live-based PGL projection':'Target-based';
+    return `<details class="distribution" ${g.phases.length===1?'open':''}><summary><div><strong>${groupTitle}</strong><div class="dist-meta">${g.phases.length} product-date group${g.phases.length===1?'':'s'} · ${esc(basisLabel)} · ${esc(timing)}</div></div><span class="pill ${isMDS?'':'pgl'}">${esc(g.type)} ▾</span></summary><div class="distbody">${phaseMarkup}</div></details>`;
+  }).join('');
+  const freshness=d.refreshedAt?`Forecast snapshot refreshed: ${esc(new Date(d.refreshedAt).toLocaleString())}.`:'Forecast snapshot refresh time unavailable.';
+  const contactMarkup=contacts.map(c=>{
+    const name=String(c['Contact__r.Name']||'Unnamed contact');const email=String(c['Contact__r.Email']||'').trim();
+    const initials=name.split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('');
+    const safeMail=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    return `<div class="compact-contact"><span class="contactavatar">${esc(initials||'?')}</span><div><strong>${esc(name)}</strong><div class="contactrole">${esc(c.Contact_Role__c||'Role not specified')}</div>${email?`<div class="muted">${esc(email)}</div>`:''}</div>${safeMail?`<a href="mailto:${esc(email)}">Email ↗</a>`:''}</div>`;
+  }).join('');
+  const primary=['Customer__r.Name','Name','Overall_Status__c','Deployment_Phase__c','Deployment_Start_Date__c','Current_MTP_Date__c','Customer__r.PS_Region_New__c','Customer__r.PS_Sub_Region__c','Customer__r.BillingCity','Customer__r.BillingState','Deployment_Partner_Name__c','Overall_Health__c'];
+  const visible=Object.entries(attrs).filter(([k])=>!k.startsWith('_'));
+  const main=primary.filter(k=>Object.prototype.hasOwnProperty.call(attrs,k)).map(k=>kvItem(prettyLabel(k),prettyValue(k,attrs[k]))).join('');
+  const extra=visible.filter(([k])=>!primary.includes(k)).map(([k,v])=>kvItem(prettyLabel(k),prettyValue(k,v))).join('');
+  el('drawerBody').innerHTML=`
+    <section class="drawer-pane active" id="voc-pane-intelligence">${infoCard}${opportunityCard}${execCard}
+    <div class="section"><h3>MDS Planning Intelligence</h3>${mdsCohortMarkup||'<p class="empty">No planned delivery cohorts with target MTP dates.</p>'}</div>
+    <div class="section"><h3>PGL Forecast Intelligence</h3>${pglMarkup}</div>
+    <div class="section"><h3>Detailed Survey Timeline</h3>${eventMarkup||'<p class="empty">No calculable projected survey events.</p>'}</div>
+    <details class="drawer-accordion"><summary>Methodology &amp; data freshness</summary><div class="accordion-body"><p class="muted" style="font-size:12px;line-height:1.6">MDS uses deployment start and each cohort target MTP (one-third milestone → first Wednesday of the following month). PGL uses each product actual production date when recorded, otherwise target MTP (first Wednesday two months after go-live month). Parent MTP fields are supporting context; product-function dates are authoritative. ${esc(freshness)}</p></div></details>
+    <details class="drawer-accordion"><summary>Data quality · ${flags.length?flags.length+' review flag(s)':'No review flags'}</summary><div class="accordion-body">${flags.length?flags.map(f=>`<div class="notice">⚠ ${esc(f)}</div>`).join(''):'<p class="empty">No date review flags.</p>'}</div></details></section>
+    <section class="drawer-pane" id="voc-pane-contacts"><div class="section"><h3>Deployment contacts</h3>${contactMarkup||'<p class="empty">No deployment contacts found.</p>'}</div></section>
+    <section class="drawer-pane" id="voc-pane-attributes"><div class="section"><h3>Deployment information</h3><div class="kv">${main}</div><details class="drawer-accordion"><summary>Product functions (${children.length})</summary><div class="accordion-body">${children.map(c=>`<div class="productline"><strong>${esc(c.Product_Area__c||'Product')}</strong><div class="muted">${esc(c.Function__c||'')}</div><div class="muted">Target: ${esc(fmt(c.Production_Move_Date_Target__c))} · Actual: ${esc(fmt(c.Production_Move_Date_Actual__c))}</div></div>`).join('')||'<p class="empty">No product functions found.</p>'}</div></details><details class="drawer-accordion"><summary>Additional Salesforce fields (${visible.length-primary.filter(k=>Object.prototype.hasOwnProperty.call(attrs,k)).length})</summary><div class="accordion-body kv">${extra||'<p class="empty">No additional fields.</p>'}</div></details></div></section>`;
+  showDrawerTab('intelligence');
+}
+
+
+// About VOC informational modal — no backend calls.
+function openAbout(){
+  const backdrop=document.getElementById('vocAboutBackdrop');
+  backdrop.classList.add('open');backdrop.setAttribute('aria-hidden','false');
+  backdrop.querySelector('.close').focus();
+}
+function closeAbout(){
+  const backdrop=document.getElementById('vocAboutBackdrop');
+  backdrop.classList.remove('open');backdrop.setAttribute('aria-hidden','true');
+  document.querySelector('.about-launch').focus();
+}
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'&&document.getElementById('vocAboutBackdrop').classList.contains('open')){
+    e.preventDefault();closeAbout();
+  }
+});
+
+load();
+</script></body></html>
